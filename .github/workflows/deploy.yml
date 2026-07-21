@@ -1,0 +1,160 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-frontend:
+    name: Build & Deploy Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: /api
+        run: npm run build
+
+      - name: Deploy frontend via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          timeout: 60000
+          local-dir: ./frontend/dist/
+          server-dir: /
+          state-name: .ftp-deploy-sync-state-frontend.json
+          exclude: |
+            **/.git*
+            **/.git*/**
+            api/**
+            laravel/**
+            .well-known/**
+            cgi-bin/**
+
+  deploy-backend:
+    name: Build & Deploy Backend (Laravel)
+    runs-on: ubuntu-latest
+    # Runs after deploy-frontend so the two jobs don't open concurrent FTP
+    # sessions (frontend action + two parallel=8 lftp mirrors) against the
+    # same hosting account at once — that contention is what produced the
+    # "Timeout (control socket)" failure.
+    needs: deploy-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: mbstring, bcmath, pdo, pdo_mysql, tokenizer, xml, ctype, json, fileinfo, openssl, zip
+          tools: composer:2.6.6
+
+      - name: Install composer dependencies (fresh resolve for PHP 7.4 + stable)
+        working-directory: backend
+        run: |
+          rm -f composer.lock
+          composer update --no-dev --optimize-autoloader --prefer-dist --prefer-stable --no-interaction --no-audit
+
+      - name: Clear any cached config (paths would be wrong on server)
+        working-directory: backend
+        run: |
+          php artisan config:clear || true
+          php artisan route:clear || true
+          php artisan view:clear || true
+          rm -f bootstrap/cache/config.php bootstrap/cache/routes-v7.php bootstrap/cache/packages.php bootstrap/cache/services.php
+
+      - name: Prepare Laravel app folder (without public/)
+        run: |
+          mkdir -p deploy/laravel
+          rsync -a --exclude='public' --exclude='node_modules' --exclude='tests' --exclude='.git' --exclude='.env' --exclude='.env.example' backend/ deploy/laravel/
+
+      - name: Prepare Laravel public folder
+        run: |
+          mkdir -p deploy/api
+          cp -r backend/public/. deploy/api/
+          sed -i "s|__DIR__.'/../storage|__DIR__.'/../laravel/storage|g" deploy/api/index.php
+          sed -i "s|__DIR__.'/../vendor|__DIR__.'/../laravel/vendor|g" deploy/api/index.php
+          sed -i "s|__DIR__.'/../bootstrap|__DIR__.'/../laravel/bootstrap|g" deploy/api/index.php
+          # Fake SCRIPT_NAME so Laravel doesn't strip /api/ from PATH_INFO
+          # (index.php is deployed at /api/index.php but routes are prefixed /api)
+          sed -i "s|<?php|<?php\n\$_SERVER['SCRIPT_NAME'] = '/index.php';\n\$_SERVER['SCRIPT_FILENAME'] = __DIR__ . '/index.php';\n\$_SERVER['PHP_SELF'] = '/index.php';\n|" deploy/api/index.php
+
+      - name: Install lftp
+        run: sudo apt-get update && sudo apt-get install -y lftp
+
+      # Excluding the *contents* of storage/framework/{cache,sessions,views} from
+      # the mirror below (so compiled/cached files aren't re-uploaded every
+      # deploy) means lftp never has a reason to create those directories on a
+      # host where they don't already exist — Laravel then fails view
+      # compilation with an InvalidArgumentException. The explicit mkdir calls
+      # create the empty shells first; -f ignores the error if they already exist.
+      - name: Deploy Laravel app to /laravel via lftp (parallel, resumable)
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          lftp -c "
+            set ftp:ssl-allow yes;
+            set ftp:ssl-protect-data yes;
+            set ssl:verify-certificate no;
+            set net:max-retries 5;
+            set net:reconnect-interval-base 5;
+            set net:reconnect-interval-multiplier 1;
+            set net:timeout 60;
+            set ftp:passive-mode true;
+            set mirror:parallel-transfer-count 8;
+            open -u \"$FTP_USERNAME\",\"$FTP_PASSWORD\" \"$FTP_HOST\";
+            mkdir -p -f /laravel/storage/framework/cache/data;
+            mkdir -p -f /laravel/storage/framework/sessions;
+            mkdir -p -f /laravel/storage/framework/views;
+            mkdir -p -f /laravel/storage/logs;
+            mirror -R --parallel=8 --only-newer --no-perms --exclude-glob '.git*' --exclude-glob '.env*' --exclude-glob 'storage/logs/*' --exclude-glob 'storage/framework/cache/*' --exclude-glob 'storage/framework/sessions/*' --exclude-glob 'storage/framework/views/*' ./deploy/laravel /laravel;
+            bye;
+          "
+
+      - name: Deploy Laravel public to /api via lftp (parallel, resumable)
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          lftp -c "
+            set ftp:ssl-allow yes;
+            set ftp:ssl-protect-data yes;
+            set ssl:verify-certificate no;
+            set net:max-retries 5;
+            set net:reconnect-interval-base 5;
+            set net:timeout 60;
+            set ftp:passive-mode true;
+            open -u \"$FTP_USERNAME\",\"$FTP_PASSWORD\" \"$FTP_HOST\";
+            mirror -R --parallel=8 --only-newer --no-perms ./deploy/api /api;
+            bye;
+          "
+
+      - name: Reset OPcache after deploy
+        continue-on-error: true
+        env:
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          sleep 3
+          response=$(curl -sS -w "\n%{http_code}" "https://sk-enterprises.salonflow.cloud/api/opcache-reset.php?token=$OPS_TOKEN")
+          echo "$response"

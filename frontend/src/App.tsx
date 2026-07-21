@@ -1,0 +1,81 @@
+/* NMS-Auto — app router + screen registry (replaces window.SCREENS) */
+import { lazy, Suspense, useEffect, useState } from 'react'
+import type { ComponentType } from 'react'
+import { Sidebar, Topbar } from './components/Shell'
+import DB from './data'
+import type { Go, ScreenProps } from './screens/types'
+import Login from './screens/Login'
+import { auth, type AuthUser } from './api'
+import { canAccessRoute } from './lib/permissions'
+
+const DashScreen = lazy(() => import('./screens/Dashboard'))
+const named = <M, K extends keyof M>(loader: () => Promise<M>, key: K) =>
+  lazy(() => loader().then((m) => ({ default: m[key] as unknown as ComponentType<any> })))
+
+const UsersScreen = named(() => import('./screens/Admin'), 'UsersScreen')
+const PermScreen = named(() => import('./screens/Admin'), 'PermScreen')
+const CompanyScreen = named(() => import('./screens/Admin'), 'CompanyScreen')
+
+type ScreenComp = ComponentType<ScreenProps & { setBrand?: (v: { name: string, tagline: string }) => void }>
+
+// Shown only for the split-second a screen chunk is downloading on first visit.
+function ScreenLoader() {
+  return (
+    <div className="row center" style={{ padding: 80, color: 'var(--tx-3)', gap: 10 }}>
+      <span className="mms-spin" style={{ width: 18, height: 18, border: '2px solid var(--line)', borderTopColor: 'var(--ac)', borderRadius: '50%', display: 'inline-block' }} />
+      <span style={{ fontSize: 13 }}>Loading…</span>
+    </div>
+  )
+}
+
+const SCREENS: Record<string, ScreenComp> = {
+  dash: DashScreen,
+  'ad/users': UsersScreen,
+  'ad/perm': PermScreen,
+  'ad/company': CompanyScreen,
+}
+
+export default function App() {
+  const [route, setRoute] = useState<string>(() => localStorage.getItem('mms-route') || 'dash')
+  const [open, setOpen] = useState(false)
+  const [brand, setBrand] = useState({ name: DB.company.name, tagline: DB.company.tagline })
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [authReady, setAuthReady] = useState(false)
+  const go: Go = (r) => { setRoute(r); localStorage.setItem('mms-route', r); window.scrollTo(0, 0) }
+  useEffect(() => { document.title = brand.name + ' — Admin Panel' }, [brand.name])
+
+  useEffect(() => {
+    import('./api').then(({ company }) => {
+      company.branding().then(b => setBrand({ name: b.name, tagline: b.tagline })).catch(() => {})
+    })
+    const token = auth.getToken()
+    if (!token) { setAuthReady(true); return }
+    auth.me()
+      .then((u) => setUser(u))
+      .catch(() => auth.setToken(null))
+      .finally(() => setAuthReady(true))
+  }, [])
+
+  if (!authReady) return null
+  if (!user) return <Login onAuth={setUser} />
+
+  // Permission gate: silently downgrade to dashboard if user lacks access to the
+  // saved route (e.g. after a permission change). The Sidebar already hides the
+  // entries they can't reach, but the route may be persisted in localStorage.
+  const effectiveRoute = canAccessRoute(user, route) ? route : 'dash'
+  const Screen = SCREENS[effectiveRoute] || (() => <div style={{ padding: 40 }} className="t-2">Screen not found</div>)
+  const denied = !canAccessRoute(user, route)
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar route={effectiveRoute} go={go} open={open} setOpen={setOpen} company={brand} user={user} />
+      <div className="mms-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <Topbar setOpen={setOpen} route={effectiveRoute} go={go} />
+        <main key={effectiveRoute} className="fade-in" style={{ padding: '24px clamp(16px,3vw,32px) 60px', flex: 1 }}>
+          {denied
+            ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)' }}>You do not have permission to view this screen.</div>
+            : <Suspense fallback={<ScreenLoader />}><Screen go={go} setBrand={setBrand} user={user} /></Suspense>}
+        </main>
+      </div>
+    </div>
+  )
+}
