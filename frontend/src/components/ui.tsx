@@ -21,7 +21,7 @@ interface BtnProps {
 export function Btn({ children, variant = 'ghost', size = 'md', icon, iconR, onClick, active, disabled, style, title }: BtnProps) {
   const base: CSSProperties = {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-    fontFamily: 'IBM Plex Sans', fontWeight: 600,
+    fontFamily: 'Outfit', fontWeight: 600,
     borderRadius: 'var(--r-s)', border: '1px solid transparent',
     padding: size === 'sm' ? '5px 10px' : size === 'lg' ? '11px 18px' : '8px 14px',
     fontSize: size === 'sm' ? 12.5 : 13.5, lineHeight: 1, transition: 'all .15s var(--ease)',
@@ -54,7 +54,7 @@ export function Badge({ children, tone = 'neutral', dot }: { children?: ReactNod
     red: { bg: 'var(--bad-dim)', c: 'var(--bad)' },
   } as Record<Tone, { bg: string; c: string }>)[tone] || { bg: 'var(--bg-3)', c: 'var(--tx-1)' }
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: '100px', background: T.bg, color: T.c, fontSize: 11.5, fontWeight: 600, fontFamily: 'IBM Plex Sans', letterSpacing: '.01em', whiteSpace: 'nowrap' }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: '100px', background: T.bg, color: T.c, fontSize: 11.5, fontWeight: 600, fontFamily: 'Outfit', letterSpacing: '.01em', whiteSpace: 'nowrap' }}>
       {dot && <span style={{ width: 6, height: 6, borderRadius: '50%', background: T.c }} />}
       {children}
     </span>
@@ -100,7 +100,7 @@ export function Field({ label, children, style, full }: { label?: ReactNode; chi
 
 export const inputStyle: CSSProperties = {
   background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)',
-  padding: '9px 12px', color: 'var(--tx-0)', fontSize: 13.5, fontFamily: 'IBM Plex Sans', width: '100%', outline: 'none',
+  padding: '9px 12px', color: 'var(--tx-0)', fontSize: 13.5, fontFamily: 'Outfit', width: '100%', outline: 'none',
 }
 export function Input(p: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...p} onFocus={(e) => {
@@ -211,14 +211,22 @@ export function SearchSelect({ value, onChange, options, getLabel, getSub, place
   const [query, setQuery] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
 
+  // Closing without a pick: if the user backspaced the field empty, that's an
+  // explicit clear; otherwise just revert to showing the previous value.
+  const closeAndMaybeClear = () => {
+    if (query.trim() === '' && value) onChange('', undefined)
+    setOpen(false)
+    setQuery('')
+  }
+
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setOpen(false); setQuery('') }
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) closeAndMaybeClear()
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
+  }, [open, query, value]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = query.trim().toLowerCase()
   const filtered = q
@@ -227,6 +235,13 @@ export function SearchSelect({ value, onChange, options, getLabel, getSub, place
   const exactMatch = filtered.some((o) => label(o).toLowerCase() === q)
 
   const pick = (o: any) => { onChange(label(o), o); setOpen(false); setQuery('') }
+  // Options use onMouseDown+preventDefault so picking one doesn't blur the
+  // input — which means a re-click after picking is NOT a real focus
+  // transition, so onFocus alone never fires again. onClick always fires on
+  // click regardless of prior focus state, so it's the reliable reopen hook;
+  // guarded so a click while already open (e.g. repositioning the cursor)
+  // doesn't stomp on text the user is mid-typing.
+  const openField = () => { if (!open) { setOpen(true); setQuery(value) } }
 
   return (
     <div ref={boxRef} style={{ position: 'relative' }}>
@@ -234,7 +249,8 @@ export function SearchSelect({ value, onChange, options, getLabel, getSub, place
         value={open ? query : value}
         disabled={disabled}
         autoFocus={autoFocus}
-        onFocus={() => { setOpen(true); setQuery('') }}
+        onFocus={openField}
+        onClick={openField}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); setQuery('') } }}
         placeholder={placeholder}

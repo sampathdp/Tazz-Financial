@@ -22,18 +22,18 @@ create/approve/pay/delete flows across all modules.
 ## Prerequisites
 
 The suite expects the app to already be running against an **isolated test database**
-(`mms_auto_test`) so it never touches development data.
+(`absl_test`) so it never touches development data.
 
 1. Create + seed the test DB (from `backend/`):
    ```sh
    # PowerShell
-   $env:DB_DATABASE='mms_auto_test'; php artisan migrate:fresh --seed --force
+   $env:DB_DATABASE='absl_test'; php artisan migrate:fresh --seed --force
    ```
 
 2. Start the backend against the test DB with relaxed rate limits (Windows needs both
    an IPv4 and an IPv6 listener so the Vite proxy's `localhost` target resolves either way):
    ```sh
-   $env:DB_DATABASE='mms_auto_test'; $env:LOGIN_RATE_LIMIT='100000'; $env:API_RATE_LIMIT='100000'
+   $env:DB_DATABASE='absl_test'; $env:LOGIN_RATE_LIMIT='100000'; $env:API_RATE_LIMIT='100000'
    php -S 127.0.0.1:8000 -t public server.php     # terminal A
    php -S [::1]:8000    -t public server.php       # terminal B
    ```
@@ -52,7 +52,7 @@ test stack on its own ports instead of fighting for 8000 — no config edits nee
 
 ```sh
 # backend on 8001, CORS opened for the test frontend origin
-$env:DB_DATABASE='mms_auto_test'; $env:LOGIN_RATE_LIMIT='100000'; $env:API_RATE_LIMIT='100000'
+$env:DB_DATABASE='absl_test'; $env:LOGIN_RATE_LIMIT='100000'; $env:API_RATE_LIMIT='100000'
 $env:CORS_ALLOWED_ORIGINS='http://localhost:5174,http://127.0.0.1:5174'
 php -S 127.0.0.1:8001 -t public server.php
 
@@ -77,7 +77,7 @@ npm test               # run everything
 npm run report         # open the HTML report
 ```
 
-Seed credentials: `admin@mms-auto.lk` / `password` (seeded with the `admin` role).
+Seed credentials: `admin@absl.local` / `password` (seeded with the `admin` role).
 
 ## Notes
 

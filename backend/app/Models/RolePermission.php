@@ -6,5 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class RolePermission extends Model
 {
-    protected $fillable = ['role', 'module', 'action'];
+    protected $fillable = ['role_id', 'module', 'action'];
+
+    public function role()
+    {
+        return $this->belongsTo(Role::class);
+    }
 }

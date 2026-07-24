@@ -11,7 +11,7 @@ class EnsureAdmin
     public function handle(Request $request, Closure $next)
     {
         $user = $request->user();
-        if (!$user || $user->role !== 'admin') {
+        if (!$user || !$user->isAdmin()) {
             Log::channel('security')->warning('admin_denied', [
                 'user_id' => $user ? $user->id : null,
                 'path' => $request->path(),

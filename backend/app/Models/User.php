@@ -20,14 +20,24 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'role',
-        'branch',
+        'role_id',
+        'branch_id',
         'status',
     ];
 
+    public function role()
+    {
+        return $this->belongsTo(Role::class);
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     public function isAdmin(): bool
     {
-        return $this->role === 'admin';
+        return (bool) $this->role?->isAdmin();
     }
 
     public function hasPermission(string $module, string $action): bool

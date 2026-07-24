@@ -3,63 +3,61 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Role;
 use App\Models\User;
-use App\Support\Permissions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
     public function index()
     {
-        return User::orderBy('id')->get(['id', 'name', 'email', 'role', 'branch', 'status', 'created_at']);
+        return User::with(['role', 'branch'])->orderBy('id')->get()
+            ->map(fn (User $u) => $this->present($u));
     }
 
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'name'     => 'required|string|max:255',
-            'email'    => 'required|email|unique:users,email',
-            'password' => 'required|string|min:6',
-            'role'     => ['required', 'string', Rule::in(Permissions::ROLES)],
-            'branch'   => 'nullable|string|max:64',
-            'status'   => ['nullable', Rule::in(['Active', 'Inactive'])],
-        ]);
+        $data = $this->validated($request);
+
+        $this->guardAdminAssignment($request, $data['role_id']);
+        $this->guardBranchRequirement($data);
+
         $user = User::create([
-            'name'     => $data['name'],
-            'email'    => $data['email'],
+            'name' => $data['name'],
+            'email' => $data['email'],
             'password' => Hash::make($data['password']),
-            'role'     => $data['role'],
-            'branch'   => $data['branch'] ?? null,
-            'status'   => $data['status'] ?? 'Active',
+            'role_id' => $data['role_id'],
+            'branch_id' => $data['branch_id'] ?? null,
+            'status' => $data['status'] ?? 'Active',
         ]);
 
-        // Seed the new user's personal permission matrix from their role defaults.
-        Permissions::seedUserIfMissing($user);
-
-        return response()->json($user->only(['id', 'name', 'email', 'role', 'branch', 'status', 'created_at']), 201);
+        return response()->json($this->present($user->load(['role', 'branch'])), 201);
     }
 
     public function update(Request $request, User $user)
     {
-        $data = $request->validate([
-            'name'     => 'sometimes|string|max:255',
-            'email'    => ['sometimes', 'email', Rule::unique('users', 'email')->ignore($user->id)],
-            'password' => 'nullable|string|min:6',
-            'role'     => ['sometimes', 'string', Rule::in(Permissions::ROLES)],
-            'branch'   => 'nullable|string|max:64',
-            'status'   => ['nullable', Rule::in(['Active', 'Inactive'])],
-        ]);
-        if (isset($data['name']))   $user->name = $data['name'];
-        if (isset($data['email']))  $user->email = $data['email'];
-        if (isset($data['role']))   $user->role = $data['role'];
-        if (array_key_exists('branch', $data)) $user->branch = $data['branch'];
+        $data = $this->validated($request, $user);
+
+        if (array_key_exists('role_id', $data)) {
+            $this->guardAdminAssignment($request, $data['role_id']);
+            $this->guardLastAdminDemotion($user, $data['role_id']);
+            $user->role_id = $data['role_id'];
+        }
+        if (array_key_exists('branch_id', $data)) {
+            $user->branch_id = $data['branch_id'];
+        }
+        $this->guardBranchRequirement(['role_id' => $user->role_id, 'branch_id' => $user->branch_id]);
+
+        if (isset($data['name'])) $user->name = $data['name'];
+        if (isset($data['email'])) $user->email = $data['email'];
         if (array_key_exists('status', $data)) $user->status = $data['status'] ?? $user->status;
         if (!empty($data['password'])) $user->password = Hash::make($data['password']);
         $user->save();
 
-        return $user->only(['id', 'name', 'email', 'role', 'branch', 'status', 'created_at']);
+        return $this->present($user->load(['role', 'branch']));
     }
 
     public function destroy(Request $request, User $user)
@@ -67,8 +65,81 @@ class UserController extends Controller
         if ($request->user()->id === $user->id) {
             return response()->json(['message' => 'You cannot delete your own account.'], 422);
         }
+        $this->guardLastAdmin($user, 'delete');
         $user->delete();
 
         return response()->noContent();
+    }
+
+    private function validated(Request $request, ?User $user = null): array
+    {
+        $required = $user ? 'sometimes' : 'required';
+
+        return $request->validate([
+            'name' => "{$required}|string|max:255",
+            'email' => [$required, 'email', Rule::unique('users', 'email')->ignore($user?->id)],
+            'password' => ($user ? 'nullable' : 'required') . '|string|min:6',
+            'role_id' => "{$required}|integer|exists:roles,id",
+            'branch_id' => 'nullable|integer|exists:branches,id',
+            'status' => ['nullable', Rule::in(['Active', 'Inactive'])],
+        ]);
+    }
+
+    /** Only an existing admin may hand out the admin role. */
+    private function guardAdminAssignment(Request $request, int $roleId): void
+    {
+        $role = Role::find($roleId);
+        if ($role && $role->isAdmin() && !$request->user()?->isAdmin()) {
+            throw ValidationException::withMessages([
+                'role_id' => 'Only an administrator can assign the administrator role.',
+            ]);
+        }
+    }
+
+    /** Non-branch-scoped roles (can_view_all_branches) don't require a branch; everyone else does. */
+    private function guardBranchRequirement(array $data): void
+    {
+        if (empty($data['role_id'])) {
+            return;
+        }
+        $role = Role::find($data['role_id']);
+        if ($role && !$role->can_view_all_branches && empty($data['branch_id'])) {
+            throw ValidationException::withMessages([
+                'branch_id' => 'A branch is required for this role.',
+            ]);
+        }
+    }
+
+    private function guardLastAdminDemotion(User $user, int $newRoleId): void
+    {
+        if ($user->isAdmin() && $newRoleId !== $user->role_id) {
+            $this->guardLastAdmin($user, 'change the role of');
+        }
+    }
+
+    private function guardLastAdmin(User $user, string $action): void
+    {
+        if (!$user->isAdmin()) {
+            return;
+        }
+        $adminRoleId = $user->role_id;
+        $remaining = User::where('role_id', $adminRoleId)->where('id', '!=', $user->id)->count();
+        if ($remaining === 0) {
+            throw ValidationException::withMessages([
+                'role_id' => "Cannot {$action} the last remaining administrator.",
+            ]);
+        }
+    }
+
+    private function present(User $u): array
+    {
+        return [
+            'id' => $u->id, 'name' => $u->name, 'email' => $u->email,
+            'roleId' => $u->role_id, 'role' => $u->role?->slug, 'roleName' => $u->role?->name,
+            'branchId' => $u->branch_id, 'branch' => $u->branch ? [
+                'id' => $u->branch->id, 'name' => $u->branch->name, 'code' => $u->branch->code,
+            ] : null,
+            'status' => $u->status, 'createdAt' => $u->created_at,
+        ];
     }
 }

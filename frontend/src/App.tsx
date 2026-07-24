@@ -1,7 +1,8 @@
 /* NMS-Auto — app router + screen registry (replaces window.SCREENS) */
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { ComponentType } from 'react'
-import { Sidebar, Topbar } from './components/Shell'
+import { Sidebar, Topbar, flatNav } from './components/Shell'
+import { Icon } from './components/Icon'
 import DB from './data'
 import type { Go, ScreenProps } from './screens/types'
 import Login from './screens/Login'
@@ -9,9 +10,15 @@ import { auth, type AuthUser } from './api'
 import { canAccessRoute } from './lib/permissions'
 
 const DashScreen = lazy(() => import('./screens/Dashboard'))
+const CustomersScreen = lazy(() => import('./screens/Customers').then((m) => ({ default: m.CustomersScreen })))
+const LoanTypesScreen = lazy(() => import('./screens/LoanTypes').then((m) => ({ default: m.LoanTypesScreen })))
+const LoanApplicationsScreen = lazy(() => import('./screens/LoanApplications').then((m) => ({ default: m.LoanApplicationsScreen })))
+const ActiveLoansScreen = lazy(() => import('./screens/ActiveLoans').then((m) => ({ default: m.ActiveLoansScreen })))
 const named = <M, K extends keyof M>(loader: () => Promise<M>, key: K) =>
   lazy(() => loader().then((m) => ({ default: m[key] as unknown as ComponentType<any> })))
 
+const BranchesScreen = named(() => import('./screens/Admin'), 'BranchesScreen')
+const RolesScreen = named(() => import('./screens/Admin'), 'RolesScreen')
 const UsersScreen = named(() => import('./screens/Admin'), 'UsersScreen')
 const PermScreen = named(() => import('./screens/Admin'), 'PermScreen')
 const CompanyScreen = named(() => import('./screens/Admin'), 'CompanyScreen')
@@ -28,8 +35,28 @@ function ScreenLoader() {
   )
 }
 
+// Shown for nav items on the roadmap but not built yet (admin-only preview — see canAccessRoute).
+function ComingSoon({ route }: { route: string }) {
+  const item = flatNav[route]
+  return (
+    <div className="col center" style={{ padding: '80px 20px', textAlign: 'center', color: 'var(--tx-2)' }}>
+      <div style={{ width: 52, height: 52, borderRadius: 'var(--r-m)', background: 'var(--bg-2)', border: '1px solid var(--line)', display: 'grid', placeItems: 'center', marginBottom: 16 }}>
+        <Icon n={item?.icon || 'clock'} s={24} c="var(--tx-3)" />
+      </div>
+      <h2 style={{ fontSize: 18, color: 'var(--tx-0)', marginBottom: 6 }}>{item?.label || 'This screen'} — coming soon</h2>
+      <p style={{ fontSize: 13, maxWidth: 380 }}>This module is on the roadmap and not built yet. It's visible to you as an admin so you can see the planned structure — say the word and we'll build it next.</p>
+    </div>
+  )
+}
+
 const SCREENS: Record<string, ScreenComp> = {
   dash: DashScreen,
+  customers: CustomersScreen,
+  'loan/types': LoanTypesScreen,
+  'loan/apps': LoanApplicationsScreen,
+  'loan/active': ActiveLoansScreen,
+  'ad/branches': BranchesScreen,
+  'ad/roles': RolesScreen,
   'ad/users': UsersScreen,
   'ad/perm': PermScreen,
   'ad/company': CompanyScreen,
@@ -63,7 +90,7 @@ export default function App() {
   // saved route (e.g. after a permission change). The Sidebar already hides the
   // entries they can't reach, but the route may be persisted in localStorage.
   const effectiveRoute = canAccessRoute(user, route) ? route : 'dash'
-  const Screen = SCREENS[effectiveRoute] || (() => <div style={{ padding: 40 }} className="t-2">Screen not found</div>)
+  const Screen = SCREENS[effectiveRoute] || (() => <ComingSoon route={effectiveRoute} />)
   const denied = !canAccessRoute(user, route)
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>

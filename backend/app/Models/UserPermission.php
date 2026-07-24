@@ -6,5 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class UserPermission extends Model
 {
-    protected $fillable = ['user_id', 'module', 'action'];
+    protected $fillable = ['user_id', 'module', 'action', 'allowed'];
+
+    protected $casts = [
+        'allowed' => 'boolean',
+    ];
 }

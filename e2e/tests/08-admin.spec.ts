@@ -13,6 +13,53 @@ test.beforeEach(async ({ page }) => {
 })
 
 test.describe('Administration', () => {
+  test('Branch Management: create → verify → delete', async ({ page }) => {
+    await nav(page, 'ad/branches')
+    const code = 'E2E' + stamp()
+
+    await page.getByRole('button', { name: 'Add Branch' }).click()
+    await expect(modal(page).getByRole('heading', { name: 'Add Branch' })).toBeVisible()
+    await mfield(page, 'Branch Name').fill('E2E Branch ' + stamp())
+    await mfield(page, 'Code').fill(code)
+
+    const [resp] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/api/branches') && r.request().method() === 'POST'),
+      modal(page).getByRole('button', { name: 'Create Branch' }).click(),
+    ])
+    expect(resp.status()).toBe(201)
+    await expect(page.getByRole('cell', { name: code })).toBeVisible()
+
+    await page.getByRole('row', { name: new RegExp(code) }).getByTitle('Delete').click()
+    await confirmDelete(page).click()
+    await expect(page.getByRole('cell', { name: code })).toHaveCount(0)
+  })
+
+  test('Role Management: create role, edit its permission matrix', async ({ page }) => {
+    await nav(page, 'ad/roles')
+    const name = 'E2E Role ' + stamp()
+
+    await page.getByRole('button', { name: 'Add Role' }).click()
+    await expect(modal(page).getByRole('heading', { name: 'Add Role' })).toBeVisible()
+    await mfield(page, 'Role Name').fill(name)
+
+    const [resp] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/api/roles') && r.request().method() === 'POST'),
+      modal(page).getByRole('button', { name: 'Create Role' }).click(),
+    ])
+    expect(resp.status()).toBe(201)
+    await page.locator('[data-testid="role-row"]', { hasText: name }).click()
+
+    // Toggle the Dashboard:View cell on for the new role and save.
+    await expect(page.getByRole('columnheader', { name: 'Module' })).toBeVisible()
+    await page.locator('tbody tr', { hasText: 'Dashboard' }).locator('td').nth(1).locator('button').click()
+
+    const [saveResp] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/permissions') && r.request().method() === 'PUT'),
+      page.getByRole('button', { name: 'Save Permissions' }).click(),
+    ])
+    expect(saveResp.ok()).toBeTruthy()
+  })
+
   test('User Management: create → verify → delete', async ({ page }) => {
     await nav(page, 'ad/users')
     const email = `e2e.user.${stamp()}@example.lk`
@@ -22,7 +69,8 @@ test.describe('Administration', () => {
     await mfield(page, 'Full Name').fill('E2E User')
     await mfield(page, 'Email').fill(email)
     await mfield(page, 'Password').fill('password123')
-    await mfield(page, 'Role').selectOption('manager')
+    await mfield(page, 'Role').selectOption({ label: 'Branch Manager' })
+    await mfield(page, 'Branch').selectOption({ label: 'Head Office' })
 
     const [resp] = await Promise.all([
       page.waitForResponse((r) => r.url().includes('/api/users') && r.request().method() === 'POST'),
@@ -47,26 +95,6 @@ test.describe('Administration', () => {
       page.getByRole('button', { name: 'Save Changes' }).click(),
     ])
     expect(resp.ok()).toBeTruthy()
-  })
-
-  test('Sales Reps: renders seeded reps and creates a new rep', async ({ page }) => {
-    await nav(page, 'ad/reps')
-    await expect(page.getByRole('cell', { name: 'R. Fernando' })).toBeVisible()
-
-    const name = 'E2E Rep ' + stamp()
-    await page.getByRole('button', { name: 'Add Sales Rep' }).click()
-    await expect(modal(page).getByRole('heading', { name: 'Add Sales Rep' })).toBeVisible()
-    await mfield(page, 'Full Name').fill(name)
-    await mfield(page, 'Sales Zone').fill('E2E Zone')
-
-    const [resp] = await Promise.all([
-      page.waitForResponse((r) => r.url().includes('/api/sales-reps') && r.request().method() === 'POST'),
-      modal(page).getByRole('button', { name: 'Create Rep & Login' }).click(),
-    ])
-    expect(resp.status()).toBe(201)
-    // Dismiss the generated-credentials dialog, then confirm the rep is listed
-    await page.getByRole('button', { name: 'Done' }).click()
-    await expect(page.getByRole('cell', { name })).toBeVisible()
   })
 
   test('User Permission: matrix loads for a user', async ({ page }) => {

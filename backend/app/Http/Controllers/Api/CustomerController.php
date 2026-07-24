@@ -1,0 +1,87 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\Customer;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+
+class CustomerController extends Controller
+{
+    private const OCCUPATION_TYPES = ['Employed', 'SelfEmployed', 'BusinessOwner', 'Unemployed', 'Retired', 'Student', 'Other'];
+
+    public function index()
+    {
+        return Customer::with('branch:id,name,code')->orderByDesc('id')->get();
+    }
+
+    public function show(Customer $customer)
+    {
+        return $customer->load(['branch:id,name,code', 'documents']);
+    }
+
+    public function store(Request $request)
+    {
+        $data = $this->validated($request);
+        $data['created_by'] = $request->user()->id;
+
+        // Serialize code generation on the last row so two concurrent creates
+        // can't compute the same "next" number.
+        $customer = DB::transaction(function () use ($data) {
+            $max = Customer::withTrashed()->lockForUpdate()->max('id') ?? 0;
+            $data['code'] = 'CUS-' . str_pad((string) ($max + 1), 6, '0', STR_PAD_LEFT);
+
+            return Customer::create($data);
+        });
+
+        return response()->json($customer->load('branch:id,name,code'), 201);
+    }
+
+    public function update(Request $request, Customer $customer)
+    {
+        $customer->update($this->validated($request, $customer));
+
+        return $customer->load('branch:id,name,code');
+    }
+
+    public function destroy(Customer $customer)
+    {
+        $customer->delete();
+
+        return response()->noContent();
+    }
+
+    private function validated(Request $request, ?Customer $customer = null): array
+    {
+        return $request->validate([
+            'branch_id' => 'required|exists:branches,id',
+            'full_name' => 'required|string|max:191',
+            'nic_no' => ['nullable', 'string', 'max:32', Rule::unique('customers', 'nic_no')->ignore($customer?->id)],
+            'passport_no' => 'nullable|string|max:32',
+            'driving_license_no' => 'nullable|string|max:32',
+            'dob' => 'nullable|date',
+            'gender' => 'nullable|string|max:16',
+            'phone' => 'nullable|string|max:32',
+            'alt_phone' => 'nullable|string|max:32',
+            'email' => 'nullable|email|max:190',
+            'address' => 'nullable|string',
+            'occupation_type' => ['nullable', Rule::in(self::OCCUPATION_TYPES)],
+            'employer_name' => 'nullable|string|max:191',
+            'job_title' => 'nullable|string|max:128',
+            'employer_address' => 'nullable|string|max:255',
+            'employer_phone' => 'nullable|string|max:32',
+            'employment_start_date' => 'nullable|date',
+            'business_name' => 'nullable|string|max:191',
+            'business_reg_no' => 'nullable|string|max:64',
+            'business_type' => 'nullable|string|max:128',
+            'business_address' => 'nullable|string|max:255',
+            'business_phone' => 'nullable|string|max:32',
+            'monthly_income' => 'nullable|numeric|min:0',
+            'status' => ['nullable', Rule::in(['Active', 'Blacklisted', 'Inactive'])],
+            'is_guarantor' => 'boolean',
+            'notes' => 'nullable|string',
+        ]);
+    }
+}

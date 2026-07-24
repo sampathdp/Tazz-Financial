@@ -1,9 +1,9 @@
 import { Page, expect } from '@playwright/test'
 import { execSync } from 'node:child_process'
 
-export const ADMIN = { email: 'admin@mms-auto.lk', password: 'password' }
+export const ADMIN = { email: 'admin@absl.local', password: 'password' }
 
-const BACKEND_DIR = 'h:/React/sk-enterprises/backend'
+const BACKEND_DIR = 'h:/React/ABSL-Financial/backend'
 
 /** Clear the Laravel rate-limiter (login is throttled to 5/min, too tight for E2E). */
 export function resetRateLimit() {
@@ -17,6 +17,9 @@ export function resetRateLimit() {
 /** route id -> { section (sidebar group, if any), label (nav button text), title (page <h1>) } */
 export const ROUTES: Record<string, { section?: string; label: string; title: string }> = {
   dash: { label: 'Dashboard', title: 'Dashboard' },
+  customers: { label: 'Customer Management', title: 'Customer Management' },
+  'ad/branches': { section: 'Administration', label: 'Branch Management', title: 'Branch Management' },
+  'ad/roles': { section: 'Administration', label: 'Role Management', title: 'Role Management' },
   'ad/users': { section: 'Administration', label: 'User Management', title: 'User Management' },
   'ad/perm': { section: 'Administration', label: 'User Permission', title: 'User Permission' },
   'ad/company': { section: 'Administration', label: 'Company Profile', title: 'Company Profile' },

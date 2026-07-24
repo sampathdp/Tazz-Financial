@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Role;
+use App\Models\RolePermission;
 use App\Models\User;
 use App\Models\UserPermission;
 use Illuminate\Support\Facades\Cache;
@@ -9,55 +11,24 @@ use Illuminate\Support\Facades\Cache;
 class Permissions
 {
     /**
-     * Canonical list of modules and actions the system exposes.
-     * Add new entries here when new screens / capabilities ship.
+     * Canonical list of pages/screens the system exposes.
+     * Add new entries here when new modules ship (Loan, Pawning, Cashbook, ...).
      */
     public const MODULES = [
         'Dashboard',
-        'Item Master', 'Customer Master', 'Supplier Master',
-        'Brand Master', 'Services', 'Employee Master', 'Payment Master', 'Bank Master',
-        'Branch Master', 'Expense Type', 'Credit Period', 'Invoice Remark',
-        'Purchase Order', 'Costing & Shipment', 'GRN', 'PO Tracking',
-        'Quotation', 'Sales Order', 'Sales Invoice', 'Sales Return', 'Payment Receipt', 'Expense',
-        'Stock Transfer', 'Stock Adjustment', 'BIN Card', 'Live Stock', 'Price Control',
-        'Reports',
-        'Sales Reps', 'User Management', 'User Permission', 'Company Profile',
+        'Branch Management', 'Role Management', 'User Management', 'User Permission',
+        'Company Profile',
+        'Customer Management',
+        'Loan Types',
+        'Loan Applications',
+        'Active Loans',
+        'Loan Payments',
     ];
 
-    public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve'];
-
-    /**
-     * Roles shipped with the system. These are now only a convenience: each
-     * role has a default permission set that seeds a user's own matrix the
-     * first time it is needed. Actual access is resolved per-user. The 'admin'
-     * role is implicit — it always has every permission and bypasses the matrix.
-     */
-    public const ROLES = ['admin', 'manager', 'storekeeper', 'accountant', 'salesrep', 'cashier', 'user'];
+    public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve', 'Export'];
 
     /** Cache TTL (seconds) for a user's resolved permission list. */
     private const CACHE_TTL = 300;
-
-    public static function rolesForUI(): array
-    {
-        return self::ROLES;
-    }
-
-    /**
-     * Default permission predicates per role, used only to seed a brand-new
-     * user's personal matrix. Returns a map of role => fn(module, action): bool.
-     */
-    private static function roleDefaults(): array
-    {
-        return [
-            'admin' => fn ($m, $a) => true,
-            'manager' => fn ($m, $a) => true && $a !== 'Delete' || in_array($m, ['Sales Invoice', 'Quotation']),
-            'storekeeper' => fn ($m, $a) => in_array($m, ['Dashboard', 'Item Master', 'Supplier Master', 'GRN', 'Stock Transfer', 'Stock Adjustment', 'BIN Card', 'Live Stock', 'Price Control']) && $a !== 'Approve',
-            'accountant' => fn ($m, $a) => in_array($m, ['Dashboard', 'Customer Master', 'Sales Invoice', 'Payment Receipt', 'Expense', 'Reports']) && $a !== 'Delete',
-            'salesrep' => fn ($m, $a) => in_array($m, ['Dashboard', 'Item Master', 'Customer Master', 'Quotation', 'Sales Invoice']) && in_array($a, ['View', 'Create']),
-            'cashier' => fn ($m, $a) => in_array($m, ['Dashboard', 'Payment Receipt', 'Sales Invoice']) && in_array($a, ['View', 'Create']),
-            'user' => fn ($m, $a) => $m === 'Dashboard' && $a === 'View',
-        ];
-    }
 
     /** Empty {module: {action: false}} grid. */
     private static function emptyGrid(): array
@@ -72,59 +43,11 @@ class Permissions
         return $grid;
     }
 
-    /** Default {module: {action: bool}} grid for a role. */
-    public static function defaultGridForRole(string $role): array
-    {
-        $fn = self::roleDefaults()[$role] ?? self::roleDefaults()['user'];
-        $grid = [];
-        foreach (self::MODULES as $m) {
-            foreach (self::ACTIONS as $a) {
-                $grid[$m][$a] = (bool) $fn($m, $a);
-            }
-        }
-
-        return $grid;
-    }
-
-    /**
-     * Ensure a user has a personal permission matrix. On first use we seed it
-     * from the user's role defaults so admins have a sensible starting point.
-     * Admin users are never seeded — their access is implicit.
-     */
-    public static function seedUserIfMissing(User $user): void
-    {
-        if ($user->role === 'admin') {
-            return;
-        }
-        if (UserPermission::where('user_id', $user->id)->exists()) {
-            return;
-        }
-        $grid = self::defaultGridForRole($user->role ?: 'user');
-        $rows = [];
-        foreach ($grid as $module => $actions) {
-            foreach ($actions as $action => $enabled) {
-                if ($enabled) {
-                    $rows[] = [
-                        'user_id' => $user->id, 'module' => $module, 'action' => $action,
-                        'created_at' => now(), 'updated_at' => now(),
-                    ];
-                }
-            }
-        }
-        if ($rows) {
-            UserPermission::insert($rows);
-        }
-        Cache::forget("perm:user:{$user->id}");
-    }
-
-    /**
-     * Return a {module: {action: bool}} matrix for a single user.
-     * Admin users get every permission.
-     */
-    public static function gridForUser(User $user): array
+    /** {module: {action: bool}} grid built from a role's stored role_permissions rows. */
+    public static function gridForRole(Role $role): array
     {
         $grid = self::emptyGrid();
-        if ($user->role === 'admin') {
+        if ($role->isAdmin()) {
             foreach (self::MODULES as $m) {
                 foreach (self::ACTIONS as $a) {
                     $grid[$m][$a] = true;
@@ -133,7 +56,7 @@ class Permissions
 
             return $grid;
         }
-        foreach (UserPermission::where('user_id', $user->id)->get() as $p) {
+        foreach (RolePermission::where('role_id', $role->id)->get() as $p) {
             if (isset($grid[$p->module][$p->action])) {
                 $grid[$p->module][$p->action] = true;
             }
@@ -143,15 +66,16 @@ class Permissions
     }
 
     /**
-     * Replace all permissions for a user with the given matrix slice:
+     * Replace all permissions for a role with the given matrix slice:
      *   {module: {action: bool}}
+     * No-op for the system admin role (its access is implicit and not stored).
      */
-    public static function saveForUser(User $user, array $modules): void
+    public static function saveForRole(Role $role, array $modules): void
     {
-        if ($user->role === 'admin') {
-            return; // admin permissions are implicit and not stored.
+        if ($role->isAdmin()) {
+            return;
         }
-        UserPermission::where('user_id', $user->id)->delete();
+        RolePermission::where('role_id', $role->id)->delete();
         $rows = [];
         foreach ($modules as $module => $actions) {
             if (!in_array($module, self::MODULES, true)) {
@@ -163,14 +87,97 @@ class Permissions
                 }
                 if ($enabled) {
                     $rows[] = [
-                        'user_id' => $user->id, 'module' => $module, 'action' => $action,
+                        'role_id' => $role->id, 'module' => $module, 'action' => $action,
                         'created_at' => now(), 'updated_at' => now(),
                     ];
                 }
             }
         }
         if ($rows) {
-            UserPermission::insert($rows);
+            RolePermission::insert($rows);
+        }
+        // Role changes ripple to every member — bust each of their cached grids.
+        foreach (User::where('role_id', $role->id)->pluck('id') as $userId) {
+            Cache::forget("perm:user:{$userId}");
+        }
+    }
+
+    /**
+     * Effective {module: {action: bool}} matrix for a single user: the
+     * user's role grid with per-user overrides (user_permissions) applied on
+     * top. Admin users get every permission.
+     */
+    public static function gridForUser(User $user): array
+    {
+        if ($user->isAdmin()) {
+            $grid = self::emptyGrid();
+            foreach (self::MODULES as $m) {
+                foreach (self::ACTIONS as $a) {
+                    $grid[$m][$a] = true;
+                }
+            }
+
+            return $grid;
+        }
+
+        $grid = $user->role ? self::gridForRole($user->role) : self::emptyGrid();
+
+        foreach (UserPermission::where('user_id', $user->id)->get() as $p) {
+            if (isset($grid[$p->module][$p->action])) {
+                $grid[$p->module][$p->action] = (bool) $p->allowed;
+            }
+        }
+
+        return $grid;
+    }
+
+    /**
+     * Which cells in a user's effective grid are explicit overrides (as
+     * opposed to inherited from their role) — {module: {action: bool}}.
+     * Used by the UI to visually distinguish overridden cells.
+     */
+    public static function overridesForUser(User $user): array
+    {
+        $overrides = [];
+        if ($user->isAdmin()) {
+            return $overrides;
+        }
+        foreach (UserPermission::where('user_id', $user->id)->get() as $p) {
+            $overrides[$p->module][$p->action] = true;
+        }
+
+        return $overrides;
+    }
+
+    /**
+     * Replace a user's permission overrides with the given slice:
+     *   {module: {action: true|false|null}}
+     * true/false upserts an explicit override, null/missing clears it back
+     * to "inherit from role". No-op for admin users.
+     */
+    public static function saveForUser(User $user, array $modules): void
+    {
+        if ($user->isAdmin()) {
+            return;
+        }
+        foreach ($modules as $module => $actions) {
+            if (!in_array($module, self::MODULES, true)) {
+                continue;
+            }
+            foreach ($actions as $action => $value) {
+                if (!in_array($action, self::ACTIONS, true)) {
+                    continue;
+                }
+                if ($value === null) {
+                    UserPermission::where('user_id', $user->id)
+                        ->where('module', $module)->where('action', $action)->delete();
+                } else {
+                    UserPermission::updateOrCreate(
+                        ['user_id' => $user->id, 'module' => $module, 'action' => $action],
+                        ['allowed' => (bool) $value]
+                    );
+                }
+            }
         }
         Cache::forget("perm:user:{$user->id}");
     }
@@ -183,23 +190,18 @@ class Permissions
         if (!$user) {
             return [];
         }
-        if ($user->role === 'admin') {
-            $all = [];
-            foreach (self::MODULES as $m) {
-                foreach (self::ACTIONS as $a) {
-                    $all[] = "{$m}:{$a}";
+
+        return Cache::remember("perm:user:{$user->id}", self::CACHE_TTL, function () use ($user) {
+            $flat = [];
+            foreach (self::gridForUser($user) as $module => $actions) {
+                foreach ($actions as $action => $enabled) {
+                    if ($enabled) {
+                        $flat[] = "{$module}:{$action}";
+                    }
                 }
             }
 
-            return $all;
-        }
-
-        return Cache::remember("perm:user:{$user->id}", self::CACHE_TTL, function () use ($user) {
-            return UserPermission::where('user_id', $user->id)
-                ->get()
-                ->map(fn ($p) => "{$p->module}:{$p->action}")
-                ->values()
-                ->all();
+            return $flat;
         });
     }
 
@@ -207,9 +209,6 @@ class Permissions
     {
         if (!$user) {
             return false;
-        }
-        if ($user->role === 'admin') {
-            return true;
         }
 
         return in_array("{$module}:{$action}", self::forUser($user), true);

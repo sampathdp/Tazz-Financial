@@ -7,15 +7,88 @@ import DB from '../data'
 import { auth, type AuthUser } from '../api'
 import { canAccessRoute } from '../lib/permissions'
 
-export interface NavLeaf { id: string; label: string; icon: string; star?: boolean }
+export interface NavLeaf {
+  id: string; label: string; icon: string; star?: boolean
+  /** Not built yet — shown (admin-only) as a preview of the planned structure. See lib/permissions.ts canAccessRoute(). */
+  soon?: boolean
+}
 export interface NavSection { section: string; icon: string; items: NavLeaf[] }
 export type NavNode = NavLeaf | NavSection
 
 export const NAV: NavNode[] = [
   { id: 'dash', label: 'Dashboard', icon: 'dash' },
+  { id: 'customers', label: 'Customer Management', icon: 'users' },
+
+  { section: 'Loan Management', icon: 'coins', items: [
+    { id: 'loan/types', label: 'Loan Types', icon: 'layers' },
+    { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
+    { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
+    { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt', soon: true },
+    { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert', soon: true },
+  ] },
+
+  { section: 'Funding / Investment', icon: 'pie', items: [
+    { id: 'fund/investors', label: 'Investors', icon: 'users', soon: true },
+    { id: 'fund/plans', label: 'Investment Plans', icon: 'layers', soon: true },
+    { id: 'fund/investments', label: 'Investments', icon: 'pie', soon: true },
+  ] },
+
+  { section: 'Pawning Management', icon: 'tag', items: [
+    { id: 'pawn/tickets', label: 'Pawn Tickets', icon: 'tag', soon: true },
+    { id: 'pawn/auctions', label: 'Auctions', icon: 'store', soon: true },
+  ] },
+
+  { section: 'Cashbook Management', icon: 'wallet', items: [
+    { id: 'cash/book', label: 'Cashbook', icon: 'wallet', soon: true },
+    { id: 'cash/transfers', label: 'Cash Transfers', icon: 'swap', soon: true },
+    { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust', soon: true },
+  ] },
+
+  { section: 'Bank Management', icon: 'building', items: [
+    { id: 'bank/accounts', label: 'Bank Accounts', icon: 'building', soon: true },
+    { id: 'bank/txns', label: 'Bank Transactions', icon: 'receipt', soon: true },
+    { id: 'bank/recon', label: 'Bank Reconciliation', icon: 'adjust', soon: true },
+  ] },
+
+  { section: 'Accounting', icon: 'list', items: [
+    { id: 'acc/coa', label: 'Chart of Accounts', icon: 'list', soon: true },
+    { id: 'acc/journal', label: 'Journal Entries', icon: 'doc', soon: true },
+    { id: 'acc/gl', label: 'General Ledger', icon: 'layers', soon: true },
+    { id: 'acc/tb', label: 'Trial Balance', icon: 'chart', soon: true },
+    { id: 'acc/pl', label: 'Profit & Loss', icon: 'pie', soon: true },
+    { id: 'acc/bs', label: 'Balance Sheet', icon: 'grid', soon: true },
+    { id: 'acc/cf', label: 'Cash Flow', icon: 'swap', soon: true },
+  ] },
+
+  { section: 'Expense Management', icon: 'wallet', items: [
+    { id: 'exp/categories', label: 'Expense Categories', icon: 'tag', soon: true },
+    { id: 'exp/vendors', label: 'Vendors', icon: 'store', soon: true },
+    { id: 'exp/expenses', label: 'Expenses', icon: 'wallet', soon: true },
+    { id: 'exp/vouchers', label: 'Payment Vouchers', icon: 'doc', soon: true },
+  ] },
+
+  { section: 'Reports', icon: 'chart', items: [
+    { id: 'rep/loans', label: 'Loan Reports', icon: 'coins', soon: true },
+    { id: 'rep/collections', label: 'Collection Reports', icon: 'receipt', soon: true },
+    { id: 'rep/customers', label: 'Customer Reports', icon: 'users', soon: true },
+    { id: 'rep/investors', label: 'Investor Reports', icon: 'pie', soon: true },
+    { id: 'rep/pawn', label: 'Pawn Reports', icon: 'tag', soon: true },
+    { id: 'rep/cashbank', label: 'Cash & Bank Reports', icon: 'building', soon: true },
+    { id: 'rep/expenses', label: 'Expense Reports', icon: 'wallet', soon: true },
+  ] },
+
+  { section: 'Notifications', icon: 'bell', items: [
+    { id: 'notif/templates', label: 'Notification Templates', icon: 'bell', soon: true },
+    { id: 'notif/log', label: 'Notifications', icon: 'mail', soon: true },
+  ] },
+
   { section: 'Administration', icon: 'shield', items: [
+    { id: 'ad/branches', label: 'Branch Management', icon: 'building' },
+    { id: 'ad/roles', label: 'Role Management', icon: 'shield' },
     { id: 'ad/users', label: 'User Management', icon: 'users' },
     { id: 'ad/perm', label: 'User Permission', icon: 'shield' },
+    { id: 'ad/audit', label: 'Audit Logs', icon: 'list', soon: true },
+    { id: 'ad/login-activity', label: 'Login Activity', icon: 'clock', soon: true },
     { id: 'ad/company', label: 'Company Profile', icon: 'building' },
   ] },
 ]
@@ -36,7 +109,8 @@ function NavItem({ item, active, sub, onClick }: { item: NavLeaf; active: boolea
       transition: 'all .14s',
     }}>
       <Icon n={item.icon} s={17} c={active ? 'var(--ac-bright)' : 'var(--tx-2)'} />
-      <span style={{ flex: 1 }}>{item.label}</span>
+      <span style={{ flex: 1, opacity: item.soon ? 0.7 : 1 }}>{item.label}</span>
+      {item.soon && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', color: 'var(--tx-3)', border: '1px solid var(--line)', borderRadius: 4, padding: '1px 5px' }}>SOON</span>}
       {item.star && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--ac)', opacity: active ? 0 : 0.7 }} />}
     </button>
   )

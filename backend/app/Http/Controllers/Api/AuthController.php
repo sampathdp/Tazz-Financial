@@ -79,19 +79,25 @@ class AuthController extends Controller
 
         return [
             'token' => $token,
-            'user' => array_merge(
-                $user->only(['id', 'name', 'email', 'role', 'branch', 'status']),
-                ['permissions' => $user->permissionList()]
-            ),
+            'user' => $this->present($user),
         ];
     }
 
     public function me(Request $request)
     {
-        $u = $request->user();
+        return $this->present($request->user());
+    }
+
+    private function present(User $u): array
+    {
         return array_merge(
-            $u->only(['id', 'name', 'email', 'role', 'branch', 'status']),
-            ['permissions' => $u->permissionList()]
+            $u->only(['id', 'name', 'email', 'status']),
+            [
+                'role' => $u->role?->slug,
+                'roleId' => $u->role_id,
+                'branch' => $u->branch ? ['id' => $u->branch->id, 'name' => $u->branch->name, 'code' => $u->branch->code] : null,
+                'permissions' => $u->permissionList(),
+            ]
         );
     }
 
