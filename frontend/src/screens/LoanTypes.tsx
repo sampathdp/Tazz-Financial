@@ -1,4 +1,4 @@
-/* ABSL Financial — Loan Types (self-referencing tree: category or product) */
+/* Tazz Investment & Credit — Loan Types (self-referencing tree: category or product) */
 import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal } from '../components/ui'
 import { Icon } from '../components/Icon'

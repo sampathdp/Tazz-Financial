@@ -1,4 +1,4 @@
-/* ABSL Financial — Active Loans (disbursement → repayment schedule → payments) */
+/* Tazz Investment & Credit — Active Loans (disbursement → repayment schedule → payments) */
 import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Input, Table, Td } from '../components/ui'
 import { Icon } from '../components/Icon'

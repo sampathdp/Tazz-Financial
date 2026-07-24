@@ -1,5 +1,5 @@
 -- ============================================================================
--- ABSL Financial — Complete Database Schema
+-- Tazz Investment & Credit — Complete Database Schema
 -- Lending / Pawning / Investment / Accounting Management System
 -- MySQL 8.0+, InnoDB, utf8mb4
 -- ============================================================================

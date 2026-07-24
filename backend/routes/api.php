@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
-| ABSL Financial API routes
+| Tazz Investment & Credit API routes
 |--------------------------------------------------------------------------
 | Public: login only (with strict throttle).
 | Everything else requires a valid Sanctum bearer token, plus a

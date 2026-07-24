@@ -205,8 +205,8 @@ export const categoryShare = categories.map((c) => ({ label: c, value: Math.roun
 export const dailyTrend = Array.from({ length: 30 }).map(() => Math.round(rnd(120, 420)))
 
 export const company: Company = {
-  name: 'Distributor Management System', tagline: 'Distribution & Supply Chain Management', address: 'No. 10, Main Street, Colombo 01, Sri Lanka',
-  phone: '+94 11 000 0000', email: 'info@dms.lk',
+  name: 'Tazz Investment & Credit Pvt Ltd', tagline: 'Investment & Credit Management', address: 'No. 10, Main Street, Colombo 01, Sri Lanka',
+  phone: '+94 11 000 0000', email: 'info@tazz.lk',
 }
 
 export const DB = {

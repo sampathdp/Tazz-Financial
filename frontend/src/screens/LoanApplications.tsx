@@ -1,4 +1,4 @@
-/* ABSL Financial — Loan Applications (intake → approve/reject workflow) */
+/* Tazz Investment & Credit — Loan Applications (intake → approve/reject workflow) */
 import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'

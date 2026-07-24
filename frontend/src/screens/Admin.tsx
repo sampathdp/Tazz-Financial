@@ -1,4 +1,4 @@
-/* ABSL Financial — Administration (API-backed) */
+/* Tazz Investment & Credit — Administration (API-backed) */
 import { useEffect, useRef, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
@@ -579,7 +579,7 @@ export function PermScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | nu
 /* ============================ Company Profile =========================== */
 
 export function CompanyScreen({ go: _go, setBrand }: { go: Go; setBrand?: (v: { name: string, tagline: string }) => void }) {
-  const [data, setData] = useState<any>({ name: 'ABSL Financial', tagline: 'Lending, Pawning & Investment Management', address: '', phone: '', email: '', taxNo: '', currency: 'LKR — Sri Lankan Rupee' })
+  const [data, setData] = useState<any>({ name: 'Tazz Investment & Credit Pvt Ltd', tagline: 'Investment & Credit Management', address: '', phone: '', email: '', taxNo: '', currency: 'LKR — Sri Lankan Rupee' })
   const [accent, setAccent] = useState(document.documentElement.dataset.accent || 'blue')
   const [saving, setSaving] = useState(false)
   const [hasLogo, setHasLogo] = useState(false)
@@ -615,7 +615,7 @@ export function CompanyScreen({ go: _go, setBrand }: { go: Go; setBrand?: (v: { 
     try {
       const updated = await companyApi.update(data)
       setData((s: any) => ({ ...s, ...updated }))
-      setBrand?.({ name: data.name || 'ABSL Financial', tagline: data.tagline || '' })
+      setBrand?.({ name: data.name || 'Tazz Investment & Credit Pvt Ltd', tagline: data.tagline || '' })
     } finally { setSaving(false) }
   }
   const set = (k: string, v: any) => setData((s: any) => ({ ...s, [k]: v }))
@@ -643,9 +643,7 @@ export function CompanyScreen({ go: _go, setBrand }: { go: Go; setBrand?: (v: { 
             <div className="t-2" style={{ fontSize: 12.5, marginBottom: 16 }}>Shown on the login screen and across the app.</div>
             <div className="row gap-3" style={{ alignItems: 'center' }}>
               <div style={{ width: 56, height: 56, borderRadius: 10, background: 'var(--bg-0)', border: '1px solid var(--line)', display: 'grid', placeItems: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                {hasLogo
-                  ? <img src={`${companyApi.logoUrl}?v=${logoVersion}`} alt="Company logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={() => setHasLogo(false)} />
-                  : <Icon n="building" s={24} />}
+                <img src={hasLogo ? `${companyApi.logoUrl}?v=${logoVersion}` : '/logo.jpeg'} alt="Company logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={() => setHasLogo(false)} />
               </div>
               <input ref={logoInput} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={pickLogo} style={{ display: 'none' }} />
               <Btn variant="solid" icon="upload" onClick={() => logoInput.current?.click()} disabled={uploadingLogo}>{uploadingLogo ? 'Uploading…' : 'Upload Logo'}</Btn>
@@ -670,12 +668,10 @@ export function CompanyScreen({ go: _go, setBrand }: { go: Go; setBrand?: (v: { 
             <div className="eyebrow" style={{ marginBottom: 14 }}>Live Preview</div>
             <div style={{ background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)', padding: 18 }}>
               <div className="row gap-3" style={{ marginBottom: 16 }}>
-                <div style={{ width: 40, height: 40, borderRadius: 9, background: 'var(--ac)', display: 'grid', placeItems: 'center', color: '#fff', overflow: 'hidden' }}>
-                  {hasLogo
-                    ? <img src={`${companyApi.logoUrl}?v=${logoVersion}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={() => setHasLogo(false)} />
-                    : <Icon n="wrench" s={21} />}
+                <div style={{ width: 40, height: 40, borderRadius: 9, background: '#fff', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+                  <img src={hasLogo ? `${companyApi.logoUrl}?v=${logoVersion}` : '/logo.jpeg'} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={() => setHasLogo(false)} />
                 </div>
-                <div><div style={{ fontFamily: 'Saira', fontWeight: 800, fontSize: 18 }}>{data.name || 'ABSL Financial'}</div><div className="eyebrow" style={{ fontSize: 9 }}>{data.tagline}</div></div>
+                <div><div style={{ fontFamily: 'Saira', fontWeight: 800, fontSize: 18 }}>{data.name || 'Tazz Investment & Credit Pvt Ltd'}</div><div className="eyebrow" style={{ fontSize: 9 }}>{data.tagline}</div></div>
               </div>
               <Btn variant="primary" style={{ width: '100%', marginBottom: 8 }}>Primary Button</Btn>
               <div className="row gap-2"><Badge tone="blue" dot>Accent</Badge><Badge tone="green" dot>Success</Badge><Badge tone="amber" dot>Pending</Badge></div>

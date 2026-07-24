@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * E2E suite for the Distributor Management System.
+ * E2E suite for the Tazz Investment & Credit Pvt Ltd.
  * Assumes the frontend (Vite :5173) and backend (Laravel :8000, pointed at the
  * mms_auto_test database) are already running. Run with `npm test`.
  */

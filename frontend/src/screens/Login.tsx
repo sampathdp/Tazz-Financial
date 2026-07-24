@@ -16,7 +16,7 @@ export default function Login({ onAuth }: { onAuth: (user: AuthUser) => void }) 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [hasLogo, setHasLogo] = useState(false)
-  const [brand, setBrand] = useState({ name: 'Distributor Management System', tagline: 'Distribution & Supply Chain Management' })
+  const [brand, setBrand] = useState({ name: 'Tazz Investment & Credit Pvt Ltd', tagline: 'Investment & Credit Management' })
 
   useEffect(() => {
     company.branding().then((b) => setBrand({ name: b.name, tagline: b.tagline })).catch(() => {})
@@ -89,15 +89,13 @@ export default function Login({ onAuth }: { onAuth: (user: AuthUser) => void }) 
           }} />
           <div style={{ position: 'relative' }}>
             <div style={{
-              width: 56, height: 56, borderRadius: 16,
-              background: hasLogo ? '#fff' : 'oklch(1 0 0 / 0.16)',
+              width: 56, height: 56, borderRadius: 16, background: '#fff',
               border: '1px solid oklch(1 0 0 / 0.32)', boxShadow: '0 8px 20px -6px oklch(0 0 0 / 0.35)',
-              display: 'grid', placeItems: 'center', marginBottom: 26, overflow: 'hidden', padding: hasLogo ? 8 : 0,
+              display: 'grid', placeItems: 'center', marginBottom: 26, overflow: 'hidden', padding: 8,
             }}>
-              {hasLogo
-                ? <img src={company.logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={() => setHasLogo(false)} />
-                : <img src={company.logoUrl} alt="" style={{ display: 'none' }} onLoad={() => setHasLogo(true)} onError={() => setHasLogo(false)} />}
-              {!hasLogo && <Icon n="wrench" s={24} />}
+              <img src={hasLogo ? company.logoUrl : '/logo.jpeg'} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              {/* Hidden probe: once a company-profile logo endpoint exists on the backend, prefer it over the bundled default above. */}
+              <img src={company.logoUrl} alt="" style={{ display: 'none' }} onLoad={() => setHasLogo(true)} onError={() => setHasLogo(false)} />
             </div>
             <div style={{ fontFamily: 'Saira', fontWeight: 800, fontSize: 27, lineHeight: 1.18, marginBottom: 10, maxWidth: 340 }}>
               {brand.name}

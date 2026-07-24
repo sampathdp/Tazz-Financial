@@ -140,9 +140,10 @@ export function Sidebar({ route, go, open, setOpen, company, user }: { route: st
     <>
       <div onClick={() => setOpen(false)} className="sb-scrim" style={{ display: open ? 'block' : 'none' }} />
       <aside className={'mms-sb' + (open ? ' open' : '')} style={{ width: 'var(--sb-w)' }}>
-        <div className="row gap-3" style={{ padding: '16px 18px', borderBottom: '1px solid var(--line)', minHeight: 'var(--topbar-h)' }}>
-          <div style={{ lineHeight: 1.15 }}>
-            <div style={{ fontFamily: 'Saira', fontWeight: 800, fontSize: 17, letterSpacing: '-0.01em' }} id="brand-name">{company.name}</div>
+        <div className="row gap-3" style={{ padding: '16px 18px', borderBottom: '1px solid var(--line)', minHeight: 'var(--topbar-h)', alignItems: 'center' }}>
+          <img src="/logo.jpeg" alt="" style={{ width: 34, height: 34, borderRadius: 9, objectFit: 'cover', flexShrink: 0 }} />
+          <div style={{ lineHeight: 1.15, minWidth: 0 }}>
+            <div style={{ fontFamily: 'Saira', fontWeight: 800, fontSize: 15, letterSpacing: '-0.01em' }} id="brand-name">{company.name}</div>
             <div className="eyebrow" style={{ fontSize: 9 }}>{company.tagline}</div>
           </div>
         </div>

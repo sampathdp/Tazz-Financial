@@ -1,4 +1,4 @@
-/* ABSL Financial — Customer Management (API-backed) */
+/* Tazz Investment & Credit — Customer Management (API-backed) */
 import { useEffect, useRef, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'

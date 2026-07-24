@@ -1,6 +1,6 @@
 # End-to-End Tests
 
-Full-stack Playwright E2E suite for the Distributor Management System. It drives the
+Full-stack Playwright E2E suite for the Tazz Investment & Credit Pvt Ltd. It drives the
 real React frontend against the real Laravel API, covering every screen and the core
 create/approve/pay/delete flows across all modules.
 

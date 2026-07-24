@@ -1,4 +1,4 @@
-/* ABSL Financial — shared, rich Loan Details view.
+/* Tazz Investment & Credit — shared, rich Loan Details view.
    Used by both Loan Applications (read-only view of a decided application)
    and Active Loans (the live contract, with disbursement/payments). One
    implementation so the two screens never drift out of sync with each other. */
