@@ -23,10 +23,12 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # No env override here on purpose — `vite build` defaults to production
+      # mode, which auto-loads frontend/.env.production from the repo. That
+      # file is the single source of truth for VITE_API_URL; change it there,
+      # not here, so there's only one place to update if the domain changes.
       - name: Build frontend
         working-directory: frontend
-        env:
-          VITE_API_URL: /api
         run: npm run build
 
       - name: Deploy frontend via FTP
