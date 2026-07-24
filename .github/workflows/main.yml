@@ -2,7 +2,7 @@ name: Deploy to Production
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -156,5 +156,5 @@ jobs:
           OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
         run: |
           sleep 3
-          response=$(curl -sS -w "\n%{http_code}" "https://sk-enterprises.salonflow.cloud/api/opcache-reset.php?token=$OPS_TOKEN")
+          response=$(curl -sS -w "\n%{http_code}" "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?token=$OPS_TOKEN")
           echo "$response"

@@ -22,17 +22,17 @@ $app = new Illuminate\Foundation\Application($basePath);
 |
 | On the live server the real .env lives outside any web-accessible
 | directory, in the shared "envs" folder at the account home directory,
-| as absl.env — one file per site hosted on the account. This app's root
-| sits three levels below that (.../sites/absl.salonflow.cloud/laravel),
-| so we walk up three levels to reach it. Locally (and if that file
-| isn't present) Laravel falls back to its normal .env in the app root.
+| as tazz-investment.env — one file per site hosted on the account. This
+| app's root sits three levels below that (.../sites/<site>/laravel), so
+| we walk up three levels to reach it. Locally (and if that file isn't
+| present) Laravel falls back to its normal .env in the app root.
 |
 */
 
 $prodEnvDir = dirname($basePath, 3) . '/envs';
-if (is_file($prodEnvDir . '/absl.env')) {
+if (is_file($prodEnvDir . '/tazz-investment.env')) {
     $app->useEnvironmentPath($prodEnvDir);
-    $app->loadEnvironmentFrom('absl.env');
+    $app->loadEnvironmentFrom('tazz-investment.env');
 }
 
 /*
