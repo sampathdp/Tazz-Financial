@@ -27,11 +27,16 @@ const blankForm = (parentId: number | null): Partial<LoanType> => ({
 
 interface Node extends LoanType { children: Node[] }
 
+// Keyed by String(id) rather than the raw id — some hosts serialize integer
+// columns as JSON strings (PDO emulated-prepares quirk) while others return
+// real numbers, so comparing id === parentId directly can silently fail on
+// one environment and not another. Normalizing both sides to string sidesteps it.
 function buildTree(rows: LoanType[]): Node[] {
-  const byId = new Map<number, Node>(rows.map((r) => [r.id, { ...r, children: [] }]))
+  const byId = new Map<string, Node>(rows.map((r) => [String(r.id), { ...r, children: [] }]))
   const roots: Node[] = []
   for (const n of byId.values()) {
-    if (n.parentId && byId.has(n.parentId)) byId.get(n.parentId)!.children.push(n)
+    const parentKey = n.parentId != null ? String(n.parentId) : null
+    if (parentKey && byId.has(parentKey)) byId.get(parentKey)!.children.push(n)
     else roots.push(n)
   }
   return roots
@@ -39,10 +44,10 @@ function buildTree(rows: LoanType[]): Node[] {
 
 function nameChain(rows: LoanType[], id: number | null | undefined): string {
   if (!id) return ''
-  const byId = new Map(rows.map((r) => [r.id, r]))
+  const byId = new Map(rows.map((r) => [String(r.id), r]))
   const chain: string[] = []
-  let cur = byId.get(id)
-  while (cur) { chain.unshift(cur.name); cur = cur.parentId ? byId.get(cur.parentId) : undefined }
+  let cur = byId.get(String(id))
+  while (cur) { chain.unshift(cur.name); cur = cur.parentId ? byId.get(String(cur.parentId)) : undefined }
   return chain.join(' › ')
 }
 

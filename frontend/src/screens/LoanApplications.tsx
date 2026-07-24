@@ -27,10 +27,13 @@ const blankQuickAdd = () => ({ fullName: '', branchId: undefined as number | und
 
 function loanTypePath(rows: LoanType[], id: number | null | undefined): string {
   if (!id) return ''
-  const byId = new Map(rows.map((r) => [r.id, r]))
+  // Keyed by String(id) — some hosts return integer columns as JSON strings,
+  // which breaks a direct id === parentId comparison inconsistently by
+  // environment. See the identical fix/comment in LoanTypes.tsx.
+  const byId = new Map(rows.map((r) => [String(r.id), r]))
   const chain: string[] = []
-  let cur = byId.get(id)
-  while (cur) { chain.unshift(cur.name); cur = cur.parentId ? byId.get(cur.parentId) : undefined }
+  let cur = byId.get(String(id))
+  while (cur) { chain.unshift(cur.name); cur = cur.parentId ? byId.get(String(cur.parentId)) : undefined }
   return chain.join(' › ')
 }
 
