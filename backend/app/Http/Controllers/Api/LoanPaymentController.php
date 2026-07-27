@@ -38,6 +38,7 @@ class LoanPaymentController extends Controller
             'is_settlement' => 'boolean',
         ]);
         $isSettlement = (bool) ($data['is_settlement'] ?? false);
+        $isCheque = ($data['payment_method'] ?? 'Cash') === 'Cheque';
 
         // Full settlement is a distinct, higher-stakes action (pays off the whole
         // loan at once and requires a second person's approval to close it) — kept
@@ -58,7 +59,7 @@ class LoanPaymentController extends Controller
             return response()->json(['message' => "Amount exceeds the outstanding balance ({$outstanding})."], 422);
         }
 
-        $payment = DB::transaction(function () use ($loan, $data, $isSettlement, $request) {
+        $payment = DB::transaction(function () use ($loan, $data, $isSettlement, $isCheque, $request) {
             $branch = Branch::find($loan->branch_id);
             $code = NumberGenerator::next('payment', [
                 'branch_id' => $branch->id,
@@ -71,6 +72,9 @@ class LoanPaymentController extends Controller
                 'branch_id' => $loan->branch_id,
                 'amount' => $data['amount'],
                 'payment_method' => $data['payment_method'] ?? 'Cash',
+                // Cash/Bank and settlement payments have no clearance concept (null).
+                // A regular cheque payment starts Pending — see clearCheque().
+                'clearance_status' => (!$isSettlement && $isCheque) ? 'Pending' : null,
                 'received_by' => $request->user()->id,
                 'paid_at' => $data['paid_at'] ?? now(),
                 'receipt_no' => $data['receipt_no'] ?? null,
@@ -83,8 +87,10 @@ class LoanPaymentController extends Controller
             NumberGenerator::attach($code, $payment);
 
             // A settlement request just reserves the amount for review — nothing is
-            // applied to the schedule and the loan can't close until it's approved.
-            if (!$isSettlement) {
+            // applied to the schedule until it's approved. A regular cheque payment
+            // similarly reserves the amount until the cheque is manually realized
+            // (it can still bounce) — see clearCheque().
+            if (!$isSettlement && !$isCheque) {
                 $this->applyAllocation($loan, $payment, (float) $data['amount']);
             }
 
@@ -133,6 +139,40 @@ class LoanPaymentController extends Controller
         ]);
 
         return $payment->fresh()->load('voider:id,name');
+    }
+
+    /** Manually realize or bounce a cheque payment that's been held pending clearance. */
+    public function clearCheque(Request $request, LoanPayment $payment)
+    {
+        if ($payment->payment_method !== 'Cheque' || $payment->clearance_status !== 'Pending') {
+            return response()->json(['message' => 'This payment is not a pending cheque awaiting clearance.'], 422);
+        }
+        $data = $request->validate(['status' => ['required', Rule::in(['Realized', 'Bounced'])]]);
+
+        if ($data['status'] === 'Realized') {
+            $loan = $payment->loan;
+            $outstanding = $this->outstandingBalance($loan);
+            if ((float) $payment->amount > $outstanding) {
+                return response()->json(['message' => "The outstanding balance has changed since this cheque was recorded (now {$outstanding}). Reject it and ask the cashier to re-record the payment."], 422);
+            }
+            DB::transaction(function () use ($loan, $payment) {
+                $this->applyAllocation($loan, $payment, (float) $payment->amount);
+                $payment->update(['clearance_status' => 'Realized']);
+            });
+        } else {
+            // Bounced — it was never applied to the schedule, so there's nothing to
+            // reverse. Void it so it stops counting as a live payment while keeping
+            // the audit trail (same "voided, not deleted" convention as destroy()).
+            $payment->update([
+                'clearance_status' => 'Bounced',
+                'status' => 'Voided',
+                'void_reason' => 'Cheque bounced',
+                'voided_by' => $request->user()->id,
+                'voided_at' => now(),
+            ]);
+        }
+
+        return $payment->fresh()->load('receiver:id,name');
     }
 
     public function destroy(Request $request, LoanPayment $payment)

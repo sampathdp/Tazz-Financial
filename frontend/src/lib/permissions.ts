@@ -32,12 +32,16 @@ export const ROUTE_MODULE: Record<string, string> = {
   'loan/apps': 'Loan Applications',
   'loan/active': 'Active Loans',
   'loan/payments': 'Loan Payments',
+  'loan/cheques': 'Loan Payments',
   'loan/doc-tracking': 'Document Tracking',
   'ad/branches': 'Branch Management',
   'ad/roles': 'Role Management',
   'ad/users': 'User Management',
   'ad/perm': 'User Permission',
   'ad/company': 'Company Profile',
+  'bank/accounts': 'Bank Accounts',
+  'bank/txns': 'Bank Transactions',
+  'bank/recon': 'Bank Reconciliation',
 }
 
 export function canAccessRoute(user: AuthUser | null | undefined, routeId: string): boolean {

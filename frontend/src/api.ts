@@ -275,6 +275,7 @@ export interface LoanSchedule {
 export type PaymentMethod = 'Cash' | 'Bank' | 'Cheque'
 export type PaymentStatus = 'Active' | 'Voided'
 export type PaymentApprovalStatus = 'Approved' | 'PendingApproval' | 'Rejected'
+export type PaymentClearanceStatus = 'Pending' | 'Realized' | 'Bounced'
 
 export interface LoanPayment {
   id: number; code: string; loanId: number;
@@ -283,6 +284,9 @@ export interface LoanPayment {
   paidAt: string; receiptNo?: string | null; notes?: string | null;
   /** Only set when paymentMethod is Cheque. */
   bankName?: string | null; chequeDate?: string | null;
+  /** Cheque payments only — null for Cash/Bank/settlement. Starts 'Pending' and holds the
+   *  amount out of the loan's balance until manually cleared via loanPaymentsApi.clearCheque(). */
+  clearanceStatus?: PaymentClearanceStatus | null;
   status?: PaymentStatus;
   /** A full-settlement request pays off the whole outstanding balance and needs
    *  approval before it's allocated/closes the loan — see approvalStatus. */
@@ -307,6 +311,12 @@ export interface LoanPostDatedCheque {
   id: number; loanId: number; chequeNo: string; bankName: string; chequeDate: string;
   amount: number | string; status: ChequeStatus; handedAt?: string | null; notes?: string | null;
   creator?: { id: number; name: string } | null;
+  /** Present only on the cross-loan listing (Cheque Management screen), not the per-loan panel. */
+  loan?: { id: number; code: string; customer?: { id: number; fullName: string } | null; branch?: { id: number; name: string; code: string } | null } | null;
+  /** Cross-loan listing only. 'PostDated' = a real cheque record you can Realize/Bounce.
+   *  'Payment' = an instant Cheque-method payment already applied to the balance — shown
+   *  read-only as Realized so the screen is a complete cheque history. */
+  source?: 'PostDated' | 'Payment';
 }
 
 export type LoanDocType = 'ContractImage' | 'Agreement' | 'IdCopy' | 'Other'
@@ -357,6 +367,63 @@ export const branchesApi = resource<Branch>('branches')
 export const customersApi = resource<Customer>('customers')
 export const loanTypesApi = resource<LoanType>('loan-types')
 
+export type BankAccountType = 'Savings' | 'Current' | 'Fixed Deposit'
+
+export interface BankAccount {
+  id: number;
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  name: string; bankName: string; branchName?: string | null;
+  accountNumber: string; accountType?: BankAccountType;
+  currency?: string;
+  openingBalance?: number | string; currentBalance?: number | string;
+  status?: 'Active' | 'Inactive';
+  notes?: string | null;
+}
+
+export type BankTxnType = 'Deposit' | 'Withdrawal' | 'TransferIn' | 'TransferOut'
+export type BankTxnStatus = 'Cleared' | 'Pending'
+
+export interface BankTransaction {
+  id: number;
+  bankAccountId: number; bankAccount?: { id: number; name: string; bankName: string; accountNumber: string };
+  txnDate: string; type: BankTxnType;
+  referenceNo?: string | null; description?: string | null;
+  amount: number | string; balanceAfter?: number | string;
+  status?: BankTxnStatus;
+  creator?: { id: number; name: string } | null;
+  createdAt?: string;
+}
+
+export type BankReconStatus = 'Pending' | 'Reconciled'
+
+export interface BankReconciliation {
+  id: number;
+  bankAccountId: number; bankAccount?: { id: number; name: string; bankName: string; accountNumber: string };
+  statementDate: string;
+  statementBalance: number | string; bookBalance?: number | string; difference?: number | string;
+  status?: BankReconStatus;
+  notes?: string | null;
+  reconciler?: { id: number; name: string } | null;
+  reconciledAt?: string | null;
+}
+
+export const bankAccountsApi = resource<BankAccount>('bank-accounts')
+
+export const bankTransactionsApi = {
+  list: (bankAccountId?: number) =>
+    http.get('/bank-transactions', { params: bankAccountId ? { bank_account_id: bankAccountId } : {} }).then((r) => camelize(r.data) as BankTransaction[]),
+  create: (body: Partial<BankTransaction>) => http.post('/bank-transactions', snakeize(body)).then((r) => camelize(r.data) as BankTransaction),
+  remove: (id: number) => http.delete(`/bank-transactions/${id}`).then((r) => r.data),
+}
+
+export const bankReconciliationsApi = {
+  list: (bankAccountId?: number) =>
+    http.get('/bank-reconciliations', { params: bankAccountId ? { bank_account_id: bankAccountId } : {} }).then((r) => camelize(r.data) as BankReconciliation[]),
+  create: (body: Partial<BankReconciliation>) => http.post('/bank-reconciliations', snakeize(body)).then((r) => camelize(r.data) as BankReconciliation),
+  update: (id: number, body: Partial<BankReconciliation>) => http.put(`/bank-reconciliations/${id}`, snakeize(body)).then((r) => camelize(r.data) as BankReconciliation),
+  remove: (id: number) => http.delete(`/bank-reconciliations/${id}`).then((r) => r.data),
+}
+
 export interface GeneratedNumber {
   id: number; module: string; number: string;
   branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
@@ -396,6 +463,9 @@ export const loanPaymentsApi = {
   approveSettlement: (paymentId: number) => http.post(`/loan-payments/${paymentId}/approve-settlement`).then((r) => camelize(r.data) as LoanPayment),
   rejectSettlement: (paymentId: number, voidReason?: string) =>
     http.post(`/loan-payments/${paymentId}/reject-settlement`, snakeize({ voidReason })).then((r) => camelize(r.data) as LoanPayment),
+  /** Realize applies the held amount to the schedule; Bounced voids the payment (it was never applied). */
+  clearCheque: (paymentId: number, status: 'Realized' | 'Bounced') =>
+    http.patch(`/loan-payments/${paymentId}/clear-cheque`, { status }).then((r) => camelize(r.data) as LoanPayment),
 }
 
 export const loanChargesApi = {
@@ -408,6 +478,9 @@ export const loanChargesApi = {
 
 export const loanPostDatedChequesApi = {
   list: (loanId: number) => http.get(`/loans/${loanId}/post-dated-cheques`).then((r) => camelize(r.data) as LoanPostDatedCheque[]),
+  /** Cross-loan listing for the Cheque Management screen. */
+  listAll: (params?: { status?: ChequeStatus; dueToday?: boolean }) =>
+    http.get('/post-dated-cheques', { params: { status: params?.status, due_today: params?.dueToday ? 1 : undefined } }).then((r) => camelize(r.data) as LoanPostDatedCheque[]),
   create: (loanId: number, body: { chequeNo: string; bankName: string; chequeDate: string; amount: number | string; notes?: string }) =>
     http.post(`/loans/${loanId}/post-dated-cheques`, snakeize(body)).then((r) => camelize(r.data) as LoanPostDatedCheque),
   updateStatus: (chequeId: number, status: ChequeStatus, notes?: string) =>

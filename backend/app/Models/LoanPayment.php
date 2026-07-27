@@ -10,7 +10,7 @@ class LoanPayment extends Model
     use BelongsToBranch;
 
     protected $fillable = [
-        'code', 'loan_id', 'branch_id', 'amount', 'payment_method', 'is_settlement',
+        'code', 'loan_id', 'branch_id', 'amount', 'payment_method', 'clearance_status', 'is_settlement',
         'received_by', 'paid_at', 'receipt_no', 'bank_name', 'cheque_date', 'notes',
         'status', 'approval_status', 'approved_by', 'approved_at',
         'void_reason', 'voided_by', 'voided_at',

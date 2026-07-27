@@ -1,0 +1,33 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class BankAccount extends Model
+{
+    protected $fillable = [
+        'branch_id', 'name', 'bank_name', 'branch_name', 'account_number', 'account_type',
+        'currency', 'opening_balance', 'current_balance', 'status', 'notes',
+    ];
+
+    protected $casts = [
+        'opening_balance' => 'decimal:2',
+        'current_balance' => 'decimal:2',
+    ];
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
+    public function transactions()
+    {
+        return $this->hasMany(BankTransaction::class)->orderByDesc('txn_date')->orderByDesc('id');
+    }
+
+    public function reconciliations()
+    {
+        return $this->hasMany(BankReconciliation::class)->orderByDesc('statement_date');
+    }
+}

@@ -16,6 +16,7 @@ const LoanApplicationsScreen = lazy(() => import('./screens/LoanApplications').t
 const ActiveLoansScreen = lazy(() => import('./screens/ActiveLoans').then((m) => ({ default: m.ActiveLoansScreen })))
 const PaymentReceiptScreen = lazy(() => import('./screens/PaymentReceipt').then((m) => ({ default: m.PaymentReceiptScreen })))
 const DocumentTrackingScreen = lazy(() => import('./screens/DocumentTracking').then((m) => ({ default: m.DocumentTrackingScreen })))
+const ChequeManagementScreen = lazy(() => import('./screens/ChequeManagement').then((m) => ({ default: m.ChequeManagementScreen })))
 const named = <M, K extends keyof M>(loader: () => Promise<M>, key: K) =>
   lazy(() => loader().then((m) => ({ default: m[key] as unknown as ComponentType<any> })))
 
@@ -24,6 +25,10 @@ const RolesScreen = named(() => import('./screens/Admin'), 'RolesScreen')
 const UsersScreen = named(() => import('./screens/Admin'), 'UsersScreen')
 const PermScreen = named(() => import('./screens/Admin'), 'PermScreen')
 const CompanyScreen = named(() => import('./screens/Admin'), 'CompanyScreen')
+
+const BankAccountsScreen = named(() => import('./screens/Bank'), 'BankAccountsScreen')
+const BankTransactionsScreen = named(() => import('./screens/Bank'), 'BankTransactionsScreen')
+const BankReconciliationScreen = named(() => import('./screens/Bank'), 'BankReconciliationScreen')
 
 type ScreenComp = ComponentType<ScreenProps & { setBrand?: (v: { name: string, tagline: string }) => void }>
 
@@ -58,12 +63,16 @@ const SCREENS: Record<string, ScreenComp> = {
   'loan/apps': LoanApplicationsScreen,
   'loan/active': ActiveLoansScreen,
   'loan/payments': PaymentReceiptScreen,
+  'loan/cheques': ChequeManagementScreen,
   'loan/doc-tracking': DocumentTrackingScreen,
   'ad/branches': BranchesScreen,
   'ad/roles': RolesScreen,
   'ad/users': UsersScreen,
   'ad/perm': PermScreen,
   'ad/company': CompanyScreen,
+  'bank/accounts': BankAccountsScreen,
+  'bank/txns': BankTransactionsScreen,
+  'bank/recon': BankReconciliationScreen,
 }
 
 export default function App() {

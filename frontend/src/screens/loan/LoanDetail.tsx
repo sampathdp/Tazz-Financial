@@ -301,7 +301,8 @@ function ScheduleTable({ loan }: { loan: Loan }) {
 function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
   const all = loan.payments || []
   const pending = all.filter((p) => p.approvalStatus === 'PendingApproval')
-  const active = all.filter((p) => p.status !== 'Voided' && p.approvalStatus !== 'PendingApproval')
+  const pendingCheque = all.filter((p) => p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending' && p.approvalStatus !== 'PendingApproval')
+  const active = all.filter((p) => p.status !== 'Voided' && p.approvalStatus !== 'PendingApproval' && !(p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending'))
   const voided = all.filter((p) => p.status === 'Voided')
 
   const voidPayment = async (p: LoanPayment) => {
@@ -309,6 +310,14 @@ function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthU
     if (reason === null) return
     try { await loanPaymentsApi.remove(p.id, reason || undefined); notify.success('Receipt voided', p.code); onChanged() }
     catch (ex: any) { notify.error('Void failed', ex?.response?.data?.message) }
+  }
+
+  const clearCheque = async (p: LoanPayment, status: 'Realized' | 'Bounced') => {
+    try {
+      await loanPaymentsApi.clearCheque(p.id, status)
+      notify.success(status === 'Realized' ? 'Cheque realized' : 'Cheque rejected')
+      onChanged()
+    } catch (ex: any) { notify.error('Update failed', ex?.response?.data?.message) }
   }
 
   return (
@@ -338,6 +347,28 @@ function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthU
             <div className="t-2" style={{ fontSize: 11.5 }}>Approve or reject this on the Payment Receipt screen.</div>
           </div>
         )}
+        {pendingCheque.length > 0 && (
+          <div className="col gap-2" style={{ marginBottom: 16 }}>
+            {pendingCheque.map((p) => (
+              <div key={p.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <Icon n="cheque" s={15} c="var(--warn)" />
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.code} · Cheque</span>
+                  <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.bankName}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · awaiting clearance, not yet applied to the schedule</span>
+                </div>
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
+                  <Can user={me} module="Loan Payments" action="Edit">
+                    {(p.chequeDate?.slice(0, 10) || '') <= todayIso() ? <>
+                      <Btn size="sm" variant="ok" onClick={() => clearCheque(p, 'Realized')}>Realize</Btn>
+                      <Btn size="sm" variant="danger" onClick={() => clearCheque(p, 'Bounced')}>Reject</Btn>
+                    </> : <span className="t-2" style={{ fontSize: 11.5 }}>Not due yet ({dateOnly(p.chequeDate)})</span>}
+                  </Can>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {active.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No receipts recorded yet.</div> :
           <div className="col gap-2">
             {active.map((p) => (
@@ -345,7 +376,7 @@ function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthU
                 <div className="row gap-2" style={{ alignItems: 'center' }}>
                   <Icon n="receipt" s={15} />
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.code}</span>
-                  <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.paymentMethod}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · {p.receiver?.name}</span>
+                  <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.paymentMethod}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · {p.receiver?.name}{p.clearanceStatus === 'Realized' ? ' · cheque realized' : ''}</span>
                 </div>
                 <div className="row gap-2" style={{ alignItems: 'center' }}>
                   <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>

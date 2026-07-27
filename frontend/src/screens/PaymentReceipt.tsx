@@ -256,11 +256,14 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   if (receipt) {
     const { payment, loan, balanceBefore } = receipt
     const balanceAfter = outstandingOf(loan)
+    const pendingClearance = payment.paymentMethod === 'Cheque' && payment.clearanceStatus === 'Pending'
     return (
       <div>
         <div className="row between wrap gap-2 no-print" style={{ marginBottom: 16 }}>
           <PageHead crumbs="Loan Management" title="Payment Receipt" icon="receipt"
-            sub={payment.isSettlement ? 'Settlement approved — loan closed. Print or issue the receipt below.' : 'Payment recorded — print or issue the receipt below.'} />
+            sub={payment.isSettlement ? 'Settlement approved — loan closed. Print or issue the receipt below.'
+              : pendingClearance ? 'Cheque recorded — held pending clearance, not yet applied to the balance. Print or issue the receipt below.'
+              : 'Payment recorded — print or issue the receipt below.'} />
         </div>
         <div className="row gap-2 no-print" style={{ marginBottom: 16 }}>
           <Btn variant="primary" icon="print" onClick={() => window.print()}>Print Receipt</Btn>
@@ -296,11 +299,16 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             {payment.isSettlement && <div className="row between"><span className="t-2">Approved By</span><b>{payment.approver?.name || '—'}</b></div>}
           </div>
 
+          {pendingClearance && (
+            <div className="no-print" style={{ background: 'var(--warn-dim)', color: 'var(--warn)', border: '1px solid var(--warn)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 16 }}>
+              This cheque is held pending clearance and has not been applied to the balance. Realize or reject it on the Cheque Management screen once it clears (or bounces) at the bank.
+            </div>
+          )}
           <div className="col gap-2" style={{ fontSize: 13, marginBottom: 20 }}>
             <div className="row between"><span className="t-2">Balance Before</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(balanceBefore)}</span></div>
-            <div className="row between"><span className="t-2">Amount Paid</span><span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700 }}>{money(payment.amount)}</span></div>
+            <div className="row between"><span className="t-2">{pendingClearance ? 'Cheque Amount (pending)' : 'Amount Paid'}</span><span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700 }}>{money(payment.amount)}</span></div>
             <div className="row between" style={{ fontSize: 15, fontWeight: 700, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
-              <span>Balance After</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(balanceAfter)}</span>
+              <span>{pendingClearance ? 'Balance (unchanged until cleared)' : 'Balance After'}</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(balanceAfter)}</span>
             </div>
           </div>
 

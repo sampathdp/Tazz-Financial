@@ -24,6 +24,9 @@ class Permissions
         'Active Loans',
         'Loan Payments',
         'Document Tracking',
+        'Bank Accounts',
+        'Bank Transactions',
+        'Bank Reconciliation',
     ];
 
     public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve', 'Export'];

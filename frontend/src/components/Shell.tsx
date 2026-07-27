@@ -24,6 +24,7 @@ export const NAV: NavNode[] = [
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
     { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
     { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt' },
+    { id: 'loan/cheques', label: 'Cheque Management', icon: 'cheque' },
     { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert', soon: true },
     { id: 'loan/doc-tracking', label: 'Document Tracking', icon: 'tag' },
   ] },
@@ -46,9 +47,9 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Bank Management', icon: 'building', items: [
-    { id: 'bank/accounts', label: 'Bank Accounts', icon: 'building', soon: true },
-    { id: 'bank/txns', label: 'Bank Transactions', icon: 'receipt', soon: true },
-    { id: 'bank/recon', label: 'Bank Reconciliation', icon: 'adjust', soon: true },
+    { id: 'bank/accounts', label: 'Bank Accounts', icon: 'building' },
+    { id: 'bank/txns', label: 'Bank Transactions', icon: 'receipt' },
+    { id: 'bank/recon', label: 'Bank Reconciliation', icon: 'adjust' },
   ] },
 
   { section: 'Accounting', icon: 'list', items: [

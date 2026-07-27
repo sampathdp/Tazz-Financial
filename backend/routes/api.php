@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BankAccountController;
+use App\Http\Controllers\Api\BankReconciliationController;
+use App\Http\Controllers\Api\BankTransactionController;
 use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerDocumentController;
@@ -108,6 +111,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('loan-payments/{payment}', [LoanPaymentController::class, 'destroy'])->middleware('perm:Loan Payments,Delete');
     Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement'])->middleware('perm:Loan Payments,Approve');
     Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement'])->middleware('perm:Loan Payments,Approve');
+    Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('perm:Loan Payments,Edit');
 
     // --- Loan Management: Charges (Document/Legal/Valuation/Other due-type breakdown) ---
     Route::get('loans/{loan}/charges', [LoanChargeController::class, 'index'])->middleware('perm:Active Loans,View');
@@ -118,6 +122,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Loan Management: Post Dated Cheques ---
     // Recorded from the Payment Receipt screen (Loan Payments module), not Active Loans —
     // a cheque is a record only and never touches the loan balance until realized.
+    Route::get('post-dated-cheques', [LoanPostDatedChequeController::class, 'all'])->middleware('perm:Loan Payments,View');
     Route::get('loans/{loan}/post-dated-cheques', [LoanPostDatedChequeController::class, 'index'])->middleware('perm:Active Loans,View');
     Route::post('loans/{loan}/post-dated-cheques', [LoanPostDatedChequeController::class, 'store'])->middleware('perm:Loan Payments,Create');
     Route::patch('loan-post-dated-cheques/{cheque}', [LoanPostDatedChequeController::class, 'updateStatus'])->middleware('perm:Loan Payments,Edit');
@@ -137,4 +142,21 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('loans/{loan}/waivers', [LoanWaiverController::class, 'index'])->middleware('perm:Active Loans,View');
     Route::post('loans/{loan}/waivers', [LoanWaiverController::class, 'store'])->middleware('perm:Active Loans,Approve');
     Route::delete('loan-waivers/{waiver}', [LoanWaiverController::class, 'destroy'])->middleware('perm:Active Loans,Delete');
+
+    // --- Bank Management: Bank Accounts ---
+    Route::get('bank-accounts', [BankAccountController::class, 'index'])->middleware('perm:Bank Accounts,View');
+    Route::post('bank-accounts', [BankAccountController::class, 'store'])->middleware('perm:Bank Accounts,Create');
+    Route::put('bank-accounts/{bankAccount}', [BankAccountController::class, 'update'])->middleware('perm:Bank Accounts,Edit');
+    Route::delete('bank-accounts/{bankAccount}', [BankAccountController::class, 'destroy'])->middleware('perm:Bank Accounts,Delete');
+
+    // --- Bank Management: Bank Transactions (immutable ledger entries — void by deleting, never edited) ---
+    Route::get('bank-transactions', [BankTransactionController::class, 'index'])->middleware('perm:Bank Transactions,View');
+    Route::post('bank-transactions', [BankTransactionController::class, 'store'])->middleware('perm:Bank Transactions,Create');
+    Route::delete('bank-transactions/{bankTransaction}', [BankTransactionController::class, 'destroy'])->middleware('perm:Bank Transactions,Delete');
+
+    // --- Bank Management: Bank Reconciliation ---
+    Route::get('bank-reconciliations', [BankReconciliationController::class, 'index'])->middleware('perm:Bank Reconciliation,View');
+    Route::post('bank-reconciliations', [BankReconciliationController::class, 'store'])->middleware('perm:Bank Reconciliation,Create');
+    Route::put('bank-reconciliations/{bankReconciliation}', [BankReconciliationController::class, 'update'])->middleware('perm:Bank Reconciliation,Edit');
+    Route::delete('bank-reconciliations/{bankReconciliation}', [BankReconciliationController::class, 'destroy'])->middleware('perm:Bank Reconciliation,Delete');
 });
