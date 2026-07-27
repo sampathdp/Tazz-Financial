@@ -530,6 +530,12 @@ export const customerDocumentsApi = {
     http.get(`/customers/${customerId}/documents/${documentId}/file`, { responseType: 'blob' }).then((r) => r.data as Blob),
 }
 
+export const customerLoansApi = {
+  /** Every loan this customer has ever borrowed (any status), plus every loan they guarantee. */
+  list: (customerId: number) =>
+    http.get(`/customers/${customerId}/loans`).then((r) => camelize(r.data) as { borrower: Loan[]; guarantor: Loan[] }),
+}
+
 export const rolesApi = {
   list: () => http.get<Role[]>('/roles').then((r) => camelize(r.data) as Role[]),
   create: (body: { name: string; description?: string; canViewAllBranches?: boolean }) =>

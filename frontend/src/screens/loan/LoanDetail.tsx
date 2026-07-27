@@ -439,10 +439,6 @@ function SecurityPanel({ loan }: { loan: Loan }) {
 function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
   const cheques = loan.postDatedCheques || []
 
-  const setStatus = async (c: LoanPostDatedCheque, status: ChequeStatus) => {
-    try { await loanPostDatedChequesApi.updateStatus(c.id, status); notify.success('Cheque updated'); onChanged() }
-    catch (ex: any) { notify.error('Update failed', ex?.response?.data?.message) }
-  }
   const remove = async (c: LoanPostDatedCheque) => {
     const ok = await notify.confirm({ title: `Delete cheque ${c.chequeNo}?`, danger: true, okText: 'Delete' })
     if (!ok) return
@@ -454,11 +450,9 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
     <Card pad={0}>
       <div className="row between" style={{ padding: '14px 16px 0' }}>
         <div className="eyebrow">Post Dated Cheques</div>
-        <Can user={me} module="Loan Payments" action="Create">
-          <span className="t-2" style={{ fontSize: 11.5 }}>Record a cheque on the Payment Receipt screen.</span>
-        </Can>
+        <span className="t-2" style={{ fontSize: 11.5 }}>Record a cheque on the Payment Receipt screen · realize or reject on Cheque Management.</span>
       </div>
-      <Table cols={[{ label: 'Cheque No' }, { label: 'Bank' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 160 }]}
+      <Table cols={[{ label: 'Cheque No' }, { label: 'Bank' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 40 }]}
         rows={cheques} empty="No post dated cheques"
         render={(c: LoanPostDatedCheque) => <>
           <Td mono>{c.chequeNo}</Td>
@@ -467,16 +461,9 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
           <Td mono align="right">{money(c.amount)}</Td>
           <Td align="center"><Badge tone={chequeTone[c.status]} dot>{c.status}</Badge></Td>
           <Td align="right">
-            <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-              <Can user={me} module="Loan Payments" action="Edit">
-                {c.status === 'Pending' && <Btn size="sm" variant="solid" onClick={() => setStatus(c, 'Handed')}>Hand Over</Btn>}
-                {c.status === 'Handed' && <Btn size="sm" variant="ok" onClick={() => setStatus(c, 'Realized')}>Realized</Btn>}
-                {c.status === 'Handed' && <Btn size="sm" variant="danger" onClick={() => setStatus(c, 'Bounced')}>Bounced</Btn>}
-              </Can>
-              <Can user={me} module="Loan Payments" action="Delete">
-                <button className="mms-act" title="Delete" onClick={() => remove(c)}><Icon n="trash" s={14} /></button>
-              </Can>
-            </div>
+            <Can user={me} module="Loan Payments" action="Delete">
+              <button className="mms-act" title="Delete" onClick={() => remove(c)}><Icon n="trash" s={14} /></button>
+            </Can>
           </Td>
         </>} />
     </Card>

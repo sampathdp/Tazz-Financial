@@ -73,6 +73,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Customer Management ---
     Route::get('customers', [CustomerController::class, 'index'])->middleware('perm:Customer Management,View');
     Route::get('customers/{customer}', [CustomerController::class, 'show'])->middleware('perm:Customer Management,View');
+    Route::get('customers/{customer}/loans', [CustomerController::class, 'loans'])->middleware('perm:Customer Management,View');
     Route::post('customers', [CustomerController::class, 'store'])->middleware('perm:Customer Management,Create');
     Route::put('customers/{customer}', [CustomerController::class, 'update'])->middleware('perm:Customer Management,Edit');
     Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->middleware('perm:Customer Management,Delete');

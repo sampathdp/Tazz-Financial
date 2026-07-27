@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\Loan;
 use App\Services\NumberGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,28 @@ class CustomerController extends Controller
     public function show(Customer $customer)
     {
         return $customer->load(['branch:id,name,code', 'documents']);
+    }
+
+    /**
+     * Full loan history for a customer's profile view: every loan they've
+     * ever borrowed (any status — pending, active, closed, written off, ...)
+     * plus every loan they stand as a guarantor on.
+     */
+    public function loans(Customer $customer)
+    {
+        $withSums = fn ($q) => $q->with(['branch:id,name,code', 'loanType:id,name,code'])
+            ->withSum('schedules as total_due_sum', 'total_due')
+            ->withSum('schedules as paid_sum', 'paid_amount')
+            ->orderByDesc('id');
+
+        $borrower = $withSums(Loan::where('customer_id', $customer->id))->get();
+
+        $guarantor = $withSums(
+            Loan::whereHas('guarantors', fn ($q) => $q->where('guarantor_id', $customer->id))
+                ->with('customer:id,full_name,code')
+        )->get();
+
+        return ['borrower' => $borrower, 'guarantor' => $guarantor];
     }
 
     public function store(Request $request)

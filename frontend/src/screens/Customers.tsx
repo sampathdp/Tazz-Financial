@@ -2,9 +2,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { customersApi, branchesApi, customerDocumentsApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type AuthUser } from '../api'
+import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { LoanDetail } from './loan/LoanDetail'
 import type { Go } from './types'
 
 const OCCUPATION_OPTIONS: { value: OccupationType; label: string }[] = [
@@ -102,7 +103,136 @@ function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser 
   )
 }
 
-export function CustomersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
+const num = (v: unknown) => Number(v ?? 0)
+const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
+const loanStatusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
+  Pending: 'amber', Approved: 'blue', Rejected: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
+}
+
+/** Read-only profile — Personal Details, Occupation, Documents, and the customer's loans.
+ *  Editing lives in the separate form (openEdit), so this stays a pure view. */
+/** Shared loan-history table for both the "as borrower" and "as guarantor" sections
+ *  of the customer view — same columns, plus a per-row button to open the full loan. */
+function LoanHistoryTable({ loans, loading, showBorrower, onOpen, empty }: {
+  loans: Loan[]; loading: boolean; showBorrower?: boolean; onOpen: (loanId: number) => void; empty: string
+}) {
+  if (loading) return <div style={{ padding: '0 16px 16px', fontSize: 12.5, color: 'var(--tx-2)' }}>Loading…</div>
+  return (
+    <Table cols={[
+      { label: 'Loan Code' }, { label: 'Product' },
+      ...(showBorrower ? [{ label: 'Borrower' }] : []),
+      { label: 'Principal', align: 'right' as const }, { label: 'Outstanding', align: 'right' as const },
+      { label: 'Status', align: 'center' as const }, { label: '', align: 'right' as const, w: 70 },
+    ]}
+      rows={loans} empty={empty}
+      render={(l) => <>
+        <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{l.code}</Td>
+        <Td>{l.loanType?.name || '—'}</Td>
+        {showBorrower && <Td>{l.customer?.fullName || '—'}</Td>}
+        <Td align="right" mono>{money(l.principalAmount)}</Td>
+        <Td align="right" mono>{l.status === 'Approved' ? '—' : money(num(l.totalDueSum) - num(l.paidSum))}</Td>
+        <Td align="center"><Badge tone={loanStatusTone[l.status]} dot>{l.status}</Badge></Td>
+        <Td align="right"><Btn size="sm" variant="solid" icon="eye" onClick={() => onOpen(l.id)}>View</Btn></Td>
+      </>} />
+  )
+}
+
+function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer; me?: AuthUser | null; onEdit: () => void; onOpenLoan: (loanId: number) => void }) {
+  const [borrowerLoans, setBorrowerLoans] = useState<Loan[]>([])
+  const [guarantorLoans, setGuarantorLoans] = useState<Loan[]>([])
+  const [loansLoading, setLoansLoading] = useState(true)
+
+  useEffect(() => {
+    setLoansLoading(true)
+    customerLoansApi.list(customer.id)
+      .then((d) => { setBorrowerLoans(d.borrower); setGuarantorLoans(d.guarantor) })
+      .catch(() => { setBorrowerLoans([]); setGuarantorLoans([]) })
+      .finally(() => setLoansLoading(false))
+  }, [customer.id])
+
+  const isEmployed = customer.occupationType === 'Employed'
+  const isBusiness = customer.occupationType === 'SelfEmployed' || customer.occupationType === 'BusinessOwner'
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        <Card>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Personal Details</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', fontSize: 12.5 }}>
+            <div><span className="t-2">Full Name: </span><b>{customer.fullName}</b></div>
+            <div><span className="t-2">Branch: </span><b>{customer.branch?.name || '—'}</b></div>
+            <div><span className="t-2">NIC No: </span><b>{customer.nicNo || '—'}</b></div>
+            <div><span className="t-2">Passport No: </span><b>{customer.passportNo || '—'}</b></div>
+            <div><span className="t-2">Driving License: </span><b>{customer.drivingLicenseNo || '—'}</b></div>
+            <div><span className="t-2">Date of Birth: </span><b>{dateOnly(customer.dob)}</b></div>
+            <div><span className="t-2">Gender: </span><b>{customer.gender || '—'}</b></div>
+            <div><span className="t-2">Phone: </span><b>{customer.phone || '—'}</b></div>
+            <div><span className="t-2">Alternate Phone: </span><b>{customer.altPhone || '—'}</b></div>
+            <div><span className="t-2">Email: </span><b>{customer.email || '—'}</b></div>
+            <div style={{ gridColumn: '1/-1' }}><span className="t-2">Address: </span><b>{customer.address || '—'}</b></div>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Occupation</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', fontSize: 12.5, marginBottom: (isEmployed || isBusiness) ? 14 : 0 }}>
+            <div><span className="t-2">Occupation Type: </span><b>{OCCUPATION_OPTIONS.find((o) => o.value === customer.occupationType)?.label || '—'}</b></div>
+            <div><span className="t-2">Monthly Income: </span><b>{customer.monthlyIncome != null ? money(customer.monthlyIncome) : '—'}</b></div>
+          </div>
+          {isEmployed && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', fontSize: 12.5, padding: 12, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
+              <div><span className="t-2">Employer: </span><b>{customer.employerName || '—'}</b></div>
+              <div><span className="t-2">Job Title: </span><b>{customer.jobTitle || '—'}</b></div>
+              <div><span className="t-2">Employer Phone: </span><b>{customer.employerPhone || '—'}</b></div>
+              <div><span className="t-2">Employed Since: </span><b>{dateOnly(customer.employmentStartDate)}</b></div>
+              <div style={{ gridColumn: '1/-1' }}><span className="t-2">Employer Address: </span><b>{customer.employerAddress || '—'}</b></div>
+            </div>
+          )}
+          {isBusiness && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', fontSize: 12.5, padding: 12, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
+              <div><span className="t-2">Business Name: </span><b>{customer.businessName || '—'}</b></div>
+              <div><span className="t-2">Reg. No: </span><b>{customer.businessRegNo || '—'}</b></div>
+              <div><span className="t-2">Business Type: </span><b>{customer.businessType || '—'}</b></div>
+              <div><span className="t-2">Business Phone: </span><b>{customer.businessPhone || '—'}</b></div>
+              <div style={{ gridColumn: '1/-1' }}><span className="t-2">Business Address: </span><b>{customer.businessAddress || '—'}</b></div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {customer.notes && (
+        <Card style={{ marginBottom: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>Notes</div>
+          <div style={{ fontSize: 13 }}>{customer.notes}</div>
+        </Card>
+      )}
+
+      <Card style={{ marginBottom: 16 }} pad={0}>
+        <div className="eyebrow" style={{ padding: '14px 16px 10px' }}>Loan History — as Borrower</div>
+        <LoanHistoryTable loans={borrowerLoans} loading={loansLoading} onOpen={onOpenLoan} empty="No loans for this customer" />
+      </Card>
+
+      <Card style={{ marginBottom: 16 }} pad={0}>
+        <div className="eyebrow" style={{ padding: '14px 16px 10px' }}>Loan History — as Guarantor</div>
+        <LoanHistoryTable loans={guarantorLoans} loading={loansLoading} showBorrower onOpen={onOpenLoan} empty="Not a guarantor on any loan" />
+      </Card>
+
+      <Card>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Documents</div>
+        <DocumentsPanel customerId={customer.id} me={me} />
+      </Card>
+
+      <Can user={me} module="Customer Management" action="Edit">
+        <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+          <Btn variant="primary" icon="edit" onClick={onEdit}>Edit Customer</Btn>
+        </div>
+      </Can>
+    </div>
+  )
+}
+
+export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
   const [rows, setRows] = useState<Customer[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
@@ -110,8 +240,12 @@ export function CustomersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [mode, setMode] = useState<'list' | 'form'>('list')
+  const [mode, setMode] = useState<'list' | 'view' | 'form' | 'loan'>('list')
   const [editing, setEditing] = useState<Customer | null>(null)
+  const [viewing, setViewing] = useState<Customer | null>(null)
+  const [viewLoading, setViewLoading] = useState(false)
+  const [viewingLoan, setViewingLoan] = useState<Loan | null>(null)
+  const [loanLoading, setLoanLoading] = useState(false)
   const [form, setForm] = useState<Partial<Customer>>(blankForm())
   const set = <K extends keyof Customer>(k: K, v: Customer[K]) => setForm((s) => ({ ...s, [k]: v }))
 
@@ -126,7 +260,17 @@ export function CustomersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser
 
   const openCreate = () => { setEditing(null); setForm(blankForm()); setErr(''); setMode('form') }
   const openEdit = (c: Customer) => { setEditing(c); setForm({ ...c }); setErr(''); setMode('form') }
-  const back = () => { setMode('list'); setEditing(null); setErr('') }
+  const openView = async (c: Customer) => {
+    setMode('view'); setViewLoading(true)
+    try { setViewing(await customersApi.get(c.id)) } catch { setViewing(c) } finally { setViewLoading(false) }
+  }
+  const back = () => { setMode('list'); setEditing(null); setViewing(null); setViewingLoan(null); setErr('') }
+
+  const openLoan = async (loanId: number) => {
+    setMode('loan'); setLoanLoading(true)
+    try { setViewingLoan(await loansApi.get(loanId)) } catch { setViewingLoan(null) } finally { setLoanLoading(false) }
+  }
+  const backToCustomer = () => { setMode('view'); setViewingLoan(null) }
 
   const save = async () => {
     if (!form.title || !form.surname || !form.initials) { setErr('Title, Surname and Initial are required.'); return }
@@ -157,6 +301,30 @@ export function CustomersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser
     ? rows.filter((c) => [c.fullName, c.surname, c.initials, c.code, c.nicNo, c.passportNo, c.drivingLicenseNo, c.phone, c.email, c.branch?.name]
         .some((v) => (v || '').toLowerCase().includes(q)))
     : rows
+
+  if (mode === 'view') {
+    return (
+      <div>
+        <PageHead crumbs="Customers" title={viewLoading || !viewing ? 'Loading…' : viewing.fullName} icon="users"
+          sub={viewing ? `${viewing.code} — ${viewing.branch?.name || ''}` : undefined}
+          actions={<Btn variant="solid" onClick={back}>← Back to Customers</Btn>} />
+        {viewLoading || !viewing ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+          : <CustomerView customer={viewing} me={me} onEdit={() => openEdit(viewing)} onOpenLoan={openLoan} />}
+      </div>
+    )
+  }
+
+  if (mode === 'loan') {
+    return (
+      <div>
+        <PageHead crumbs={`Customers / ${viewing?.fullName || ''}`} title={loanLoading || !viewingLoan ? 'Loading…' : `Loan ${viewingLoan.code}`} icon="coins"
+          sub={viewingLoan ? `${viewingLoan.customer?.fullName} — ${viewingLoan.loanType?.name}` : undefined}
+          actions={<Btn variant="solid" onClick={backToCustomer}>← Back to Customer</Btn>} />
+        {loanLoading || !viewingLoan ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+          : <LoanDetail loan={viewingLoan} me={me} onChanged={() => openLoan(viewingLoan.id)} go={go} context="active" />}
+      </div>
+    )
+  }
 
   if (mode === 'form') {
     return (
@@ -263,7 +431,7 @@ export function CustomersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser
         <Table cols={[{ label: 'Customer' }, { label: 'NIC / ID' }, { label: 'Phone' }, { label: 'Branch' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           rows={filtered}
           empty={q ? 'No customers match your search' : 'No records'}
-          onRow={(c) => openEdit(c)}
+          onRow={(c) => openView(c)}
           render={(c) => <>
             <Td c="var(--tx-0)"><div className="row gap-2" style={{ alignItems: 'center' }}><span style={{ fontWeight: 600 }}>{c.fullName}</span>{c.isGuarantor && <Badge tone="blue">Guarantor</Badge>}</div><div className="t-2" style={{ fontSize: 11.5 }}>{c.code}</div></Td>
             <Td mono style={{ fontSize: 12 }}>{c.nicNo || c.passportNo || c.drivingLicenseNo || '—'}</Td>
