@@ -4,11 +4,12 @@ import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, 
 import { Icon } from '../components/Icon'
 import {
   loansApi, customersApi, loanTypesApi, branchesApi, api,
-  type Loan, type LoanStatus, type LoanType, type Customer, type LoanFrequency,
+  type Loan, type LoanStatus, type LoanType, type Customer, type LoanFrequency, type CustomerTitle,
   type LoanGuarantorInput, type LoanCollateralInput, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { DEFAULT_REFERENCE_FORMAT, previewReferenceNumber } from '../lib/referenceNumber'
 import { LoanDetail } from './loan/LoanDetail'
 import type { Go } from './types'
 
@@ -23,7 +24,8 @@ const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutr
   Pending: 'amber', Approved: 'blue', Rejected: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
 const custStatusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'red', Blacklisted: 'amber' }
-const blankQuickAdd = () => ({ fullName: '', branchId: undefined as number | undefined, nicNo: '', phone: '' })
+const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.']
+const blankQuickAdd = () => ({ title: '' as CustomerTitle | '', surname: '', initials: '', nameInFull: '', branchId: undefined as number | undefined, nicNo: '', phone: '' })
 
 function loanTypePath(rows: LoanType[], id: number | null | undefined): string {
   if (!id) return ''
@@ -90,12 +92,13 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
 
   const openQuickAdd = () => { setQuickAddForm(blankQuickAdd()); setQuickAddErr(''); setQuickAdd(true) }
   const saveQuickAdd = async () => {
-    if (!quickAddForm.fullName) { setQuickAddErr('Full name is required.'); return }
+    if (!quickAddForm.title || !quickAddForm.surname || !quickAddForm.initials) { setQuickAddErr('Title, Surname and Initial are required.'); return }
     if (!quickAddForm.branchId) { setQuickAddErr('Branch is required.'); return }
     setQuickAddBusy(true); setQuickAddErr('')
     try {
       const created = await customersApi.create({
-        fullName: quickAddForm.fullName, branchId: quickAddForm.branchId,
+        title: quickAddForm.title, surname: quickAddForm.surname, initials: quickAddForm.initials,
+        nameInFull: quickAddForm.nameInFull || undefined, branchId: quickAddForm.branchId,
         nicNo: quickAddForm.nicNo || undefined, phone: quickAddForm.phone || undefined, status: 'Active',
       })
       setCustomers((cs) => [created, ...cs])
@@ -233,6 +236,15 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
 
         {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 16 }}>{err}</div>}
 
+        <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 16 }}>
+          <span className="t-2" style={{ fontSize: 12 }}>{editing ? 'Loan ID' : 'Loan ID (preview — assigned on submit)'}</span>
+          <Badge tone={editing ? 'blue' : 'neutral'}>
+            {editing ? editing.code : (selectedType
+              ? previewReferenceNumber(selectedType.referenceFormat || DEFAULT_REFERENCE_FORMAT, selectedCustomer?.branch?.code || 'BR', selectedType.code)
+              : '—')}
+          </Badge>
+        </div>
+
         <Card style={{ marginBottom: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Field label="Customer" full>
@@ -254,7 +266,12 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             {quickAdd && (
               <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
                 {quickAddErr && <div style={{ gridColumn: '1/-1', background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '6px 10px', borderRadius: 'var(--r-s)', fontSize: 12 }}>{quickAddErr}</div>}
-                <Field label="Full Name" full><Input value={quickAddForm.fullName} onChange={(e) => setQuickAddForm((s) => ({ ...s, fullName: e.target.value }))} /></Field>
+                <Field label="Surname"><Input value={quickAddForm.surname} onChange={(e) => setQuickAddForm((s) => ({ ...s, surname: e.target.value }))} /></Field>
+                <Field label="Initial in Full without Surname"><Input value={quickAddForm.nameInFull} onChange={(e) => setQuickAddForm((s) => ({ ...s, nameInFull: e.target.value }))} /></Field>
+                <Field label="Initial"><Input value={quickAddForm.initials} onChange={(e) => setQuickAddForm((s) => ({ ...s, initials: e.target.value }))} placeholder="e.g. J.K." /></Field>
+                <Field label="Title"><Select value={quickAddForm.title} onChange={(e) => setQuickAddForm((s) => ({ ...s, title: e.target.value as CustomerTitle }))}>
+                  <option value="">—</option>{TITLE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                </Select></Field>
                 <Field label="Branch"><Select value={quickAddForm.branchId ?? ''} onChange={(e) => setQuickAddForm((s) => ({ ...s, branchId: Number(e.target.value) || undefined }))}>
                   <option value="">—</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </Select></Field>

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\LoanType;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class LoanTypeController extends Controller
 {
@@ -13,6 +14,7 @@ class LoanTypeController extends Controller
     private const INTEREST_METHODS = ['flat', 'reducing_balance'];
     private const RATE_PERIODS = ['monthly', 'annual'];
     private const PENALTY_METHODS = ['flat', 'daily'];
+    private const COLLECTION_DAYS = ['all_days', 'week_days'];
 
     public function index()
     {
@@ -58,8 +60,10 @@ class LoanTypeController extends Controller
             'parent_id' => ['nullable', 'exists:loan_types,id'],
             'name' => 'required|string|max:128',
             'code' => ['required', 'string', 'max:32', Rule::unique('loan_types', 'code')->ignore($loanType?->id)],
+            'reference_format' => 'nullable|string|max:191',
             'is_product' => 'boolean',
             'frequency' => ['nullable', Rule::in(self::FREQUENCIES)],
+            'collection_days' => ['nullable', Rule::in(self::COLLECTION_DAYS)],
             'sort_order' => 'nullable|integer|min:0',
             'status' => ['nullable', Rule::in(['Active', 'Inactive'])],
             'interest_method' => [$isProduct ? 'required' : 'nullable', Rule::in(self::INTEREST_METHODS)],
@@ -74,11 +78,21 @@ class LoanTypeController extends Controller
             'processing_fee_percent' => 'nullable|numeric|min:0',
         ]);
 
+        if (!empty($data['reference_format']) && !str_contains($data['reference_format'], '{SEQ')) {
+            throw ValidationException::withMessages([
+                'reference_format' => 'The reference format must include a sequence placeholder, e.g. {SEQ:6}.',
+            ]);
+        }
+
         // Non-product (category) nodes carry no terms of their own.
         if (!$isProduct) {
             foreach (['frequency', 'interest_method', 'interest_rate_percent', 'min_amount', 'max_amount', 'min_term_months', 'max_term_months'] as $field) {
                 $data[$field] = null;
             }
+            $data['collection_days'] = 'all_days';
+        } else {
+            // Only meaningful for daily products — non-daily frequencies always collect on their normal cadence.
+            $data['collection_days'] = ($data['frequency'] ?? null) === 'daily' ? ($data['collection_days'] ?? 'all_days') : 'all_days';
         }
 
         return $data;

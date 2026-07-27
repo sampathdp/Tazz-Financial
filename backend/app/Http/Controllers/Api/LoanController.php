@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Branch;
 use App\Models\Loan;
+use App\Models\LoanSchedule;
 use App\Models\LoanType;
+use App\Services\NumberGenerator;
 use App\Support\LoanAmortizer;
 use App\Support\LoanSummary;
 use Illuminate\Http\Request;
@@ -101,11 +104,19 @@ class LoanController extends Controller
         $data['created_by'] = $request->user()->id;
         $data['status'] = 'Pending';
 
-        $loan = DB::transaction(function () use ($data, $guarantors, $collateral) {
-            $max = Loan::withTrashed()->lockForUpdate()->max('id') ?? 0;
-            $data['code'] = 'LN-' . str_pad((string) ($max + 1), 6, '0', STR_PAD_LEFT);
+        $loan = DB::transaction(function () use ($data, $guarantors, $collateral, $request) {
+            $branch = Branch::find($data['branch_id']);
+            $loanType = LoanType::find($data['loan_type_id']);
+            $data['code'] = NumberGenerator::next('loan', [
+                'branch_id' => $branch->id,
+                'branch_code' => $branch->code,
+                'loan_type_id' => $loanType->id,
+                'loan_type_code' => $loanType->code,
+                'user_id' => $request->user()->id,
+            ], $loanType->reference_format);
 
             $loan = Loan::create($data);
+            NumberGenerator::attach($data['code'], $loan);
             foreach ($guarantors as $g) {
                 $loan->guarantors()->create($g);
             }
@@ -204,6 +215,39 @@ class LoanController extends Controller
         });
 
         return $loan->load(self::DETAIL_RELATIONS);
+    }
+
+    /** Pushes an unpaid installment to the back of the schedule (due one period
+     *  after the current last installment) instead of collecting it on time —
+     *  the loan simply runs one period longer. */
+    public function skipInstallment(Loan $loan, LoanSchedule $schedule)
+    {
+        if ($schedule->loan_id !== $loan->id) {
+            abort(404);
+        }
+        if ($loan->status !== 'Active') {
+            return response()->json(['message' => 'Only installments on an active loan can be skipped.'], 422);
+        }
+        if ($schedule->status === 'Paid' || (float) $schedule->paid_amount > 0) {
+            return response()->json(['message' => 'A paid or partially paid installment cannot be skipped.'], 422);
+        }
+
+        DB::transaction(function () use ($loan, $schedule) {
+            $last = $loan->schedules()->orderByDesc('due_date')->firstOrFail();
+            $schedule->update([
+                'due_date' => LoanAmortizer::nextDueDate($last->due_date, $loan->installment_frequency)->format('Y-m-d'),
+                'status' => 'Pending',
+            ]);
+
+            // Renumber by due date so installment_no still reflects payment order.
+            foreach ($loan->schedules()->orderBy('due_date')->orderBy('id')->get() as $i => $row) {
+                if ($row->installment_no !== $i + 1) {
+                    $row->update(['installment_no' => $i + 1]);
+                }
+            }
+        });
+
+        return $this->show($loan->fresh());
     }
 
     /** @return array{0: array, 1: array, 2: array} [loan fields, guarantors, collateral] */

@@ -16,7 +16,12 @@ class LoanAmortizer
     /** @return array<int, array<string, mixed>> rows ready for LoanSchedule::insert() */
     public static function generate(Loan $loan, string $firstInstallmentDate): array
     {
+        $loan->loadMissing('loanType');
         $frequency = $loan->installment_frequency;
+        // Daily products can be set to collect Mon-Fri only — installment count
+        // is unchanged, due dates just skip weekends (the loan runs longer in
+        // calendar time as a result).
+        $weekdaysOnly = $frequency === 'daily' && $loan->loanType?->collection_days === 'week_days';
         $periodsPerMonth = self::periodsPerMonth($frequency);
         $n = max(1, (int) round($loan->term_months * $periodsPerMonth));
 
@@ -32,7 +37,7 @@ class LoanAmortizer
             ? self::reducingBalance($principal, $periodRate, $n)
             : self::flat($principal, $monthlyRate, $loan->term_months, $n);
 
-        $date = Carbon::parse($firstInstallmentDate);
+        $date = self::skipWeekend(Carbon::parse($firstInstallmentDate), $weekdaysOnly);
         $out = [];
         foreach ($rows as $i => $row) {
             $out[] = [
@@ -48,10 +53,26 @@ class LoanAmortizer
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            $date = self::step($date, $frequency);
+            $date = self::skipWeekend(self::step($date, $frequency), $weekdaysOnly);
         }
 
         return $out;
+    }
+
+    /** Advances `$date` by one installment period — used to push a skipped
+     *  installment to the back of the queue (LoanController::skipInstallment()). */
+    public static function nextDueDate(Carbon $date, string $frequency): Carbon
+    {
+        return self::step($date, $frequency);
+    }
+
+    private static function skipWeekend(Carbon $date, bool $weekdaysOnly): Carbon
+    {
+        while ($weekdaysOnly && $date->isWeekend()) {
+            $date->addDay();
+        }
+
+        return $date;
     }
 
     private static function periodsPerMonth(string $frequency): float

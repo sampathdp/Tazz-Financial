@@ -7,7 +7,7 @@ import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, inputStyle } 
 import { Icon } from '../../components/Icon'
 import {
   loansApi, loanPaymentsApi, loanChargesApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanWaiversApi, api,
-  type Loan, type LoanStatus, type LoanSchedule, type LoanPayment, type PaymentMethod,
+  type Loan, type LoanStatus, type LoanSchedule, type LoanPayment,
   type LoanCharge, type LoanChargeType, type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type LoanDocType, type LoanDiaryNote, type LoanWaiver, type WaiverType,
   type AuthUser,
@@ -300,28 +300,9 @@ function ScheduleTable({ loan }: { loan: Loan }) {
 /* ---------- Contract Receipts / Cancelled Receipts ---------- */
 function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
   const all = loan.payments || []
-  const active = all.filter((p) => p.status !== 'Voided')
+  const pending = all.filter((p) => p.approvalStatus === 'PendingApproval')
+  const active = all.filter((p) => p.status !== 'Voided' && p.approvalStatus !== 'PendingApproval')
   const voided = all.filter((p) => p.status === 'Voided')
-  const schedules = loan.schedules || []
-  const totalDue = schedules.reduce((s, r) => s + num(r.totalDue), 0)
-  const totalPaid = schedules.reduce((s, r) => s + num(r.paidAmount), 0)
-  const outstanding = Math.max(0, totalDue - totalPaid)
-
-  const [amount, setAmount] = useState('')
-  const [method, setMethod] = useState<PaymentMethod>('Cash')
-  const [paidAt, setPaidAt] = useState(todayIso())
-  const [receiptNo, setReceiptNo] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-
-  const record = async () => {
-    if (!amount || Number(amount) <= 0) { setErr('Enter a payment amount.'); return }
-    setBusy(true); setErr('')
-    try {
-      await loanPaymentsApi.create(loan.id, { amount, paymentMethod: method, paidAt, receiptNo: receiptNo || undefined })
-      setAmount(''); setReceiptNo(''); notify.success('Payment recorded', loan.code); onChanged()
-    } catch (ex: any) { setErr(ex?.response?.data?.message || 'Payment failed') } finally { setBusy(false) }
-  }
 
   const voidPayment = async (p: LoanPayment) => {
     const reason = await notify.prompt({ title: `Void receipt ${p.code}?`, msg: 'Give a reason — this reverses its allocation against the schedule.', placeholder: 'Reason for voiding', danger: true, okText: 'Void' })
@@ -333,22 +314,29 @@ function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthU
   return (
     <>
       <Card style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Contract Receipts</div>
-        {loan.status === 'Active' && outstanding > 0 && (
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <div className="eyebrow">Contract Receipts</div>
           <Can user={me} module="Loan Payments" action="Create">
-            <div style={{ padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)', marginBottom: 16 }}>
-              {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 12 }}>{err}</div>}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 12 }}>
-                <Field label="Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Outstanding: ${money(outstanding)}`} /></Field>
-                <Field label="Method"><Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
-                  <option>Cash</option><option>Bank</option><option>Cheque</option>
-                </Select></Field>
-                <Field label="Date"><Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field>
-                <Field label="Receipt No"><Input value={receiptNo} onChange={(e) => setReceiptNo(e.target.value)} /></Field>
-              </div>
-              <Btn variant="primary" size="sm" icon="check" onClick={record} disabled={busy}>{busy ? 'Recording…' : 'Record Payment'}</Btn>
-            </div>
+            <span className="t-2" style={{ fontSize: 11.5 }}>Record payments on the Payment Receipt screen.</span>
           </Can>
+        </div>
+        {pending.length > 0 && (
+          <div className="col gap-2" style={{ marginBottom: 16 }}>
+            {pending.map((p) => (
+              <div key={p.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <Icon n="clock" s={15} c="var(--warn)" />
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.code} · Full Settlement</span>
+                  <span className="t-2" style={{ fontSize: 12 }}>requested {dateOnly(p.createdAt || p.paidAt)} by {p.receiver?.name} · not yet applied to the schedule</span>
+                </div>
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
+                  <Badge tone="amber" dot>Pending Approval</Badge>
+                </div>
+              </div>
+            ))}
+            <div className="t-2" style={{ fontSize: 11.5 }}>Approve or reject this on the Payment Receipt screen.</div>
+          </div>
         )}
         {active.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No receipts recorded yet.</div> :
           <div className="col gap-2">
@@ -419,18 +407,7 @@ function SecurityPanel({ loan }: { loan: Loan }) {
 /* ---------- Post Dated Cheques ---------- */
 function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
   const cheques = loan.postDatedCheques || []
-  const [form, setForm] = useState({ chequeNo: '', bankName: '', chequeDate: todayIso(), amount: '' })
-  const [busy, setBusy] = useState(false)
 
-  const add = async () => {
-    if (!form.chequeNo || !form.bankName || !form.amount) return
-    setBusy(true)
-    try {
-      await loanPostDatedChequesApi.create(loan.id, form)
-      setForm({ chequeNo: '', bankName: '', chequeDate: todayIso(), amount: '' })
-      notify.success('Cheque added'); onChanged()
-    } catch (ex: any) { notify.error('Add failed', ex?.response?.data?.message) } finally { setBusy(false) }
-  }
   const setStatus = async (c: LoanPostDatedCheque, status: ChequeStatus) => {
     try { await loanPostDatedChequesApi.updateStatus(c.id, status); notify.success('Cheque updated'); onChanged() }
     catch (ex: any) { notify.error('Update failed', ex?.response?.data?.message) }
@@ -444,16 +421,12 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
 
   return (
     <Card pad={0}>
-      <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Post Dated Cheques</div>
-      <Can user={me} module="Active Loans" action="Create">
-        <div className="row gap-2 wrap" style={{ padding: 16 }}>
-          <Input placeholder="Cheque No" value={form.chequeNo} onChange={(e) => setForm((s) => ({ ...s, chequeNo: e.target.value }))} style={{ maxWidth: 140 }} />
-          <Input placeholder="Bank" value={form.bankName} onChange={(e) => setForm((s) => ({ ...s, bankName: e.target.value }))} style={{ maxWidth: 160 }} />
-          <Input type="date" value={form.chequeDate} onChange={(e) => setForm((s) => ({ ...s, chequeDate: e.target.value }))} style={{ maxWidth: 150 }} />
-          <Input type="number" placeholder="Amount" value={form.amount} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} style={{ maxWidth: 130 }} />
-          <Btn variant="primary" size="sm" icon="plus" onClick={add} disabled={busy}>Add</Btn>
-        </div>
-      </Can>
+      <div className="row between" style={{ padding: '14px 16px 0' }}>
+        <div className="eyebrow">Post Dated Cheques</div>
+        <Can user={me} module="Loan Payments" action="Create">
+          <span className="t-2" style={{ fontSize: 11.5 }}>Record a cheque on the Payment Receipt screen.</span>
+        </Can>
+      </div>
       <Table cols={[{ label: 'Cheque No' }, { label: 'Bank' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 160 }]}
         rows={cheques} empty="No post dated cheques"
         render={(c: LoanPostDatedCheque) => <>
@@ -464,12 +437,12 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
           <Td align="center"><Badge tone={chequeTone[c.status]} dot>{c.status}</Badge></Td>
           <Td align="right">
             <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-              <Can user={me} module="Active Loans" action="Edit">
+              <Can user={me} module="Loan Payments" action="Edit">
                 {c.status === 'Pending' && <Btn size="sm" variant="solid" onClick={() => setStatus(c, 'Handed')}>Hand Over</Btn>}
                 {c.status === 'Handed' && <Btn size="sm" variant="ok" onClick={() => setStatus(c, 'Realized')}>Realized</Btn>}
                 {c.status === 'Handed' && <Btn size="sm" variant="danger" onClick={() => setStatus(c, 'Bounced')}>Bounced</Btn>}
               </Can>
-              <Can user={me} module="Active Loans" action="Delete">
+              <Can user={me} module="Loan Payments" action="Delete">
                 <button className="mms-act" title="Delete" onClick={() => remove(c)}><Icon n="trash" s={14} /></button>
               </Can>
             </div>
@@ -485,7 +458,7 @@ function LedgerCard({ loan }: { loan: Loan }) {
   const rows: Row[] = []
   for (const s of loan.schedules || []) rows.push({ date: s.dueDate, particulars: `Installment #${s.installmentNo} due`, debit: num(s.totalDue), credit: 0 })
   for (const p of loan.payments || []) {
-    if (p.status === 'Voided') continue
+    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval') continue
     rows.push({ date: dateOnly(p.paidAt), particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount) })
   }
   for (const c of loan.charges || []) {

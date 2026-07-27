@@ -109,9 +109,18 @@ export interface Role {
 
 export type OccupationType = 'Employed' | 'SelfEmployed' | 'BusinessOwner' | 'Unemployed' | 'Retired' | 'Student' | 'Other'
 
+export type CustomerTitle = 'Mr.' | 'Mrs.' | 'Miss' | 'Ms.' | 'Dr.' | 'Rev.'
+
 export interface Customer {
   id: number; branchId: number; branch?: { id: number; name: string; code: string };
-  code: string; fullName: string;
+  code: string;
+  /** Derived display name — "Title Initials Surname" (e.g. "Mr. J.K. Perera"). Not editable directly. */
+  fullName: string;
+  title?: CustomerTitle | null; surname: string;
+  /** Given name(s) written out in full, excluding surname — for formal documents only. */
+  nameInFull?: string | null;
+  /** Abbreviated given-name initials, e.g. "J.K." */
+  initials: string;
   nicNo?: string | null; passportNo?: string | null; drivingLicenseNo?: string | null;
   dob?: string | null; gender?: string | null;
   phone?: string | null; altPhone?: string | null; email?: string | null; address?: string | null;
@@ -174,9 +183,13 @@ export type InterestMethod = 'flat' | 'reducing_balance'
 export interface LoanType {
   id: number; parentId?: number | null;
   name: string; code: string;
+  /** Template for this loan type's generated reference numbers, e.g. "{BRANCH}-{CODE}-{YEAR}-{SEQ:6}". Null = system default. */
+  referenceFormat?: string | null;
   /** false = organizational category only (not selectable when issuing a loan) */
   isProduct: boolean;
   frequency?: LoanFrequency | null;
+  /** Daily products only — which calendar days installments are due on. */
+  collectionDays?: 'all_days' | 'week_days' | null;
   interestMethod?: InterestMethod | null;
   interestRatePercent?: number | string | null;
   ratePeriod?: 'monthly' | 'annual' | null;
@@ -261,14 +274,23 @@ export interface LoanSchedule {
 
 export type PaymentMethod = 'Cash' | 'Bank' | 'Cheque'
 export type PaymentStatus = 'Active' | 'Voided'
+export type PaymentApprovalStatus = 'Approved' | 'PendingApproval' | 'Rejected'
 
 export interface LoanPayment {
   id: number; code: string; loanId: number;
   amount: number | string; paymentMethod: PaymentMethod;
   receiver?: { id: number; name: string } | null;
   paidAt: string; receiptNo?: string | null; notes?: string | null;
+  /** Only set when paymentMethod is Cheque. */
+  bankName?: string | null; chequeDate?: string | null;
   status?: PaymentStatus;
+  /** A full-settlement request pays off the whole outstanding balance and needs
+   *  approval before it's allocated/closes the loan — see approvalStatus. */
+  isSettlement?: boolean;
+  approvalStatus?: PaymentApprovalStatus;
+  approver?: { id: number; name: string } | null; approvedAt?: string | null;
   voidReason?: string | null; voider?: { id: number; name: string } | null; voidedAt?: string | null;
+  createdAt?: string;
 }
 
 export type LoanChargeType = 'Document' | 'Legal' | 'Valuation' | 'Other'
@@ -335,6 +357,17 @@ export const branchesApi = resource<Branch>('branches')
 export const customersApi = resource<Customer>('customers')
 export const loanTypesApi = resource<LoanType>('loan-types')
 
+export interface GeneratedNumber {
+  id: number; module: string; number: string;
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  loanTypeId?: number | null; loanType?: { id: number; name: string; code: string } | null;
+  year?: number | null; sequence: number;
+  generatedBy?: number | null; generator?: { id: number; name: string } | null;
+  createdAt?: string;
+}
+
+export const generatedNumbersApi = resource<GeneratedNumber>('generated-numbers')
+
 export const loansApi = {
   list: () => http.get('/loans').then((r) => camelize(r.data) as Loan[]),
   get: (id: number) => http.get(`/loans/${id}`).then((r) => camelize(r.data) as Loan),
@@ -349,11 +382,20 @@ export const loansApi = {
     http.patch(`/loans/${id}/status-flags`, snakeize(body)).then((r) => camelize(r.data) as Loan),
 }
 
+export const loanSchedulesApi = {
+  /** Pushes an unpaid installment to the back of the schedule (due one period
+   *  after the current last installment) instead of collecting it on time. */
+  skip: (loanId: number, scheduleId: number) => http.post(`/loans/${loanId}/schedules/${scheduleId}/skip`).then((r) => camelize(r.data) as Loan),
+}
+
 export const loanPaymentsApi = {
   list: (loanId: number) => http.get(`/loans/${loanId}/payments`).then((r) => camelize(r.data) as LoanPayment[]),
-  create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; notes?: string }) =>
+  create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankName?: string; chequeDate?: string; notes?: string; isSettlement?: boolean }) =>
     http.post(`/loans/${loanId}/payments`, snakeize(body)).then((r) => camelize(r.data) as LoanPayment),
   remove: (paymentId: number, voidReason?: string) => http.delete(`/loan-payments/${paymentId}`, { data: { void_reason: voidReason } }).then((r) => r.data),
+  approveSettlement: (paymentId: number) => http.post(`/loan-payments/${paymentId}/approve-settlement`).then((r) => camelize(r.data) as LoanPayment),
+  rejectSettlement: (paymentId: number, voidReason?: string) =>
+    http.post(`/loan-payments/${paymentId}/reject-settlement`, snakeize({ voidReason })).then((r) => camelize(r.data) as LoanPayment),
 }
 
 export const loanChargesApi = {

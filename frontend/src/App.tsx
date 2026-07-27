@@ -14,6 +14,8 @@ const CustomersScreen = lazy(() => import('./screens/Customers').then((m) => ({ 
 const LoanTypesScreen = lazy(() => import('./screens/LoanTypes').then((m) => ({ default: m.LoanTypesScreen })))
 const LoanApplicationsScreen = lazy(() => import('./screens/LoanApplications').then((m) => ({ default: m.LoanApplicationsScreen })))
 const ActiveLoansScreen = lazy(() => import('./screens/ActiveLoans').then((m) => ({ default: m.ActiveLoansScreen })))
+const PaymentReceiptScreen = lazy(() => import('./screens/PaymentReceipt').then((m) => ({ default: m.PaymentReceiptScreen })))
+const DocumentTrackingScreen = lazy(() => import('./screens/DocumentTracking').then((m) => ({ default: m.DocumentTrackingScreen })))
 const named = <M, K extends keyof M>(loader: () => Promise<M>, key: K) =>
   lazy(() => loader().then((m) => ({ default: m[key] as unknown as ComponentType<any> })))
 
@@ -55,6 +57,8 @@ const SCREENS: Record<string, ScreenComp> = {
   'loan/types': LoanTypesScreen,
   'loan/apps': LoanApplicationsScreen,
   'loan/active': ActiveLoansScreen,
+  'loan/payments': PaymentReceiptScreen,
+  'loan/doc-tracking': DocumentTrackingScreen,
   'ad/branches': BranchesScreen,
   'ad/roles': RolesScreen,
   'ad/users': UsersScreen,

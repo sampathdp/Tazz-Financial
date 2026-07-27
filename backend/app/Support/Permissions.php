@@ -23,6 +23,7 @@ class Permissions
         'Loan Applications',
         'Active Loans',
         'Loan Payments',
+        'Document Tracking',
     ];
 
     public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve', 'Export'];

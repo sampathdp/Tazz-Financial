@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon'
 import { loanTypesApi, type LoanType, type LoanFrequency, type InterestMethod, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { DEFAULT_REFERENCE_FORMAT, previewReferenceNumber } from '../lib/referenceNumber'
 import type { Go } from './types'
 
 const FREQ_OPTIONS: { value: LoanFrequency; label: string }[] = [
@@ -22,7 +23,9 @@ const blankForm = (parentId: number | null): Partial<LoanType> => ({
   isProduct: true,
   ratePeriod: 'monthly',
   penaltyMethod: 'flat',
+  collectionDays: 'all_days',
   status: 'Active',
+  referenceFormat: DEFAULT_REFERENCE_FORMAT,
 })
 
 interface Node extends LoanType { children: Node[] }
@@ -71,6 +74,7 @@ function Row({ node, depth, me, onAddChild, onEdit, onDelete }: {
           <span className="t-2" style={{ fontSize: 11 }}>{node.code}</span>
           <Badge tone={node.isProduct ? 'blue' : 'neutral'}>{node.isProduct ? 'Product' : 'Category'}</Badge>
           {node.frequency && <Badge tone="neutral">{FREQ_OPTIONS.find((f) => f.value === node.frequency)?.label}</Badge>}
+          {node.frequency === 'daily' && node.collectionDays === 'week_days' && <Badge tone="amber">Week Days Only</Badge>}
           {node.status === 'Inactive' && <Badge tone="red" dot>Inactive</Badge>}
         </div>
         <div className="row gap-3" style={{ alignItems: 'center', flexShrink: 0 }}>
@@ -130,6 +134,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
       if (form.interestRatePercent == null || form.interestRatePercent === '') { setErr('Interest rate is required for a loan product.'); return }
       if (form.minAmount == null || form.maxAmount == null || form.minAmount === '' || form.maxAmount === '') { setErr('Min/Max amount is required for a loan product.'); return }
       if (!form.minTermMonths || !form.maxTermMonths) { setErr('Min/Max term (months) is required for a loan product.'); return }
+      if (form.referenceFormat && !form.referenceFormat.includes('{SEQ')) { setErr('Reference number format must include a sequence placeholder, e.g. {SEQ:6}.'); return }
     }
     setBusy(true); setErr('')
     try {
@@ -187,6 +192,14 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
               <Field label="Repayment Frequency"><Select value={form.frequency || ''} onChange={(e) => set('frequency', (e.target.value || null) as any)}>
                 <option value="">—</option>{FREQ_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select></Field>
+              {form.frequency === 'daily' && (
+                <Field label="Collection Days">
+                  <Select value={form.collectionDays || 'all_days'} onChange={(e) => set('collectionDays', e.target.value as any)}>
+                    <option value="all_days">All Days</option>
+                    <option value="week_days">Week Days Only (Mon–Fri)</option>
+                  </Select>
+                </Field>
+              )}
               <Field label="Interest Method"><Select value={form.interestMethod || ''} onChange={(e) => set('interestMethod', e.target.value as any)}>
                 <option value="">—</option>{INTEREST_METHOD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select></Field>
@@ -203,6 +216,18 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
                 <option value="flat">Flat</option><option value="daily">Daily</option>
               </Select></Field>
               <Field label="Processing Fee %"><Input type="number" step="0.001" value={form.processingFeePercent ?? ''} onChange={(e) => set('processingFeePercent', e.target.value as any)} /></Field>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <Field label="Reference Number Format">
+                <Input value={form.referenceFormat ?? ''} onChange={(e) => set('referenceFormat', e.target.value.toUpperCase() as any)} placeholder={DEFAULT_REFERENCE_FORMAT} />
+              </Field>
+              <div className="t-2" style={{ fontSize: 11.5, marginTop: 4 }}>
+                Placeholders: <code>{'{BRANCH}'}</code> branch code · <code>{'{CODE}'}</code> this loan type's code · <code>{'{YEAR}'}</code> 4-digit year · <code>{'{SEQ:6}'}</code> sequence (digit count adjustable). Leave blank to use the system default.
+              </div>
+              <div className="t-2" style={{ fontSize: 12, marginTop: 6 }}>
+                Preview: <strong>{previewReferenceNumber(form.referenceFormat || DEFAULT_REFERENCE_FORMAT, 'HO', form.code || '')}</strong>
+              </div>
             </div>
           </div>
         )}

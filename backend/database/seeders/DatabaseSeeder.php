@@ -65,7 +65,9 @@ class DatabaseSeeder extends Seeder
             'Loan Types' => ['View' => true],
             'Loan Applications' => ['View' => true, 'Create' => true, 'Edit' => true, 'Delete' => true, 'Approve' => true],
             'Active Loans' => ['View' => true, 'Approve' => true],
-            'Loan Payments' => ['View' => true, 'Create' => true, 'Delete' => true],
+            // Approves/rejects the Cashier's full-settlement requests so a loan can close.
+            // Edit lets them skip an installment (pushed to the back of the schedule).
+            'Loan Payments' => ['View' => true, 'Create' => true, 'Edit' => true, 'Delete' => true, 'Approve' => true],
         ]);
 
         $staff = Role::updateOrCreate(['slug' => 'staff'], [
@@ -80,7 +82,24 @@ class DatabaseSeeder extends Seeder
             'Loan Types' => ['View' => true],
             'Loan Applications' => ['View' => true, 'Create' => true, 'Edit' => true],
             'Active Loans' => ['View' => true],
-            'Loan Payments' => ['View' => true, 'Create' => true],
+            'Loan Payments' => ['View' => true, 'Create' => true, 'Edit' => true],
+        ]);
+
+        // Cashier — the only role allowed to apply for a full loan settlement (see
+        // LoanPaymentController::store()'s explicit role-slug check); day-to-day
+        // payment recording otherwise matches Staff.
+        $cashier = Role::updateOrCreate(['slug' => 'cashier'], [
+            'name' => 'Cashier',
+            'description' => 'Records loan payments at the counter, including full settlements (which a Branch Manager must approve).',
+            'is_system' => false,
+            'can_view_all_branches' => false,
+        ]);
+        Permissions::saveForRole($cashier, [
+            'Dashboard' => ['View' => true],
+            'Customer Management' => ['View' => true],
+            'Loan Applications' => ['View' => true],
+            'Active Loans' => ['View' => true],
+            'Loan Payments' => ['View' => true, 'Create' => true, 'Edit' => true],
         ]);
     }
 

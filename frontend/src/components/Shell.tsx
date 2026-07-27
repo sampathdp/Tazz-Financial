@@ -23,8 +23,9 @@ export const NAV: NavNode[] = [
     { id: 'loan/types', label: 'Loan Types', icon: 'layers' },
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
     { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
-    { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt', soon: true },
+    { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt' },
     { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert', soon: true },
+    { id: 'loan/doc-tracking', label: 'Document Tracking', icon: 'tag' },
   ] },
 
   { section: 'Funding / Investment', icon: 'pie', items: [

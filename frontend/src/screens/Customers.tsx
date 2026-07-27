@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { customersApi, branchesApi, customerDocumentsApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type AuthUser } from '../api'
+import { customersApi, branchesApi, customerDocumentsApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import type { Go } from './types'
@@ -25,6 +25,7 @@ const DOC_TYPE_OPTIONS: { value: CustomerDocType; label: string }[] = [
   { value: 'Other', label: 'Other' },
 ]
 const statusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'red', Blacklisted: 'amber' }
+const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.']
 
 const blankForm = (): Partial<Customer> => ({ status: 'Active' })
 
@@ -128,14 +129,14 @@ export function CustomersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser
   const back = () => { setMode('list'); setEditing(null); setErr('') }
 
   const save = async () => {
-    if (!form.fullName) { setErr('Full name is required.'); return }
+    if (!form.title || !form.surname || !form.initials) { setErr('Title, Surname and Initial are required.'); return }
     if (!form.branchId) { setErr('Branch is required.'); return }
     setBusy(true); setErr('')
     try {
       if (editing) await customersApi.update(editing.id, form)
       else await customersApi.create(form)
       back(); refresh()
-      notify.success(editing ? 'Customer updated' : 'Customer created', form.fullName)
+      notify.success(editing ? 'Customer updated' : 'Customer created', [form.title, form.initials, form.surname].filter(Boolean).join(' '))
     } catch (ex: any) {
       setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.nic_no?.[0] || 'Save failed')
     } finally { setBusy(false) }
@@ -153,7 +154,7 @@ export function CustomersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser
 
   const q = search.trim().toLowerCase()
   const filtered = q
-    ? rows.filter((c) => [c.fullName, c.code, c.nicNo, c.passportNo, c.drivingLicenseNo, c.phone, c.email, c.branch?.name]
+    ? rows.filter((c) => [c.fullName, c.surname, c.initials, c.code, c.nicNo, c.passportNo, c.drivingLicenseNo, c.phone, c.email, c.branch?.name]
         .some((v) => (v || '').toLowerCase().includes(q)))
     : rows
 
@@ -172,7 +173,12 @@ export function CustomersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser
         <Card style={{ marginBottom: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Personal Details</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Full Name" full><Input value={form.fullName || ''} onChange={(e) => set('fullName', e.target.value)} /></Field>
+            <Field label="Surname"><Input value={form.surname || ''} onChange={(e) => set('surname', e.target.value)} /></Field>
+            <Field label="Initial in Full without Surname"><Input value={form.nameInFull || ''} onChange={(e) => set('nameInFull', e.target.value)} /></Field>
+            <Field label="Initial"><Input value={form.initials || ''} onChange={(e) => set('initials', e.target.value)} placeholder="e.g. J.K." /></Field>
+            <Field label="Title"><Select value={form.title || ''} onChange={(e) => set('title', (e.target.value || undefined) as any)}>
+              <option value="">—</option>{TITLE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </Select></Field>
             <Field label="Branch"><Select value={form.branchId ?? ''} onChange={(e) => set('branchId', Number(e.target.value) || undefined as any)}>
               <option value="">—</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </Select></Field>

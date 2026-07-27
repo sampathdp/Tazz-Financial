@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class LoanType extends Model
 {
     protected $fillable = [
-        'parent_id', 'name', 'code', 'is_product', 'frequency',
+        'parent_id', 'name', 'code', 'reference_format', 'is_product', 'frequency', 'collection_days',
         'interest_method', 'interest_rate_percent', 'rate_period',
         'min_amount', 'max_amount', 'min_term_months', 'max_term_months',
         'penalty_rate_percent', 'penalty_method', 'processing_fee_percent',

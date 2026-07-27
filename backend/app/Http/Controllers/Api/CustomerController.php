@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Services\NumberGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -11,6 +12,7 @@ use Illuminate\Validation\Rule;
 class CustomerController extends Controller
 {
     private const OCCUPATION_TYPES = ['Employed', 'SelfEmployed', 'BusinessOwner', 'Unemployed', 'Retired', 'Student', 'Other'];
+    private const TITLES = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.'];
 
     public function index()
     {
@@ -29,11 +31,12 @@ class CustomerController extends Controller
 
         // Serialize code generation on the last row so two concurrent creates
         // can't compute the same "next" number.
-        $customer = DB::transaction(function () use ($data) {
-            $max = Customer::withTrashed()->lockForUpdate()->max('id') ?? 0;
-            $data['code'] = 'CUS-' . str_pad((string) ($max + 1), 6, '0', STR_PAD_LEFT);
+        $customer = DB::transaction(function () use ($data, $request) {
+            $data['code'] = NumberGenerator::next('customer', ['user_id' => $request->user()->id]);
+            $customer = Customer::create($data);
+            NumberGenerator::attach($data['code'], $customer);
 
-            return Customer::create($data);
+            return $customer;
         });
 
         return response()->json($customer->load('branch:id,name,code'), 201);
@@ -57,7 +60,10 @@ class CustomerController extends Controller
     {
         return $request->validate([
             'branch_id' => 'required|exists:branches,id',
-            'full_name' => 'required|string|max:191',
+            'title' => ['required', Rule::in(self::TITLES)],
+            'surname' => 'required|string|max:100',
+            'name_in_full' => 'nullable|string|max:191',
+            'initials' => 'required|string|max:32',
             'nic_no' => ['nullable', 'string', 'max:32', Rule::unique('customers', 'nic_no')->ignore($customer?->id)],
             'passport_no' => 'nullable|string|max:32',
             'driving_license_no' => 'nullable|string|max:32',

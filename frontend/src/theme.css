@@ -214,3 +214,10 @@ input,select,textarea{ font-family:inherit; }
   .hide-sm{ display:none; }
 }
 select option{ background:var(--bg-1); color:var(--tx-0); }
+
+@media print{
+  .mms-sb,.mms-top,.sb-scrim,.no-print{ display:none!important; }
+  .mms-main{ display:block!important; }
+  main{ padding:0!important; }
+  body,.mms-card{ background:#fff!important; color:#000!important; box-shadow:none!important; }
+}

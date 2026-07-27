@@ -19,7 +19,9 @@ class LoanSummary
         $today = Carbon::today();
         $schedules = $loan->schedules;
         $charges = $loan->charges;
-        $activePayments = $loan->payments->where('status', '!=', 'Voided');
+        // A pending settlement reserves an amount for review but hasn't been
+        // allocated yet — it must not count as "received" until approved.
+        $activePayments = $loan->payments->where('status', '!=', 'Voided')->where('approval_status', '!=', 'PendingApproval');
 
         $rows = $schedules->map(function ($s) {
             $paidPrincipal = (float) $s->allocations->sum('principal_applied');
