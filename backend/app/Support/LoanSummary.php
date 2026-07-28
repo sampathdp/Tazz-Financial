@@ -75,6 +75,11 @@ class LoanSummary
         $defaultCharges = round((float) $rows->filter(fn ($r) => !$r->isFuture)->sum('remainingPenalty'), 2);
         $futureCapital = round((float) $rows->filter(fn ($r) => $r->isFuture)->sum('remainingPrincipal'), 2);
         $futureInterest = round((float) $rows->filter(fn ($r) => $r->isFuture)->sum('remainingInterest'), 2);
+        // Interest remaining across the WHOLE loan (overdue + future combined) —
+        // distinct from futureInterest above, which only counts installments not
+        // yet due. Waivers screen shows this one: "future interest" there means
+        // the full remaining interest, not just the strictly-future slice.
+        $totalInterestRemaining = round((float) $rows->sum('remainingInterest'), 2);
 
         $dueToDate = round((float) $schedules->filter(fn ($s) => !$s->due_date->greaterThan($today))->sum('total_due'), 2);
         $overPayment = round(max(0, $rentalPaid - $dueToDate), 2);
@@ -100,6 +105,7 @@ class LoanSummary
                 'overPayment' => $overPayment,
                 'futureCapital' => $futureCapital,
                 'futureInterest' => $futureInterest,
+                'totalInterestRemaining' => $totalInterestRemaining,
                 'balancePrePayment' => $balancePrePayment,
                 'amountToBeCollected' => $amountToBeCollected,
             ],

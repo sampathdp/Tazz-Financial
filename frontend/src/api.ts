@@ -348,7 +348,7 @@ export interface LoanSummary {
   dueBreakdown: LoanDueTypeRow[];
   arrears: {
     rentalArrears: number; otherChargeArrears: number; defaultCharges: number; totalArrears: number;
-    overPayment: number; futureCapital: number; futureInterest: number;
+    overPayment: number; futureCapital: number; futureInterest: number; totalInterestRemaining: number;
     balancePrePayment: number; amountToBeCollected: number;
   };
   recovery: {

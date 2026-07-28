@@ -253,7 +253,7 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
             {[
               { label: 'Future Capital', value: arrears.futureCapital },
-              { label: 'Future Interest', value: arrears.futureInterest },
+              { label: 'Total Interest (Remaining)', value: arrears.totalInterestRemaining },
               { label: 'OD / Default Charges', value: arrears.defaultCharges },
               { label: 'Other Charges', value: arrears.otherChargeArrears },
             ].map((it) => (
