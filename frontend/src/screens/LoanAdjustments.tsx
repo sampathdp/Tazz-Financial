@@ -1,13 +1,15 @@
-/* Tazz Investment & Credit — Loan Adjustments (admin-only). These three actions
+/* Tazz Investment & Credit — Loan Adjustments (admin-only). These actions
    directly change a loan's schedule/balance or a receipt's outcome after the
    fact, so they're kept off the regular Loan Detail / Payment Receipt screens
    (which everyone with Loan Payments access can reach) and consolidated here
-   behind the 'admin' route middleware — see routes/api.php. */
+   behind the 'admin' route middleware — see routes/api.php. Document/Legal/
+   Valuation/Other charges are permission-gated on the backend (Active Loans),
+   not admin-only, but this is the only place a charge can actually be added. */
 import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td } from '../components/ui'
 import {
-  loansApi, loanSchedulesApi, loanWaiversApi, loanPostDatedChequesApi, loanPaymentsApi,
-  type Loan, type LoanSchedule, type LoanWaiver, type WaiverType,
+  loansApi, loanSchedulesApi, loanWaiversApi, loanPostDatedChequesApi, loanPaymentsApi, loanChargesApi,
+  type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type LoanChargeType,
   type AuthUser, type LoanPostDatedCheque, type ChequeStatus,
 } from '../api'
 import { Icon } from '../components/Icon'
@@ -21,6 +23,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = { Paid: 'green', Partial: 'amber', Overdue: 'red', Pending: 'neutral' }
 const balanceOf = (r: LoanSchedule) => Math.max(0, num(r.totalDue) - num(r.paidAmount))
 const WAIVER_TYPES: WaiverType[] = ['Interest', 'Penalty', 'Charge', 'Principal']
+const CHARGE_TYPES: LoanChargeType[] = ['Document', 'Legal', 'Valuation', 'Other']
 
 /* ============================ Installment Skip =========================== */
 function SkipSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
@@ -275,11 +278,115 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   )
 }
 
+/* ================================ Charges ================================= */
+function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
+  const [loans, setLoans] = useState<Loan[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<Loan | null>(null)
+  const [loadingLoan, setLoadingLoan] = useState(false)
+  // Only the amount owed is entered here — it's paid down automatically when the
+  // customer pays (Payment Receipt), same as interest/principal, never typed in directly.
+  const [form, setForm] = useState<{ chargeType: LoanChargeType; dueAmount: string; chargedAt: string; notes: string }>(
+    { chargeType: 'Document', dueAmount: '', chargedAt: todayIso(), notes: '' },
+  )
+  const [busy, setBusy] = useState(false)
+  const [charges, setCharges] = useState<LoanCharge[]>([])
+  const [chargesLoading, setChargesLoading] = useState(false)
+
+  useEffect(() => { loansApi.list().then(setLoans).catch(() => setLoans([])).finally(() => setLoading(false)) }, [])
+
+  const loadCharges = (loanId: number) => {
+    setChargesLoading(true)
+    loanChargesApi.list(loanId).then(setCharges).catch(() => setCharges([])).finally(() => setChargesLoading(false))
+  }
+
+  const pickLoan = async (_n: string, opt?: Loan) => {
+    if (!opt) { setSelected(null); setCharges([]); return }
+    setLoadingLoan(true)
+    try { setSelected(await loansApi.get(opt.id)) } catch { setSelected(opt) } finally { setLoadingLoan(false) }
+    loadCharges(opt.id)
+  }
+
+  const add = async () => {
+    if (!selected || !form.dueAmount) return
+    setBusy(true)
+    try {
+      await loanChargesApi.create(selected.id, {
+        chargeType: form.chargeType, dueAmount: form.dueAmount,
+        chargedAt: form.chargedAt || undefined, notes: form.notes || undefined,
+      })
+      setForm({ chargeType: 'Document', dueAmount: '', chargedAt: todayIso(), notes: '' })
+      notify.success('Charge recorded')
+      loadCharges(selected.id)
+    } catch (ex: any) {
+      notify.error('Add failed', ex?.response?.data?.message)
+    } finally { setBusy(false) }
+  }
+  const remove = async (c: LoanCharge) => {
+    const ok = await notify.confirm({ title: `Delete this ${c.chargeType.toLowerCase()} charge?`, danger: true, okText: 'Delete' })
+    if (!ok || !selected) return
+    try { await loanChargesApi.remove(c.id); notify.success('Charge deleted'); loadCharges(selected.id) }
+    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+  }
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Find Loan</div>
+        <SearchSelect
+          value={selected ? `${selected.code} — ${selected.customer?.fullName}` : ''}
+          onChange={(_n, opt) => pickLoan(_n, opt)}
+          options={loans}
+          getLabel={(l: Loan) => `${l.code} — ${l.customer?.fullName}`}
+          getSub={(l: Loan) => [l.customer?.nicNo, l.customer?.phone].filter(Boolean).join(' · ')}
+          placeholder={loading ? 'Loading loans…' : 'Search by NIC, Loan ID, or customer name…'}
+          disabled={loading}
+        />
+      </Card>
+
+      {loadingLoan && <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-2)' }}>Loading loan…</div>}
+
+      {selected && !loadingLoan && (
+        <Card>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Charges (Document / Legal / Valuation / Other) — {selected.code}</div>
+          <div className="row gap-2 wrap" style={{ marginBottom: 14 }}>
+            <Select value={form.chargeType} onChange={(e) => setForm((s) => ({ ...s, chargeType: e.target.value as LoanChargeType }))} style={{ maxWidth: 140 }}>
+              {CHARGE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </Select>
+            <Input type="number" placeholder="Amount" value={form.dueAmount} onChange={(e) => setForm((s) => ({ ...s, dueAmount: e.target.value }))} style={{ maxWidth: 130 }} />
+            <Input type="date" value={form.chargedAt} onChange={(e) => setForm((s) => ({ ...s, chargedAt: e.target.value }))} style={{ maxWidth: 160 }} />
+            <Input placeholder="Notes" value={form.notes} onChange={(e) => setForm((s) => ({ ...s, notes: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
+            <Btn variant="primary" size="sm" icon="plus" onClick={add} disabled={busy}>Add</Btn>
+          </div>
+          {chargesLoading ? <div className="t-2" style={{ fontSize: 12.5 }}>Loading…</div> :
+          charges.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No charges recorded.</div> :
+            <div className="col gap-2">
+              {charges.map((c) => (
+                <div key={c.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
+                  <div>
+                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>{c.chargeType}</span>
+                    <span className="t-2" style={{ fontSize: 12 }}> — {c.notes || 'no notes'} · {dateOnly(c.chargedAt)} · by {c.creator?.name}</span>
+                  </div>
+                  <div className="row gap-2" style={{ alignItems: 'center' }}>
+                    <span className="t-2" style={{ fontSize: 12 }}>Due {money(c.dueAmount)} · Balance</span>
+                    <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(num(c.dueAmount) - num(c.paidAmount))}</span>
+                    <button className="mms-act" title="Delete" onClick={() => remove(c)}><Icon n="trash" s={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>}
+        </Card>
+      )}
+    </div>
+  )
+}
+
 /* ================================ Screen ================================= */
 const TABS = [
   { id: 'skip', label: 'Installment Skip', icon: 'clock' },
   { id: 'cheques', label: 'Cheque Clearance', icon: 'cheque' },
   { id: 'waivers', label: 'Waivers', icon: 'refund' },
+  { id: 'charges', label: 'Charges', icon: 'tag' },
 ] as const
 
 export function LoanAdjustmentsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
@@ -294,7 +401,7 @@ export function LoanAdjustmentsScreen({ user: me }: { go: Go; user?: AuthUser | 
 
   return (
     <div>
-      <PageHead crumbs="Loan Management" title="Loan Adjustments" icon="shield" sub="Installment skip, cheque realize/reject, and waivers — admin only." />
+      <PageHead crumbs="Loan Management" title="Loan Adjustments" icon="shield" sub="Installment skip, cheque realize/reject, waivers, and charges — admin only." />
       <div className="row gap-2" style={{ marginBottom: 16, overflowX: 'auto', paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
         {TABS.map((t) => (
           <Btn key={t.id} size="sm" variant="ghost" active={tab === t.id} icon={t.icon} onClick={() => setTab(t.id)} style={{ flexShrink: 0 }}>{t.label}</Btn>
@@ -303,6 +410,7 @@ export function LoanAdjustmentsScreen({ user: me }: { go: Go; user?: AuthUser | 
       {tab === 'skip' && <SkipSection notify={notify} />}
       {tab === 'cheques' && <ChequeSection notify={notify} />}
       {tab === 'waivers' && <WaiversSection notify={notify} />}
+      {tab === 'charges' && <ChargesSection notify={notify} />}
     </div>
   )
 }

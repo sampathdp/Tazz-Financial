@@ -75,6 +75,7 @@ class LoanTypeController extends Controller
             'max_term_months' => [$isProduct ? 'required' : 'nullable', 'integer', 'gte:min_term_months'],
             'penalty_rate_percent' => 'nullable|numeric|min:0',
             'penalty_method' => ['nullable', Rule::in(self::PENALTY_METHODS)],
+            'grace_period_days' => 'nullable|integer|min:0',
             'processing_fee_percent' => 'nullable|numeric|min:0',
         ]);
 

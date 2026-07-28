@@ -6,9 +6,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, inputStyle } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import {
-  loansApi, loanChargesApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, api,
+  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, api,
   type Loan, type LoanStatus, type LoanSchedule,
-  type LoanCharge, type LoanChargeType, type LoanPostDatedCheque, type ChequeStatus,
+  type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type LoanDocType, type LoanDiaryNote,
   type AuthUser,
 } from '../../api'
@@ -31,7 +31,6 @@ const chequeTone: Record<ChequeStatus, 'green' | 'red' | 'amber' | 'neutral' | '
   Pending: 'neutral', Handed: 'blue', Realized: 'green', Bounced: 'red', Returned: 'amber',
 }
 
-const CHARGE_TYPES: LoanChargeType[] = ['Document', 'Legal', 'Valuation', 'Other']
 const DOC_TYPES: { value: LoanDocType; label: string }[] = [
   { value: 'ContractImage', label: 'Contract Image' },
   { value: 'Agreement', label: 'Agreement' },

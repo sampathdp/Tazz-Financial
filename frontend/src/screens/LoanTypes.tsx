@@ -23,6 +23,7 @@ const blankForm = (parentId: number | null): Partial<LoanType> => ({
   isProduct: true,
   ratePeriod: 'monthly',
   penaltyMethod: 'flat',
+  gracePeriodDays: 5,
   collectionDays: 'all_days',
   status: 'Active',
   referenceFormat: DEFAULT_REFERENCE_FORMAT,
@@ -215,6 +216,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
               <Field label="Penalty Method"><Select value={form.penaltyMethod || 'flat'} onChange={(e) => set('penaltyMethod', e.target.value as any)}>
                 <option value="flat">Flat</option><option value="daily">Daily</option>
               </Select></Field>
+              <Field label="Grace Period (Days)"><Input type="number" min={0} value={form.gracePeriodDays ?? 5} onChange={(e) => set('gracePeriodDays', Number(e.target.value) as any)} /></Field>
               <Field label="Processing Fee %"><Input type="number" step="0.001" value={form.processingFeePercent ?? ''} onChange={(e) => set('processingFeePercent', e.target.value as any)} /></Field>
             </div>
 

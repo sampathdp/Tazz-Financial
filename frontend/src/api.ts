@@ -199,6 +199,8 @@ export interface LoanType {
   maxTermMonths?: number | null;
   penaltyRatePercent?: number | string | null;
   penaltyMethod?: 'flat' | 'daily' | null;
+  /** Days after due_date before default interest starts accruing. Default 5. */
+  gracePeriodDays?: number | null;
   processingFeePercent?: number | string | null;
   sortOrder?: number;
   status?: 'Active' | 'Inactive';

@@ -5,9 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\Loan;
+use App\Models\LoanChargeAllocation;
 use App\Models\LoanPayment;
 use App\Models\LoanPaymentAllocation;
 use App\Services\NumberGenerator;
+use App\Support\LoanSummary;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -189,16 +192,24 @@ class LoanPaymentController extends Controller
             return response()->json(['message' => 'Reject the pending settlement request instead of voiding it.'], 422);
         }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
+        $payment->load(['allocations.schedule', 'chargeAllocations.charge']);
 
         DB::transaction(function () use ($payment, $data, $request) {
             foreach ($payment->allocations as $alloc) {
                 $row = $alloc->schedule;
-                $newPaid = max(0, round((float) $row->paid_amount - $alloc->principal_applied - $alloc->interest_applied - $alloc->penalty_applied, 2));
+                // paid_amount tracks principal+interest only (an installment's total_due
+                // never includes penalty — see LoanAmortizer), so only reverse those two;
+                // penalty_applied is netted off separately via LoanSummary's live estimate.
+                $newPaid = max(0, round((float) $row->paid_amount - $alloc->principal_applied - $alloc->interest_applied, 2));
                 $row->update([
                     'paid_amount' => $newPaid,
                     'status' => $newPaid <= 0 ? 'Pending' : ($newPaid >= (float) $row->total_due ? 'Paid' : 'Partial'),
                     'paid_at' => $newPaid >= (float) $row->total_due ? $row->paid_at : null,
                 ]);
+            }
+            foreach ($payment->chargeAllocations as $chargeAlloc) {
+                $charge = $chargeAlloc->charge;
+                $charge->update(['paid_amount' => max(0, round((float) $charge->paid_amount - $chargeAlloc->amount_applied, 2))]);
             }
             $loan = $payment->loan;
             if ($loan->status === 'Closed') {
@@ -217,58 +228,166 @@ class LoanPaymentController extends Controller
         return response()->noContent();
     }
 
-    private function outstandingBalance(Loan $loan): float
+    /** Standard-practice loan servicing figures for this loan's penalty config
+     *  (see LoanSummary::penaltyDueForRow) — shared by outstandingBalance() and
+     *  applyAllocation() so both price "OD" identically. */
+    private function penaltyTerms(Loan $loan): array
     {
-        $schedules = $loan->schedules()->where('status', '!=', 'Paid')->get();
-
-        return round($schedules->sum(fn ($s) => (float) $s->total_due - (float) $s->paid_amount), 2);
+        return [
+            (int) ($loan->loanType?->grace_period_days ?? 5),
+            (float) ($loan->loanType?->penalty_rate_percent ?? 0),
+            $loan->loanType?->penalty_method ?? 'flat',
+        ];
     }
 
-    /** Applies `$amount` across the loan's unpaid schedule rows oldest-first
-     *  (interest before principal on each), then closes the loan if that clears
-     *  the balance. Shared by an immediate payment and an approved settlement. */
+    /** Everything this loan owes right now: unpaid principal+interest, unpaid
+     *  penalty/OD (live estimate, same formula as the Contract Status tab), and
+     *  unpaid Document/Legal/Valuation/Other charges. */
+    private function outstandingBalance(Loan $loan): float
+    {
+        $schedules = $loan->schedules()->with('allocations.payment:id,status,approval_status')->get();
+        $scheduleBalance = $schedules->where('status', '!=', 'Paid')
+            ->sum(fn ($s) => (float) $s->total_due - (float) $s->paid_amount);
+
+        [$graceDays, $penaltyRate, $penaltyMethod] = $this->penaltyTerms($loan);
+        $today = Carbon::today();
+        $penaltyBalance = $penaltyRate > 0
+            ? $schedules->sum(function ($s) use ($graceDays, $penaltyRate, $penaltyMethod, $today) {
+                $due = LoanSummary::penaltyDueForRow($s, $graceDays, $penaltyRate, $penaltyMethod, $today);
+                $paid = LoanSummary::activePenaltyPaid($s);
+
+                return max(0, round($due - $paid, 2));
+            })
+            : 0.0;
+
+        $chargesBalance = (float) $loan->charges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
+
+        return round($scheduleBalance + $penaltyBalance + $chargesBalance, 2);
+    }
+
+    /**
+     * Applies `$amount` in standard loan-servicing order: Interest, then OD
+     * (penalty), then other charges (Document/Legal/Valuation/Other), then
+     * Principal — each bucket oldest-first across the loan's unpaid
+     * installments/charges — then closes the loan once nothing is owed.
+     * Shared by an immediate payment, an approved settlement, and a realized
+     * cheque.
+     */
     private function applyAllocation(Loan $loan, LoanPayment $payment, float $amount): void
     {
-        $schedules = $loan->schedules()->where('status', '!=', 'Paid')->orderBy('installment_no')->get();
-        $paidByRow = LoanPaymentAllocation::whereIn('loan_schedule_id', $schedules->pluck('id'))
-            ->selectRaw('loan_schedule_id, SUM(interest_applied) as interest_applied, SUM(principal_applied) as principal_applied')
-            ->groupBy('loan_schedule_id')->get()->keyBy('loan_schedule_id');
+        $schedules = $loan->schedules()->where('status', '!=', 'Paid')->orderBy('installment_no')
+            ->with('allocations.payment:id,status,approval_status')->get();
+        [$graceDays, $penaltyRate, $penaltyMethod] = $this->penaltyTerms($loan);
+        $today = Carbon::today();
+
+        // A void doesn't delete allocation rows (kept for audit trail), so every
+        // "how much of this row is already paid" lookup below must exclude a
+        // voided (or still-pending-approval) payment's rows explicitly — the
+        // authoritative-and-already-reversed paid_amount only covers principal+
+        // interest combined, not the per-bucket split these passes need.
+        $activeApplied = fn ($row, string $column) => (float) $row->allocations
+            ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
+            ->sum($column);
+
+        // Accumulate this payment's contribution per schedule row across all
+        // three buckets that touch schedules, so exactly one allocation row is
+        // written per installment (mirrors the pre-existing convention).
+        $applied = [];
+        $touch = function (int $scheduleId, string $bucket, float $amt) use (&$applied) {
+            if ($amt <= 0) {
+                return;
+            }
+            $applied[$scheduleId] ??= ['interest' => 0.0, 'penalty' => 0.0, 'principal' => 0.0];
+            $applied[$scheduleId][$bucket] += $amt;
+        };
 
         $remaining = $amount;
+
+        // 1) Interest — oldest installment first.
         foreach ($schedules as $row) {
             if ($remaining <= 0) {
                 break;
             }
-            $balance = round((float) $row->total_due - (float) $row->paid_amount, 2);
-            if ($balance <= 0) {
+            $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2));
+            if ($due <= 0) {
                 continue;
             }
-            $applied = min($remaining, $balance);
-            $priorInterest = (float) ($paidByRow[$row->id]->interest_applied ?? 0);
-            $interestRemaining = max(0, round((float) $row->interest_due - $priorInterest, 2));
-            $interestApplied = min($applied, $interestRemaining);
-            $principalApplied = round($applied - $interestApplied, 2);
+            $pay = min($remaining, $due);
+            $touch($row->id, 'interest', $pay);
+            $remaining = round($remaining - $pay, 2);
+        }
 
+        // 2) OD / penalty — live estimate per installment, oldest first.
+        if ($remaining > 0 && $penaltyRate > 0) {
+            foreach ($schedules as $row) {
+                if ($remaining <= 0) {
+                    break;
+                }
+                $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $penaltyRate, $penaltyMethod, $today);
+                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied'), 2));
+                if ($due <= 0) {
+                    continue;
+                }
+                $pay = min($remaining, $due);
+                $touch($row->id, 'penalty', $pay);
+                $remaining = round($remaining - $pay, 2);
+            }
+        }
+
+        // 3) Other charges (Document/Legal/Valuation/Other) — oldest first.
+        if ($remaining > 0) {
+            $charges = $loan->charges()->orderBy('charged_at')->get();
+            foreach ($charges as $charge) {
+                if ($remaining <= 0) {
+                    break;
+                }
+                $due = max(0, round((float) $charge->due_amount - (float) $charge->paid_amount, 2));
+                if ($due <= 0) {
+                    continue;
+                }
+                $pay = min($remaining, $due);
+                $charge->update(['paid_amount' => round((float) $charge->paid_amount + $pay, 2)]);
+                LoanChargeAllocation::create(['loan_payment_id' => $payment->id, 'loan_charge_id' => $charge->id, 'amount_applied' => $pay]);
+                $remaining = round($remaining - $pay, 2);
+            }
+        }
+
+        // 4) Principal — oldest installment first, whatever's left.
+        foreach ($schedules as $row) {
+            if ($remaining <= 0) {
+                break;
+            }
+            $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2));
+            if ($due <= 0) {
+                continue;
+            }
+            $pay = min($remaining, $due);
+            $touch($row->id, 'principal', $pay);
+            $remaining = round($remaining - $pay, 2);
+        }
+
+        foreach ($applied as $scheduleId => $buckets) {
             LoanPaymentAllocation::create([
                 'loan_payment_id' => $payment->id,
-                'loan_schedule_id' => $row->id,
-                'principal_applied' => $principalApplied,
-                'interest_applied' => $interestApplied,
-                'penalty_applied' => 0,
+                'loan_schedule_id' => $scheduleId,
+                'principal_applied' => round($buckets['principal'], 2),
+                'interest_applied' => round($buckets['interest'], 2),
+                'penalty_applied' => round($buckets['penalty'], 2),
             ]);
 
-            $newPaid = round((float) $row->paid_amount + $applied, 2);
+            $row = $schedules->firstWhere('id', $scheduleId);
+            // Only principal+interest count toward an installment's own total_due/
+            // status — penalty is priced and collected separately (see above) and
+            // never was, and isn't now, part of that figure (see LoanAmortizer).
+            $newPaid = round((float) $row->paid_amount + $buckets['interest'] + $buckets['principal'], 2);
             $row->update([
                 'paid_amount' => $newPaid,
                 'status' => $newPaid >= (float) $row->total_due ? 'Paid' : 'Partial',
                 'paid_at' => $newPaid >= (float) $row->total_due ? now() : $row->paid_at,
             ]);
-
-            $remaining = round($remaining - $applied, 2);
         }
 
-        $stillOwed = $loan->schedules()->get()->sum(fn ($s) => (float) $s->total_due - (float) $s->paid_amount);
-        if (round($stillOwed, 2) <= 0) {
+        if ($this->outstandingBalance($loan) <= 0) {
             $loan->update(['status' => 'Closed', 'closed_at' => now()]);
         }
     }

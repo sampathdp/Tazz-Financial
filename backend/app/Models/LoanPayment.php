@@ -54,4 +54,9 @@ class LoanPayment extends Model
     {
         return $this->hasMany(LoanPaymentAllocation::class);
     }
+
+    public function chargeAllocations()
+    {
+        return $this->hasMany(LoanChargeAllocation::class);
+    }
 }
