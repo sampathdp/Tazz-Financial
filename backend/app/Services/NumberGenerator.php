@@ -14,10 +14,10 @@ use Illuminate\Support\Facades\DB;
  * doesn't open one itself, since it always runs alongside the parent record's
  * creation (e.g. LoanController::store()'s transaction).
  *
- * Placeholders: {BRANCH} branch code, {CODE} loan type code, {TYPE} caller-
- * supplied short code (e.g. payment method), {YEAR} / {YEAR:n} year, last n
- * digits (default 4), {SEQ} / {SEQ:n} sequence zero-padded to n digits
- * (default 6).
+ * Placeholders: {BRANCH} branch code, {CODE} loan type / funding product
+ * code (whichever the module uses), {TYPE} caller-supplied short code (e.g.
+ * payment method), {YEAR} / {YEAR:n} year, last n digits (default 4),
+ * {SEQ} / {SEQ:n} sequence zero-padded to n digits (default 6).
  */
 class NumberGenerator
 {
@@ -28,21 +28,33 @@ class NumberGenerator
         // LoanPaymentController::TYPE_CODES. One shared sequence per
         // branch+year across all methods, same as a physical receipt book.
         'payment' => '{BRANCH}-{TYPE}-{YEAR:2}-{SEQ:5}',
+        'fd_deposit' => '{BRANCH}-DEP-{YEAR:2}-{SEQ:6}',
+        'fixed_deposit' => '{BRANCH}-FD-{CODE}-{YEAR:2}-{SEQ:6}',
+        'fd_withdrawal' => '{BRANCH}-FDV-{YEAR:2}-{SEQ:5}',
     ];
+
+    // Modules whose {CODE} placeholder is keyed off a funding product (own
+    // number_sequences column) rather than a loan type — see the
+    // 2026_07_28_102007 migration for why they can't share loan_type_id.
+    private const PRODUCT_SCOPED_MODULES = ['fixed_deposit'];
 
     public static function next(string $module, array $context = [], ?string $format = null): string
     {
         $format ??= self::DEFAULT_FORMATS[$module] ?? throw new \InvalidArgumentException("No default reference format for module [{$module}].");
 
         $usesBranch = str_contains($format, '{BRANCH}');
-        $usesLoanType = str_contains($format, '{CODE}');
+        $usesCode = str_contains($format, '{CODE}');
+        $isProductScoped = in_array($module, self::PRODUCT_SCOPED_MODULES, true);
+        $usesLoanType = $usesCode && !$isProductScoped;
+        $usesProduct = $usesCode && $isProductScoped;
         $usesYear = (bool) preg_match('/\{YEAR(?::\d+)?\}/', $format);
 
         $branchId = $usesBranch ? (int) ($context['branch_id'] ?? 0) : 0;
         $loanTypeId = $usesLoanType ? (int) ($context['loan_type_id'] ?? 0) : 0;
+        $productId = $usesProduct ? (int) ($context['funding_product_id'] ?? 0) : 0;
         $year = $usesYear ? (int) now()->format('Y') : 0;
 
-        $key = ['module' => $module, 'branch_id' => $branchId, 'loan_type_id' => $loanTypeId, 'year' => $year];
+        $key = ['module' => $module, 'branch_id' => $branchId, 'loan_type_id' => $loanTypeId, 'funding_product_id' => $productId, 'year' => $year];
 
         // Atomically create the counter row if this is the first number ever
         // issued for this key, then lock it so concurrent requests serialize
@@ -54,7 +66,7 @@ class NumberGenerator
 
         $number = strtr($format, [
             '{BRANCH}' => $context['branch_code'] ?? '',
-            '{CODE}' => $context['loan_type_code'] ?? '',
+            '{CODE}' => $context['loan_type_code'] ?? $context['funding_product_code'] ?? '',
             '{TYPE}' => $context['type_code'] ?? '',
         ]);
         $number = preg_replace_callback(
@@ -73,6 +85,7 @@ class NumberGenerator
             'number' => $number,
             'branch_id' => $branchId ?: null,
             'loan_type_id' => $loanTypeId ?: null,
+            'funding_product_id' => $productId ?: null,
             'year' => $year ?: null,
             'sequence' => $sequence,
             'generated_by' => $context['user_id'] ?? null,

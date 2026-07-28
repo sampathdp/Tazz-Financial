@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\FdDeposit;
+use App\Models\FixedDeposit;
 use App\Models\Loan;
 use App\Services\NumberGenerator;
 use Illuminate\Http\Request;
@@ -45,6 +47,15 @@ class CustomerController extends Controller
         )->get();
 
         return ['borrower' => $borrower, 'guarantor' => $guarantor];
+    }
+
+    /** Full funding history for a customer's profile view: every deposit and Fixed Deposit they hold. */
+    public function funding(Customer $customer)
+    {
+        return [
+            'deposits' => FdDeposit::where('customer_id', $customer->id)->orderByDesc('id')->get(),
+            'fixed_deposits' => FixedDeposit::with('fundingProduct:id,name,code')->where('customer_id', $customer->id)->orderByDesc('id')->get(),
+        ];
     }
 
     public function store(Request $request)

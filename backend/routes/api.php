@@ -8,6 +8,12 @@ use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerDocumentController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\FdDepositController;
+use App\Http\Controllers\Api\FdInterestPaymentController;
+use App\Http\Controllers\Api\FixedDepositController;
+use App\Http\Controllers\Api\FundingDashboardController;
+use App\Http\Controllers\Api\FundingProductController;
+use App\Http\Controllers\Api\FundingReportController;
 use App\Http\Controllers\Api\GeneratedNumberController;
 use App\Http\Controllers\Api\LoanChargeController;
 use App\Http\Controllers\Api\LoanController;
@@ -75,6 +81,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('customers', [CustomerController::class, 'index'])->middleware('perm:Customer Management,View');
     Route::get('customers/{customer}', [CustomerController::class, 'show'])->middleware('perm:Customer Management,View');
     Route::get('customers/{customer}/loans', [CustomerController::class, 'loans'])->middleware('perm:Customer Management,View');
+    Route::get('customers/{customer}/funding', [CustomerController::class, 'funding'])->middleware('perm:Customer Management,View');
     Route::post('customers', [CustomerController::class, 'store'])->middleware('perm:Customer Management,Create');
     Route::put('customers/{customer}', [CustomerController::class, 'update'])->middleware('perm:Customer Management,Edit');
     Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->middleware('perm:Customer Management,Delete');
@@ -173,4 +180,31 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('master-categories', [MasterCategoryController::class, 'store'])->middleware('perm:Masters,Create');
     Route::put('master-categories/{masterCategory}', [MasterCategoryController::class, 'update'])->middleware('perm:Masters,Edit');
     Route::delete('master-categories/{masterCategory}', [MasterCategoryController::class, 'destroy'])->middleware('perm:Masters,Delete');
+
+    // --- Funding Management: Funding Products ---
+    Route::get('funding-products', [FundingProductController::class, 'index'])->middleware('perm:Funding Products,View');
+    Route::post('funding-products', [FundingProductController::class, 'store'])->middleware('perm:Funding Products,Create');
+    Route::put('funding-products/{fundingProduct}', [FundingProductController::class, 'update'])->middleware('perm:Funding Products,Edit');
+    Route::delete('funding-products/{fundingProduct}', [FundingProductController::class, 'destroy'])->middleware('perm:Funding Products,Delete');
+
+    // --- Funding Management: Deposits (cash-in, before an FD exists) ---
+    Route::get('fd-deposits', [FdDepositController::class, 'index'])->middleware('perm:Deposits,View');
+    Route::get('fd-deposits/{fdDeposit}', [FdDepositController::class, 'show'])->middleware('perm:Deposits,View');
+    Route::post('fd-deposits', [FdDepositController::class, 'store'])->middleware('perm:Deposits,Create');
+    Route::delete('fd-deposits/{fdDeposit}', [FdDepositController::class, 'destroy'])->middleware('perm:Deposits,Delete');
+
+    // --- Funding Management: Fixed Deposits ---
+    Route::get('fixed-deposits', [FixedDepositController::class, 'index'])->middleware('perm:Fixed Deposits,View');
+    Route::get('fixed-deposits/{fixedDeposit}', [FixedDepositController::class, 'show'])->middleware('perm:Fixed Deposits,View');
+    Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->middleware('perm:Fixed Deposits,Create');
+    Route::post('fixed-deposits/{fixedDeposit}/renew', [FixedDepositController::class, 'renew'])->middleware('perm:Fixed Deposits,Edit');
+    Route::post('fixed-deposits/{fixedDeposit}/withdraw', [FixedDepositController::class, 'withdraw'])->middleware('perm:Fixed Deposits,Edit');
+
+    // --- Funding Management: Monthly Interest Payments ---
+    Route::get('fixed-deposits/{fixedDeposit}/interest-payments', [FdInterestPaymentController::class, 'index'])->middleware('perm:Fixed Deposits,View');
+    Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware('perm:Fixed Deposits,Edit');
+
+    // --- Funding Management: Reports & Dashboard ---
+    Route::get('funding-reports/{type}', [FundingReportController::class, 'show'])->middleware('perm:Funding Reports,View');
+    Route::get('funding-dashboard', [FundingDashboardController::class, 'index'])->middleware('perm:Funding Reports,View');
 });

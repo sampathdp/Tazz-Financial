@@ -71,6 +71,11 @@ class DatabaseSeeder extends Seeder
             'Bank Accounts' => ['View' => true, 'Create' => true, 'Edit' => true],
             'Bank Transactions' => ['View' => true, 'Create' => true, 'Delete' => true],
             'Bank Reconciliation' => ['View' => true, 'Create' => true, 'Edit' => true],
+            // Funding products are HQ-configured, same rationale as Loan Types above.
+            'Funding Products' => ['View' => true],
+            'Deposits' => ['View' => true, 'Create' => true, 'Delete' => true],
+            'Fixed Deposits' => ['View' => true, 'Create' => true, 'Edit' => true],
+            'Funding Reports' => ['View' => true],
         ]);
 
         $staff = Role::updateOrCreate(['slug' => 'staff'], [
@@ -86,6 +91,8 @@ class DatabaseSeeder extends Seeder
             'Loan Applications' => ['View' => true, 'Create' => true, 'Edit' => true],
             'Active Loans' => ['View' => true],
             'Loan Payments' => ['View' => true, 'Create' => true, 'Edit' => true],
+            'Deposits' => ['View' => true, 'Create' => true],
+            'Fixed Deposits' => ['View' => true, 'Create' => true],
         ]);
 
         // Cashier — the only role allowed to apply for a full loan settlement (see
@@ -103,6 +110,9 @@ class DatabaseSeeder extends Seeder
             'Loan Applications' => ['View' => true],
             'Active Loans' => ['View' => true],
             'Loan Payments' => ['View' => true, 'Create' => true, 'Edit' => true],
+            // Records counter deposits and pays out monthly FD interest/withdrawals (Edit).
+            'Deposits' => ['View' => true, 'Create' => true],
+            'Fixed Deposits' => ['View' => true, 'Create' => true, 'Edit' => true],
         ]);
     }
 

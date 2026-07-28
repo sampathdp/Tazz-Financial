@@ -33,9 +33,11 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Funding / Investment', icon: 'pie', items: [
-    { id: 'fund/investors', label: 'Investors', icon: 'users', soon: true },
-    { id: 'fund/plans', label: 'Investment Plans', icon: 'layers', soon: true },
-    { id: 'fund/investments', label: 'Investments', icon: 'pie', soon: true },
+    { id: 'fund/dashboard', label: 'Funding Dashboard', icon: 'pie' },
+    { id: 'fund/products', label: 'Funding Products', icon: 'layers' },
+    { id: 'fund/deposits', label: 'Deposits', icon: 'wallet' },
+    { id: 'fund/fds', label: 'Fixed Deposits', icon: 'coins' },
+    { id: 'fund/reports', label: 'Funding Reports', icon: 'chart' },
   ] },
 
   { section: 'Pawning Management', icon: 'tag', items: [

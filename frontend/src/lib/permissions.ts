@@ -45,6 +45,11 @@ export const ROUTE_MODULE: Record<string, string> = {
   'bank/recon': 'Bank Reconciliation',
   'masters/expense-categories': 'Masters',
   'masters/bank-account-types': 'Masters',
+  'fund/dashboard': 'Funding Reports',
+  'fund/products': 'Funding Products',
+  'fund/deposits': 'Deposits',
+  'fund/fds': 'Fixed Deposits',
+  'fund/reports': 'Funding Reports',
 }
 
 export function canAccessRoute(user: AuthUser | null | undefined, routeId: string): boolean {

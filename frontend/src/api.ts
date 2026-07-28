@@ -561,6 +561,154 @@ export const customerLoansApi = {
     http.get(`/customers/${customerId}/loans`).then((r) => camelize(r.data) as { borrower: Loan[]; guarantor: Loan[] }),
 }
 
+/* ======================= Funding (Fixed Deposit) Management ======================= */
+
+export type FdInterestMethod = 'monthly' | 'maturity'
+export type FdPaymentMethod = 'Cash' | 'Cheque' | 'BankTransfer'
+export type FdDepositStatus = 'Available' | 'Allocated'
+export type FixedDepositStatus = 'Active' | 'Closed' | 'Renewed'
+
+export interface FundingProduct {
+  id: number;
+  name: string; code: string;
+  interestMethod: FdInterestMethod;
+  annualRatePercent: number | string;
+  /** Auto = annualRatePercent/12 unless rateIsManual. */
+  monthlyRatePercent?: number | string | null;
+  rateIsManual?: boolean;
+  allowedTermsMonths: number[];
+  allowCustomTerm?: boolean;
+  minDepositAmount: number | string;
+  maxDepositAmount?: number | string | null;
+  /** Template for this product's generated FD numbers, e.g. "{BRANCH}-FD-{CODE}-{YEAR}-{SEQ:6}". Null = system default. */
+  referenceFormat?: string | null;
+  sortOrder?: number;
+  status?: 'Active' | 'Inactive';
+}
+
+export interface FdDeposit {
+  id: number; depositNumber: string;
+  branchId: number; branch?: { id: number; name: string; code: string };
+  customerId: number; customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null };
+  depositDate: string; amount: number | string;
+  paymentMethod: FdPaymentMethod;
+  referenceNo?: string | null; bankName?: string | null; notes?: string | null;
+  status: FdDepositStatus;
+  fixedDepositId?: number | null; fixedDeposit?: { id: number; fdNumber: string } | null;
+  creator?: { id: number; name: string } | null;
+  createdAt?: string;
+}
+
+export interface FdInterestPayment {
+  id: number; fixedDepositId: number;
+  installmentNo: number; dueDate: string; amount: number | string;
+  status: 'Pending' | 'Paid';
+  paidAmount?: number | string; paidAt?: string | null;
+  paymentMethod?: FdPaymentMethod | null; referenceNo?: string | null;
+  payer?: { id: number; name: string } | null;
+}
+
+export interface FdWithdrawal {
+  id: number; fixedDepositId: number; voucherNo: string;
+  principalAmount: number | string; interestAmount: number | string; totalAmount: number | string;
+  paymentMethod: FdPaymentMethod; referenceNo?: string | null; notes?: string | null;
+  closedAt: string;
+  creator?: { id: number; name: string } | null;
+}
+
+export interface FdRenewal {
+  id: number;
+  oldFixedDepositId: number; oldFixedDeposit?: { id: number; fdNumber: string; customer?: { id: number; fullName: string; code: string } } | null;
+  newFixedDepositId: number; newFixedDeposit?: { id: number; fdNumber: string } | null;
+  oldPrincipal: number | string; additionalDepositAmount: number | string; newPrincipal: number | string;
+  additionalDepositId?: number | null; additionalDeposit?: FdDeposit | null;
+  newTermMonths: number; renewedAt: string; notes?: string | null;
+  creator?: { id: number; name: string } | null;
+}
+
+export interface FixedDeposit {
+  id: number; fdNumber: string;
+  branchId: number; branch?: { id: number; name: string; code: string };
+  customerId: number; customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null; email?: string | null; address?: string | null };
+  fundingProductId: number; fundingProduct?: FundingProduct;
+  principalAmount: number | string;
+  interestRatePercent: number | string;
+  interestPaymentMethod: FdInterestMethod;
+  termMonths: number; startDate: string; maturityDate: string;
+  monthlyInterestAmount?: number | string | null;
+  totalInterestAmount: number | string;
+  maturityAmount: number | string;
+  nextInterestDate?: string | null;
+  status: FixedDepositStatus;
+  /** Derived server-side: status === 'Active' && maturityDate <= today. Not a stored value. */
+  isMatured?: boolean;
+  renewedFromId?: number | null; renewedFrom?: { id: number; fdNumber: string } | null;
+  renewedToId?: number | null; renewedTo?: { id: number; fdNumber: string } | null;
+  closedAt?: string | null;
+  deposits?: FdDeposit[];
+  interestPayments?: FdInterestPayment[];
+  withdrawal?: FdWithdrawal | null;
+  createdAt?: string;
+}
+
+export const fundingProductsApi = resource<FundingProduct>('funding-products')
+
+export const fdDepositsApi = {
+  list: (params?: { status?: FdDepositStatus; customerId?: number }) =>
+    http.get('/fd-deposits', { params }).then((r) => camelize(r.data) as FdDeposit[]),
+  get: (id: number) => http.get(`/fd-deposits/${id}`).then((r) => camelize(r.data) as FdDeposit),
+  create: (body: { branchId: number; customerId: number; depositDate: string; amount: number | string; paymentMethod: FdPaymentMethod; referenceNo?: string; bankName?: string; notes?: string }) =>
+    http.post('/fd-deposits', snakeize(body)).then((r) => camelize(r.data) as FdDeposit),
+  remove: (id: number) => http.delete(`/fd-deposits/${id}`).then((r) => r.data),
+}
+
+export interface FdEnhancementInput {
+  amount: number | string; paymentMethod: FdPaymentMethod;
+  depositDate?: string; referenceNo?: string; bankName?: string; notes?: string;
+}
+
+export const fixedDepositsApi = {
+  list: (params?: { status?: FixedDepositStatus; customerId?: number; matured?: boolean; maturingWithinDays?: number }) =>
+    http.get('/fixed-deposits', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as FixedDeposit[]),
+  get: (id: number) => http.get(`/fixed-deposits/${id}`).then((r) => camelize(r.data) as FixedDeposit),
+  create: (body: { depositId: number; fundingProductId: number; termMonths: number; startDate: string }) =>
+    http.post('/fixed-deposits', snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
+  renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput }) =>
+    http.post(`/fixed-deposits/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { fixedDeposit: FixedDeposit; enhancementDeposit: FdDeposit | null }),
+  withdraw: (id: number, body: { paymentMethod: FdPaymentMethod; referenceNo?: string; notes?: string; closedAt?: string }) =>
+    http.post(`/fixed-deposits/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
+}
+
+export const fdInterestPaymentsApi = {
+  list: (fixedDepositId: number) => http.get(`/fixed-deposits/${fixedDepositId}/interest-payments`).then((r) => camelize(r.data) as FdInterestPayment[]),
+  pay: (id: number, body: { paidAt?: string; paymentMethod: FdPaymentMethod; referenceNo?: string }) =>
+    http.post(`/fd-interest-payments/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as FdInterestPayment),
+}
+
+export type FundingReportType =
+  | 'active' | 'maturing-soon' | 'matured' | 'monthly-interest' | 'interest-paid'
+  | 'deposit-history' | 'customer-funding-history' | 'renewal-history' | 'capital-enhancements'
+
+export const fundingReportsApi = {
+  get: (type: FundingReportType, params?: Record<string, any>) =>
+    http.get(`/funding-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+}
+
+export interface FundingDashboardSummary {
+  totalFundingPortfolio: number; activeFds: number; monthlyInterestPayable: number;
+  maturingThisMonth: number; newDepositsToday: number; renewalsThisMonth: number;
+}
+
+export const fundingDashboardApi = {
+  get: () => http.get('/funding-dashboard').then((r) => camelize(r.data) as FundingDashboardSummary),
+}
+
+export const customerFundingApi = {
+  /** Every deposit and Fixed Deposit this customer holds. */
+  list: (customerId: number) =>
+    http.get(`/customers/${customerId}/funding`).then((r) => camelize(r.data) as { deposits: FdDeposit[]; fixedDeposits: FixedDeposit[] }),
+}
+
 export const rolesApi = {
   list: () => http.get<Role[]>('/roles').then((r) => camelize(r.data) as Role[]),
   create: (body: { name: string; description?: string; canViewAllBranches?: boolean }) =>

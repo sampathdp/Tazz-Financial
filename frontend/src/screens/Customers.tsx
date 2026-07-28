@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type AuthUser } from '../api'
+import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type FdDeposit, type FixedDeposit, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { LoanDetail } from './loan/LoanDetail'
@@ -138,6 +138,52 @@ function LoanHistoryTable({ loans, loading, showBorrower, onOpen, empty }: {
   )
 }
 
+/** Read-only Funding History — every deposit and Fixed Deposit this customer holds. */
+function FundingHistoryPanel({ customerId }: { customerId: number }) {
+  const [deposits, setDeposits] = useState<FdDeposit[]>([])
+  const [fixedDeposits, setFixedDeposits] = useState<FixedDeposit[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    customerFundingApi.list(customerId)
+      .then((d) => { setDeposits(d.deposits); setFixedDeposits(d.fixedDeposits) })
+      .catch(() => { setDeposits([]); setFixedDeposits([]) })
+      .finally(() => setLoading(false))
+  }, [customerId])
+
+  if (loading) return <div style={{ padding: '0 16px 16px', fontSize: 12.5, color: 'var(--tx-2)' }}>Loading…</div>
+
+  return (
+    <>
+      <div style={{ padding: '14px 16px 10px' }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Deposits</div>
+        <Table cols={[{ label: 'Deposit No' }, { label: 'Date' }, { label: 'Method' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }]}
+          rows={deposits} empty="No deposits for this customer"
+          render={(d) => <>
+            <Td mono>{d.depositNumber}</Td>
+            <Td>{typeof d.depositDate === 'string' ? d.depositDate.slice(0, 10) : '—'}</Td>
+            <Td>{d.paymentMethod}</Td>
+            <Td align="right" mono>{money(d.amount)}</Td>
+            <Td align="center"><Badge tone={d.status === 'Available' ? 'amber' : 'green'} dot>{d.status}</Badge></Td>
+          </>} />
+      </div>
+      <div style={{ padding: '14px 16px 10px' }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Fixed Deposits</div>
+        <Table cols={[{ label: 'FD No' }, { label: 'Product' }, { label: 'Principal', align: 'right' as const }, { label: 'Maturity Date' }, { label: 'Status', align: 'center' as const }]}
+          rows={fixedDeposits} empty="No Fixed Deposits for this customer"
+          render={(fd) => <>
+            <Td mono>{fd.fdNumber}</Td>
+            <Td>{fd.fundingProduct?.name || '—'}</Td>
+            <Td align="right" mono>{money(fd.principalAmount)}</Td>
+            <Td>{typeof fd.maturityDate === 'string' ? fd.maturityDate.slice(0, 10) : '—'}</Td>
+            <Td align="center"><Badge tone={fd.status === 'Active' ? 'green' : 'neutral'} dot>{fd.status}</Badge></Td>
+          </>} />
+      </div>
+    </>
+  )
+}
+
 function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer; me?: AuthUser | null; onEdit: () => void; onOpenLoan: (loanId: number) => void }) {
   const [borrowerLoans, setBorrowerLoans] = useState<Loan[]>([])
   const [guarantorLoans, setGuarantorLoans] = useState<Loan[]>([])
@@ -216,6 +262,10 @@ function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer
       <Card style={{ marginBottom: 16 }} pad={0}>
         <div className="eyebrow" style={{ padding: '14px 16px 10px' }}>Loan History — as Guarantor</div>
         <LoanHistoryTable loans={guarantorLoans} loading={loansLoading} showBorrower onOpen={onOpenLoan} empty="Not a guarantor on any loan" />
+      </Card>
+
+      <Card style={{ marginBottom: 16 }} pad={0}>
+        <FundingHistoryPanel customerId={customer.id} />
       </Card>
 
       <Card>

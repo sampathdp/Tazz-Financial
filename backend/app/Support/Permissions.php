@@ -28,6 +28,10 @@ class Permissions
         'Bank Transactions',
         'Bank Reconciliation',
         'Masters',
+        'Funding Products',
+        'Deposits',
+        'Fixed Deposits',
+        'Funding Reports',
     ];
 
     public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve', 'Export'];

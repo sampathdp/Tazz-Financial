@@ -8,7 +8,7 @@ class GeneratedNumber extends Model
 {
     protected $fillable = [
         'module', 'number', 'reference_type', 'reference_id',
-        'branch_id', 'loan_type_id', 'year', 'sequence', 'generated_by',
+        'branch_id', 'loan_type_id', 'funding_product_id', 'year', 'sequence', 'generated_by',
     ];
 
     public function reference()
@@ -24,6 +24,11 @@ class GeneratedNumber extends Model
     public function loanType()
     {
         return $this->belongsTo(LoanType::class);
+    }
+
+    public function fundingProduct()
+    {
+        return $this->belongsTo(FundingProduct::class);
     }
 
     public function generator()
