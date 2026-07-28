@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\LoanPaymentController;
 use App\Http\Controllers\Api\LoanPostDatedChequeController;
 use App\Http\Controllers\Api\LoanTypeController;
 use App\Http\Controllers\Api\LoanWaiverController;
+use App\Http\Controllers\Api\MasterCategoryController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\UserController;
@@ -104,7 +105,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Loan Management: Active Loans ---
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
     Route::patch('loans/{loan}/status-flags', [LoanController::class, 'updateStatusFlags'])->middleware('perm:Active Loans,Edit');
-    Route::post('loans/{loan}/schedules/{schedule}/skip', [LoanController::class, 'skipInstallment'])->middleware('perm:Loan Payments,Edit');
+    // Admin-only — see the frontend's "Loan Adjustments" screen (installment skip / cheque clearance / waivers).
+    Route::post('loans/{loan}/schedules/{schedule}/skip', [LoanController::class, 'skipInstallment'])->middleware('admin');
 
     // --- Loan Management: Loan Payments ---
     Route::get('loans/{loan}/payments', [LoanPaymentController::class, 'index'])->middleware('perm:Loan Payments,View');
@@ -112,7 +114,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('loan-payments/{payment}', [LoanPaymentController::class, 'destroy'])->middleware('perm:Loan Payments,Delete');
     Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement'])->middleware('perm:Loan Payments,Approve');
     Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement'])->middleware('perm:Loan Payments,Approve');
-    Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('perm:Loan Payments,Edit');
+    // Admin-only — realizing/bouncing a cheque is a Loan Adjustments action, not a regular Loan Payments one.
+    Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('admin');
 
     // --- Loan Management: Charges (Document/Legal/Valuation/Other due-type breakdown) ---
     Route::get('loans/{loan}/charges', [LoanChargeController::class, 'index'])->middleware('perm:Active Loans,View');
@@ -123,10 +126,12 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Loan Management: Post Dated Cheques ---
     // Recorded from the Payment Receipt screen (Loan Payments module), not Active Loans —
     // a cheque is a record only and never touches the loan balance until realized.
-    Route::get('post-dated-cheques', [LoanPostDatedChequeController::class, 'all'])->middleware('perm:Loan Payments,View');
+    // The cross-loan list and the Realize/Bounce action are Loan Adjustments (admin-only);
+    // the per-loan read-only list and recording a new cheque stay permission-based.
+    Route::get('post-dated-cheques', [LoanPostDatedChequeController::class, 'all'])->middleware('admin');
     Route::get('loans/{loan}/post-dated-cheques', [LoanPostDatedChequeController::class, 'index'])->middleware('perm:Active Loans,View');
     Route::post('loans/{loan}/post-dated-cheques', [LoanPostDatedChequeController::class, 'store'])->middleware('perm:Loan Payments,Create');
-    Route::patch('loan-post-dated-cheques/{cheque}', [LoanPostDatedChequeController::class, 'updateStatus'])->middleware('perm:Loan Payments,Edit');
+    Route::patch('loan-post-dated-cheques/{cheque}', [LoanPostDatedChequeController::class, 'updateStatus'])->middleware('admin');
     Route::delete('loan-post-dated-cheques/{cheque}', [LoanPostDatedChequeController::class, 'destroy'])->middleware('perm:Loan Payments,Delete');
 
     // --- Loan Management: Contract Images / Documents ---
@@ -140,9 +145,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('loan-diary-notes/{note}', [LoanDiaryNoteController::class, 'destroy'])->middleware('perm:Active Loans,Delete');
 
     // --- Loan Management: Waivers (W-Off Set Plan / Waved Off Details) ---
+    // Viewing stays permission-based (the loan detail page shows them read-only);
+    // recording/removing a waiver is a Loan Adjustments action (admin-only).
     Route::get('loans/{loan}/waivers', [LoanWaiverController::class, 'index'])->middleware('perm:Active Loans,View');
-    Route::post('loans/{loan}/waivers', [LoanWaiverController::class, 'store'])->middleware('perm:Active Loans,Approve');
-    Route::delete('loan-waivers/{waiver}', [LoanWaiverController::class, 'destroy'])->middleware('perm:Active Loans,Delete');
+    Route::post('loans/{loan}/waivers', [LoanWaiverController::class, 'store'])->middleware('admin');
+    Route::delete('loan-waivers/{waiver}', [LoanWaiverController::class, 'destroy'])->middleware('admin');
 
     // --- Bank Management: Bank Accounts ---
     Route::get('bank-accounts', [BankAccountController::class, 'index'])->middleware('perm:Bank Accounts,View');
@@ -160,4 +167,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('bank-reconciliations', [BankReconciliationController::class, 'store'])->middleware('perm:Bank Reconciliation,Create');
     Route::put('bank-reconciliations/{bankReconciliation}', [BankReconciliationController::class, 'update'])->middleware('perm:Bank Reconciliation,Edit');
     Route::delete('bank-reconciliations/{bankReconciliation}', [BankReconciliationController::class, 'destroy'])->middleware('perm:Bank Reconciliation,Delete');
+
+    // --- Masters: shared lookup/category lists (Expense Categories, Bank Account Types, ...) ---
+    Route::get('master-categories', [MasterCategoryController::class, 'index'])->middleware('perm:Masters,View');
+    Route::post('master-categories', [MasterCategoryController::class, 'store'])->middleware('perm:Masters,Create');
+    Route::put('master-categories/{masterCategory}', [MasterCategoryController::class, 'update'])->middleware('perm:Masters,Edit');
+    Route::delete('master-categories/{masterCategory}', [MasterCategoryController::class, 'destroy'])->middleware('perm:Masters,Delete');
 });

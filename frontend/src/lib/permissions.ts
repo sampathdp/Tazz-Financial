@@ -32,8 +32,9 @@ export const ROUTE_MODULE: Record<string, string> = {
   'loan/apps': 'Loan Applications',
   'loan/active': 'Active Loans',
   'loan/payments': 'Loan Payments',
-  'loan/cheques': 'Loan Payments',
   'loan/doc-tracking': 'Document Tracking',
+  // 'loan/adjustments' is intentionally NOT mapped here — canAccessRoute() below
+  // falls back to an admin-only check for any route id absent from this map.
   'ad/branches': 'Branch Management',
   'ad/roles': 'Role Management',
   'ad/users': 'User Management',
@@ -42,15 +43,19 @@ export const ROUTE_MODULE: Record<string, string> = {
   'bank/accounts': 'Bank Accounts',
   'bank/txns': 'Bank Transactions',
   'bank/recon': 'Bank Reconciliation',
+  'masters/expense-categories': 'Masters',
+  'masters/bank-account-types': 'Masters',
 }
 
 export function canAccessRoute(user: AuthUser | null | undefined, routeId: string): boolean {
   if (!user) return false
   const mod = ROUTE_MODULE[routeId]
-  // Unmapped route = a module that isn't built yet (no permission catalog
-  // entry exists for it server-side, so nobody's `permissions[]` can include
-  // it). Admins get a preview of these ("soon" nav items); everyone else is
-  // denied and never sees them in the sidebar (see Shell.tsx's visibleNav).
+  // Unmapped route = either a module that isn't built yet ("soon" nav items,
+  // shown to admins as a preview) or one deliberately kept out of the
+  // permission system because it must always be admin-only regardless of
+  // role/user overrides (e.g. 'loan/adjustments'). Either way: admins can
+  // reach it, everyone else is denied and never sees it in the sidebar
+  // (see Shell.tsx's visibleNav).
   if (!mod) return user.role === 'admin'
   return userCan(user, mod, 'View')
 }

@@ -1,15 +1,15 @@
 /* Tazz Investment & Credit — Payment Receipt: standalone loan-payment intake.
    Look up any active loan by NIC, Loan ID, or customer name, see its upcoming
-   installments, then per-row either pay it (any day, on or off schedule) or
-   skip it (pushed to the back of the schedule). Full settlement lives in the
-   Loan Summary card — Cashier-only, and doesn't close the loan or become
-   printable until a Branch Manager approves it. Posts to the same
-   loans/{loan}/payments endpoint the Active Loans > Receipts tab uses, so
-   history and outstanding balances stay in sync either way. */
+   installments, then pay a row (any day, on or off schedule). Skipping an
+   installment is an admin-only action — see the Loan Adjustments screen.
+   Full settlement lives in the Loan Summary card — Cashier-only, and doesn't
+   close the loan or become printable until a Branch Manager approves it.
+   Posts to the same loans/{loan}/payments endpoint the Active Loans > Receipts
+   tab uses, so history and outstanding balances stay in sync either way. */
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { loansApi, loanPaymentsApi, loanSchedulesApi, loanPostDatedChequesApi, company, type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser } from '../api'
+import { loansApi, loanPaymentsApi, loanPostDatedChequesApi, company, type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser } from '../api'
 import { Can, userCan } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import type { Go } from './types'
@@ -74,7 +74,6 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
   const [selected, setSelected] = useState<Loan | null>(null)
   const [loadingLoan, setLoadingLoan] = useState(false)
-  const [skipBusy, setSkipBusy] = useState<number | null>(null)
 
   // Pay-one-installment modal
   const [payTarget, setPayTarget] = useState<LoanSchedule | null>(null)
@@ -170,24 +169,6 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     } catch (ex: any) {
       setErr(ex?.response?.data?.message || 'Payment failed')
     } finally { setBusy(false) }
-  }
-
-  const skip = async (row: LoanSchedule) => {
-    if (!selected) return
-    const ok = await notify.confirm({
-      title: `Skip installment #${row.installmentNo}?`,
-      msg: `Due ${dateOnly(row.dueDate)} for ${money(balanceOf(row))} — it will be moved to the back of the schedule and the loan will run one period longer.`,
-      okText: 'Skip',
-    })
-    if (!ok) return
-    setSkipBusy(row.id)
-    try {
-      const fresh = await loanSchedulesApi.skip(selected.id, row.id)
-      setSelected(fresh)
-      notify.success('Installment skipped', 'Moved to the end of the schedule')
-    } catch (ex: any) {
-      notify.error('Could not skip installment', ex?.response?.data?.message)
-    } finally { setSkipBusy(null) }
   }
 
   const submitSettlement = async () => {
@@ -324,7 +305,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   return (
     <div>
       <PageHead crumbs="Loan Management" title="Payment Receipt" icon="receipt"
-        sub="Look up a loan by NIC, Loan ID, or customer name, then pay or skip an installment, or settle the loan completely." />
+        sub="Look up a loan by NIC, Loan ID, or customer name, then pay an installment or settle the loan completely." />
 
       <Card style={{ marginBottom: 16 }}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>Find Loan</div>
@@ -396,8 +377,8 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 ))}
               </div>
             </div>
-            {locked && <div className="t-2" style={{ padding: '8px 16px 0', fontSize: 11.5 }}>Payments and skips are disabled while a settlement request is pending.</div>}
-            <Table cols={[{ label: '#' }, { label: 'Due Date' }, { label: 'Total Due', align: 'right' }, { label: 'Paid', align: 'right' }, { label: 'Balance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 170 }]}
+            {locked && <div className="t-2" style={{ padding: '8px 16px 0', fontSize: 11.5 }}>Payments are disabled while a settlement request is pending.</div>}
+            <Table cols={[{ label: '#' }, { label: 'Due Date' }, { label: 'Total Due', align: 'right' }, { label: 'Paid', align: 'right' }, { label: 'Balance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 90 }]}
               rows={scheduleRows} empty={scheduleTab === 'paid' ? 'No paid installments yet' : scheduleTab === 'unpaid' ? 'No unpaid installments — this loan is fully paid' : 'No installments generated'}
               render={(r: LoanSchedule) => <>
                 <Td>{r.installmentNo}</Td>
@@ -409,12 +390,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 <Td align="right">
                   {r.status !== 'Paid' && (
                     <Can user={me} module="Loan Payments" action="Create">
-                      <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-                        <Btn size="sm" variant="primary" icon="check" onClick={() => openPay(r)} disabled={locked}>Pay</Btn>
-                        <Can user={me} module="Loan Payments" action="Edit">
-                          <Btn size="sm" variant="solid" onClick={() => skip(r)} disabled={locked || skipBusy === r.id}>{skipBusy === r.id ? 'Skipping…' : 'Skip'}</Btn>
-                        </Can>
-                      </div>
+                      <Btn size="sm" variant="primary" icon="check" onClick={() => openPay(r)} disabled={locked}>Pay</Btn>
                     </Can>
                   )}
                 </Td>

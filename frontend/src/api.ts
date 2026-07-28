@@ -424,6 +424,29 @@ export const bankReconciliationsApi = {
   remove: (id: number) => http.delete(`/bank-reconciliations/${id}`).then((r) => r.data),
 }
 
+/** Shared lookup/category lists (Expense Categories, Bank Account Types, ...).
+ *  `type` is the whitelist key from the backend's MasterCategoryController::TYPES —
+ *  add a new lookup list there, then a screen instance here with the same type. */
+export type MasterCategoryType = 'expense_category' | 'bank_account_type'
+
+export interface MasterCategory {
+  id: number;
+  type: MasterCategoryType;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  status?: 'Active' | 'Inactive';
+  sortOrder?: number;
+}
+
+export const masterCategoriesApi = {
+  list: (type: MasterCategoryType) =>
+    http.get('/master-categories', { params: { type } }).then((r) => camelize(r.data) as MasterCategory[]),
+  create: (body: Partial<MasterCategory>) => http.post('/master-categories', snakeize(body)).then((r) => camelize(r.data) as MasterCategory),
+  update: (id: number, body: Partial<MasterCategory>) => http.put(`/master-categories/${id}`, snakeize(body)).then((r) => camelize(r.data) as MasterCategory),
+  remove: (id: number) => http.delete(`/master-categories/${id}`).then((r) => r.data),
+}
+
 export interface GeneratedNumber {
   id: number; module: string; number: string;
   branchId?: number | null; branch?: { id: number; name: string; code: string } | null;

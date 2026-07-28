@@ -14,15 +14,20 @@ use Illuminate\Support\Facades\DB;
  * doesn't open one itself, since it always runs alongside the parent record's
  * creation (e.g. LoanController::store()'s transaction).
  *
- * Placeholders: {BRANCH} branch code, {CODE} loan type code, {YEAR} 4-digit
- * year, {SEQ} / {SEQ:n} sequence zero-padded to n digits (default 6).
+ * Placeholders: {BRANCH} branch code, {CODE} loan type code, {TYPE} caller-
+ * supplied short code (e.g. payment method), {YEAR} / {YEAR:n} year, last n
+ * digits (default 4), {SEQ} / {SEQ:n} sequence zero-padded to n digits
+ * (default 6).
  */
 class NumberGenerator
 {
     private const DEFAULT_FORMATS = [
-        'loan' => '{BRANCH}-{CODE}-{YEAR}-{SEQ:6}',
+        'loan' => '{BRANCH}-{CODE}-{YEAR:2}-{SEQ:6}',
         'customer' => 'CUS-{SEQ:6}',
-        'payment' => '{BRANCH}-PMT-{YEAR}-{SEQ:6}',
+        // {TYPE} is the payment method's short code (CA/BT/CQ) — see
+        // LoanPaymentController::TYPE_CODES. One shared sequence per
+        // branch+year across all methods, same as a physical receipt book.
+        'payment' => '{BRANCH}-{TYPE}-{YEAR:2}-{SEQ:5}',
     ];
 
     public static function next(string $module, array $context = [], ?string $format = null): string
@@ -31,7 +36,7 @@ class NumberGenerator
 
         $usesBranch = str_contains($format, '{BRANCH}');
         $usesLoanType = str_contains($format, '{CODE}');
-        $usesYear = str_contains($format, '{YEAR}');
+        $usesYear = (bool) preg_match('/\{YEAR(?::\d+)?\}/', $format);
 
         $branchId = $usesBranch ? (int) ($context['branch_id'] ?? 0) : 0;
         $loanTypeId = $usesLoanType ? (int) ($context['loan_type_id'] ?? 0) : 0;
@@ -50,8 +55,13 @@ class NumberGenerator
         $number = strtr($format, [
             '{BRANCH}' => $context['branch_code'] ?? '',
             '{CODE}' => $context['loan_type_code'] ?? '',
-            '{YEAR}' => now()->format('Y'),
+            '{TYPE}' => $context['type_code'] ?? '',
         ]);
+        $number = preg_replace_callback(
+            '/\{YEAR(?::(\d+))?\}/',
+            fn ($m) => isset($m[1]) ? substr(now()->format('Y'), -(int) $m[1]) : now()->format('Y'),
+            $number
+        );
         $number = preg_replace_callback(
             '/\{SEQ(?::(\d+))?\}/',
             fn ($m) => str_pad((string) $sequence, isset($m[1]) ? (int) $m[1] : 6, '0', STR_PAD_LEFT),

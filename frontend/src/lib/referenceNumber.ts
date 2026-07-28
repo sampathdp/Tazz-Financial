@@ -1,5 +1,5 @@
 /** Template used when a loan type has no reference_format of its own. */
-export const DEFAULT_REFERENCE_FORMAT = '{BRANCH}-{CODE}-{YEAR}-{SEQ:6}'
+export const DEFAULT_REFERENCE_FORMAT = '{BRANCH}-{CODE}-{YEAR:2}-{SEQ:6}'
 
 /**
  * Mirrors the backend's App\Services\NumberGenerator placeholder substitution,
@@ -11,7 +11,7 @@ export function previewReferenceNumber(format: string, branchCode: string, code:
   let out = format
     .replace(/\{BRANCH\}/g, branchCode || 'BR')
     .replace(/\{CODE\}/g, code || 'CODE')
-    .replace(/\{YEAR\}/g, year)
+    .replace(/\{YEAR(?::(\d+))?\}/g, (_, n) => (n ? year.slice(-Number(n)) : year))
   out = out.replace(/\{SEQ(?::(\d+))?\}/g, (_, n) => String(seq).padStart(n ? Number(n) : 6, '0'))
   return out
 }

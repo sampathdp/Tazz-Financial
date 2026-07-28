@@ -6,10 +6,10 @@ import { useEffect, useRef, useState } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, inputStyle } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import {
-  loansApi, loanPaymentsApi, loanChargesApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanWaiversApi, api,
-  type Loan, type LoanStatus, type LoanSchedule, type LoanPayment,
+  loansApi, loanChargesApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, api,
+  type Loan, type LoanStatus, type LoanSchedule,
   type LoanCharge, type LoanChargeType, type LoanPostDatedCheque, type ChequeStatus,
-  type LoanDocument, type LoanDocType, type LoanDiaryNote, type LoanWaiver, type WaiverType,
+  type LoanDocument, type LoanDocType, type LoanDiaryNote,
   type AuthUser,
 } from '../../api'
 import { Can } from '../../lib/permissions'
@@ -38,7 +38,6 @@ const DOC_TYPES: { value: LoanDocType; label: string }[] = [
   { value: 'IdCopy', label: 'ID Copy' },
   { value: 'Other', label: 'Other' },
 ]
-const WAIVER_TYPES: WaiverType[] = ['Interest', 'Penalty', 'Charge', 'Principal']
 const ACTIVE_STAGE_STATUSES: LoanStatus[] = ['Active', 'Closed', 'WrittenOff', 'Restructured']
 
 const SECTIONS = [
@@ -104,12 +103,12 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
       {tab === 'contract-status' && <ArrearsPanel loan={loan} />}
       {tab === 'recovery' && <RecoveryDetails loan={loan} me={me} onChanged={onChanged} notify={notify} />}
       {tab === 'schedule' && <ScheduleTable loan={loan} />}
-      {tab === 'receipts' && <ReceiptsPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
+      {tab === 'receipts' && <ReceiptsPanel loan={loan} me={me} />}
       {tab === 'security' && <SecurityPanel loan={loan} />}
       {tab === 'cheques' && <ChequesPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
       {tab === 'ledger' && <LedgerCard loan={loan} />}
       {tab === 'diary' && <DiaryPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
-      {tab === 'waivers' && <WaiversPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
+      {tab === 'waivers' && <WaiversPanel loan={loan} />}
       {tab === 'images' && <ImagesPanel loan={loan} me={me} />}
 
       <StatusFlagsModal open={statusModal} onClose={() => setStatusModal(false)} loan={loan} onChanged={onChanged} notify={notify} />
@@ -297,28 +296,13 @@ function ScheduleTable({ loan }: { loan: Loan }) {
   )
 }
 
-/* ---------- Contract Receipts / Cancelled Receipts ---------- */
-function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
+/* ---------- Contract Receipts / Cancelled Receipts (read-only) ---------- */
+function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
   const all = loan.payments || []
   const pending = all.filter((p) => p.approvalStatus === 'PendingApproval')
   const pendingCheque = all.filter((p) => p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending' && p.approvalStatus !== 'PendingApproval')
   const active = all.filter((p) => p.status !== 'Voided' && p.approvalStatus !== 'PendingApproval' && !(p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending'))
   const voided = all.filter((p) => p.status === 'Voided')
-
-  const voidPayment = async (p: LoanPayment) => {
-    const reason = await notify.prompt({ title: `Void receipt ${p.code}?`, msg: 'Give a reason — this reverses its allocation against the schedule.', placeholder: 'Reason for voiding', danger: true, okText: 'Void' })
-    if (reason === null) return
-    try { await loanPaymentsApi.remove(p.id, reason || undefined); notify.success('Receipt voided', p.code); onChanged() }
-    catch (ex: any) { notify.error('Void failed', ex?.response?.data?.message) }
-  }
-
-  const clearCheque = async (p: LoanPayment, status: 'Realized' | 'Bounced') => {
-    try {
-      await loanPaymentsApi.clearCheque(p.id, status)
-      notify.success(status === 'Realized' ? 'Cheque realized' : 'Cheque rejected')
-      onChanged()
-    } catch (ex: any) { notify.error('Update failed', ex?.response?.data?.message) }
-  }
 
   return (
     <>
@@ -358,15 +342,11 @@ function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthU
                 </div>
                 <div className="row gap-2" style={{ alignItems: 'center' }}>
                   <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
-                  <Can user={me} module="Loan Payments" action="Edit">
-                    {(p.chequeDate?.slice(0, 10) || '') <= todayIso() ? <>
-                      <Btn size="sm" variant="ok" onClick={() => clearCheque(p, 'Realized')}>Realize</Btn>
-                      <Btn size="sm" variant="danger" onClick={() => clearCheque(p, 'Bounced')}>Reject</Btn>
-                    </> : <span className="t-2" style={{ fontSize: 11.5 }}>Not due yet ({dateOnly(p.chequeDate)})</span>}
-                  </Can>
+                  <Badge tone="amber" dot>Pending Clearance</Badge>
                 </div>
               </div>
             ))}
+            <div className="t-2" style={{ fontSize: 11.5 }}>Realize or reject on the Loan Adjustments screen (admin only).</div>
           </div>
         )}
         {active.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No receipts recorded yet.</div> :
@@ -378,12 +358,7 @@ function ReceiptsPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthU
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.code}</span>
                   <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.paymentMethod}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · {p.receiver?.name}{p.clearanceStatus === 'Realized' ? ' · cheque realized' : ''}</span>
                 </div>
-                <div className="row gap-2" style={{ alignItems: 'center' }}>
-                  <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
-                  <Can user={me} module="Loan Payments" action="Delete">
-                    <button className="mms-act" title="Void" onClick={() => voidPayment(p)}><Icon n="trash" s={14} /></button>
-                  </Can>
-                </div>
+                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
               </div>
             ))}
           </div>}
@@ -450,7 +425,7 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
     <Card pad={0}>
       <div className="row between" style={{ padding: '14px 16px 0' }}>
         <div className="eyebrow">Post Dated Cheques</div>
-        <span className="t-2" style={{ fontSize: 11.5 }}>Record a cheque on the Payment Receipt screen · realize or reject on Cheque Management.</span>
+        <span className="t-2" style={{ fontSize: 11.5 }}>Record a cheque on the Payment Receipt screen · realize or reject on Loan Adjustments (admin only).</span>
       </div>
       <Table cols={[{ label: 'Cheque No' }, { label: 'Bank' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 40 }]}
         rows={cheques} empty="No post dated cheques"
@@ -553,40 +528,16 @@ function DiaryPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser
   )
 }
 
-/* ---------- Waivers (W-Off Set Plan / Waved Off Details) ---------- */
-function WaiversPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
+/* ---------- Waivers (W-Off Set Plan / Waved Off Details) — read-only; recorded on Loan Adjustments (admin) ---------- */
+function WaiversPanel({ loan }: { loan: Loan }) {
   const waivers = loan.waivers || []
-  const [form, setForm] = useState<{ waiverType: WaiverType; amount: string; reason: string }>({ waiverType: 'Interest', amount: '', reason: '' })
-  const [busy, setBusy] = useState(false)
-
-  const add = async () => {
-    if (!form.amount) return
-    setBusy(true)
-    try {
-      await loanWaiversApi.create(loan.id, { waiverType: form.waiverType, amount: form.amount, reason: form.reason || undefined })
-      setForm({ waiverType: 'Interest', amount: '', reason: '' }); notify.success('Waiver recorded'); onChanged()
-    } catch (ex: any) { notify.error('Add failed', ex?.response?.data?.message) } finally { setBusy(false) }
-  }
-  const remove = async (w: LoanWaiver) => {
-    const ok = await notify.confirm({ title: 'Delete this waiver?', danger: true, okText: 'Delete' })
-    if (!ok) return
-    try { await loanWaiversApi.remove(w.id); notify.success('Waiver deleted'); onChanged() }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
-  }
 
   return (
     <Card>
-      <div className="eyebrow" style={{ marginBottom: 12 }}>Waivers (W-Off Set Plan / Waved Off Details)</div>
-      <Can user={me} module="Active Loans" action="Approve">
-        <div className="row gap-2 wrap" style={{ marginBottom: 14 }}>
-          <Select value={form.waiverType} onChange={(e) => setForm((s) => ({ ...s, waiverType: e.target.value as WaiverType }))} style={{ maxWidth: 140 }}>
-            {WAIVER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </Select>
-          <Input type="number" placeholder="Amount" value={form.amount} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} style={{ maxWidth: 130 }} />
-          <Input placeholder="Reason" value={form.reason} onChange={(e) => setForm((s) => ({ ...s, reason: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
-          <Btn variant="primary" size="sm" icon="plus" onClick={add} disabled={busy}>Add</Btn>
-        </div>
-      </Can>
+      <div className="row between" style={{ marginBottom: 12 }}>
+        <div className="eyebrow">Waivers (W-Off Set Plan / Waved Off Details)</div>
+        <span className="t-2" style={{ fontSize: 11.5 }}>Recorded on the Loan Adjustments screen (admin only).</span>
+      </div>
       {waivers.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No waivers recorded.</div> :
         <div className="col gap-2">
           {waivers.map((w) => (
@@ -595,10 +546,7 @@ function WaiversPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>{w.waiverType}</span>
                 <span className="t-2" style={{ fontSize: 12 }}> — {w.reason || 'no reason given'} · {dateOnly(w.waivedAt)} · approved by {w.approver?.name}</span>
               </div>
-              <div className="row gap-2" style={{ alignItems: 'center' }}>
-                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(w.amount)}</span>
-                <Can user={me} module="Active Loans" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(w)}><Icon n="trash" s={14} /></button></Can>
-              </div>
+              <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(w.amount)}</span>
             </div>
           ))}
         </div>}

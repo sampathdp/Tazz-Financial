@@ -14,6 +14,9 @@ use Illuminate\Validation\Rule;
 
 class LoanPaymentController extends Controller
 {
+    /** Short code used in the receipt number's {TYPE} segment — see NumberGenerator's 'payment' format. */
+    private const TYPE_CODES = ['Cash' => 'CA', 'Bank' => 'BT', 'Cheque' => 'CQ'];
+
     public function index(Loan $loan)
     {
         return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name'])->get();
@@ -61,9 +64,11 @@ class LoanPaymentController extends Controller
 
         $payment = DB::transaction(function () use ($loan, $data, $isSettlement, $isCheque, $request) {
             $branch = Branch::find($loan->branch_id);
+            $method = $data['payment_method'] ?? 'Cash';
             $code = NumberGenerator::next('payment', [
                 'branch_id' => $branch->id,
                 'branch_code' => $branch->code,
+                'type_code' => self::TYPE_CODES[$method] ?? 'CA',
                 'user_id' => $request->user()->id,
             ]);
             $payment = LoanPayment::create([

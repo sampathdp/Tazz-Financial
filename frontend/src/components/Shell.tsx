@@ -24,9 +24,12 @@ export const NAV: NavNode[] = [
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
     { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
     { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt' },
-    { id: 'loan/cheques', label: 'Cheque Management', icon: 'cheque' },
     { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert', soon: true },
     { id: 'loan/doc-tracking', label: 'Document Tracking', icon: 'tag' },
+    /** Admin-only — installment skip / cheque realize-reject / waivers. Intentionally
+     *  left out of lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back
+     *  to its unmapped-route rule (admin role only), not the permission system. */
+    { id: 'loan/adjustments', label: 'Loan Adjustments', icon: 'shield' },
   ] },
 
   { section: 'Funding / Investment', icon: 'pie', items: [
@@ -63,10 +66,14 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Expense Management', icon: 'wallet', items: [
-    { id: 'exp/categories', label: 'Expense Categories', icon: 'tag', soon: true },
     { id: 'exp/vendors', label: 'Vendors', icon: 'store', soon: true },
     { id: 'exp/expenses', label: 'Expenses', icon: 'wallet', soon: true },
     { id: 'exp/vouchers', label: 'Payment Vouchers', icon: 'doc', soon: true },
+  ] },
+
+  { section: 'Masters', icon: 'layers', items: [
+    { id: 'masters/expense-categories', label: 'Expense Categories', icon: 'tag' },
+    { id: 'masters/bank-account-types', label: 'Bank Account Types', icon: 'building' },
   ] },
 
   { section: 'Reports', icon: 'chart', items: [

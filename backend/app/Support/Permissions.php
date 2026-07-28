@@ -27,6 +27,7 @@ class Permissions
         'Bank Accounts',
         'Bank Transactions',
         'Bank Reconciliation',
+        'Masters',
     ];
 
     public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve', 'Export'];
