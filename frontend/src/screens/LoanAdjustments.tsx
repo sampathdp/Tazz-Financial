@@ -228,6 +228,7 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   }
 
   const waivers = selected?.waivers || []
+  const arrears = selected?.summary?.arrears
 
   return (
     <div>
@@ -245,6 +246,29 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
       </Card>
 
       {loadingLoan && <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-2)' }}>Loading loan…</div>}
+
+      {selected && !loadingLoan && arrears && (
+        <Card style={{ marginBottom: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Outstanding Balance — {selected.code}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+            {[
+              { label: 'Future Capital', value: arrears.futureCapital },
+              { label: 'Future Interest', value: arrears.futureInterest },
+              { label: 'OD / Default Charges', value: arrears.defaultCharges },
+              { label: 'Other Charges', value: arrears.otherChargeArrears },
+            ].map((it) => (
+              <div key={it.label} style={{ padding: '10px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
+                <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{it.label}</div>
+                <div style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 14 }}>{money(it.value)}</div>
+              </div>
+            ))}
+            <div style={{ padding: '10px 12px', background: 'var(--ac-dim)', border: '1px solid var(--ac-bright)', borderRadius: 'var(--r-s)' }}>
+              <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>Total Balance</div>
+              <div style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 14, color: 'var(--ac-bright)' }}>{money(arrears.amountToBeCollected)}</div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {selected && !loadingLoan && (
         <Card>
