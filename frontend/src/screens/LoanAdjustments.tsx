@@ -6,11 +6,11 @@
    Valuation/Other charges are permission-gated on the backend (Active Loans),
    not admin-only, but this is the only place a charge can actually be added. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, DateInput } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, DateInput, Modal } from '../components/ui'
 import {
-  loansApi, loanSchedulesApi, loanWaiversApi, loanPostDatedChequesApi, loanPaymentsApi, loanChargesApi,
+  loansApi, loanSchedulesApi, loanWaiversApi, loanPostDatedChequesApi, loanPaymentsApi, loanChargesApi, loanTypesApi,
   type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type LoanChargeType,
-  type AuthUser, type LoanPostDatedCheque, type ChequeStatus,
+  type AuthUser, type LoanPostDatedCheque, type ChequeStatus, type LoanType, type SkipDateOption,
 } from '../api'
 import { Icon } from '../components/Icon'
 import { useNotify } from '../components/Notify'
@@ -27,6 +27,19 @@ const CHARGE_TYPES: LoanChargeType[] = ['Document', 'Legal', 'Valuation', 'Other
 
 /* ============================ Installment Skip =========================== */
 function SkipSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
+  const [mode, setMode] = useState<'loan' | 'bulk'>('loan')
+  return (
+    <div>
+      <div className="row gap-2" style={{ marginBottom: 16 }}>
+        <Btn size="sm" variant={mode === 'loan' ? 'primary' : 'solid'} onClick={() => setMode('loan')}>By Loan</Btn>
+        <Btn size="sm" variant={mode === 'bulk' ? 'primary' : 'solid'} onClick={() => setMode('bulk')}>By Loan Type (Bulk)</Btn>
+      </div>
+      {mode === 'loan' ? <SkipByLoan notify={notify} /> : <SkipByLoanType notify={notify} />}
+    </div>
+  )
+}
+
+function SkipByLoan({ notify }: { notify: ReturnType<typeof useNotify> }) {
   const [loans, setLoans] = useState<Loan[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Loan | null>(null)
@@ -95,6 +108,112 @@ function SkipSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
               <Td align="center"><Badge tone={scheduleTone[r.status]} dot>{r.status}</Badge></Td>
               <Td align="right"><Btn size="sm" variant="solid" onClick={() => skip(r)} disabled={skipBusy === r.id}>{skipBusy === r.id ? 'Skipping…' : 'Skip'}</Btn></Td>
             </>} />
+        </Card>
+      )}
+    </div>
+  )
+}
+
+function SkipByLoanType({ notify }: { notify: ReturnType<typeof useNotify> }) {
+  const [loanTypes, setLoanTypes] = useState<LoanType[]>([])
+  const [loadingTypes, setLoadingTypes] = useState(true)
+  const [typeId, setTypeId] = useState<number | ''>('')
+  const [dates, setDates] = useState<SkipDateOption[]>([])
+  const [loadingDates, setLoadingDates] = useState(false)
+  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    loanTypesApi.list().then((all) => setLoanTypes(all.filter((t) => t.isProduct))).catch(() => setLoanTypes([])).finally(() => setLoadingTypes(false))
+  }, [])
+
+  const loadDates = (id: number) => {
+    setLoadingDates(true)
+    loanSchedulesApi.skipDates(id).then(setDates).catch(() => setDates([])).finally(() => setLoadingDates(false))
+  }
+  useEffect(() => {
+    setSelectedDates(new Set())
+    if (typeId === '') { setDates([]); return }
+    loadDates(typeId)
+  }, [typeId])
+
+  const toggleDate = (d: string) => {
+    setSelectedDates((cur) => {
+      const next = new Set(cur)
+      if (next.has(d)) next.delete(d); else next.add(d)
+      return next
+    })
+  }
+  const toggleAll = () => setSelectedDates((cur) => (cur.size === dates.length ? new Set() : new Set(dates.map((d) => d.dueDate))))
+
+  const selectedSummary = useMemo(() => {
+    const picked = dates.filter((d) => selectedDates.has(d.dueDate))
+    return { installments: picked.reduce((s, d) => s + d.installmentCount, 0), amount: picked.reduce((s, d) => s + d.totalAmount, 0) }
+  }, [dates, selectedDates])
+
+  const runBulkSkip = async () => {
+    if (typeId === '' || selectedDates.size === 0) return
+    const typeName = loanTypes.find((t) => t.id === typeId)?.name || 'this loan type'
+    const ok = await notify.confirm({
+      title: `Skip ${selectedSummary.installments} installment(s) across ${typeName}?`,
+      msg: `Every active loan of this type with an unpaid installment on the selected date(s) will have it pushed to the back of its own schedule — ${money(selectedSummary.amount)} total, running each loan one period longer.`,
+      okText: 'Skip All',
+    })
+    if (!ok) return
+    setBusy(true)
+    try {
+      const res = await loanSchedulesApi.bulkSkip(typeId, Array.from(selectedDates))
+      if (res.errors.length > 0) {
+        notify.warning('Some loans could not be skipped', `${res.loansAffected} loan(s) / ${res.installmentsSkipped} installment(s) skipped; ${res.errors.length} failed.`)
+      } else {
+        notify.success('Installments skipped', `${res.loansAffected} loan(s), ${res.installmentsSkipped} installment(s)`)
+      }
+      loadDates(typeId)
+    } catch (ex: any) {
+      notify.error('Bulk skip failed', ex?.response?.data?.message)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Loan Type</div>
+        <Select value={typeId} onChange={(e) => setTypeId(e.target.value ? Number(e.target.value) : '')} disabled={loadingTypes} style={{ maxWidth: 320 }}>
+          <option value="">{loadingTypes ? 'Loading…' : 'Select a loan type…'}</option>
+          {loanTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </Select>
+      </Card>
+
+      {typeId !== '' && (
+        <Card pad={0}>
+          <div className="row between wrap gap-2" style={{ padding: '14px 16px' }}>
+            <div className="eyebrow">Skippable Due Dates</div>
+            {dates.length > 0 && (
+              <div className="row gap-3" style={{ alignItems: 'center' }}>
+                {selectedDates.size > 0 && <span className="t-2" style={{ fontSize: 12 }}>{selectedSummary.installments} installment(s) selected · {money(selectedSummary.amount)}</span>}
+                <button className="mms-act" style={{ fontSize: 11.5, color: 'var(--ac-bright)', background: 'transparent', border: 'none', cursor: 'pointer' }} onClick={toggleAll}>
+                  {selectedDates.size === dates.length ? 'Clear all' : 'Select all'}
+                </button>
+              </div>
+            )}
+          </div>
+          {loadingDates ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+          <Table cols={[{ label: '', w: 34 }, { label: 'Due Date' }, { label: 'Loans', align: 'right' }, { label: 'Installments', align: 'right' }, { label: 'Amount', align: 'right' }]}
+            rows={dates} empty="No skippable installments for this loan type"
+            render={(d: SkipDateOption) => <>
+              <Td><input type="checkbox" checked={selectedDates.has(d.dueDate)} onChange={() => toggleDate(d.dueDate)} /></Td>
+              <Td>{dateOnly(d.dueDate)}</Td>
+              <Td align="right">{d.loanCount}</Td>
+              <Td align="right">{d.installmentCount}</Td>
+              <Td mono align="right">{money(d.totalAmount)}</Td>
+            </>} />}
+          {dates.length > 0 && (
+            <div className="row" style={{ padding: '14px 16px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end' }}>
+              <Btn variant="primary" icon="check" disabled={selectedDates.size === 0 || busy} onClick={runBulkSkip}>
+                {busy ? 'Skipping…' : `Skip Selected (${selectedDates.size})`}
+              </Btn>
+            </div>
+          )}
         </Card>
       )}
     </div>
@@ -201,32 +320,20 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
           }} />}
       </Card>
 
-      {realizeTarget && (
-        <div onClick={() => setRealizeTarget(null)} style={{
-          position: 'fixed', inset: 0, zIndex: 350, background: 'oklch(0 0 0 / 0.55)', backdropFilter: 'blur(3px)',
-          display: 'grid', placeItems: 'center', padding: 20,
-        }}>
-          <div onClick={(e) => e.stopPropagation()} style={{
-            width: 'min(400px,100%)', background: 'var(--bg-1)', border: '1px solid var(--line)',
-            borderRadius: 'var(--r-l)', boxShadow: '0 30px 60px -20px rgb(0 0 0 / .6)', overflow: 'hidden',
-          }}>
-            <div style={{ padding: '20px 22px 6px' }}>
-              <h3 style={{ fontSize: 17, marginBottom: 4 }}>Realize cheque {realizeTarget.chequeNo}</h3>
-              <div className="t-2" style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}>
-                Enter the date the cheque actually cleared at the bank (check-in date) — the amount is deducted
-                from the loan as of this date, not today's date.
-              </div>
-              <Field label="Check-in / Realization Date">
-                <DateInput value={realizeDate} onChange={setRealizeDate} />
-              </Field>
-            </div>
-            <div className="row gap-2" style={{ padding: '14px 22px', justifyContent: 'flex-end', borderTop: '1px solid var(--line)', marginTop: 14 }}>
-              <Btn variant="plain" onClick={() => setRealizeTarget(null)}>Cancel</Btn>
-              <Btn variant="primary" icon="check" disabled={!realizeDate || busyId === realizeTarget.id} onClick={confirmRealize}>Realize</Btn>
-            </div>
-          </div>
+      <Modal open={!!realizeTarget} onClose={() => setRealizeTarget(null)} width={400}
+        title={realizeTarget ? `Realize cheque ${realizeTarget.chequeNo}` : ''}
+        footer={<>
+          <Btn variant="plain" onClick={() => setRealizeTarget(null)}>Cancel</Btn>
+          <Btn variant="primary" icon="check" disabled={!realizeDate || busyId === realizeTarget?.id} onClick={confirmRealize}>Realize</Btn>
+        </>}>
+        <div className="t-2" style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}>
+          Enter the date the cheque actually cleared at the bank (check-in date) — the amount is deducted
+          from the loan as of this date, not today's date.
         </div>
-      )}
+        <Field label="Check-in / Realization Date">
+          <DateInput value={realizeDate} onChange={setRealizeDate} />
+        </Field>
+      </Modal>
     </div>
   )
 }

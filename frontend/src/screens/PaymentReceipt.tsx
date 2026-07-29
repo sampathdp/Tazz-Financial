@@ -36,6 +36,14 @@ const METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
 const REF_LABEL: Record<PaymentMethod, string> = { Cash: 'Receipt No. (optional)', Bank: 'Transfer Reference', Cheque: 'Cheque No.' }
 const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = { Paid: 'green', Partial: 'amber', Overdue: 'red', Pending: 'neutral' }
 
+/** Payment History row status — mirrors LoanDetail's ReceiptsPanel classification. */
+function PaymentStatusBadge({ p }: { p: LoanPayment }) {
+  if (p.status === 'Voided') return <Badge tone="red" dot>Voided</Badge>
+  if (p.approvalStatus === 'PendingApproval') return <Badge tone="amber" dot>Pending Approval</Badge>
+  if (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending') return <Badge tone="amber" dot>Pending Clearance</Badge>
+  return <Badge tone="green" dot>Recorded</Badge>
+}
+
 interface ReceiptData { payment: LoanPayment; loan: Loan; balanceBefore: number }
 
 /* A Cheque payment (unlike Cash/Bank) does NOT apply to the balance immediately —
@@ -126,6 +134,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const outstanding = selected ? outstandingOf(selected) : 0
   const pendingSettlement = selected?.payments?.find((p) => p.isSettlement && p.approvalStatus === 'PendingApproval')
   const allSchedules = (selected?.schedules || []).slice().sort((a, b) => a.installmentNo - b.installmentNo)
+  const paymentHistory = (selected?.payments || []).slice().sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
   const scheduleRows = scheduleTab === 'paid' ? allSchedules.filter((s) => s.status === 'Paid')
     : scheduleTab === 'unpaid' ? allSchedules.filter((s) => s.status !== 'Paid')
     : allSchedules
@@ -347,6 +356,20 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
               <div><span className="t-2">Status: </span><Badge tone="green" dot>{selected.status}</Badge></div>
               <div><span className="t-2">Outstanding Balance: </span><b style={{ fontFamily: 'JetBrains Mono', color: outstanding > 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(outstanding)}</b></div>
             </div>
+          </Card>
+
+          <Card pad={0} style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Payment History</div>
+            <Table cols={[{ label: 'Receipt No' }, { label: 'Date' }, { label: 'Method' }, { label: 'Amount', align: 'right' }, { label: 'Received By' }, { label: 'Status', align: 'center' }]}
+              rows={paymentHistory} empty="No payments recorded yet for this loan."
+              render={(p: LoanPayment) => <>
+                <Td mono style={{ fontWeight: 600 }}>{p.code}</Td>
+                <Td>{dateOnly(p.paidAt)}</Td>
+                <Td>{METHOD_OPTIONS.find((m) => m.value === p.paymentMethod)?.label || p.paymentMethod}{p.isSettlement ? ' (Settlement)' : ''}</Td>
+                <Td mono align="right">{money(p.amount)}</Td>
+                <Td>{p.receiver?.name || '—'}</Td>
+                <Td align="center"><PaymentStatusBadge p={p} /></Td>
+              </>} />
           </Card>
 
           {pendingSettlement && (

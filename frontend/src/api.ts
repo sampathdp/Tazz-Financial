@@ -493,10 +493,28 @@ export const loansApi = {
   overdue: () => http.get('/loans-overdue').then((r) => camelize(r.data) as OverdueLoan[]),
 }
 
+/** One due date shared by unpaid installments across a loan type's active loans —
+ *  see loanSchedulesApi.skipDates(). */
+export interface SkipDateOption {
+  dueDate: string; loanCount: number; installmentCount: number; totalAmount: number
+}
+export interface BulkSkipResult {
+  loansAffected: number; installmentsSkipped: number
+  errors: { loanId: number; loanCode: string; message: string }[]
+}
+
 export const loanSchedulesApi = {
   /** Pushes an unpaid installment to the back of the schedule (due one period
    *  after the current last installment) instead of collecting it on time. */
   skip: (loanId: number, scheduleId: number) => http.post(`/loans/${loanId}/schedules/${scheduleId}/skip`).then((r) => camelize(r.data) as Loan),
+  /** Distinct due dates with at least one skippable installment across this loan
+   *  type's active loans — powers the bulk-skip date picklist. */
+  skipDates: (loanTypeId: number) => http.get(`/loan-types/${loanTypeId}/skip-dates`).then((r) => camelize(r.data) as SkipDateOption[]),
+  /** For every active loan of this loan type, skips whichever unpaid installment
+   *  falls on one of the given dates (each loan pushed independently, same rule
+   *  as skip() — paid/partially paid installments are left alone). */
+  bulkSkip: (loanTypeId: number, dates: string[]) =>
+    http.post(`/loan-types/${loanTypeId}/schedules/bulk-skip`, { dates }).then((r) => camelize(r.data) as BulkSkipResult),
 }
 
 export const loanPaymentsApi = {

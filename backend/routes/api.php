@@ -116,6 +116,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::patch('loans/{loan}/status-flags', [LoanController::class, 'updateStatusFlags'])->middleware('perm:Active Loans,Edit');
     // Admin-only — see the frontend's "Loan Adjustments" screen (installment skip / cheque clearance / waivers).
     Route::post('loans/{loan}/schedules/{schedule}/skip', [LoanController::class, 'skipInstallment'])->middleware('admin');
+    // Bulk installment skip, by loan type — skips the matching due-date installment
+    // for every active loan of that type in one go (e.g. a public holiday).
+    Route::get('loan-types/{loanType}/skip-dates', [LoanController::class, 'skipDates'])->middleware('admin');
+    Route::post('loan-types/{loanType}/schedules/bulk-skip', [LoanController::class, 'bulkSkipInstallments'])->middleware('admin');
 
     // --- Loan Management: Loan Payments ---
     Route::get('loans/{loan}/payments', [LoanPaymentController::class, 'index'])->middleware('perm:Loan Payments,View');

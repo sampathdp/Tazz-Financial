@@ -10,6 +10,7 @@ use App\Models\LoanType;
 use App\Services\NumberGenerator;
 use App\Support\LoanAmortizer;
 use App\Support\LoanSummary;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -297,6 +298,93 @@ class LoanController extends Controller
         });
 
         return $this->show($loan->fresh());
+    }
+
+    /** Distinct due dates with at least one skippable (unpaid, untouched)
+     *  installment across this loan type's active loans — powers the date
+     *  picklist on the Loan Adjustments > Installment Skip (bulk) screen. */
+    public function skipDates(LoanType $loanType)
+    {
+        $rows = LoanSchedule::query()
+            ->whereHas('loan', fn ($q) => $q->where('status', 'Active')->where('loan_type_id', $loanType->id))
+            ->where('status', '!=', 'Paid')
+            ->where('paid_amount', 0)
+            ->selectRaw('due_date, COUNT(DISTINCT loan_id) as loan_count, COUNT(*) as installment_count, SUM(total_due) as total_amount')
+            ->groupBy('due_date')
+            ->orderBy('due_date')
+            ->get();
+
+        return $rows->map(fn ($r) => [
+            'dueDate' => $r->due_date->toDateString(),
+            'loanCount' => (int) $r->loan_count,
+            'installmentCount' => (int) $r->installment_count,
+            'totalAmount' => round((float) $r->total_amount, 2),
+        ])->values();
+    }
+
+    /**
+     * Bulk version of skipInstallment() — for every active loan of this loan
+     * type, skips (pushes to the back of that loan's own schedule) whichever
+     * of its unpaid installments falls on one of the given dates. Each loan is
+     * its own transaction/renumbering pass (same rule as the single-installment
+     * version: paid or partially paid installments are left alone), so one
+     * loan's ordering never affects another's, and a failure on one loan
+     * doesn't block the rest.
+     */
+    public function bulkSkipInstallments(Request $request, LoanType $loanType)
+    {
+        $data = $request->validate([
+            'dates' => 'required|array|min:1',
+            'dates.*' => 'date',
+        ]);
+        $dates = collect($data['dates'])->map(fn ($d) => Carbon::parse($d)->toDateString())->unique()->values()->all();
+
+        $loans = Loan::where('status', 'Active')
+            ->where('loan_type_id', $loanType->id)
+            ->whereHas('schedules', fn ($q) => $q->whereIn('due_date', $dates)->where('status', '!=', 'Paid')->where('paid_amount', 0))
+            ->get();
+
+        $loansAffected = 0;
+        $installmentsSkipped = 0;
+        $errors = [];
+
+        foreach ($loans as $loan) {
+            $rows = $loan->schedules()->whereIn('due_date', $dates)
+                ->where('status', '!=', 'Paid')->where('paid_amount', 0)
+                ->orderBy('due_date')->get();
+            if ($rows->isEmpty()) {
+                continue;
+            }
+            try {
+                DB::transaction(function () use ($loan, $rows) {
+                    foreach ($rows as $schedule) {
+                        // Re-queried fresh each pass (not the eager-loaded $rows/schedules
+                        // collection) so a loan with two skippable dates in this batch
+                        // correctly stacks the second skip behind the first.
+                        $last = $loan->schedules()->orderByDesc('due_date')->firstOrFail();
+                        $schedule->update([
+                            'due_date' => LoanAmortizer::nextDueDate($last->due_date, $loan->installment_frequency)->format('Y-m-d'),
+                            'status' => 'Pending',
+                        ]);
+                    }
+                    foreach ($loan->schedules()->orderBy('due_date')->orderBy('id')->get() as $i => $row) {
+                        if ($row->installment_no !== $i + 1) {
+                            $row->update(['installment_no' => $i + 1]);
+                        }
+                    }
+                });
+                $loansAffected++;
+                $installmentsSkipped += $rows->count();
+            } catch (\Throwable $e) {
+                $errors[] = ['loanId' => $loan->id, 'loanCode' => $loan->code, 'message' => $e->getMessage()];
+            }
+        }
+
+        return response()->json([
+            'loansAffected' => $loansAffected,
+            'installmentsSkipped' => $installmentsSkipped,
+            'errors' => $errors,
+        ]);
     }
 
     /** @return array{0: array, 1: array, 2: array} [loan fields, guarantors, collateral] */
