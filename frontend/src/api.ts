@@ -289,6 +289,10 @@ export interface LoanPayment {
   /** Cheque payments only — null for Cash/Bank/settlement. Starts 'Pending' and holds the
    *  amount out of the loan's balance until manually cleared via loanPaymentsApi.clearCheque(). */
   clearanceStatus?: PaymentClearanceStatus | null;
+  /** The date the cheque actually cleared at the bank (check-in date) — set when
+   *  clearCheque() marks it Realized. This, not paidAt or chequeDate, is the date the
+   *  amount is considered to have landed in the loan. */
+  realizedAt?: string | null;
   status?: PaymentStatus;
   /** A full-settlement request pays off the whole outstanding balance and needs
    *  approval before it's allocated/closes the loan — see approvalStatus. */
@@ -312,6 +316,9 @@ export type ChequeStatus = 'Pending' | 'Handed' | 'Realized' | 'Bounced' | 'Retu
 export interface LoanPostDatedCheque {
   id: number; loanId: number; chequeNo: string; bankName: string; chequeDate: string;
   amount: number | string; status: ChequeStatus; handedAt?: string | null; notes?: string | null;
+  /** The date the cheque actually cleared at the bank (check-in date) — set when marked
+   *  Realized. This is the date the amount is considered to have landed in the loan. */
+  realizedAt?: string | null;
   creator?: { id: number; name: string } | null;
   /** Present only on the cross-loan listing (Cheque Management screen), not the per-loan panel. */
   loan?: { id: number; code: string; customer?: { id: number; fullName: string } | null; branch?: { id: number; name: string; code: string } | null } | null;
@@ -488,9 +495,11 @@ export const loanPaymentsApi = {
   approveSettlement: (paymentId: number) => http.post(`/loan-payments/${paymentId}/approve-settlement`).then((r) => camelize(r.data) as LoanPayment),
   rejectSettlement: (paymentId: number, voidReason?: string) =>
     http.post(`/loan-payments/${paymentId}/reject-settlement`, snakeize({ voidReason })).then((r) => camelize(r.data) as LoanPayment),
-  /** Realize applies the held amount to the schedule; Bounced voids the payment (it was never applied). */
-  clearCheque: (paymentId: number, status: 'Realized' | 'Bounced') =>
-    http.patch(`/loan-payments/${paymentId}/clear-cheque`, { status }).then((r) => camelize(r.data) as LoanPayment),
+  /** Realize applies the held amount to the schedule as of `realizedAt` (the cheque's
+   *  check-in/clearing date — required when status is 'Realized'); Bounced voids the
+   *  payment (it was never applied). */
+  clearCheque: (paymentId: number, status: 'Realized' | 'Bounced', realizedAt?: string) =>
+    http.patch(`/loan-payments/${paymentId}/clear-cheque`, snakeize({ status, realizedAt })).then((r) => camelize(r.data) as LoanPayment),
 }
 
 export const loanChargesApi = {
@@ -508,8 +517,10 @@ export const loanPostDatedChequesApi = {
     http.get('/post-dated-cheques', { params: { status: params?.status, due_today: params?.dueToday ? 1 : undefined } }).then((r) => camelize(r.data) as LoanPostDatedCheque[]),
   create: (loanId: number, body: { chequeNo: string; bankName: string; chequeDate: string; amount: number | string; notes?: string }) =>
     http.post(`/loans/${loanId}/post-dated-cheques`, snakeize(body)).then((r) => camelize(r.data) as LoanPostDatedCheque),
-  updateStatus: (chequeId: number, status: ChequeStatus, notes?: string) =>
-    http.patch(`/loan-post-dated-cheques/${chequeId}`, { status, notes }).then((r) => camelize(r.data) as LoanPostDatedCheque),
+  /** realizedAt (the cheque's check-in/clearing date) is required when status is
+   *  'Realized' — that's the day the amount actually applies against the loan. */
+  updateStatus: (chequeId: number, status: ChequeStatus, notes?: string, realizedAt?: string) =>
+    http.patch(`/loan-post-dated-cheques/${chequeId}`, snakeize({ status, notes, realizedAt })).then((r) => camelize(r.data) as LoanPostDatedCheque),
   remove: (chequeId: number) => http.delete(`/loan-post-dated-cheques/${chequeId}`).then((r) => r.data),
 }
 

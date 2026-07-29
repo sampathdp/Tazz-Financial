@@ -5,11 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\Loan;
-use App\Models\LoanChargeAllocation;
 use App\Models\LoanPayment;
-use App\Models\LoanPaymentAllocation;
 use App\Services\NumberGenerator;
-use App\Support\LoanSummary;
+use App\Support\LoanPaymentAllocator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -53,7 +51,7 @@ class LoanPaymentController extends Controller
             return response()->json(['message' => 'Only a Cashier can apply for a full settlement.'], 403);
         }
 
-        $outstanding = $this->outstandingBalance($loan);
+        $outstanding = LoanPaymentAllocator::outstandingBalance($loan);
         if ($outstanding <= 0) {
             return response()->json(['message' => 'This loan has no outstanding balance.'], 422);
         }
@@ -99,7 +97,7 @@ class LoanPaymentController extends Controller
             // similarly reserves the amount until the cheque is manually realized
             // (it can still bounce) — see clearCheque().
             if (!$isSettlement && !$isCheque) {
-                $this->applyAllocation($loan, $payment, (float) $data['amount']);
+                LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $data['amount']);
             }
 
             return $payment;
@@ -114,13 +112,13 @@ class LoanPaymentController extends Controller
             return response()->json(['message' => 'This payment is not a pending settlement request.'], 422);
         }
         $loan = $payment->loan;
-        $outstanding = $this->outstandingBalance($loan);
+        $outstanding = LoanPaymentAllocator::outstandingBalance($loan);
         if ((float) $payment->amount > $outstanding) {
             return response()->json(['message' => "The outstanding balance has changed since this request was made (now {$outstanding}). Reject it and ask the cashier to resubmit."], 422);
         }
 
         DB::transaction(function () use ($loan, $payment, $request) {
-            $this->applyAllocation($loan, $payment, (float) $payment->amount);
+            LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $payment->amount);
             $payment->update([
                 'approval_status' => 'Approved',
                 'approved_by' => $request->user()->id,
@@ -155,17 +153,25 @@ class LoanPaymentController extends Controller
         if ($payment->payment_method !== 'Cheque' || $payment->clearance_status !== 'Pending') {
             return response()->json(['message' => 'This payment is not a pending cheque awaiting clearance.'], 422);
         }
-        $data = $request->validate(['status' => ['required', Rule::in(['Realized', 'Bounced'])]]);
+        $data = $request->validate([
+            'status' => ['required', Rule::in(['Realized', 'Bounced'])],
+            // The date the cheque actually cleared at the bank (check-in date) —
+            // required when realizing, since that's the day the amount is
+            // considered to have landed in the loan, not the day someone
+            // happens to click "Realize" here.
+            'realized_at' => 'required_if:status,Realized|nullable|date',
+        ]);
 
         if ($data['status'] === 'Realized') {
             $loan = $payment->loan;
-            $outstanding = $this->outstandingBalance($loan);
+            $asOf = Carbon::parse($data['realized_at']);
+            $outstanding = LoanPaymentAllocator::outstandingBalance($loan, $asOf);
             if ((float) $payment->amount > $outstanding) {
                 return response()->json(['message' => "The outstanding balance has changed since this cheque was recorded (now {$outstanding}). Reject it and ask the cashier to re-record the payment."], 422);
             }
-            DB::transaction(function () use ($loan, $payment) {
-                $this->applyAllocation($loan, $payment, (float) $payment->amount);
-                $payment->update(['clearance_status' => 'Realized']);
+            DB::transaction(function () use ($loan, $payment, $asOf) {
+                LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $payment->amount, $asOf);
+                $payment->update(['clearance_status' => 'Realized', 'realized_at' => $asOf]);
             });
         } else {
             // Bounced — it was never applied to the schedule, so there's nothing to
@@ -228,167 +234,4 @@ class LoanPaymentController extends Controller
         return response()->noContent();
     }
 
-    /** Standard-practice loan servicing figures for this loan's penalty config
-     *  (see LoanSummary::penaltyDueForRow) — shared by outstandingBalance() and
-     *  applyAllocation() so both price "OD" identically. */
-    private function penaltyTerms(Loan $loan): array
-    {
-        return [
-            (int) ($loan->loanType?->grace_period_days ?? 5),
-            (float) ($loan->loanType?->penalty_rate_percent ?? 0),
-            $loan->loanType?->penalty_method ?? 'flat',
-        ];
-    }
-
-    /** Everything this loan owes right now: unpaid principal+interest, unpaid
-     *  penalty/OD (live estimate, same formula as the Contract Status tab), and
-     *  unpaid Document/Legal/Valuation/Other charges. */
-    private function outstandingBalance(Loan $loan): float
-    {
-        $schedules = $loan->schedules()->with('allocations.payment:id,status,approval_status')->get();
-        $scheduleBalance = $schedules->where('status', '!=', 'Paid')
-            ->sum(fn ($s) => (float) $s->total_due - (float) $s->paid_amount);
-
-        [$graceDays, $penaltyRate, $penaltyMethod] = $this->penaltyTerms($loan);
-        $today = Carbon::today();
-        $penaltyBalance = $penaltyRate > 0
-            ? $schedules->sum(function ($s) use ($graceDays, $penaltyRate, $penaltyMethod, $today) {
-                $due = LoanSummary::penaltyDueForRow($s, $graceDays, $penaltyRate, $penaltyMethod, $today);
-                $paid = LoanSummary::activePenaltyPaid($s);
-
-                return max(0, round($due - $paid, 2));
-            })
-            : 0.0;
-
-        $chargesBalance = (float) $loan->charges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
-
-        return round($scheduleBalance + $penaltyBalance + $chargesBalance, 2);
-    }
-
-    /**
-     * Applies `$amount` in standard loan-servicing order: Interest, then OD
-     * (penalty), then other charges (Document/Legal/Valuation/Other), then
-     * Principal — each bucket oldest-first across the loan's unpaid
-     * installments/charges — then closes the loan once nothing is owed.
-     * Shared by an immediate payment, an approved settlement, and a realized
-     * cheque.
-     */
-    private function applyAllocation(Loan $loan, LoanPayment $payment, float $amount): void
-    {
-        $schedules = $loan->schedules()->where('status', '!=', 'Paid')->orderBy('installment_no')
-            ->with('allocations.payment:id,status,approval_status')->get();
-        [$graceDays, $penaltyRate, $penaltyMethod] = $this->penaltyTerms($loan);
-        $today = Carbon::today();
-
-        // A void doesn't delete allocation rows (kept for audit trail), so every
-        // "how much of this row is already paid" lookup below must exclude a
-        // voided (or still-pending-approval) payment's rows explicitly — the
-        // authoritative-and-already-reversed paid_amount only covers principal+
-        // interest combined, not the per-bucket split these passes need.
-        $activeApplied = fn ($row, string $column) => (float) $row->allocations
-            ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
-            ->sum($column);
-
-        // Accumulate this payment's contribution per schedule row across all
-        // three buckets that touch schedules, so exactly one allocation row is
-        // written per installment (mirrors the pre-existing convention).
-        $applied = [];
-        $touch = function (int $scheduleId, string $bucket, float $amt) use (&$applied) {
-            if ($amt <= 0) {
-                return;
-            }
-            $applied[$scheduleId] ??= ['interest' => 0.0, 'penalty' => 0.0, 'principal' => 0.0];
-            $applied[$scheduleId][$bucket] += $amt;
-        };
-
-        $remaining = $amount;
-
-        // 1) Interest — oldest installment first.
-        foreach ($schedules as $row) {
-            if ($remaining <= 0) {
-                break;
-            }
-            $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2));
-            if ($due <= 0) {
-                continue;
-            }
-            $pay = min($remaining, $due);
-            $touch($row->id, 'interest', $pay);
-            $remaining = round($remaining - $pay, 2);
-        }
-
-        // 2) OD / penalty — live estimate per installment, oldest first.
-        if ($remaining > 0 && $penaltyRate > 0) {
-            foreach ($schedules as $row) {
-                if ($remaining <= 0) {
-                    break;
-                }
-                $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $penaltyRate, $penaltyMethod, $today);
-                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied'), 2));
-                if ($due <= 0) {
-                    continue;
-                }
-                $pay = min($remaining, $due);
-                $touch($row->id, 'penalty', $pay);
-                $remaining = round($remaining - $pay, 2);
-            }
-        }
-
-        // 3) Other charges (Document/Legal/Valuation/Other) — oldest first.
-        if ($remaining > 0) {
-            $charges = $loan->charges()->orderBy('charged_at')->get();
-            foreach ($charges as $charge) {
-                if ($remaining <= 0) {
-                    break;
-                }
-                $due = max(0, round((float) $charge->due_amount - (float) $charge->paid_amount, 2));
-                if ($due <= 0) {
-                    continue;
-                }
-                $pay = min($remaining, $due);
-                $charge->update(['paid_amount' => round((float) $charge->paid_amount + $pay, 2)]);
-                LoanChargeAllocation::create(['loan_payment_id' => $payment->id, 'loan_charge_id' => $charge->id, 'amount_applied' => $pay]);
-                $remaining = round($remaining - $pay, 2);
-            }
-        }
-
-        // 4) Principal — oldest installment first, whatever's left.
-        foreach ($schedules as $row) {
-            if ($remaining <= 0) {
-                break;
-            }
-            $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2));
-            if ($due <= 0) {
-                continue;
-            }
-            $pay = min($remaining, $due);
-            $touch($row->id, 'principal', $pay);
-            $remaining = round($remaining - $pay, 2);
-        }
-
-        foreach ($applied as $scheduleId => $buckets) {
-            LoanPaymentAllocation::create([
-                'loan_payment_id' => $payment->id,
-                'loan_schedule_id' => $scheduleId,
-                'principal_applied' => round($buckets['principal'], 2),
-                'interest_applied' => round($buckets['interest'], 2),
-                'penalty_applied' => round($buckets['penalty'], 2),
-            ]);
-
-            $row = $schedules->firstWhere('id', $scheduleId);
-            // Only principal+interest count toward an installment's own total_due/
-            // status — penalty is priced and collected separately (see above) and
-            // never was, and isn't now, part of that figure (see LoanAmortizer).
-            $newPaid = round((float) $row->paid_amount + $buckets['interest'] + $buckets['principal'], 2);
-            $row->update([
-                'paid_amount' => $newPaid,
-                'status' => $newPaid >= (float) $row->total_due ? 'Paid' : 'Partial',
-                'paid_at' => $newPaid >= (float) $row->total_due ? now() : $row->paid_at,
-            ]);
-        }
-
-        if ($this->outstandingBalance($loan) <= 0) {
-            $loan->update(['status' => 'Closed', 'closed_at' => now()]);
-        }
-    }
 }

@@ -6,7 +6,7 @@
    Valuation/Other charges are permission-gated on the backend (Active Loans),
    not admin-only, but this is the only place a charge can actually be added. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, DateInput } from '../components/ui'
 import {
   loansApi, loanSchedulesApi, loanWaiversApi, loanPostDatedChequesApi, loanPaymentsApi, loanChargesApi,
   type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type LoanChargeType,
@@ -117,6 +117,10 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   const [status, setStatus] = useState<ChequeStatus | ''>('')
   const [dueTodayOnly, setDueTodayOnly] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
+  // Realizing needs the actual bank check-in/clearing date, not just a click —
+  // see act(). Bouncing doesn't touch the loan, so it skips this dialog.
+  const [realizeTarget, setRealizeTarget] = useState<LoanPostDatedCheque | null>(null)
+  const [realizeDate, setRealizeDate] = useState('')
 
   const refresh = () => {
     setLoading(true)
@@ -129,16 +133,24 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   const dueTodayCount = useMemo(() => rows.filter((c) => isOpenCheque(c) && c.chequeDate?.slice(0, 10) === today).length, [rows, today])
   const overdueCount = useMemo(() => rows.filter((c) => isOpenCheque(c) && c.chequeDate?.slice(0, 10) < today).length, [rows, today])
 
-  const act = async (c: LoanPostDatedCheque, next: 'Realized' | 'Bounced') => {
+  const act = async (c: LoanPostDatedCheque, next: 'Realized' | 'Bounced', realizedAt?: string) => {
     setBusyId(c.id)
     try {
-      if (c.source === 'Payment') await loanPaymentsApi.clearCheque(c.id, next)
-      else await loanPostDatedChequesApi.updateStatus(c.id, next)
+      if (c.source === 'Payment') await loanPaymentsApi.clearCheque(c.id, next, realizedAt)
+      else await loanPostDatedChequesApi.updateStatus(c.id, next, undefined, realizedAt)
       notify.success(next === 'Realized' ? 'Cheque realized' : 'Cheque rejected')
       refresh()
     } catch (ex: any) {
       notify.error('Update failed', ex?.response?.data?.message)
     } finally { setBusyId(null) }
+  }
+
+  const openRealize = (c: LoanPostDatedCheque) => { setRealizeTarget(c); setRealizeDate(today) }
+  const confirmRealize = async () => {
+    if (!realizeTarget || !realizeDate) return
+    const c = realizeTarget
+    setRealizeTarget(null)
+    await act(c, 'Realized', realizeDate)
   }
 
   return (
@@ -180,7 +192,7 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
               <Td align="right">
                 {isOpenCheque(c) && (isDueCheque(c, today) ? (
                   <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-                    <Btn size="sm" variant="ok" icon="check" disabled={busyId === c.id} onClick={() => act(c, 'Realized')}>Realize</Btn>
+                    <Btn size="sm" variant="ok" icon="check" disabled={busyId === c.id} onClick={() => openRealize(c)}>Realize</Btn>
                     <Btn size="sm" variant="danger" icon="x" disabled={busyId === c.id} onClick={() => act(c, 'Bounced')}>Reject</Btn>
                   </div>
                 ) : <span className="t-2" style={{ fontSize: 11.5 }}>Not due yet</span>)}
@@ -188,6 +200,33 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
             </>
           }} />}
       </Card>
+
+      {realizeTarget && (
+        <div onClick={() => setRealizeTarget(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 350, background: 'oklch(0 0 0 / 0.55)', backdropFilter: 'blur(3px)',
+          display: 'grid', placeItems: 'center', padding: 20,
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: 'min(400px,100%)', background: 'var(--bg-1)', border: '1px solid var(--line)',
+            borderRadius: 'var(--r-l)', boxShadow: '0 30px 60px -20px rgb(0 0 0 / .6)', overflow: 'hidden',
+          }}>
+            <div style={{ padding: '20px 22px 6px' }}>
+              <h3 style={{ fontSize: 17, marginBottom: 4 }}>Realize cheque {realizeTarget.chequeNo}</h3>
+              <div className="t-2" style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}>
+                Enter the date the cheque actually cleared at the bank (check-in date) — the amount is deducted
+                from the loan as of this date, not today's date.
+              </div>
+              <Field label="Check-in / Realization Date">
+                <DateInput value={realizeDate} onChange={setRealizeDate} />
+              </Field>
+            </div>
+            <div className="row gap-2" style={{ padding: '14px 22px', justifyContent: 'flex-end', borderTop: '1px solid var(--line)', marginTop: 14 }}>
+              <Btn variant="plain" onClick={() => setRealizeTarget(null)}>Cancel</Btn>
+              <Btn variant="primary" icon="check" disabled={!realizeDate || busyId === realizeTarget.id} onClick={confirmRealize}>Realize</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -38,10 +38,13 @@ const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = { Pa
 
 interface ReceiptData { payment: LoanPayment; loan: Loan; balanceBefore: number }
 
-/* A Cheque payment applies to the balance immediately, same as Cash/Bank — it
-   just also captures bank + cheque date for the audit trail. This is distinct
-   from "Record Cheque" (Post Dated Cheques), which logs a future cheque
-   without touching the balance until it's realized. */
+/* A Cheque payment (unlike Cash/Bank) does NOT apply to the balance immediately —
+   it's held Pending until admin marks it Realized on Loan Adjustments' Cheque
+   Clearance tab, which is when the amount actually lands in the loan (as of the
+   cheque's bank check-in/clearing date, not this entry date). "Cheque Date" here
+   is just the date printed on the cheque, captured for the audit trail. This is
+   distinct from "Record Cheque" (Post Dated Cheques), which logs a future cheque
+   the same way — also untouched until realized. */
 function PaymentFields({ method, setMethod, paidAt, setPaidAt, refNo, setRefNo, bankName, setBankName, chequeDate, setChequeDate, notes, setNotes }: {
   method: PaymentMethod; setMethod: (v: PaymentMethod) => void
   paidAt: string; setPaidAt: (v: string) => void

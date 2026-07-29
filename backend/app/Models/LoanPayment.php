@@ -11,7 +11,7 @@ class LoanPayment extends Model
 
     protected $fillable = [
         'code', 'loan_id', 'branch_id', 'amount', 'payment_method', 'clearance_status', 'is_settlement',
-        'received_by', 'paid_at', 'receipt_no', 'bank_name', 'cheque_date', 'notes',
+        'received_by', 'paid_at', 'receipt_no', 'bank_name', 'cheque_date', 'realized_at', 'notes',
         'status', 'approval_status', 'approved_by', 'approved_at',
         'void_reason', 'voided_by', 'voided_at',
     ];
@@ -21,6 +21,7 @@ class LoanPayment extends Model
         'is_settlement' => 'boolean',
         'paid_at' => 'datetime',
         'cheque_date' => 'date',
+        'realized_at' => 'date',
         'approved_at' => 'datetime',
         'voided_at' => 'datetime',
     ];
@@ -58,5 +59,13 @@ class LoanPayment extends Model
     public function chargeAllocations()
     {
         return $this->hasMany(LoanChargeAllocation::class);
+    }
+
+    /** Set only when this payment was auto-created by realizing a post-dated
+     *  cheque (LoanPostDatedChequeController::updateStatus) rather than
+     *  recorded directly as a Cheque-method payment. */
+    public function postDatedCheque()
+    {
+        return $this->hasOne(LoanPostDatedCheque::class, 'loan_payment_id');
     }
 }

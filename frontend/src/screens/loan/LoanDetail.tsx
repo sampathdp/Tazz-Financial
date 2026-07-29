@@ -355,7 +355,7 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
                 <div className="row gap-2" style={{ alignItems: 'center' }}>
                   <Icon n="receipt" s={15} />
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.code}</span>
-                  <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.paymentMethod}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · {p.receiver?.name}{p.clearanceStatus === 'Realized' ? ' · cheque realized' : ''}</span>
+                  <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.paymentMethod}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · {p.receiver?.name}{p.clearanceStatus === 'Realized' ? ` · cheque realized ${dateOnly(p.realizedAt)}` : ''}</span>
                 </div>
                 <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
               </div>
@@ -426,18 +426,21 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         <div className="eyebrow">Post Dated Cheques</div>
         <span className="t-2" style={{ fontSize: 11.5 }}>Record a cheque on the Payment Receipt screen · realize or reject on Loan Adjustments (admin only).</span>
       </div>
-      <Table cols={[{ label: 'Cheque No' }, { label: 'Bank' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 40 }]}
+      <Table cols={[{ label: 'Cheque No' }, { label: 'Bank' }, { label: 'Cheque Date' }, { label: 'Realized' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 40 }]}
         rows={cheques} empty="No post dated cheques"
         render={(c: LoanPostDatedCheque) => <>
           <Td mono>{c.chequeNo}</Td>
           <Td>{c.bankName}</Td>
           <Td>{dateOnly(c.chequeDate)}</Td>
+          <Td>{c.status === 'Realized' ? dateOnly(c.realizedAt) : '—'}</Td>
           <Td mono align="right">{money(c.amount)}</Td>
           <Td align="center"><Badge tone={chequeTone[c.status]} dot>{c.status}</Badge></Td>
           <Td align="right">
-            <Can user={me} module="Loan Payments" action="Delete">
-              <button className="mms-act" title="Delete" onClick={() => remove(c)}><Icon n="trash" s={14} /></button>
-            </Can>
+            {c.status !== 'Realized' && (
+              <Can user={me} module="Loan Payments" action="Delete">
+                <button className="mms-act" title="Delete" onClick={() => remove(c)}><Icon n="trash" s={14} /></button>
+              </Can>
+            )}
           </Td>
         </>} />
     </Card>

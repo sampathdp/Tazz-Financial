@@ -11,13 +11,14 @@ class LoanPostDatedCheque extends Model
 
     protected $fillable = [
         'loan_id', 'branch_id', 'cheque_no', 'bank_name', 'cheque_date', 'amount',
-        'status', 'handed_at', 'notes', 'created_by',
+        'status', 'handed_at', 'realized_at', 'loan_payment_id', 'notes', 'created_by',
     ];
 
     protected $casts = [
         'cheque_date' => 'date',
         'amount' => 'decimal:2',
         'handed_at' => 'date',
+        'realized_at' => 'date',
     ];
 
     public function loan()
@@ -28,5 +29,10 @@ class LoanPostDatedCheque extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function payment()
+    {
+        return $this->belongsTo(LoanPayment::class, 'loan_payment_id');
     }
 }

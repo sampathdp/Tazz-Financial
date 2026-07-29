@@ -8,6 +8,7 @@ import type { Go, ScreenProps } from './screens/types'
 import Login from './screens/Login'
 import { auth, type AuthUser } from './api'
 import { canAccessRoute } from './lib/permissions'
+import { WhatsNewModal } from './components/WhatsNewModal'
 
 const DashScreen = lazy(() => import('./screens/Dashboard'))
 const CustomersScreen = lazy(() => import('./screens/Customers').then((m) => ({ default: m.CustomersScreen })))
@@ -122,6 +123,7 @@ export default function App() {
   const denied = !canAccessRoute(user, route)
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <WhatsNewModal user={user} />
       <Sidebar route={effectiveRoute} go={go} open={open} setOpen={setOpen} company={brand} user={user} />
       <div className="mms-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Topbar setOpen={setOpen} route={effectiveRoute} go={go} />

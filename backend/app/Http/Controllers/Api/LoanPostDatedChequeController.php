@@ -3,10 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Branch;
 use App\Models\Loan;
 use App\Models\LoanPayment;
 use App\Models\LoanPostDatedCheque;
+use App\Services\NumberGenerator;
+use App\Support\LoanPaymentAllocator;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class LoanPostDatedChequeController extends Controller
@@ -62,6 +67,10 @@ class LoanPostDatedChequeController extends Controller
         ])
             ->where('payment_method', 'Cheque')
             ->where('approval_status', '!=', 'PendingApproval')
+            // A cheque realized from the Post Dated Cheques flow already
+            // appears via $postDated above (with its own loan_payment_id
+            // link) — excluding it here keeps it from listing twice.
+            ->whereDoesntHave('postDatedCheque')
             // Keep live payments plus ones voided specifically because the cheque
             // bounced (so its rejection still shows up in the history); drop
             // payments voided for any other reason (a cancelled receipt entirely).
@@ -135,19 +144,76 @@ class LoanPostDatedChequeController extends Controller
         $data = $request->validate([
             'status' => ['required', Rule::in(self::STATUSES)],
             'notes' => 'nullable|string|max:255',
+            // Required when realizing — the date the cheque actually cleared
+            // at the bank (check-in date), not the day someone happens to
+            // mark it Realized here. This is the day the amount is
+            // considered to have landed in the loan — see LoanPaymentAllocator.
+            'realized_at' => 'required_if:status,Realized|nullable|date',
         ]);
 
-        $cheque->update([
-            'status' => $data['status'],
-            'handed_at' => $data['status'] === 'Handed' ? now() : $cheque->handed_at,
-            'notes' => $data['notes'] ?? $cheque->notes,
-        ]);
+        if ($data['status'] === 'Realized') {
+            if ($cheque->status === 'Realized') {
+                return response()->json(['message' => 'This cheque has already been realized.'], 422);
+            }
+            $loan = $cheque->loan;
+            $asOf = Carbon::parse($data['realized_at']);
+            $outstanding = LoanPaymentAllocator::outstandingBalance($loan, $asOf);
+            if ((float) $cheque->amount > $outstanding) {
+                return response()->json(['message' => "The outstanding balance has changed since this cheque was recorded (now {$outstanding})."], 422);
+            }
 
-        return $cheque->load('creator:id,name');
+            DB::transaction(function () use ($loan, $cheque, $asOf, $data, $request) {
+                $branch = Branch::find($loan->branch_id);
+                $code = NumberGenerator::next('payment', [
+                    'branch_id' => $branch->id,
+                    'branch_code' => $branch->code,
+                    'type_code' => 'CQ',
+                    'user_id' => $request->user()->id,
+                ]);
+                $payment = LoanPayment::create([
+                    'code' => $code,
+                    'loan_id' => $loan->id,
+                    'branch_id' => $loan->branch_id,
+                    'amount' => $cheque->amount,
+                    'payment_method' => 'Cheque',
+                    'clearance_status' => 'Realized',
+                    'received_by' => $request->user()->id,
+                    'paid_at' => $asOf,
+                    'receipt_no' => $cheque->cheque_no,
+                    'bank_name' => $cheque->bank_name,
+                    'cheque_date' => $cheque->cheque_date,
+                    'realized_at' => $asOf,
+                    'notes' => $data['notes'] ?? $cheque->notes,
+                    'is_settlement' => false,
+                    'approval_status' => 'Approved',
+                ]);
+                NumberGenerator::attach($code, $payment);
+
+                LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $cheque->amount, $asOf);
+
+                $cheque->update([
+                    'status' => 'Realized',
+                    'realized_at' => $asOf,
+                    'loan_payment_id' => $payment->id,
+                    'notes' => $data['notes'] ?? $cheque->notes,
+                ]);
+            });
+        } else {
+            $cheque->update([
+                'status' => $data['status'],
+                'handed_at' => $data['status'] === 'Handed' ? now() : $cheque->handed_at,
+                'notes' => $data['notes'] ?? $cheque->notes,
+            ]);
+        }
+
+        return $cheque->fresh()->load('creator:id,name');
     }
 
     public function destroy(LoanPostDatedCheque $cheque)
     {
+        if ($cheque->status === 'Realized') {
+            return response()->json(['message' => 'This cheque has already been realized and applied to the loan — void the linked payment instead of deleting the cheque record.'], 422);
+        }
         $cheque->delete();
 
         return response()->noContent();
