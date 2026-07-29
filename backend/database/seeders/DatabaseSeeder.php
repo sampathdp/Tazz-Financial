@@ -68,6 +68,7 @@ class DatabaseSeeder extends Seeder
             // Approves/rejects the Cashier's full-settlement requests so a loan can close.
             // Edit lets them skip an installment (pushed to the back of the schedule).
             'Loan Payments' => ['View' => true, 'Create' => true, 'Edit' => true, 'Delete' => true, 'Approve' => true],
+            'Overdue Loans' => ['View' => true],
             'Bank Accounts' => ['View' => true, 'Create' => true, 'Edit' => true],
             'Bank Transactions' => ['View' => true, 'Create' => true, 'Delete' => true],
             'Bank Reconciliation' => ['View' => true, 'Create' => true, 'Edit' => true],
@@ -91,6 +92,7 @@ class DatabaseSeeder extends Seeder
             'Loan Applications' => ['View' => true, 'Create' => true, 'Edit' => true],
             'Active Loans' => ['View' => true],
             'Loan Payments' => ['View' => true, 'Create' => true, 'Edit' => true],
+            'Overdue Loans' => ['View' => true],
             'Deposits' => ['View' => true, 'Create' => true],
             'Fixed Deposits' => ['View' => true, 'Create' => true],
         ]);

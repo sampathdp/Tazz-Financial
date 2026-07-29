@@ -347,6 +347,17 @@ export interface LoanWaiver {
   approver?: { id: number; name: string } | null;
 }
 
+/** A loan with at least one past-due, not-fully-paid installment — see loansApi.overdue(). */
+export interface OverdueLoan extends Loan {
+  oldestOverdueDate: string;
+  daysOverdue: number;
+  overdueInstallments: number;
+  /** Principal + interest arrears on the overdue installments (excludes penalty). */
+  overdueAmount: number;
+  /** Default/OD interest accrued on the overdue installments. */
+  penaltyDue: number;
+}
+
 export interface LoanDueTypeRow {
   type: string; due: number; paid: number; balance: number; recoveryPct: number;
 }
@@ -479,6 +490,7 @@ export const loansApi = {
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>
     http.patch(`/loans/${id}/status-flags`, snakeize(body)).then((r) => camelize(r.data) as Loan),
+  overdue: () => http.get('/loans-overdue').then((r) => camelize(r.data) as OverdueLoan[]),
 }
 
 export const loanSchedulesApi = {

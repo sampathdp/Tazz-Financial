@@ -31,6 +31,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'loan/types': 'Loan Types',
   'loan/apps': 'Loan Applications',
   'loan/active': 'Active Loans',
+  'loan/overdue': 'Overdue Loans',
   'loan/payments': 'Loan Payments',
   'loan/doc-tracking': 'Document Tracking',
   // 'loan/adjustments' is intentionally NOT mapped here — canAccessRoute() below

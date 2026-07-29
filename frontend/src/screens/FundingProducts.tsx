@@ -137,7 +137,7 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
           </Field>
           <Field label="Minimum Deposit Amount"><Input type="number" step="0.01" value={form.minDepositAmount ?? ''} onChange={(e) => set({ minDepositAmount: e.target.value })} /></Field>
           <Field label="Maximum Deposit Amount (optional)"><Input type="number" step="0.01" value={form.maxDepositAmount ?? ''} onChange={(e) => set({ maxDepositAmount: e.target.value || null })} /></Field>
-          <Field label="Reference Format (optional)"><Input value={form.referenceFormat || ''} onChange={(e) => set({ referenceFormat: e.target.value })} placeholder="{BRANCH}-FD-{CODE}-{YEAR}-{SEQ:6}" /></Field>
+          <Field label="Reference Format (optional)"><Input value={form.referenceFormat || ''} onChange={(e) => set({ referenceFormat: e.target.value })} placeholder="{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:6}" /></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => set({ status: e.target.value as any })}><option>Active</option><option>Inactive</option></Select></Field>
         </div>
       </Modal>

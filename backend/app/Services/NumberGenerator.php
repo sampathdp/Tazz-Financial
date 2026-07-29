@@ -17,7 +17,10 @@ use Illuminate\Support\Facades\DB;
  * Placeholders: {BRANCH} branch code, {CODE} loan type / funding product
  * code (whichever the module uses), {TYPE} caller-supplied short code (e.g.
  * payment method), {YEAR} / {YEAR:n} year, last n digits (default 4),
- * {SEQ} / {SEQ:n} sequence zero-padded to n digits (default 6).
+ * {MONTH} / {MONTH:n} current calendar month, zero-padded to n digits
+ * (default 2) — display only, it does NOT affect the sequence counter below,
+ * which still resets by year, {SEQ} / {SEQ:n} sequence zero-padded to n
+ * digits (default 6).
  */
 class NumberGenerator
 {
@@ -28,8 +31,11 @@ class NumberGenerator
         // LoanPaymentController::TYPE_CODES. One shared sequence per
         // branch+year across all methods, same as a physical receipt book.
         'payment' => '{BRANCH}-{TYPE}-{YEAR:2}-{SEQ:5}',
-        'fd_deposit' => '{BRANCH}-DEP-{YEAR:2}-{SEQ:6}',
-        'fixed_deposit' => '{BRANCH}-FD-{CODE}-{YEAR:2}-{SEQ:6}',
+        'fd_deposit' => '{BRANCH}-DEP-{YEAR:2}-{MONTH:2}-{SEQ:6}',
+        // {CODE} (the funding product's own code, e.g. "TT") already
+        // distinguishes this as a fixed deposit — a literal "FD" segment was
+        // redundant, so it's dropped in favor of the calendar month.
+        'fixed_deposit' => '{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:6}',
         'fd_withdrawal' => '{BRANCH}-FDV-{YEAR:2}-{SEQ:5}',
     ];
 
@@ -72,6 +78,11 @@ class NumberGenerator
         $number = preg_replace_callback(
             '/\{YEAR(?::(\d+))?\}/',
             fn ($m) => isset($m[1]) ? substr(now()->format('Y'), -(int) $m[1]) : now()->format('Y'),
+            $number
+        );
+        $number = preg_replace_callback(
+            '/\{MONTH(?::(\d+))?\}/',
+            fn ($m) => str_pad(now()->format('n'), isset($m[1]) ? (int) $m[1] : 2, '0', STR_PAD_LEFT),
             $number
         );
         $number = preg_replace_callback(

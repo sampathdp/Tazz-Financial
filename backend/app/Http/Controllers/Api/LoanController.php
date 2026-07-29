@@ -56,6 +56,55 @@ class LoanController extends Controller
             ->orderByDesc('id')->get();
     }
 
+    /**
+     * Active loans with at least one installment past its due date and not
+     * fully paid. There's no persisted "overdue" flag (LoanSchedule.status
+     * only ever becomes Pending/Partial/Paid — see LoanPaymentAllocator), so
+     * this is computed live, the same way app\Support\LoanSummary does for a
+     * single loan's arrears — penaltyDueForRow() is reused directly so the OD
+     * figure here can never disagree with what Loan Detail shows.
+     */
+    public function overdue()
+    {
+        $today = now()->startOfDay();
+
+        $loans = Loan::where('status', 'Active')
+            ->whereHas('schedules', fn ($q) => $q->where('due_date', '<', $today)->where('status', '!=', 'Paid'))
+            ->with([
+                'customer:id,full_name,code,nic_no,phone',
+                'branch:id,name,code',
+                'loanType:id,name,code,penalty_rate_percent,penalty_method,grace_period_days',
+                'loanOfficer:id,name',
+                'recoveryOfficer:id,name',
+                'schedules' => fn ($q) => $q->where('due_date', '<', $today)->where('status', '!=', 'Paid')->orderBy('due_date'),
+            ])
+            ->withSum('schedules as total_due_sum', 'total_due')
+            ->withSum('schedules as paid_sum', 'paid_amount')
+            ->get();
+
+        return $loans->map(function ($loan) use ($today) {
+            $graceDays = (int) ($loan->loanType?->grace_period_days ?? 5);
+            $penaltyRate = (float) ($loan->loanType?->penalty_rate_percent ?? 0);
+            $penaltyMethod = $loan->loanType?->penalty_method ?? 'flat';
+
+            $overdueSchedules = $loan->schedules;
+            $oldestDueDate = $overdueSchedules->min('due_date');
+
+            $data = $loan->toArray();
+            $data['oldestOverdueDate'] = $oldestDueDate;
+            $data['daysOverdue'] = $oldestDueDate ? (int) $today->diffInDays($oldestDueDate) : 0;
+            $data['overdueInstallments'] = $overdueSchedules->count();
+            $data['overdueAmount'] = round((float) $overdueSchedules->sum(
+                fn ($s) => max(0, (float) $s->principal_due + (float) $s->interest_due - (float) $s->paid_amount)
+            ), 2);
+            $data['penaltyDue'] = round((float) $overdueSchedules->sum(
+                fn ($s) => LoanSummary::penaltyDueForRow($s, $graceDays, $penaltyRate, $penaltyMethod, $today)
+            ), 2);
+
+            return $data;
+        })->sortByDesc('daysOverdue')->values();
+    }
+
     public function show(Loan $loan)
     {
         $loan->load(self::DETAIL_RELATIONS);

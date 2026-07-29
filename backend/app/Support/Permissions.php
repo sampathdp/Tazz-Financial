@@ -23,6 +23,7 @@ class Permissions
         'Loan Applications',
         'Active Loans',
         'Loan Payments',
+        'Overdue Loans',
         'Document Tracking',
         'Bank Accounts',
         'Bank Transactions',

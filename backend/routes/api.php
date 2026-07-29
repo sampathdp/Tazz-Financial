@@ -102,6 +102,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Loan Management: Loan Applications ---
     Route::get('loans', [LoanController::class, 'index'])->middleware('perm:Loan Applications,View');
+    // Flat path (not loans/overdue) so it can never collide with the loans/{loan} route below.
+    Route::get('loans-overdue', [LoanController::class, 'overdue'])->middleware('perm:Overdue Loans,View');
     Route::get('loans/{loan}', [LoanController::class, 'show'])->middleware('perm:Loan Applications,View');
     Route::post('loans', [LoanController::class, 'store'])->middleware('perm:Loan Applications,Create');
     Route::put('loans/{loan}', [LoanController::class, 'update'])->middleware('perm:Loan Applications,Edit');

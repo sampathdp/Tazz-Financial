@@ -24,7 +24,7 @@ export const NAV: NavNode[] = [
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
     { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
     { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt' },
-    { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert', soon: true },
+    { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert' },
     { id: 'loan/doc-tracking', label: 'Document Tracking', icon: 'tag' },
     /** Admin-only — installment skip / cheque realize-reject / waivers. Intentionally
      *  left out of lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back
