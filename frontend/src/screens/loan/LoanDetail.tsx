@@ -228,7 +228,7 @@ function RecoveryDetails({ loan, me, onChanged, notify }: { loan: Loan; me?: Aut
   const [busy, setBusy] = useState(false)
 
   const openEdit = () => {
-    api.users.list().then((u: any) => setOfficers(u)).catch(() => setOfficers([]))
+    api.users.marketingExecutives().then(setOfficers).catch(() => setOfficers([]))
     setLoanOfficerId(loan.loanOfficerId || ''); setRecoveryOfficerId(loan.recoveryOfficerId || '')
     setEditing(true)
   }
@@ -248,7 +248,7 @@ function RecoveryDetails({ loan, me, onChanged, notify }: { loan: Loan; me?: Aut
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5 }}>
         <div><span className="t-2">Follow Up Officer: </span>{loan.recoveryOfficer?.name || '—'}</div>
-        <div><span className="t-2">Marketing / Loan Officer: </span>{loan.loanOfficer?.name || '—'}</div>
+        <div><span className="t-2">Marketing Executive: </span>{loan.loanOfficer?.name || '—'}</div>
         <div><span className="t-2">Last Payment: </span>{r?.lastPaymentDate ? `${dateOnly(r.lastPaymentDate)} · ${money(r.lastPaymentAmount)}` : '—'}</div>
         <div><span className="t-2">Fallen Due Rentals: </span>{r?.fallenDueRentals ?? 0}</div>
         <div><span className="t-2">Settled Rentals: </span>{r?.settledRentals ?? 0}</div>
@@ -261,7 +261,7 @@ function RecoveryDetails({ loan, me, onChanged, notify }: { loan: Loan; me?: Aut
         <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Btn>
       </>}>
         <div className="col gap-3">
-          <Field label="Marketing / Loan Officer"><Select value={loanOfficerId} onChange={(e) => setLoanOfficerId(Number(e.target.value) || '')}>
+          <Field label="Marketing Executive"><Select value={loanOfficerId} onChange={(e) => setLoanOfficerId(Number(e.target.value) || '')}>
             <option value="">—</option>{officers.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </Select></Field>
           <Field label="Follow Up / Recovery Officer"><Select value={recoveryOfficerId} onChange={(e) => setRecoveryOfficerId(Number(e.target.value) || '')}>

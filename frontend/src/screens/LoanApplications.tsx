@@ -87,7 +87,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     customersApi.list().then(setCustomers).catch(() => setCustomers([]))
     branchesApi.list().then(setBranches).catch(() => setBranches([]))
     loanTypesApi.list().then(setLoanTypes).catch(() => setLoanTypes([]))
-    api.users.list().then((u: any) => setOfficers(u)).catch(() => setOfficers([]))
+    api.users.marketingExecutives().then(setOfficers).catch(() => setOfficers([]))
   }, [])
 
   const openQuickAdd = () => { setQuickAddForm(blankQuickAdd()); setQuickAddErr(''); setQuickAdd(true) }
@@ -326,7 +326,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             <Field label="Repayment Frequency"><Select value={form.installmentFrequency || 'monthly'} onChange={(e) => setForm((s) => ({ ...s, installmentFrequency: e.target.value as any }))}>
               {FREQ_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select></Field>
-            <Field label="Loan Officer"><Select value={form.loanOfficerId ?? ''} onChange={(e) => setForm((s) => ({ ...s, loanOfficerId: Number(e.target.value) || undefined }))}>
+            <Field label="Marketing Executive"><Select value={form.loanOfficerId ?? ''} onChange={(e) => setForm((s) => ({ ...s, loanOfficerId: Number(e.target.value) || undefined }))}>
               <option value="">—</option>{officers.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </Select></Field>
             <Field label="Purpose" full><textarea value={form.purpose || ''} onChange={(e) => setForm((s) => ({ ...s, purpose: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>

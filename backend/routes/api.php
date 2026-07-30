@@ -69,6 +69,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::put('roles/{role}/permissions', [PermissionController::class, 'updateRole'])->middleware('perm:Role Management,Edit');
 
     // --- User Management ---
+    // Sales-executive picklist for Loan/Pawning "assign officer" dropdowns —
+    // open to any authenticated user (see UserController::marketingExecutives()).
+    Route::get('users/marketing-executives', [UserController::class, 'marketingExecutives']);
     Route::get('users', [UserController::class, 'index'])->middleware('perm:User Management,View');
     Route::post('users', [UserController::class, 'store'])->middleware('perm:User Management,Create');
     Route::put('users/{user}', [UserController::class, 'update'])->middleware('perm:User Management,Edit');

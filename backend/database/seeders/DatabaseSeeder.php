@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
         $adminRole = $this->seedAdminRole();
         $this->seedExampleRoles();
         $admin = $this->seedAdminUser($adminRole, $branch);
+        $this->seedSampleStaffUsers($branch);
 
         $this->seedSampleBranches($branch);
         $this->seedSampleLoanTypes();
@@ -116,6 +117,54 @@ class DatabaseSeeder extends Seeder
             'Deposits' => ['View' => true, 'Create' => true],
             'Fixed Deposits' => ['View' => true, 'Create' => true, 'Edit' => true],
         ]);
+
+        // Marketing Executive — the field/sales role. Members of this role are the
+        // ones offered in the "Loan Officer" picklist on Loan Applications and the
+        // Loan Detail "Assign Officers" panel (see UserController::marketingExecutives()).
+        $marketing = Role::updateOrCreate(['slug' => 'marketing_executive'], [
+            'name' => 'Marketing Executive',
+            'description' => 'Sources customers and loan applications in the field.',
+            'is_system' => false,
+            'can_view_all_branches' => false,
+        ]);
+        Permissions::saveForRole($marketing, [
+            'Dashboard' => ['View' => true],
+            'Customer Management' => ['View' => true, 'Create' => true, 'Edit' => true],
+            'Loan Types' => ['View' => true],
+            'Loan Applications' => ['View' => true, 'Create' => true],
+            'Active Loans' => ['View' => true],
+        ]);
+    }
+
+    /** Sample Cashier and Marketing Executive users so the Loan Officer /
+     *  sales-executive picklists aren't empty on first run. Idempotent by
+     *  email — re-running the seeder never touches an existing account. */
+    private function seedSampleStaffUsers(Branch $branch): void
+    {
+        $cashier = Role::where('slug', 'cashier')->first();
+        $marketing = Role::where('slug', 'marketing_executive')->first();
+
+        $people = [
+            ['email' => 'cashier1@absl.local', 'name' => 'H.M. Kaushalya', 'role' => $cashier],
+            ['email' => 'cashier2@absl.local', 'name' => 'P.G. Nadeesha', 'role' => $cashier],
+            ['email' => 'marketing1@absl.local', 'name' => 'S.A. Ruwan', 'role' => $marketing],
+            ['email' => 'marketing2@absl.local', 'name' => 'D.M. Iresha', 'role' => $marketing],
+            ['email' => 'marketing3@absl.local', 'name' => 'T.K. Chamara', 'role' => $marketing],
+        ];
+
+        foreach ($people as $p) {
+            if (!$p['role'] || User::where('email', $p['email'])->exists()) {
+                continue;
+            }
+            User::create([
+                'email' => $p['email'],
+                'name' => $p['name'],
+                'password' => Hash::make('password'),
+                'role_id' => $p['role']->id,
+                'branch_id' => $branch->id,
+                'status' => 'Active',
+            ]);
+        }
     }
 
     private function seedAdminUser(Role $adminRole, Branch $branch): User

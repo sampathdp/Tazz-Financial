@@ -18,6 +18,21 @@ class UserController extends Controller
             ->map(fn (User $u) => $this->present($u));
     }
 
+    /**
+     * Lightweight roster of active Marketing Executives — the "sales
+     * executive" picklist used by Loan/Pawning "assign officer" dropdowns.
+     * Deliberately not gated behind `perm:User Management,View`: roles that
+     * can create a loan application (e.g. Staff) may not be allowed to
+     * browse the full user list, but still need to pick an officer.
+     */
+    public function marketingExecutives()
+    {
+        return User::whereHas('role', fn ($q) => $q->where('slug', 'marketing_executive'))
+            ->where('status', 'Active')
+            ->orderBy('name')
+            ->get(['id', 'name']);
+    }
+
     public function store(Request $request)
     {
         $data = $this->validated($request);

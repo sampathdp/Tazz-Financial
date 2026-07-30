@@ -803,7 +803,13 @@ export const company = {
 }
 
 export const api = {
-  users: resource('users'),
+  users: {
+    ...resource('users'),
+    /** Active Marketing Executives — the sales-executive picklist used by
+     *  the Loan Officer dropdown on Loan Applications / Loan Detail. */
+    marketingExecutives: () =>
+      http.get('/users/marketing-executives').then((r) => camelize(r.data) as { id: number; name: string }[]),
+  },
   dashboard: () => http.get('/dashboard').then((r) => camelize(r.data)),
 }
 

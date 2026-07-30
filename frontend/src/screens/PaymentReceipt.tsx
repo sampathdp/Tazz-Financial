@@ -120,6 +120,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
   const [scheduleTab, setScheduleTab] = useState<'all' | 'paid' | 'unpaid'>('unpaid')
+  const [viewPayment, setViewPayment] = useState<LoanPayment | null>(null)
 
   const refresh = () => {
     setLoading(true)
@@ -361,7 +362,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <Card pad={0} style={{ marginBottom: 16 }}>
             <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Payment History</div>
             <Table cols={[{ label: 'Receipt No' }, { label: 'Date' }, { label: 'Method' }, { label: 'Amount', align: 'right' }, { label: 'Received By' }, { label: 'Status', align: 'center' }]}
-              rows={paymentHistory} empty="No payments recorded yet for this loan."
+              rows={paymentHistory} empty="No payments recorded yet for this loan." onRow={(p) => setViewPayment(p)}
               render={(p: LoanPayment) => <>
                 <Td mono style={{ fontWeight: 600 }}>{p.code}</Td>
                 <Td>{dateOnly(p.paidAt)}</Td>
@@ -472,6 +473,44 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             <Field label="Amount"><Input type="number" value={chequeAmount} onChange={(e) => setChequeAmount(e.target.value)} /></Field>
           </div>
         </div>
+      </Modal>
+
+      <Modal open={!!viewPayment} onClose={() => setViewPayment(null)} title={viewPayment ? `Payment ${viewPayment.code}` : ''} sub={selected ? `${selected.code} — ${selected.customer?.fullName}` : undefined}
+        footer={<Btn variant="solid" onClick={() => setViewPayment(null)}>Close</Btn>}>
+        {viewPayment && (() => {
+          const p = viewPayment
+          const pendingClearance = p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending'
+          return (
+            <div className="col gap-2" style={{ fontSize: 13 }}>
+              <div className="row between"><span className="t-2">Date</span><b>{dateOnly(p.paidAt)}</b></div>
+              <div className="row between"><span className="t-2">Status</span><PaymentStatusBadge p={p} /></div>
+              <div className="row between" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+                <span className="t-2">Amount</span><span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700 }}>{money(p.amount)}</span>
+              </div>
+              <div className="row between"><span className="t-2">Payment Method</span><b>{METHOD_OPTIONS.find((m) => m.value === p.paymentMethod)?.label || p.paymentMethod}{p.isSettlement ? ' (Settlement)' : ''}</b></div>
+              {p.receiptNo && <div className="row between"><span className="t-2">{REF_LABEL[p.paymentMethod]}</span><b>{p.receiptNo}</b></div>}
+              {p.paymentMethod === 'Cheque' && p.bankName && <div className="row between"><span className="t-2">Bank</span><b>{p.bankName}</b></div>}
+              {p.paymentMethod === 'Cheque' && p.chequeDate && <div className="row between"><span className="t-2">Cheque Date</span><b>{dateOnly(p.chequeDate)}</b></div>}
+              {p.paymentMethod === 'Cheque' && p.clearanceStatus && <div className="row between"><span className="t-2">Clearance</span><b>{p.clearanceStatus}</b></div>}
+              {p.clearanceStatus === 'Realized' && p.realizedAt && <div className="row between"><span className="t-2">Realized On</span><b>{dateOnly(p.realizedAt)}</b></div>}
+              {p.notes && <div className="row between"><span className="t-2">Notes</span><b>{p.notes}</b></div>}
+              <div className="row between" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}><span className="t-2">Received By</span><b>{p.receiver?.name || '—'}</b></div>
+              {p.isSettlement && <div className="row between"><span className="t-2">Approval Status</span><b>{p.approvalStatus || '—'}</b></div>}
+              {p.isSettlement && p.approver?.name && <div className="row between"><span className="t-2">Approved By</span><b>{p.approver.name}{p.approvedAt ? ` · ${dateOnly(p.approvedAt)}` : ''}</b></div>}
+              {p.status === 'Voided' && (
+                <div className="col gap-1" style={{ marginTop: 8, padding: '8px 12px', background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
+                  <div>Voided {dateOnly(p.voidedAt)} by {p.voider?.name || '—'}</div>
+                  {p.voidReason && <div>Reason: {p.voidReason}</div>}
+                </div>
+              )}
+              {pendingClearance && (
+                <div style={{ marginTop: 8, background: 'var(--warn-dim)', color: 'var(--warn)', border: '1px solid var(--warn)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
+                  This cheque is held pending clearance and has not been applied to the balance.
+                </div>
+              )}
+            </div>
+          )
+        })()}
       </Modal>
     </div>
   )
