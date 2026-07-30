@@ -3,6 +3,7 @@ import { Children, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
+import { masterCategoriesApi } from '../api'
 
 /* ---------- primitives ---------- */
 type Variant = 'primary' | 'solid' | 'ghost' | 'danger' | 'ok' | 'plain'
@@ -188,6 +189,42 @@ export function Select({ children, ...p }: React.SelectHTMLAttributes<HTMLSelect
         <Icon n="chevd" s={15} />
       </span>
     </div>
+  )
+}
+
+/** BankSelect — a plain bank-name string field (matches the existing
+ *  free-text `bank_name` columns every screen writes to), sourced from the
+ *  Banks master (Masters > Banks) instead of typed by hand. The list is
+ *  fetched once and shared across every instance on the page. If the current
+ *  value isn't in the master list (e.g. older free-text data, or a bank an
+ *  admin later deactivated/renamed), it's kept as an extra option so it
+ *  still displays instead of silently reverting to blank. */
+let bankNamesCache: string[] | null = null
+let bankNamesPromise: Promise<string[]> | null = null
+function loadBankNames(): Promise<string[]> {
+  if (bankNamesCache) return Promise.resolve(bankNamesCache)
+  if (!bankNamesPromise) {
+    bankNamesPromise = masterCategoriesApi.list('bank')
+      .then((rows) => (bankNamesCache = rows.filter((r) => (r.status || 'Active') === 'Active').map((r) => r.name)))
+      .catch(() => (bankNamesCache = []))
+  }
+  return bankNamesPromise
+}
+export function BankSelect({ value, onChange, style, disabled, placeholder = 'Select bank…' }: {
+  value: string
+  onChange: (v: string) => void
+  style?: CSSProperties
+  disabled?: boolean
+  placeholder?: string
+}) {
+  const [names, setNames] = useState<string[]>(bankNamesCache || [])
+  useEffect(() => { loadBankNames().then(setNames) }, [])
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value)} style={style} disabled={disabled}>
+      <option value="">{placeholder}</option>
+      {value && !names.includes(value) && <option value={value}>{value}</option>}
+      {names.map((n) => <option key={n} value={n}>{n}</option>)}
+    </Select>
   )
 }
 

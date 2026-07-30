@@ -75,7 +75,7 @@ export const NAV: NavNode[] = [
 
   { section: 'Masters', icon: 'layers', items: [
     { id: 'masters/expense-categories', label: 'Expense Categories', icon: 'tag' },
-    { id: 'masters/bank-account-types', label: 'Bank Account Types', icon: 'building' },
+    { id: 'masters/banks', label: 'Banks', icon: 'building' },
   ] },
 
   { section: 'Reports', icon: 'chart', items: [

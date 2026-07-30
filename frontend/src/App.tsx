@@ -38,7 +38,7 @@ const BankTransactionsScreen = named(() => import('./screens/Bank'), 'BankTransa
 const BankReconciliationScreen = named(() => import('./screens/Bank'), 'BankReconciliationScreen')
 
 const ExpenseCategoriesScreen = named(() => import('./screens/Masters'), 'ExpenseCategoriesScreen')
-const BankAccountTypesScreen = named(() => import('./screens/Masters'), 'BankAccountTypesScreen')
+const BanksScreen = named(() => import('./screens/Masters'), 'BanksScreen')
 
 type ScreenComp = ComponentType<ScreenProps & { setBrand?: (v: { name: string, tagline: string }) => void }>
 
@@ -85,7 +85,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'bank/txns': BankTransactionsScreen,
   'bank/recon': BankReconciliationScreen,
   'masters/expense-categories': ExpenseCategoriesScreen,
-  'masters/bank-account-types': BankAccountTypesScreen,
+  'masters/banks': BanksScreen,
   'fund/dashboard': FundingDashboardScreen,
   'fund/products': FundingProductsScreen,
   'fund/deposits': DepositsScreen,

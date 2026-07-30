@@ -95,6 +95,6 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
   return <MasterCategoryScreen type="expense_category" label="Expense Categories" icon="tag" crumbs="Masters" me={me} />
 }
 
-export function BankAccountTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
-  return <MasterCategoryScreen type="bank_account_type" label="Bank Account Types" icon="building" crumbs="Masters" me={me} />
+export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  return <MasterCategoryScreen type="bank" label="Banks" icon="building" crumbs="Masters" me={me} />
 }

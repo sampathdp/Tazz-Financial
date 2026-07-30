@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Bank Management (API-backed) */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, Modal, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   branchesApi, bankAccountsApi, bankTransactionsApi, bankReconciliationsApi,
@@ -92,7 +92,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
         {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Account Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
-          <Field label="Bank Name"><Input value={form.bankName || ''} onChange={(e) => setForm((s) => ({ ...s, bankName: e.target.value }))} /></Field>
+          <Field label="Bank Name"><BankSelect value={form.bankName || ''} onChange={(v) => setForm((s) => ({ ...s, bankName: v }))} /></Field>
           <Field label="Bank Branch"><Input value={form.branchName || ''} onChange={(e) => setForm((s) => ({ ...s, branchName: e.target.value }))} /></Field>
           <Field label="Account Number"><Input value={form.accountNumber || ''} onChange={(e) => setForm((s) => ({ ...s, accountNumber: e.target.value }))} disabled={!!editing} /></Field>
           <Field label="Account Type"><Select value={form.accountType || 'Savings'} onChange={(e) => setForm((s) => ({ ...s, accountType: e.target.value as any }))}>

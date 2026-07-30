@@ -21,6 +21,18 @@ use Illuminate\Support\Facades\DB;
  * (default 2) — display only, it does NOT affect the sequence counter below,
  * which still resets by year, {SEQ} / {SEQ:n} sequence zero-padded to n
  * digits (default 6).
+ *
+ * The {SEQ} counter is always ONE company-wide series per module (+ loan
+ * type/product + year, where the format uses those) — never split by branch.
+ * {BRANCH} is cosmetic only (which branch issued it); two branches saving a
+ * loan/receipt at the same instant must land on different {SEQ} values, not
+ * both "00001". Concurrent requests — even from different branches — safely
+ * serialize on the same number_sequences row via lockForUpdate() below, since
+ * branch is no longer part of that row's key. See the
+ * 2026_07_30_000001_globalize_number_sequences migration for the one-time
+ * seed that carried each key's highest already-issued sequence forward when
+ * this stopped being per-branch, so the switch never re-issues a number that
+ * some branch already used this year.
  */
 class NumberGenerator
 {
@@ -55,12 +67,15 @@ class NumberGenerator
         $usesProduct = $usesCode && $isProductScoped;
         $usesYear = (bool) preg_match('/\{YEAR(?::\d+)?\}/', $format);
 
+        // Kept only for the {BRANCH} placeholder substitution and the audit
+        // trail on generated_numbers below — NOT part of the sequence key
+        // (see class docblock: {SEQ} is always one global series).
         $branchId = $usesBranch ? (int) ($context['branch_id'] ?? 0) : 0;
         $loanTypeId = $usesLoanType ? (int) ($context['loan_type_id'] ?? 0) : 0;
         $productId = $usesProduct ? (int) ($context['funding_product_id'] ?? 0) : 0;
         $year = $usesYear ? (int) now()->format('Y') : 0;
 
-        $key = ['module' => $module, 'branch_id' => $branchId, 'loan_type_id' => $loanTypeId, 'funding_product_id' => $productId, 'year' => $year];
+        $key = ['module' => $module, 'branch_id' => 0, 'loan_type_id' => $loanTypeId, 'funding_product_id' => $productId, 'year' => $year];
 
         // Atomically create the counter row if this is the first number ever
         // issued for this key, then lock it so concurrent requests serialize

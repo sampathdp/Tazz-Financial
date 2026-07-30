@@ -45,7 +45,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'bank/txns': 'Bank Transactions',
   'bank/recon': 'Bank Reconciliation',
   'masters/expense-categories': 'Masters',
-  'masters/bank-account-types': 'Masters',
+  'masters/banks': 'Masters',
   'fund/dashboard': 'Funding Reports',
   'fund/products': 'Funding Products',
   'fund/deposits': 'Deposits',

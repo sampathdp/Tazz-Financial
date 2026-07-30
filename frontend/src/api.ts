@@ -444,10 +444,10 @@ export const bankReconciliationsApi = {
   remove: (id: number) => http.delete(`/bank-reconciliations/${id}`).then((r) => r.data),
 }
 
-/** Shared lookup/category lists (Expense Categories, Bank Account Types, ...).
+/** Shared lookup/category lists (Expense Categories, Banks, ...).
  *  `type` is the whitelist key from the backend's MasterCategoryController::TYPES —
  *  add a new lookup list there, then a screen instance here with the same type. */
-export type MasterCategoryType = 'expense_category' | 'bank_account_type'
+export type MasterCategoryType = 'expense_category' | 'bank'
 
 export interface MasterCategory {
   id: number;

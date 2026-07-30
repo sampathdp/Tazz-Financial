@@ -7,7 +7,7 @@
    Posts to the same loans/{loan}/payments endpoint the Active Loans > Receipts
    tab uses, so history and outstanding balances stay in sync either way. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, BankSelect, SearchSelect, Table, Td, Modal, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loansApi, loanPaymentsApi, loanPostDatedChequesApi, company, type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser } from '../api'
 import { Can, userCan } from '../lib/permissions'
@@ -69,7 +69,7 @@ function PaymentFields({ method, setMethod, paidAt, setPaidAt, refNo, setRefNo, 
       <Field label="Date"><Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field>
       <Field label={REF_LABEL[method]}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
       {method === 'Cheque' && <>
-        <Field label="Bank"><Input value={bankName} onChange={(e) => setBankName(e.target.value)} /></Field>
+        <Field label="Bank"><BankSelect value={bankName} onChange={setBankName} /></Field>
         <Field label="Cheque Date"><Input type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} /></Field>
       </>}
       <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
@@ -467,7 +467,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <div className="t-2" style={{ fontSize: 12.5 }}>This is a record only — it won't reduce the outstanding balance until the cheque is marked Realized on the loan's Post Dated Cheques tab.</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
             <Field label="Cheque No"><Input value={chequeNo} onChange={(e) => setChequeNo(e.target.value)} /></Field>
-            <Field label="Bank"><Input value={rcBankName} onChange={(e) => setRcBankName(e.target.value)} /></Field>
+            <Field label="Bank"><BankSelect value={rcBankName} onChange={setRcBankName} /></Field>
             <Field label="Cheque Date"><Input type="date" value={rcChequeDate} onChange={(e) => setRcChequeDate(e.target.value)} /></Field>
             <Field label="Amount"><Input type="number" value={chequeAmount} onChange={(e) => setChequeAmount(e.target.value)} /></Field>
           </div>

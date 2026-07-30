@@ -2,7 +2,7 @@
    Record a deposit, print its Deposit Slip, and later allocate it to an FD
    from the Fixed Deposits screen (fdDepositsApi status flips Available -> Allocated). */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, SearchSelect, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   fdDepositsApi, branchesApi, customersApi, company,
@@ -191,7 +191,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           </Select></Field>
           <Field label={REF_LABEL[form.paymentMethod]}><Input value={form.referenceNo} onChange={(e) => setForm((s) => ({ ...s, referenceNo: e.target.value }))} /></Field>
           {form.paymentMethod !== 'Cash' && (
-            <Field label="Bank Name"><Input value={form.bankName} onChange={(e) => setForm((s) => ({ ...s, bankName: e.target.value }))} /></Field>
+            <Field label="Bank Name"><BankSelect value={form.bankName} onChange={(v) => setForm((s) => ({ ...s, bankName: v }))} /></Field>
           )}
           <Field label="Notes" full><textarea value={form.notes} onChange={(e) => setForm((s) => ({ ...s, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
         </div>

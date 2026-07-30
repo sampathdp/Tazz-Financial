@@ -4,7 +4,7 @@
    action (create/renew/withdraw/pay-interest) prints a document following the
    same window.print()/.no-print pattern as PaymentReceipt.tsx. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, SearchSelect, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   fixedDepositsApi, fdDepositsApi, fundingProductsApi, fdInterestPaymentsApi, company,
@@ -334,7 +334,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
               {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </Select></Field>
             <Field label="Reference No"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
-            {method !== 'Cash' && <Field label="Bank Name"><Input value={bankName} onChange={(e) => setBankName(e.target.value)} /></Field>}
+            {method !== 'Cash' && <Field label="Bank Name"><BankSelect value={bankName} onChange={setBankName} /></Field>}
           </div>
         )}
         <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
