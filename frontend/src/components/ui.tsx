@@ -3,7 +3,7 @@ import { Children, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
-import { masterCategoriesApi } from '../api'
+import { banksApi } from '../api'
 
 /* ---------- primitives ---------- */
 type Variant = 'primary' | 'solid' | 'ghost' | 'danger' | 'ok' | 'plain'
@@ -204,7 +204,7 @@ let bankNamesPromise: Promise<string[]> | null = null
 function loadBankNames(): Promise<string[]> {
   if (bankNamesCache) return Promise.resolve(bankNamesCache)
   if (!bankNamesPromise) {
-    bankNamesPromise = masterCategoriesApi.list('bank')
+    bankNamesPromise = banksApi.list()
       .then((rows) => (bankNamesCache = rows.filter((r) => (r.status || 'Active') === 'Active').map((r) => r.name)))
       .catch(() => (bankNamesCache = []))
   }

@@ -17,7 +17,6 @@ class MasterCategoryController extends Controller
      */
     private const TYPES = [
         'expense_category' => 'Expense Category',
-        'bank' => 'Bank',
     ];
 
     public function index(Request $request)

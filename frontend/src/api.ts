@@ -387,6 +387,18 @@ export const branchesApi = resource<Branch>('branches')
 export const customersApi = resource<Customer>('customers')
 export const loanTypesApi = resource<LoanType>('loan-types')
 
+/** A local bank (Masters > Banks) — used everywhere a "Bank Name" field is
+ *  picked (Bank Accounts, Loan Payments/Cheques, Fixed Deposits) via the
+ *  shared `BankSelect` component, instead of free-typed text. */
+export interface Bank {
+  id: number; name: string;
+  code?: string | null;
+  description?: string | null;
+  status?: 'Active' | 'Inactive';
+  sortOrder?: number;
+}
+export const banksApi = resource<Bank>('banks')
+
 export type BankAccountType = 'Savings' | 'Current' | 'Fixed Deposit'
 
 export interface BankAccount {
@@ -444,10 +456,13 @@ export const bankReconciliationsApi = {
   remove: (id: number) => http.delete(`/bank-reconciliations/${id}`).then((r) => r.data),
 }
 
-/** Shared lookup/category lists (Expense Categories, Banks, ...).
+/** Shared lookup/category lists (Expense Categories, ...). Banks used to be one
+ *  of these (type='bank') but got promoted to its own table/resource — see
+ *  `Bank` / `banksApi` below — since it's a first-class entity other screens
+ *  point at, not just an admin-managed lookup list.
  *  `type` is the whitelist key from the backend's MasterCategoryController::TYPES —
  *  add a new lookup list there, then a screen instance here with the same type. */
-export type MasterCategoryType = 'expense_category' | 'bank'
+export type MasterCategoryType = 'expense_category'
 
 export interface MasterCategory {
   id: number;

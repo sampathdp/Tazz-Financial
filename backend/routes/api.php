@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BankAccountController;
+use App\Http\Controllers\Api\BankController;
 use App\Http\Controllers\Api\BankReconciliationController;
 use App\Http\Controllers\Api\BankTransactionController;
 use App\Http\Controllers\Api\BranchController;
@@ -181,11 +182,19 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::put('bank-reconciliations/{bankReconciliation}', [BankReconciliationController::class, 'update'])->middleware('perm:Bank Reconciliation,Edit');
     Route::delete('bank-reconciliations/{bankReconciliation}', [BankReconciliationController::class, 'destroy'])->middleware('perm:Bank Reconciliation,Delete');
 
-    // --- Masters: shared lookup/category lists (Expense Categories, Bank Account Types, ...) ---
+    // --- Masters: shared lookup/category lists (Expense Categories, ...) ---
     Route::get('master-categories', [MasterCategoryController::class, 'index'])->middleware('perm:Masters,View');
     Route::post('master-categories', [MasterCategoryController::class, 'store'])->middleware('perm:Masters,Create');
     Route::put('master-categories/{masterCategory}', [MasterCategoryController::class, 'update'])->middleware('perm:Masters,Edit');
     Route::delete('master-categories/{masterCategory}', [MasterCategoryController::class, 'destroy'])->middleware('perm:Masters,Delete');
+
+    // --- Masters: Banks — a dedicated table (not master_categories), used
+    // everywhere a "Bank Name" field is picked (Bank Accounts, Loan Payments/
+    // Cheques, Fixed Deposits) — see frontend's BankSelect component. ---
+    Route::get('banks', [BankController::class, 'index'])->middleware('perm:Masters,View');
+    Route::post('banks', [BankController::class, 'store'])->middleware('perm:Masters,Create');
+    Route::put('banks/{bank}', [BankController::class, 'update'])->middleware('perm:Masters,Edit');
+    Route::delete('banks/{bank}', [BankController::class, 'destroy'])->middleware('perm:Masters,Delete');
 
     // --- Funding Management: Funding Products ---
     Route::get('funding-products', [FundingProductController::class, 'index'])->middleware('perm:Funding Products,View');
