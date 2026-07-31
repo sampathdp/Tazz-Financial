@@ -23,6 +23,21 @@ class LoanPaymentController extends Controller
         return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name'])->get();
     }
 
+    /** Preview-only: the receipt number the next payment on this loan would get,
+     *  for display in the payment form before it's submitted — see NumberGenerator::peek(). */
+    public function nextReceiptNo(Request $request, Loan $loan)
+    {
+        $data = $request->validate(['payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])]]);
+        $branch = Branch::find($loan->branch_id);
+        $method = $data['payment_method'] ?? 'Cash';
+        $code = NumberGenerator::peek('payment', [
+            'branch_code' => $branch->code,
+            'type_code' => self::TYPE_CODES[$method] ?? 'CA',
+        ]);
+
+        return response()->json(['code' => $code]);
+    }
+
     public function store(Request $request, Loan $loan)
     {
         if ($loan->status !== 'Active') {

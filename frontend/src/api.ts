@@ -368,6 +368,8 @@ export interface LoanSummary {
     rentalArrears: number; otherChargeArrears: number; defaultCharges: number; totalArrears: number;
     overPayment: number; futureCapital: number; futureInterest: number; totalInterestRemaining: number;
     balancePrePayment: number; amountToBeCollected: number;
+    /** Past due date and not fully paid — same definition as loansApi.overdue(). */
+    daysOverdue: number; overdueInstallments: number;
   };
   recovery: {
     lastPaymentDate: string | null; lastPaymentAmount: number | null;
@@ -534,6 +536,11 @@ export const loanSchedulesApi = {
 
 export const loanPaymentsApi = {
   list: (loanId: number) => http.get(`/loans/${loanId}/payments`).then((r) => camelize(r.data) as LoanPayment[]),
+  /** Preview-only: the receipt number the next payment on this loan would get — for
+   *  display in the payment form before it's submitted. Not reserved until the payment
+   *  is actually created, so it can shift if another payment lands first. */
+  nextReceiptNo: (loanId: number, paymentMethod: PaymentMethod) =>
+    http.get(`/loans/${loanId}/next-receipt-no`, { params: { payment_method: paymentMethod } }).then((r) => r.data.code as string),
   create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankName?: string; chequeDate?: string; notes?: string; isSettlement?: boolean }) =>
     http.post(`/loans/${loanId}/payments`, snakeize(body)).then((r) => camelize(r.data) as LoanPayment),
   remove: (paymentId: number, voidReason?: string) => http.delete(`/loan-payments/${paymentId}`, { data: { void_reason: voidReason } }).then((r) => r.data),

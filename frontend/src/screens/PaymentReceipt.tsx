@@ -53,10 +53,11 @@ interface ReceiptData { payment: LoanPayment; loan: Loan; balanceBefore: number 
    is just the date printed on the cheque, captured for the audit trail. This is
    distinct from "Record Cheque" (Post Dated Cheques), which logs a future cheque
    the same way — also untouched until realized. */
-function PaymentFields({ method, setMethod, paidAt, setPaidAt, refNo, setRefNo, bankName, setBankName, chequeDate, setChequeDate, notes, setNotes }: {
+function PaymentFields({ method, setMethod, paidAt, setPaidAt, refNo, setRefNo, nextReceipt, bankName, setBankName, chequeDate, setChequeDate, notes, setNotes }: {
   method: PaymentMethod; setMethod: (v: PaymentMethod) => void
   paidAt: string; setPaidAt: (v: string) => void
   refNo: string; setRefNo: (v: string) => void
+  nextReceipt: string
   bankName: string; setBankName: (v: string) => void
   chequeDate: string; setChequeDate: (v: string) => void
   notes: string; setNotes: (v: string) => void
@@ -67,7 +68,9 @@ function PaymentFields({ method, setMethod, paidAt, setPaidAt, refNo, setRefNo, 
         {METHOD_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
       </Select></Field>
       <Field label="Date"><Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field>
-      <Field label={REF_LABEL[method]}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
+      {method === 'Cash'
+        ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
+        : <Field label={REF_LABEL[method]}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
       {method === 'Cheque' && <>
         <Field label="Bank"><BankSelect value={bankName} onChange={setBankName} /></Field>
         <Field label="Cheque Date"><Input type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} /></Field>
@@ -118,7 +121,12 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [chequeBusy, setChequeBusy] = useState(false)
   const [chequeErr, setChequeErr] = useState('')
 
+  // Preview of the receipt number the next Cash payment on this loan would get —
+  // just for display; the real number is only assigned when the payment is created.
+  const [nextReceipt, setNextReceipt] = useState('')
+
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
+  const [panelTab, setPanelTab] = useState<'history' | 'schedule'>('history')
   const [scheduleTab, setScheduleTab] = useState<'all' | 'paid' | 'unpaid'>('unpaid')
   const [viewPayment, setViewPayment] = useState<LoanPayment | null>(null)
 
@@ -130,6 +138,16 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     refresh()
     company.branding().then((b) => setBrand({ name: b.name, tagline: b.tagline })).catch(() => {})
   }, [])
+
+  // Only Cash shows a receipt-number preview (Bank/Cheque use a manually-entered
+  // external reference instead — see REF_LABEL), so skip the fetch otherwise.
+  useEffect(() => {
+    const activeMethod = payTarget ? method : settleOpen ? settleMethod : null
+    if (!selected || activeMethod !== 'Cash') { setNextReceipt(''); return }
+    let cancelled = false
+    loanPaymentsApi.nextReceiptNo(selected.id, 'Cash').then((code) => { if (!cancelled) setNextReceipt(code) }).catch(() => { if (!cancelled) setNextReceipt('') })
+    return () => { cancelled = true }
+  }, [selected, payTarget, method, settleOpen, settleMethod])
 
   const payable = loans.filter((l) => l.status === 'Active')
   const outstanding = selected ? outstandingOf(selected) : 0
@@ -146,7 +164,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const resetChequeForm = () => { setChequeOpen(false); setChequeNo(''); setRcBankName(''); setRcChequeDate(todayIso()); setChequeAmount(''); setChequeErr('') }
 
   const pickLoan = async (_n: string, opt?: Loan) => {
-    resetPayForm(); resetSettleForm(); resetChequeForm(); setScheduleTab('unpaid')
+    resetPayForm(); resetSettleForm(); resetChequeForm(); setScheduleTab('unpaid'); setPanelTab('history')
     if (!opt) { setSelected(null); return }
     setLoadingLoan(true)
     try { setSelected(await loansApi.get(opt.id)) }
@@ -359,20 +377,6 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             </div>
           </Card>
 
-          <Card pad={0} style={{ marginBottom: 16 }}>
-            <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Payment History</div>
-            <Table cols={[{ label: 'Receipt No' }, { label: 'Date' }, { label: 'Method' }, { label: 'Amount', align: 'right' }, { label: 'Received By' }, { label: 'Status', align: 'center' }]}
-              rows={paymentHistory} empty="No payments recorded yet for this loan." onRow={(p) => setViewPayment(p)}
-              render={(p: LoanPayment) => <>
-                <Td mono style={{ fontWeight: 600 }}>{p.code}</Td>
-                <Td>{dateOnly(p.paidAt)}</Td>
-                <Td>{METHOD_OPTIONS.find((m) => m.value === p.paymentMethod)?.label || p.paymentMethod}{p.isSettlement ? ' (Settlement)' : ''}</Td>
-                <Td mono align="right">{money(p.amount)}</Td>
-                <Td>{p.receiver?.name || '—'}</Td>
-                <Td align="center"><PaymentStatusBadge p={p} /></Td>
-              </>} />
-          </Card>
-
           {pendingSettlement && (
             <Card style={{ marginBottom: 16 }}>
               <div className="eyebrow" style={{ marginBottom: 12 }}>Full Settlement — Pending Approval</div>
@@ -395,34 +399,57 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             </Card>
           )}
 
-          <Card pad={0}>
-            <div className="row between wrap gap-2" style={{ padding: '14px 16px 0' }}>
-              <div className="eyebrow">Payment Schedule</div>
-              <div className="row gap-1">
-                {([['all', 'All'], ['paid', 'Paid'], ['unpaid', 'Not Paid']] as const).map(([id, label]) => (
-                  <Btn key={id} size="sm" variant="ghost" active={scheduleTab === id} onClick={() => setScheduleTab(id)}>{label}</Btn>
-                ))}
+          <div className="row gap-2" style={{ marginBottom: 16, borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
+            <Btn size="sm" variant="ghost" icon="receipt" active={panelTab === 'history'} onClick={() => setPanelTab('history')}>Payment History</Btn>
+            <Btn size="sm" variant="ghost" icon="calendar" active={panelTab === 'schedule'} onClick={() => setPanelTab('schedule')}>Payment Schedule</Btn>
+          </div>
+
+          {panelTab === 'history' && (
+            <Card pad={0}>
+              <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Payment History</div>
+              <Table cols={[{ label: 'Receipt No' }, { label: 'Date' }, { label: 'Method' }, { label: 'Amount', align: 'right' }, { label: 'Received By' }, { label: 'Status', align: 'center' }]}
+                rows={paymentHistory} empty="No payments recorded yet for this loan." onRow={(p) => setViewPayment(p)}
+                render={(p: LoanPayment) => <>
+                  <Td mono style={{ fontWeight: 600 }}>{p.code}</Td>
+                  <Td>{dateOnly(p.paidAt)}</Td>
+                  <Td>{METHOD_OPTIONS.find((m) => m.value === p.paymentMethod)?.label || p.paymentMethod}{p.isSettlement ? ' (Settlement)' : ''}</Td>
+                  <Td mono align="right">{money(p.amount)}</Td>
+                  <Td>{p.receiver?.name || '—'}</Td>
+                  <Td align="center"><PaymentStatusBadge p={p} /></Td>
+                </>} />
+            </Card>
+          )}
+
+          {panelTab === 'schedule' && (
+            <Card pad={0}>
+              <div className="row between wrap gap-2" style={{ padding: '14px 16px 0' }}>
+                <div className="eyebrow">Payment Schedule</div>
+                <div className="row gap-1">
+                  {([['all', 'All'], ['paid', 'Paid'], ['unpaid', 'Not Paid']] as const).map(([id, label]) => (
+                    <Btn key={id} size="sm" variant="ghost" active={scheduleTab === id} onClick={() => setScheduleTab(id)}>{label}</Btn>
+                  ))}
+                </div>
               </div>
-            </div>
-            {locked && <div className="t-2" style={{ padding: '8px 16px 0', fontSize: 11.5 }}>Payments are disabled while a settlement request is pending.</div>}
-            <Table cols={[{ label: '#' }, { label: 'Due Date' }, { label: 'Total Due', align: 'right' }, { label: 'Paid', align: 'right' }, { label: 'Balance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 90 }]}
-              rows={scheduleRows} empty={scheduleTab === 'paid' ? 'No paid installments yet' : scheduleTab === 'unpaid' ? 'No unpaid installments — this loan is fully paid' : 'No installments generated'}
-              render={(r: LoanSchedule) => <>
-                <Td>{r.installmentNo}</Td>
-                <Td>{dateOnly(r.dueDate)}</Td>
-                <Td mono align="right">{money(r.totalDue)}</Td>
-                <Td mono align="right">{money(r.paidAmount)}</Td>
-                <Td mono align="right">{money(balanceOf(r))}</Td>
-                <Td align="center"><Badge tone={scheduleTone[r.status]} dot>{r.status}</Badge></Td>
-                <Td align="right">
-                  {r.status !== 'Paid' && (
-                    <Can user={me} module="Loan Payments" action="Create">
-                      <Btn size="sm" variant="primary" icon="check" onClick={() => openPay(r)} disabled={locked}>Pay</Btn>
-                    </Can>
-                  )}
-                </Td>
-              </>} />
-          </Card>
+              {locked && <div className="t-2" style={{ padding: '8px 16px 0', fontSize: 11.5 }}>Payments are disabled while a settlement request is pending.</div>}
+              <Table cols={[{ label: '#' }, { label: 'Due Date' }, { label: 'Total Due', align: 'right' }, { label: 'Paid', align: 'right' }, { label: 'Balance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 90 }]}
+                rows={scheduleRows} empty={scheduleTab === 'paid' ? 'No paid installments yet' : scheduleTab === 'unpaid' ? 'No unpaid installments — this loan is fully paid' : 'No installments generated'}
+                render={(r: LoanSchedule) => <>
+                  <Td>{r.installmentNo}</Td>
+                  <Td>{dateOnly(r.dueDate)}</Td>
+                  <Td mono align="right">{money(r.totalDue)}</Td>
+                  <Td mono align="right">{money(r.paidAmount)}</Td>
+                  <Td mono align="right">{money(balanceOf(r))}</Td>
+                  <Td align="center"><Badge tone={scheduleTone[r.status]} dot>{r.status}</Badge></Td>
+                  <Td align="right">
+                    {r.status !== 'Paid' && (
+                      <Can user={me} module="Loan Payments" action="Create">
+                        <Btn size="sm" variant="primary" icon="check" onClick={() => openPay(r)} disabled={locked}>Pay</Btn>
+                      </Can>
+                    )}
+                  </Td>
+                </>} />
+            </Card>
+          )}
         </>
       )}
 
@@ -440,7 +467,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
         <div className="col gap-3">
           {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>{err}</div>}
           <Field label="Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Outstanding: ${money(outstanding)}`} /></Field>
-          <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} refNo={refNo} setRefNo={setRefNo}
+          <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} refNo={refNo} setRefNo={setRefNo} nextReceipt={nextReceipt}
             bankName={payBankName} setBankName={setPayBankName} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes} />
         </div>
       </Modal>
@@ -453,7 +480,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
         <div className="col gap-3">
           {settleErr && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>{settleErr}</div>}
           <div className="t-2" style={{ fontSize: 12.5 }}>This pays off the full outstanding balance of <b style={{ fontFamily: 'JetBrains Mono' }}>{money(outstanding)}</b> and must be approved by a Branch Manager before the loan closes and the receipt can be printed.</div>
-          <PaymentFields method={settleMethod} setMethod={setSettleMethod} paidAt={settlePaidAt} setPaidAt={setSettlePaidAt} refNo={settleRefNo} setRefNo={setSettleRefNo}
+          <PaymentFields method={settleMethod} setMethod={setSettleMethod} paidAt={settlePaidAt} setPaidAt={setSettlePaidAt} refNo={settleRefNo} setRefNo={setSettleRefNo} nextReceipt={nextReceipt}
             bankName={settleBankName} setBankName={setSettleBankName} chequeDate={settleChequeDate} setChequeDate={setSettleChequeDate} notes={settleNotes} setNotes={setSettleNotes} />
         </div>
       </Modal>

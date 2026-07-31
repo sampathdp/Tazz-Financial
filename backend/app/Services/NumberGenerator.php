@@ -42,7 +42,7 @@ class NumberGenerator
         // {TYPE} is the payment method's short code (CA/BT/CQ) — see
         // LoanPaymentController::TYPE_CODES. One shared sequence per
         // branch+year across all methods, same as a physical receipt book.
-        'payment' => '{BRANCH}-{TYPE}-{YEAR:2}-{SEQ:5}',
+        'payment' => '{BRANCH}-{TYPE}-{YEAR:2}-{MONTH:2}-{SEQ:5}',
         'fd_deposit' => '{BRANCH}-DEP-{YEAR:2}-{MONTH:2}-{SEQ:6}',
         // {CODE} (the funding product's own code, e.g. "TT") already
         // distinguishes this as a fixed deposit — a literal "FD" segment was
@@ -58,8 +58,65 @@ class NumberGenerator
 
     public static function next(string $module, array $context = [], ?string $format = null): string
     {
-        $format ??= self::DEFAULT_FORMATS[$module] ?? throw new \InvalidArgumentException("No default reference format for module [{$module}].");
+        $format ??= self::formatFor($module);
+        [$key, $branchId, $loanTypeId, $productId, $year] = self::resolveKey($module, $context, $format);
 
+        // Atomically create the counter row if this is the first number ever
+        // issued for this key, then lock it so concurrent requests serialize
+        // on the increment below instead of computing the same "next" value.
+        DB::table('number_sequences')->insertOrIgnore([$key + ['last_sequence' => 0, 'created_at' => now(), 'updated_at' => now()]]);
+        $seqRow = NumberSequence::where($key)->lockForUpdate()->first();
+        $sequence = $seqRow->last_sequence + 1;
+        $seqRow->update(['last_sequence' => $sequence]);
+
+        $number = self::format($format, $context, $sequence);
+
+        GeneratedNumber::create([
+            'module' => $module,
+            'number' => $number,
+            'branch_id' => $branchId ?: null,
+            'loan_type_id' => $loanTypeId ?: null,
+            'funding_product_id' => $productId ?: null,
+            'year' => $year ?: null,
+            'sequence' => $sequence,
+            'generated_by' => $context['user_id'] ?? null,
+        ]);
+
+        return $number;
+    }
+
+    /**
+     * Non-mutating preview of the number `next()` would produce for this key right
+     * now — for UI display before the record actually exists (e.g. showing the
+     * receipt number a payment form will get, before it's submitted). Doesn't lock
+     * or increment the counter and doesn't write a generated_numbers row, so it's
+     * only a preview: if another request calls next() for the same key first, the
+     * real number issued can end up different from what was previewed here.
+     */
+    public static function peek(string $module, array $context = [], ?string $format = null): string
+    {
+        $format ??= self::formatFor($module);
+        [$key] = self::resolveKey($module, $context, $format);
+
+        $sequence = (int) (NumberSequence::where($key)->value('last_sequence') ?? 0) + 1;
+
+        return self::format($format, $context, $sequence);
+    }
+
+    /** Links a just-generated number to the record it was created for. */
+    public static function attach(string $number, Model $record): void
+    {
+        GeneratedNumber::where('number', $number)->latest('id')->first()?->reference()->associate($record)->save();
+    }
+
+    private static function formatFor(string $module): string
+    {
+        return self::DEFAULT_FORMATS[$module] ?? throw new \InvalidArgumentException("No default reference format for module [{$module}].");
+    }
+
+    /** @return array{0: array, 1: int, 2: int, 3: int, 4: int} [sequence key, branch id, loan type id, product id, year] */
+    private static function resolveKey(string $module, array $context, string $format): array
+    {
         $usesBranch = str_contains($format, '{BRANCH}');
         $usesCode = str_contains($format, '{CODE}');
         $isProductScoped = in_array($module, self::PRODUCT_SCOPED_MODULES, true);
@@ -77,14 +134,11 @@ class NumberGenerator
 
         $key = ['module' => $module, 'branch_id' => 0, 'loan_type_id' => $loanTypeId, 'funding_product_id' => $productId, 'year' => $year];
 
-        // Atomically create the counter row if this is the first number ever
-        // issued for this key, then lock it so concurrent requests serialize
-        // on the increment below instead of computing the same "next" value.
-        DB::table('number_sequences')->insertOrIgnore([$key + ['last_sequence' => 0, 'created_at' => now(), 'updated_at' => now()]]);
-        $seqRow = NumberSequence::where($key)->lockForUpdate()->first();
-        $sequence = $seqRow->last_sequence + 1;
-        $seqRow->update(['last_sequence' => $sequence]);
+        return [$key, $branchId, $loanTypeId, $productId, $year];
+    }
 
+    private static function format(string $format, array $context, int $sequence): string
+    {
         $number = strtr($format, [
             '{BRANCH}' => $context['branch_code'] ?? '',
             '{CODE}' => $context['loan_type_code'] ?? $context['funding_product_code'] ?? '',
@@ -106,23 +160,6 @@ class NumberGenerator
             $number
         );
 
-        GeneratedNumber::create([
-            'module' => $module,
-            'number' => $number,
-            'branch_id' => $branchId ?: null,
-            'loan_type_id' => $loanTypeId ?: null,
-            'funding_product_id' => $productId ?: null,
-            'year' => $year ?: null,
-            'sequence' => $sequence,
-            'generated_by' => $context['user_id'] ?? null,
-        ]);
-
         return $number;
-    }
-
-    /** Links a just-generated number to the record it was created for. */
-    public static function attach(string $number, Model $record): void
-    {
-        GeneratedNumber::where('number', $number)->latest('id')->first()?->reference()->associate($record)->save();
     }
 }

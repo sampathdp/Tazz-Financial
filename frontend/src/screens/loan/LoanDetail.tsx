@@ -200,13 +200,16 @@ function DueTypeBreakdown({ loan }: { loan: Loan }) {
 function ArrearsPanel({ loan }: { loan: Loan }) {
   const a = loan.summary?.arrears
   if (!a) return null
+  const documentCharges = loan.summary?.dueBreakdown?.find((r) => r.type === 'Document')
   return (
     <>
       <div className="eyebrow" style={{ marginBottom: 10 }}>Contract Status</div>
       <KpiGrid items={[
+        { label: 'Total OD', value: <>{a.daysOverdue} days<div className="t-2" style={{ fontSize: 11, fontWeight: 400 }}>{a.overdueInstallments} installment{a.overdueInstallments === 1 ? '' : 's'}</div></>, icon: 'clock', tone: a.daysOverdue > 0 ? 'red' : 'green' },
         { label: 'Rental Arrears', value: money(a.rentalArrears), icon: 'alert', tone: a.rentalArrears > 0 ? 'red' : 'green' },
         { label: 'Other Charge Arrears', value: money(a.otherChargeArrears), icon: 'alert', tone: a.otherChargeArrears > 0 ? 'red' : 'green' },
         { label: 'Default Charges', value: money(a.defaultCharges), icon: 'alert', tone: a.defaultCharges > 0 ? 'red' : 'green' },
+        { label: 'Document Charges', value: money(documentCharges?.balance ?? 0), icon: 'doc', tone: (documentCharges?.balance ?? 0) > 0 ? 'red' : 'green' },
         { label: 'Total Arrears', value: money(a.totalArrears), icon: 'target', tone: a.totalArrears > 0 ? 'red' : 'green' },
         { label: 'Over Payment', value: money(a.overPayment), icon: 'refund', tone: a.overPayment > 0 ? 'blue' : 'neutral' },
         { label: 'Future Capital', value: money(a.futureCapital), icon: 'coins', tone: 'blue' },

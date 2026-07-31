@@ -88,6 +88,13 @@ class LoanSummary
         $balancePrePayment = round(max(0, $totalArrears - $overPayment), 2);
         $amountToBeCollected = round($balancePrePayment + $futureCapital + $futureInterest, 2);
 
+        // Same "past due date, not fully paid" definition LoanController::overdue()
+        // uses for the Overdue Loans list, so the two screens never disagree.
+        $overdueSchedules = $schedules->filter(fn ($s) => $s->due_date->lessThan($today) && $s->status !== 'Paid');
+        $oldestOverdueDate = $overdueSchedules->min('due_date');
+        $daysOverdue = $oldestOverdueDate ? (int) $today->diffInDays($oldestOverdueDate) : 0;
+        $overdueInstallments = $overdueSchedules->count();
+
         // --- Recovery details ---
         $lastPayment = $activePayments->sortByDesc('paid_at')->first();
         $fallenDueRentals = $schedules->filter(fn ($s) => !$s->due_date->greaterThan($today) && $s->status !== 'Paid')->count();
@@ -108,6 +115,8 @@ class LoanSummary
                 'totalInterestRemaining' => $totalInterestRemaining,
                 'balancePrePayment' => $balancePrePayment,
                 'amountToBeCollected' => $amountToBeCollected,
+                'daysOverdue' => $daysOverdue,
+                'overdueInstallments' => $overdueInstallments,
             ],
             'recovery' => [
                 'lastPaymentDate' => $lastPayment?->paid_at,
