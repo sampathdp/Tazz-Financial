@@ -11,6 +11,7 @@ class LoanType extends Model
         'interest_method', 'interest_rate_percent', 'rate_period',
         'min_amount', 'max_amount', 'min_term_months', 'max_term_months',
         'penalty_rate_percent', 'penalty_method', 'grace_period_days', 'processing_fee_percent',
+        'commission_type', 'commission_value', 'min_paid_installments',
         'sort_order', 'status',
     ];
 
@@ -22,6 +23,8 @@ class LoanType extends Model
         'penalty_rate_percent' => 'decimal:3',
         'grace_period_days' => 'integer',
         'processing_fee_percent' => 'decimal:3',
+        'commission_value' => 'decimal:2',
+        'min_paid_installments' => 'integer',
     ];
 
     public function parent()

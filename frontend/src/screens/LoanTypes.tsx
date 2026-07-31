@@ -27,6 +27,9 @@ const blankForm = (parentId: number | null): Partial<LoanType> => ({
   collectionDays: 'all_days',
   status: 'Active',
   referenceFormat: DEFAULT_REFERENCE_FORMAT,
+  commissionType: 'fixed',
+  commissionValue: 0,
+  minPaidInstallments: 0,
 })
 
 interface Node extends LoanType { children: Node[] }
@@ -218,6 +221,15 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
               </Select></Field>
               <Field label="Grace Period (Days)"><Input type="number" min={0} value={form.gracePeriodDays ?? 5} onChange={(e) => set('gracePeriodDays', Number(e.target.value) as any)} /></Field>
               <Field label="Processing Fee %"><Input type="number" step="0.001" value={form.processingFeePercent ?? ''} onChange={(e) => set('processingFeePercent', e.target.value as any)} /></Field>
+              <Field label="Sales Executive Commission Type"><Select value={form.commissionType || 'fixed'} onChange={(e) => set('commissionType', e.target.value as any)}>
+                <option value="fixed">Fixed Amount</option><option value="percentage">Percentage of Disbursed Amount</option>
+              </Select></Field>
+              <Field label={form.commissionType === 'percentage' ? 'Commission %' : 'Commission Amount'}>
+                <Input type="number" step="0.01" min={0} value={form.commissionValue ?? 0} onChange={(e) => set('commissionValue', e.target.value as any)} />
+              </Field>
+              <Field label="Min. Paid Installments for Commission Eligibility">
+                <Input type="number" min={0} value={form.minPaidInstallments ?? 0} onChange={(e) => set('minPaidInstallments', Number(e.target.value) as any)} />
+              </Field>
             </div>
 
             <div style={{ marginTop: 16 }}>

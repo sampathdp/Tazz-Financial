@@ -34,6 +34,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'loan/overdue': 'Overdue Loans',
   'loan/payments': 'Loan Payments',
   'loan/doc-tracking': 'Document Tracking',
+  'loan/commissions': 'Sales Executive Commissions',
   // 'loan/adjustments' is intentionally NOT mapped here — canAccessRoute() below
   // falls back to an admin-only check for any route id absent from this map.
   'ad/branches': 'Branch Management',

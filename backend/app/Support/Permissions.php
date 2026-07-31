@@ -23,6 +23,7 @@ class Permissions
         'Loan Applications',
         'Active Loans',
         'Loan Payments',
+        'Sales Executive Commissions',
         'Overdue Loans',
         'Document Tracking',
         'Cashbook',

@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\CashTransferController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerDocumentController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\ExpenseCategoryController;
 use App\Http\Controllers\Api\FdDepositController;
 use App\Http\Controllers\Api\FdInterestPaymentController;
 use App\Http\Controllers\Api\FixedDepositController;
@@ -28,9 +29,9 @@ use App\Http\Controllers\Api\LoanPaymentController;
 use App\Http\Controllers\Api\LoanPostDatedChequeController;
 use App\Http\Controllers\Api\LoanTypeController;
 use App\Http\Controllers\Api\LoanWaiverController;
-use App\Http\Controllers\Api\MasterCategoryController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
+use App\Http\Controllers\Api\SalesExecutiveCommissionController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -139,6 +140,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // Admin-only — realizing/bouncing a cheque is a Loan Adjustments action, not a regular Loan Payments one.
     Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('admin');
 
+    // --- Loan Management: Sales Executive Commissions ---
+    Route::get('sales-executive-commissions', [SalesExecutiveCommissionController::class, 'index'])->middleware('perm:Sales Executive Commissions,View');
+    // Admin-only, like other one-shot financial-payout actions (clear-cheque, waivers) — bypasses the permission grid entirely.
+    Route::post('sales-executive-commissions/{commission}/pay', [SalesExecutiveCommissionController::class, 'pay'])->middleware('admin');
+
     // --- Loan Management: Charges (Document/Legal/Valuation/Other due-type breakdown) ---
     Route::get('loans/{loan}/charges', [LoanChargeController::class, 'index'])->middleware('perm:Active Loans,View');
     Route::post('loans/{loan}/charges', [LoanChargeController::class, 'store'])->middleware('perm:Active Loans,Create');
@@ -213,13 +219,14 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('cash-reconciliations', [CashReconciliationController::class, 'store'])->middleware('perm:Cash Reconciliation,Create');
     Route::delete('cash-reconciliations/{cashReconciliation}', [CashReconciliationController::class, 'destroy'])->middleware('perm:Cash Reconciliation,Delete');
 
-    // --- Masters: shared lookup/category lists (Expense Categories, ...) ---
-    Route::get('master-categories', [MasterCategoryController::class, 'index'])->middleware('perm:Masters,View');
-    Route::post('master-categories', [MasterCategoryController::class, 'store'])->middleware('perm:Masters,Create');
-    Route::put('master-categories/{masterCategory}', [MasterCategoryController::class, 'update'])->middleware('perm:Masters,Edit');
-    Route::delete('master-categories/{masterCategory}', [MasterCategoryController::class, 'destroy'])->middleware('perm:Masters,Delete');
+    // --- Masters: Expense Categories — a dedicated table, used by the
+    // Expense Management module's category picker. ---
+    Route::get('expense-categories', [ExpenseCategoryController::class, 'index'])->middleware('perm:Masters,View');
+    Route::post('expense-categories', [ExpenseCategoryController::class, 'store'])->middleware('perm:Masters,Create');
+    Route::put('expense-categories/{expenseCategory}', [ExpenseCategoryController::class, 'update'])->middleware('perm:Masters,Edit');
+    Route::delete('expense-categories/{expenseCategory}', [ExpenseCategoryController::class, 'destroy'])->middleware('perm:Masters,Delete');
 
-    // --- Masters: Banks — a dedicated table (not master_categories), used
+    // --- Masters: Banks — a dedicated table, used
     // everywhere a "Bank Name" field is picked (Bank Accounts, Loan Payments/
     // Cheques, Fixed Deposits) — see frontend's BankSelect component. ---
     Route::get('banks', [BankController::class, 'index'])->middleware('perm:Masters,View');

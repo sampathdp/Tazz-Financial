@@ -1,66 +1,68 @@
-/* Tazz Investment & Credit — Masters (shared lookup/category lists)
-   One generic screen renders every master list; each nav item below is just
-   this component pre-bound to a `type`. Adding a new master list later is:
-   whitelist the type in the backend's MasterCategoryController::TYPES, then
-   add one more exported screen here + a nav entry + an App.tsx route. */
+/* Tazz Investment & Credit — Masters (dedicated per-list screens)
+   Each master list (Expense Categories, Banks, ...) is backed by its own
+   table/resource — see api.ts — so the two screens below are independent
+   components, not a single generic one keyed by type. Adding a new master
+   list later is: a table/model/controller on the backend, a resource in
+   api.ts, then one more exported screen here + a nav entry + an App.tsx route. */
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { masterCategoriesApi, banksApi, type MasterCategory, type MasterCategoryType, type Bank, type AuthUser } from '../api'
+import { expenseCategoriesApi, banksApi, type ExpenseCategory, type Bank, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import type { Go } from './types'
 
-const blankForm = (type: MasterCategoryType): Partial<MasterCategory> => ({ type, status: 'Active', sortOrder: 0 })
+const blankExpenseCategoryForm = (): Partial<ExpenseCategory> => ({ status: 'Active', sortOrder: 0 })
 
-function MasterCategoryScreen({ type, label, icon, crumbs, me }: { type: MasterCategoryType; label: string; icon: string; crumbs: string; me?: AuthUser | null }) {
+export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
-  const [rows, setRows] = useState<MasterCategory[]>([])
+  const [rows, setRows] = useState<ExpenseCategory[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [modal, setModal] = useState(false)
-  const [editing, setEditing] = useState<MasterCategory | null>(null)
-  const [form, setForm] = useState<Partial<MasterCategory>>(blankForm(type))
+  const [editing, setEditing] = useState<ExpenseCategory | null>(null)
+  const [form, setForm] = useState<Partial<ExpenseCategory>>(blankExpenseCategoryForm())
 
   const refresh = () => {
     setLoading(true)
-    masterCategoriesApi.list(type).then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+    expenseCategoriesApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
   }
-  useEffect(refresh, [type])
+  useEffect(refresh, [])
 
-  const openCreate = () => { setEditing(null); setForm(blankForm(type)); setErr(''); setModal(true) }
-  const openEdit = (r: MasterCategory) => { setEditing(r); setForm({ ...r }); setErr(''); setModal(true) }
+  const openCreate = () => { setEditing(null); setForm(blankExpenseCategoryForm()); setErr(''); setModal(true) }
+  const openEdit = (r: ExpenseCategory) => { setEditing(r); setForm({ ...r }); setErr(''); setModal(true) }
   const close = () => { setModal(false); setEditing(null); setErr('') }
 
   const save = async () => {
     if (!form.name) { setErr('Name is required.'); return }
+    if (!form.code) { setErr('Code is required.'); return }
     setBusy(true); setErr('')
     try {
-      if (editing) await masterCategoriesApi.update(editing.id, form)
-      else await masterCategoriesApi.create(form)
+      if (editing) await expenseCategoriesApi.update(editing.id, form)
+      else await expenseCategoriesApi.create(form)
       close(); refresh()
-      notify.success(editing ? `${label} updated` : `${label} created`, form.name)
+      notify.success(editing ? 'Expense Category updated' : 'Expense Category created', form.name)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.name?.[0] || 'Save failed')
+      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.name?.[0] || ex?.response?.data?.errors?.code?.[0] || 'Save failed')
     } finally { setBusy(false) }
   }
 
-  const remove = async (r: MasterCategory) => {
+  const remove = async (r: ExpenseCategory) => {
     const ok = await notify.confirm({ title: `Delete "${r.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
-    try { await masterCategoriesApi.remove(r.id); refresh(); notify.success(`${label} deleted`, r.name) }
+    try { await expenseCategoriesApi.remove(r.id); refresh(); notify.success('Expense Category deleted', r.name) }
     catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
   }
 
   return (
     <div>
-      <PageHead crumbs={crumbs} title={label} icon={icon} sub={`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`}
-        actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add {label}</Btn></Can>} />
+      <PageHead crumbs="Masters" title="Expense Categories" icon="tag" sub={`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`}
+        actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Expense Category</Btn></Can>} />
       <Card pad={0}>
         {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
         <Table cols={[{ label: 'Name' }, { label: 'Code' }, { label: 'Description' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
-          empty={`No ${label.toLowerCase()} yet`}
+          empty="No expense categories yet"
           rows={rows}
           render={(r) => <>
             <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}</Td>
@@ -74,7 +76,7 @@ function MasterCategoryScreen({ type, label, icon, crumbs, me }: { type: MasterC
           </>} />}
       </Card>
 
-      <Modal open={modal} onClose={close} width={480} title={editing ? `Edit ${label}` : `Add ${label}`}
+      <Modal open={modal} onClose={close} width={480} title={editing ? 'Edit Expense Category' : 'Add Expense Category'}
         footer={<>
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create')}</Btn>
@@ -91,17 +93,12 @@ function MasterCategoryScreen({ type, label, icon, crumbs, me }: { type: MasterC
   )
 }
 
-export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
-  return <MasterCategoryScreen type="expense_category" label="Expense Categories" icon="tag" crumbs="Masters" me={me} />
-}
-
 const blankBankForm = (): Partial<Bank> => ({ status: 'Active', sortOrder: 0 })
 
-/** Banks — same shape/behavior as MasterCategoryScreen above, but backed by
- *  its own `banks` table/resource (see api.ts) rather than the generic
- *  master_categories lookup, since it's a first-class entity other screens
- *  (Bank Accounts, Loan Payments/Cheques, Fixed Deposits) point at via
- *  BankSelect, not just an admin-managed list. */
+/** Banks — same shape/behavior as ExpenseCategoriesScreen above, backed by
+ *  its own `banks` table/resource (see api.ts), since it's a first-class
+ *  entity other screens (Bank Accounts, Loan Payments/Cheques, Fixed
+ *  Deposits) point at via BankSelect, not just an admin-managed list. */
 export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
   const [rows, setRows] = useState<Bank[]>([])

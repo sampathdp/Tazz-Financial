@@ -40,6 +40,8 @@ class LoanPostDatedChequeController extends Controller
     {
         $status = $request->filled('status') ? $request->string('status')->toString() : null;
         $dueToday = $request->boolean('due_today');
+        $fromDate = $request->filled('from_date') ? $request->string('from_date')->toString() : null;
+        $toDate = $request->filled('to_date') ? $request->string('to_date')->toString() : null;
         $today = now()->toDateString();
 
         $postDated = LoanPostDatedCheque::with([
@@ -53,6 +55,7 @@ class LoanPostDatedChequeController extends Controller
             'cheque_no' => $c->cheque_no,
             'bank_name' => $c->bank_name,
             'cheque_date' => optional($c->cheque_date)->toDateString(),
+            'realized_at' => optional($c->realized_at)->toDateString(),
             'amount' => $c->amount,
             'status' => $c->status,
             'loan' => $this->loanSummary($c->loan),
@@ -81,6 +84,7 @@ class LoanPostDatedChequeController extends Controller
                 'cheque_no' => $p->receipt_no,
                 'bank_name' => $p->bank_name,
                 'cheque_date' => optional($p->cheque_date)->toDateString(),
+                'realized_at' => optional($p->realized_at)->toDateString(),
                 'amount' => $p->amount,
                 // A plain cheque payment carries its own Pending/Realized/Bounced
                 // clearance_status; an approved settlement cheque has none (its
@@ -96,6 +100,27 @@ class LoanPostDatedChequeController extends Controller
         }
         if ($dueToday) {
             $all = $all->where('cheque_date', $today);
+        }
+        // Once a cheque has cleared, the meaningful date for a From/To search is
+        // when it was actually realized at the bank, not its (possibly long past)
+        // cheque date — e.g. a cheque dated in January realized in April should
+        // show up when filtering for April. Open/bounced cheques have no
+        // realized_at, so they fall back to the cheque date.
+        if ($fromDate || $toDate) {
+            $all = $all->filter(function ($c) use ($fromDate, $toDate) {
+                $effective = $c['status'] === 'Realized' && $c['realized_at'] ? $c['realized_at'] : $c['cheque_date'];
+                if (!$effective) {
+                    return false;
+                }
+                if ($fromDate && $effective < $fromDate) {
+                    return false;
+                }
+                if ($toDate && $effective > $toDate) {
+                    return false;
+                }
+
+                return true;
+            });
         }
 
         return $all->sortBy('cheque_date')->values();

@@ -19,6 +19,8 @@ const OverdueLoansScreen = lazy(() => import('./screens/OverdueLoans').then((m) 
 const PaymentReceiptScreen = lazy(() => import('./screens/PaymentReceipt').then((m) => ({ default: m.PaymentReceiptScreen })))
 const DocumentTrackingScreen = lazy(() => import('./screens/DocumentTracking').then((m) => ({ default: m.DocumentTrackingScreen })))
 const LoanAdjustmentsScreen = lazy(() => import('./screens/LoanAdjustments').then((m) => ({ default: m.LoanAdjustmentsScreen })))
+const ChequeClearanceScreen = lazy(() => import('./screens/ChequeClearance').then((m) => ({ default: m.ChequeClearanceScreen })))
+const SalesExecutiveCommissionsScreen = lazy(() => import('./screens/SalesExecutiveCommissions').then((m) => ({ default: m.SalesExecutiveCommissionsScreen })))
 const FundingDashboardScreen = lazy(() => import('./screens/FundingDashboard').then((m) => ({ default: m.FundingDashboardScreen })))
 const FundingProductsScreen = lazy(() => import('./screens/FundingProducts').then((m) => ({ default: m.FundingProductsScreen })))
 const DepositsScreen = lazy(() => import('./screens/Deposits').then((m) => ({ default: m.DepositsScreen })))
@@ -79,7 +81,9 @@ const SCREENS: Record<string, ScreenComp> = {
   'loan/overdue': OverdueLoansScreen,
   'loan/payments': PaymentReceiptScreen,
   'loan/doc-tracking': DocumentTrackingScreen,
+  'loan/cheques': ChequeClearanceScreen,
   'loan/adjustments': LoanAdjustmentsScreen,
+  'loan/commissions': SalesExecutiveCommissionsScreen,
   'ad/branches': BranchesScreen,
   'ad/roles': RolesScreen,
   'ad/users': UsersScreen,

@@ -7,6 +7,7 @@ use App\Models\Branch;
 use App\Models\Loan;
 use App\Models\LoanSchedule;
 use App\Models\LoanType;
+use App\Models\SalesExecutiveCommission;
 use App\Services\NumberGenerator;
 use App\Support\LoanAmortizer;
 use App\Support\LoanSummary;
@@ -262,9 +263,35 @@ class LoanController extends Controller
                 'status' => 'Active',
             ]);
             $loan->schedules()->insert(LoanAmortizer::generate($loan, $data['first_installment_date']));
+            $this->generateSalesExecutiveCommission($loan);
         });
 
         return $loan->load(self::DETAIL_RELATIONS);
+    }
+
+    /** Creates the (single, immutable-loan_id) commission record for the loan's
+     *  sales executive, if its loan type has a commission configured — only for
+     *  loans disbursed from now on, since this only runs at disbursal time. */
+    private function generateSalesExecutiveCommission(Loan $loan): void
+    {
+        $loanType = LoanType::find($loan->loan_type_id);
+        if (!$loan->loan_officer_id || !$loanType || (float) $loanType->commission_value <= 0) {
+            return;
+        }
+
+        $commissionAmount = $loanType->commission_type === 'percentage'
+            ? round((float) $loan->disbursed_amount * (float) $loanType->commission_value / 100, 2)
+            : (float) $loanType->commission_value;
+
+        SalesExecutiveCommission::create([
+            'loan_id' => $loan->id,
+            'sales_executive_id' => $loan->loan_officer_id,
+            'loan_type_id' => $loanType->id,
+            'commission_type' => $loanType->commission_type,
+            'commission_value' => $loanType->commission_value,
+            'commission_amount' => $commissionAmount,
+            'required_installments' => $loanType->min_paid_installments,
+        ]);
     }
 
     /** Pushes an unpaid installment to the back of the schedule (due one period
@@ -400,6 +427,9 @@ class LoanController extends Controller
             'term_months' => 'required|integer|min:1',
             'installment_frequency' => ['required', Rule::in(self::FREQUENCIES)],
             'purpose' => 'nullable|string|max:255',
+            'reference_name' => 'nullable|string|max:150',
+            'reference_id_no' => 'nullable|string|max:64',
+            'reference_address' => 'nullable|string|max:255',
             'loan_officer_id' => 'nullable|exists:users,id',
             'guarantors' => 'array',
             'guarantors.*.guarantor_id' => 'required|exists:customers,id',
@@ -445,6 +475,9 @@ class LoanController extends Controller
             'term_months' => $validated['term_months'],
             'installment_frequency' => $validated['installment_frequency'],
             'purpose' => $validated['purpose'] ?? null,
+            'reference_name' => $validated['reference_name'] ?? null,
+            'reference_id_no' => $validated['reference_id_no'] ?? null,
+            'reference_address' => $validated['reference_address'] ?? null,
             'loan_officer_id' => $validated['loan_officer_id'] ?? null,
         ];
 

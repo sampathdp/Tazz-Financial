@@ -15,6 +15,7 @@ class LoanTypeController extends Controller
     private const RATE_PERIODS = ['monthly', 'annual'];
     private const PENALTY_METHODS = ['flat', 'daily'];
     private const COLLECTION_DAYS = ['all_days', 'week_days'];
+    private const COMMISSION_TYPES = ['fixed', 'percentage'];
 
     public function index()
     {
@@ -77,6 +78,9 @@ class LoanTypeController extends Controller
             'penalty_method' => ['nullable', Rule::in(self::PENALTY_METHODS)],
             'grace_period_days' => 'nullable|integer|min:0',
             'processing_fee_percent' => 'nullable|numeric|min:0',
+            'commission_type' => ['nullable', Rule::in(self::COMMISSION_TYPES)],
+            'commission_value' => 'nullable|numeric|min:0',
+            'min_paid_installments' => 'nullable|integer|min:0',
         ]);
 
         if (!empty($data['reference_format']) && !str_contains($data['reference_format'], '{SEQ')) {

@@ -6,11 +6,11 @@
    Valuation/Other charges are permission-gated on the backend (Active Loans),
    not admin-only, but this is the only place a charge can actually be added. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, DateInput, Modal } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td } from '../components/ui'
 import {
-  loansApi, loanSchedulesApi, loanWaiversApi, loanPostDatedChequesApi, loanPaymentsApi, loanChargesApi, loanTypesApi,
+  loansApi, loanSchedulesApi, loanWaiversApi, loanChargesApi, loanTypesApi,
   type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type LoanChargeType,
-  type AuthUser, type LoanPostDatedCheque, type ChequeStatus, type LoanType, type SkipDateOption,
+  type AuthUser, type LoanType, type SkipDateOption,
 } from '../api'
 import { Icon } from '../components/Icon'
 import { useNotify } from '../components/Notify'
@@ -216,124 +216,6 @@ function SkipByLoanType({ notify }: { notify: ReturnType<typeof useNotify> }) {
           )}
         </Card>
       )}
-    </div>
-  )
-}
-
-/* ========================== Cheque Clearance ============================ */
-const chequeTone: Record<ChequeStatus, 'green' | 'red' | 'amber' | 'neutral' | 'blue'> = {
-  Pending: 'neutral', Handed: 'blue', Realized: 'green', Bounced: 'red', Returned: 'amber',
-}
-const CHEQUE_STATUSES: ChequeStatus[] = ['Pending', 'Handed', 'Realized', 'Bounced', 'Returned']
-/** Cheques still awaiting a bank outcome — the only ones that can be realized or rejected. */
-const isOpenCheque = (c: LoanPostDatedCheque) => c.status === 'Pending' || c.status === 'Handed'
-/** A cheque can only be presented at the bank on or after its own date. */
-const isDueCheque = (c: LoanPostDatedCheque, today: string) => (c.chequeDate?.slice(0, 10) || '') <= today
-
-function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
-  const [rows, setRows] = useState<LoanPostDatedCheque[]>([])
-  const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState<ChequeStatus | ''>('')
-  const [dueTodayOnly, setDueTodayOnly] = useState(false)
-  const [busyId, setBusyId] = useState<number | null>(null)
-  // Realizing needs the actual bank check-in/clearing date, not just a click —
-  // see act(). Bouncing doesn't touch the loan, so it skips this dialog.
-  const [realizeTarget, setRealizeTarget] = useState<LoanPostDatedCheque | null>(null)
-  const [realizeDate, setRealizeDate] = useState('')
-
-  const refresh = () => {
-    setLoading(true)
-    loanPostDatedChequesApi.listAll({ status: status || undefined, dueToday: dueTodayOnly })
-      .then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
-  }
-  useEffect(() => { refresh() }, [status, dueTodayOnly]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const today = todayIso()
-  const dueTodayCount = useMemo(() => rows.filter((c) => isOpenCheque(c) && c.chequeDate?.slice(0, 10) === today).length, [rows, today])
-  const overdueCount = useMemo(() => rows.filter((c) => isOpenCheque(c) && c.chequeDate?.slice(0, 10) < today).length, [rows, today])
-
-  const act = async (c: LoanPostDatedCheque, next: 'Realized' | 'Bounced', realizedAt?: string) => {
-    setBusyId(c.id)
-    try {
-      if (c.source === 'Payment') await loanPaymentsApi.clearCheque(c.id, next, realizedAt)
-      else await loanPostDatedChequesApi.updateStatus(c.id, next, undefined, realizedAt)
-      notify.success(next === 'Realized' ? 'Cheque realized' : 'Cheque rejected')
-      refresh()
-    } catch (ex: any) {
-      notify.error('Update failed', ex?.response?.data?.message)
-    } finally { setBusyId(null) }
-  }
-
-  const openRealize = (c: LoanPostDatedCheque) => { setRealizeTarget(c); setRealizeDate(today) }
-  const confirmRealize = async () => {
-    if (!realizeTarget || !realizeDate) return
-    const c = realizeTarget
-    setRealizeTarget(null)
-    await act(c, 'Realized', realizeDate)
-  }
-
-  return (
-    <div>
-      <div className="row between wrap gap-2" style={{ marginBottom: 12 }}>
-        <div className="t-2" style={{ fontSize: 12.5 }}>{rows.length} cheques{dueTodayCount ? ` — ${dueTodayCount} due today` : ''}</div>
-        <div className="row gap-2">
-          {dueTodayCount > 0 && <Badge tone="amber" dot>{dueTodayCount} due today</Badge>}
-          {overdueCount > 0 && <Badge tone="red" dot>{overdueCount} overdue</Badge>}
-        </div>
-      </div>
-
-      <Card style={{ marginBottom: 16 }}>
-        <div className="row gap-3 wrap" style={{ alignItems: 'flex-end' }}>
-          <Field label="Status"><Select value={status} onChange={(e) => setStatus(e.target.value as ChequeStatus | '')} style={{ minWidth: 160 }}>
-            <option value="">All statuses</option>
-            {CHEQUE_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </Select></Field>
-          <Btn variant={dueTodayOnly ? 'primary' : 'solid'} icon="calendar" onClick={() => setDueTodayOnly((v) => !v)}>Due Today Only</Btn>
-        </div>
-      </Card>
-
-      <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
-        <Table cols={[{ label: 'Cheque No' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Branch' }, { label: 'Bank' }, { label: 'Cheque Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 190 }]}
-          rows={rows} empty="No cheques found"
-          render={(c) => {
-            const d = c.chequeDate?.slice(0, 10)
-            const dueBadge = isOpenCheque(c) && d === today ? <Badge tone="amber" dot>Today</Badge> : isOpenCheque(c) && d < today ? <Badge tone="red" dot>Overdue</Badge> : null
-            return <>
-              <Td mono>{c.chequeNo}</Td>
-              <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{c.loan?.code || '—'}</Td>
-              <Td>{c.loan?.customer?.fullName || '—'}</Td>
-              <Td>{c.loan?.branch?.name || '—'}</Td>
-              <Td>{c.bankName}</Td>
-              <Td><div className="row gap-2" style={{ alignItems: 'center' }}>{dateOnly(c.chequeDate)}{dueBadge}</div></Td>
-              <Td align="right" mono>{money(c.amount)}</Td>
-              <Td align="center"><div className="row gap-2" style={{ justifyContent: 'center' }}><Badge tone={chequeTone[c.status]} dot>{c.status}</Badge>{c.source === 'Payment' && <span className="t-2" style={{ fontSize: 10.5 }}>(payment)</span>}</div></Td>
-              <Td align="right">
-                {isOpenCheque(c) && (isDueCheque(c, today) ? (
-                  <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-                    <Btn size="sm" variant="ok" icon="check" disabled={busyId === c.id} onClick={() => openRealize(c)}>Realize</Btn>
-                    <Btn size="sm" variant="danger" icon="x" disabled={busyId === c.id} onClick={() => act(c, 'Bounced')}>Reject</Btn>
-                  </div>
-                ) : <span className="t-2" style={{ fontSize: 11.5 }}>Not due yet</span>)}
-              </Td>
-            </>
-          }} />}
-      </Card>
-
-      <Modal open={!!realizeTarget} onClose={() => setRealizeTarget(null)} width={400}
-        title={realizeTarget ? `Realize cheque ${realizeTarget.chequeNo}` : ''}
-        footer={<>
-          <Btn variant="plain" onClick={() => setRealizeTarget(null)}>Cancel</Btn>
-          <Btn variant="primary" icon="check" disabled={!realizeDate || busyId === realizeTarget?.id} onClick={confirmRealize}>Realize</Btn>
-        </>}>
-        <div className="t-2" style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}>
-          Enter the date the cheque actually cleared at the bank (check-in date) — the amount is deducted
-          from the loan as of this date, not today's date.
-        </div>
-        <Field label="Check-in / Realization Date">
-          <DateInput value={realizeDate} onChange={setRealizeDate} />
-        </Field>
-      </Modal>
     </div>
   )
 }
@@ -554,7 +436,6 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
 /* ================================ Screen ================================= */
 const TABS = [
   { id: 'skip', label: 'Installment Skip', icon: 'clock' },
-  { id: 'cheques', label: 'Cheque Clearance', icon: 'cheque' },
   { id: 'waivers', label: 'Waivers', icon: 'refund' },
   { id: 'charges', label: 'Charges', icon: 'tag' },
 ] as const
@@ -571,14 +452,13 @@ export function LoanAdjustmentsScreen({ user: me }: { go: Go; user?: AuthUser | 
 
   return (
     <div>
-      <PageHead crumbs="Loan Management" title="Loan Adjustments" icon="shield" sub="Installment skip, cheque realize/reject, waivers, and charges — admin only." />
+      <PageHead crumbs="Loan Management" title="Loan Adjustments" icon="shield" sub="Installment skip, waivers, and charges — admin only." />
       <div className="row gap-2" style={{ marginBottom: 16, overflowX: 'auto', paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
         {TABS.map((t) => (
           <Btn key={t.id} size="sm" variant="ghost" active={tab === t.id} icon={t.icon} onClick={() => setTab(t.id)} style={{ flexShrink: 0 }}>{t.label}</Btn>
         ))}
       </div>
       {tab === 'skip' && <SkipSection notify={notify} />}
-      {tab === 'cheques' && <ChequeSection notify={notify} />}
       {tab === 'waivers' && <WaiversSection notify={notify} />}
       {tab === 'charges' && <ChargesSection notify={notify} />}
     </div>

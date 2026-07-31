@@ -24,10 +24,15 @@ export const NAV: NavNode[] = [
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
     { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
     { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt' },
+    /** Admin-only — cheque realize/reject. Intentionally left out of
+     *  lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back to its
+     *  unmapped-route rule (admin role only), not the permission system. */
+    { id: 'loan/cheques', label: 'Cheque Clearance', icon: 'cheque' },
     { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert' },
     { id: 'loan/doc-tracking', label: 'Document Tracking', icon: 'tag' },
-    /** Admin-only — installment skip / cheque realize-reject / waivers. Intentionally
-     *  left out of lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back
+    { id: 'loan/commissions', label: 'Sales Executive Commissions', icon: 'target' },
+    /** Admin-only — installment skip / waivers. Intentionally left out of
+     *  lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back
      *  to its unmapped-route rule (admin role only), not the permission system. */
     { id: 'loan/adjustments', label: 'Loan Adjustments', icon: 'shield' },
   ] },

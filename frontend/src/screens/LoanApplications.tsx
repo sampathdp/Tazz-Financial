@@ -49,6 +49,9 @@ interface FormState {
   termMonths?: number
   installmentFrequency?: LoanFrequency
   purpose?: string
+  referenceName?: string
+  referenceIdNo?: string
+  referenceAddress?: string
   loanOfficerId?: number
   guarantors: LoanGuarantorInput[]
   collateral: LoanCollateralInput[]
@@ -126,6 +129,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
         principalAmount: loan.principalAmount, downPayment: loan.downPayment,
         interestRatePercent: loan.interestRatePercent, termMonths: loan.termMonths,
         installmentFrequency: loan.installmentFrequency, purpose: loan.purpose || '',
+        referenceName: loan.referenceName || '', referenceIdNo: loan.referenceIdNo || '', referenceAddress: loan.referenceAddress || '',
         loanOfficerId: loan.loanOfficerId || undefined,
         guarantors: loan.guarantors || [], collateral: loan.collateral || [],
       })
@@ -153,6 +157,9 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
       termMonths: form.termMonths,
       installmentFrequency: form.installmentFrequency,
       purpose: form.purpose || null,
+      referenceName: form.referenceName || null,
+      referenceIdNo: form.referenceIdNo || null,
+      referenceAddress: form.referenceAddress || null,
       loanOfficerId: form.loanOfficerId || null,
       guarantors: form.guarantors.map((g) => ({ guarantorId: g.guarantorId, guaranteedAmount: g.guaranteedAmount })),
       collateral: form.collateral,
@@ -330,6 +337,15 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
               <option value="">—</option>{officers.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </Select></Field>
             <Field label="Purpose" full><textarea value={form.purpose || ''} onChange={(e) => setForm((s) => ({ ...s, purpose: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
+          </div>
+        </Card>
+
+        <Card style={{ marginBottom: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Reference Person <span className="t-2" style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Field label="Name"><Input value={form.referenceName || ''} onChange={(e) => setForm((s) => ({ ...s, referenceName: e.target.value }))} /></Field>
+            <Field label="NIC / Other ID No"><Input value={form.referenceIdNo || ''} onChange={(e) => setForm((s) => ({ ...s, referenceIdNo: e.target.value }))} /></Field>
+            <Field label="Address" full><textarea value={form.referenceAddress || ''} onChange={(e) => setForm((s) => ({ ...s, referenceAddress: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
           </div>
         </Card>
 

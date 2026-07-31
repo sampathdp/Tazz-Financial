@@ -14,6 +14,7 @@ class Loan extends Model
         'branch_id', 'code', 'customer_id', 'loan_type_id',
         'principal_amount', 'down_payment', 'interest_rate_percent', 'interest_method', 'rate_period',
         'term_months', 'installment_frequency', 'purpose',
+        'reference_name', 'reference_id_no', 'reference_address',
         'loan_officer_id', 'recovery_officer_id',
         'disbursed_amount', 'disbursed_at', 'first_installment_date',
         'status', 'applied_by', 'approved_by', 'approved_at', 'rejected_reason', 'closed_at', 'created_by',
@@ -131,5 +132,10 @@ class Loan extends Model
     public function payments()
     {
         return $this->hasMany(LoanPayment::class)->orderByDesc('paid_at');
+    }
+
+    public function salesExecutiveCommission()
+    {
+        return $this->hasOne(SalesExecutiveCommission::class);
     }
 }

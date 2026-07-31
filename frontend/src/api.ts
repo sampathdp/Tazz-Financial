@@ -202,6 +202,11 @@ export interface LoanType {
   /** Days after due_date before default interest starts accruing. Default 5. */
   gracePeriodDays?: number | null;
   processingFeePercent?: number | string | null;
+  /** Fixed amount, or a percentage of the loan's disbursed_amount — see commissionType. */
+  commissionType?: 'fixed' | 'percentage' | null;
+  commissionValue?: number | string | null;
+  /** Paid installments required before the sales executive becomes commission-eligible. 0 = immediately eligible on disbursal. */
+  minPaidInstallments?: number | null;
   sortOrder?: number;
   status?: 'Active' | 'Inactive';
 }
@@ -234,6 +239,10 @@ export interface Loan {
   termMonths: number;
   installmentFrequency: LoanFrequency;
   purpose?: string | null;
+  /** Reference person recorded on the application — a contactable third party, not a guarantor. */
+  referenceName?: string | null;
+  referenceIdNo?: string | null;
+  referenceAddress?: string | null;
   loanOfficerId?: number | null; loanOfficer?: { id: number; name: string } | null;
   recoveryOfficerId?: number | null; recoveryOfficer?: { id: number; name: string } | null;
   status: LoanStatus;
@@ -264,6 +273,40 @@ export interface Loan {
   totalDueSum?: number | string | null;
   paidSum?: number | string | null;
   createdAt?: string;
+}
+
+export type CommissionStatus = 'Pending' | 'Eligible' | 'Paid'
+export type CommissionPaymentStatus = 'Current' | 'Overdue' | 'Closed'
+
+/** One row per loan (created at disbursal — see backend LoanController::disburse()),
+ *  tracking the sales executive's commission through Pending -> Eligible -> Paid. */
+export interface SalesExecutiveCommission {
+  id: number;
+  loanId: number; loanCode: string; customerName: string;
+  loanTypeId: number; loanTypeName: string;
+  salesExecutiveId: number; salesExecutiveName: string;
+  loanAmount: number | string; commissionAmount: number | string;
+  requiredInstallments: number; paidInstallments: number;
+  /** Pending/Eligible are derived live server-side (never persisted); only Paid is a real stored state. */
+  commissionStatus: CommissionStatus;
+  /** The underlying loan's repayment health — distinct from commissionStatus. */
+  paymentStatus: CommissionPaymentStatus;
+  paidAt?: string | null;
+  paymentAmount?: number | string | null;
+  paymentMethod?: PaymentMethod | null;
+  referenceNo?: string | null;
+  notes?: string | null;
+}
+
+export const salesExecutiveCommissionsApi = {
+  list: (params: { salesExecutiveId?: number | ''; loanTypeId?: number | ''; status?: CommissionStatus | '' } = {}) =>
+    http.get('/sales-executive-commissions', { params: snakeize({
+      salesExecutiveId: params.salesExecutiveId || undefined,
+      loanTypeId: params.loanTypeId || undefined,
+      status: params.status || undefined,
+    }) }).then((r) => camelize(r.data) as SalesExecutiveCommission[]),
+  pay: (id: number, body: { paymentDate: string; paymentAmount: number | string; paymentMethod: PaymentMethod; referenceNo?: string; notes?: string }) =>
+    http.post(`/sales-executive-commissions/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as SalesExecutiveCommission),
 }
 
 export type ScheduleStatus = 'Pending' | 'Paid' | 'Partial' | 'Overdue'
@@ -554,31 +597,17 @@ export const cashReconciliationsApi = {
   remove: (id: number) => http.delete(`/cash-reconciliations/${id}`).then((r) => r.data),
 }
 
-/** Shared lookup/category lists (Expense Categories, ...). Banks used to be one
- *  of these (type='bank') but got promoted to its own table/resource — see
- *  `Bank` / `banksApi` below — since it's a first-class entity other screens
- *  point at, not just an admin-managed lookup list.
- *  `type` is the whitelist key from the backend's MasterCategoryController::TYPES —
- *  add a new lookup list there, then a screen instance here with the same type. */
-export type MasterCategoryType = 'expense_category'
-
-export interface MasterCategory {
-  id: number;
-  type: MasterCategoryType;
-  name: string;
+/** A spend category (Masters > Expense Categories) — same shape/pattern as
+ *  `Bank` / `banksApi` above, each master list gets its own dedicated
+ *  table/resource rather than a shared `type`-discriminated lookup. */
+export interface ExpenseCategory {
+  id: number; name: string;
   code?: string | null;
   description?: string | null;
   status?: 'Active' | 'Inactive';
   sortOrder?: number;
 }
-
-export const masterCategoriesApi = {
-  list: (type: MasterCategoryType) =>
-    http.get('/master-categories', { params: { type } }).then((r) => camelize(r.data) as MasterCategory[]),
-  create: (body: Partial<MasterCategory>) => http.post('/master-categories', snakeize(body)).then((r) => camelize(r.data) as MasterCategory),
-  update: (id: number, body: Partial<MasterCategory>) => http.put(`/master-categories/${id}`, snakeize(body)).then((r) => camelize(r.data) as MasterCategory),
-  remove: (id: number) => http.delete(`/master-categories/${id}`).then((r) => r.data),
-}
+export const expenseCategoriesApi = resource<ExpenseCategory>('expense-categories')
 
 export interface GeneratedNumber {
   id: number; module: string; number: string;
@@ -661,8 +690,11 @@ export const loanChargesApi = {
 export const loanPostDatedChequesApi = {
   list: (loanId: number) => http.get(`/loans/${loanId}/post-dated-cheques`).then((r) => camelize(r.data) as LoanPostDatedCheque[]),
   /** Cross-loan listing for the Cheque Management screen. */
-  listAll: (params?: { status?: ChequeStatus; dueToday?: boolean }) =>
-    http.get('/post-dated-cheques', { params: { status: params?.status, due_today: params?.dueToday ? 1 : undefined } }).then((r) => camelize(r.data) as LoanPostDatedCheque[]),
+  listAll: (params?: { status?: ChequeStatus; dueToday?: boolean; fromDate?: string; toDate?: string }) =>
+    http.get('/post-dated-cheques', { params: {
+      status: params?.status, due_today: params?.dueToday ? 1 : undefined,
+      from_date: params?.fromDate || undefined, to_date: params?.toDate || undefined,
+    } }).then((r) => camelize(r.data) as LoanPostDatedCheque[]),
   create: (loanId: number, body: { chequeNo: string; bankName: string; chequeDate: string; amount: number | string; notes?: string }) =>
     http.post(`/loans/${loanId}/post-dated-cheques`, snakeize(body)).then((r) => camelize(r.data) as LoanPostDatedCheque),
   /** realizedAt (the cheque's check-in/clearing date) is required when status is

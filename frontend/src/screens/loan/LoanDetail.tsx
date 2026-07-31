@@ -388,10 +388,19 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
 
 /* ---------- Security & Collateral ---------- */
 function SecurityPanel({ loan }: { loan: Loan }) {
+  const hasReference = !!(loan.referenceName || loan.referenceIdNo || loan.referenceAddress)
   return (
     <Card>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Security, Collateral & Equipment Details</div>
-      {!loan.guarantors?.length && !loan.collateral?.length && <div className="t-2" style={{ fontSize: 12.5 }}>No guarantors or collateral recorded.</div>}
+      {!loan.guarantors?.length && !loan.collateral?.length && !hasReference && <div className="t-2" style={{ fontSize: 12.5 }}>No guarantors, collateral or reference person recorded.</div>}
+      {hasReference && (<>
+        <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Reference Person</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px', fontSize: 12.5, marginBottom: 14 }}>
+          <div><span className="t-2">Name: </span>{loan.referenceName || '—'}</div>
+          <div><span className="t-2">NIC / Other ID No: </span>{loan.referenceIdNo || '—'}</div>
+          <div><span className="t-2">Address: </span>{loan.referenceAddress || '—'}</div>
+        </div>
+      </>)}
       {!!loan.guarantors?.length && (<>
         <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Guarantors</div>
         {loan.guarantors.map((g, i) => (
