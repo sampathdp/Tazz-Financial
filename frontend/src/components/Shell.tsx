@@ -46,9 +46,9 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Cashbook Management', icon: 'wallet', items: [
-    { id: 'cash/book', label: 'Cashbook', icon: 'wallet', soon: true },
-    { id: 'cash/transfers', label: 'Cash Transfers', icon: 'swap', soon: true },
-    { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust', soon: true },
+    { id: 'cash/book', label: 'Cashbook', icon: 'wallet' },
+    { id: 'cash/transfers', label: 'Cash Transfers', icon: 'swap' },
+    { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust' },
   ] },
 
   { section: 'Bank Management', icon: 'building', items: [

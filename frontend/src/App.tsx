@@ -33,6 +33,10 @@ const UsersScreen = named(() => import('./screens/Admin'), 'UsersScreen')
 const PermScreen = named(() => import('./screens/Admin'), 'PermScreen')
 const CompanyScreen = named(() => import('./screens/Admin'), 'CompanyScreen')
 
+const CashbookScreen = named(() => import('./screens/Cashbook'), 'CashbookScreen')
+const CashTransfersScreen = named(() => import('./screens/Cashbook'), 'CashTransfersScreen')
+const CashReconciliationScreen = named(() => import('./screens/Cashbook'), 'CashReconciliationScreen')
+
 const BankAccountsScreen = named(() => import('./screens/Bank'), 'BankAccountsScreen')
 const BankTransactionsScreen = named(() => import('./screens/Bank'), 'BankTransactionsScreen')
 const BankReconciliationScreen = named(() => import('./screens/Bank'), 'BankReconciliationScreen')
@@ -81,6 +85,9 @@ const SCREENS: Record<string, ScreenComp> = {
   'ad/users': UsersScreen,
   'ad/perm': PermScreen,
   'ad/company': CompanyScreen,
+  'cash/book': CashbookScreen,
+  'cash/transfers': CashTransfersScreen,
+  'cash/recon': CashReconciliationScreen,
   'bank/accounts': BankAccountsScreen,
   'bank/txns': BankTransactionsScreen,
   'bank/recon': BankReconciliationScreen,

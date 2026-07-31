@@ -6,6 +6,10 @@ use App\Http\Controllers\Api\BankController;
 use App\Http\Controllers\Api\BankReconciliationController;
 use App\Http\Controllers\Api\BankTransactionController;
 use App\Http\Controllers\Api\BranchController;
+use App\Http\Controllers\Api\CashAccountController;
+use App\Http\Controllers\Api\CashbookEntryController;
+use App\Http\Controllers\Api\CashReconciliationController;
+use App\Http\Controllers\Api\CashTransferController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerDocumentController;
 use App\Http\Controllers\Api\DashboardController;
@@ -185,6 +189,29 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('bank-reconciliations', [BankReconciliationController::class, 'store'])->middleware('perm:Bank Reconciliation,Create');
     Route::put('bank-reconciliations/{bankReconciliation}', [BankReconciliationController::class, 'update'])->middleware('perm:Bank Reconciliation,Edit');
     Route::delete('bank-reconciliations/{bankReconciliation}', [BankReconciliationController::class, 'destroy'])->middleware('perm:Bank Reconciliation,Delete');
+
+    // --- Cashbook Management: Cash Accounts + Cashbook Entries (single "Cashbook" screen/permission) ---
+    Route::get('cash-accounts', [CashAccountController::class, 'index'])->middleware('perm:Cashbook,View');
+    Route::post('cash-accounts', [CashAccountController::class, 'store'])->middleware('perm:Cashbook,Create');
+    Route::put('cash-accounts/{cashAccount}', [CashAccountController::class, 'update'])->middleware('perm:Cashbook,Edit');
+    Route::delete('cash-accounts/{cashAccount}', [CashAccountController::class, 'destroy'])->middleware('perm:Cashbook,Delete');
+
+    Route::get('cashbook-entries', [CashbookEntryController::class, 'index'])->middleware('perm:Cashbook,View');
+    Route::post('cashbook-entries', [CashbookEntryController::class, 'store'])->middleware('perm:Cashbook,Create');
+    Route::delete('cashbook-entries/{cashbookEntry}', [CashbookEntryController::class, 'destroy'])->middleware('perm:Cashbook,Delete');
+
+    // --- Cashbook Management: Cash Transfers (between cash accounts, requires approval) ---
+    Route::get('cash-transfers', [CashTransferController::class, 'index'])->middleware('perm:Cash Transfers,View');
+    Route::post('cash-transfers', [CashTransferController::class, 'store'])->middleware('perm:Cash Transfers,Create');
+    Route::put('cash-transfers/{cashTransfer}/approve', [CashTransferController::class, 'approve'])->middleware('perm:Cash Transfers,Approve');
+    Route::put('cash-transfers/{cashTransfer}/reject', [CashTransferController::class, 'reject'])->middleware('perm:Cash Transfers,Approve');
+    Route::delete('cash-transfers/{cashTransfer}', [CashTransferController::class, 'destroy'])->middleware('perm:Cash Transfers,Delete');
+
+    // --- Cashbook Management: Cash Reconciliation (branch-level daily cash-in-hand entry) ---
+    Route::get('cash-reconciliations', [CashReconciliationController::class, 'index'])->middleware('perm:Cash Reconciliation,View');
+    Route::get('cash-reconciliations/summary', [CashReconciliationController::class, 'summary'])->middleware('perm:Cash Reconciliation,View');
+    Route::post('cash-reconciliations', [CashReconciliationController::class, 'store'])->middleware('perm:Cash Reconciliation,Create');
+    Route::delete('cash-reconciliations/{cashReconciliation}', [CashReconciliationController::class, 'destroy'])->middleware('perm:Cash Reconciliation,Delete');
 
     // --- Masters: shared lookup/category lists (Expense Categories, ...) ---
     Route::get('master-categories', [MasterCategoryController::class, 'index'])->middleware('perm:Masters,View');

@@ -458,6 +458,102 @@ export const bankReconciliationsApi = {
   remove: (id: number) => http.delete(`/bank-reconciliations/${id}`).then((r) => r.data),
 }
 
+/* =========================== Cashbook Management =========================== */
+
+export interface CashAccount {
+  id: number;
+  branchId: number; branch?: { id: number; name: string; code: string } | null;
+  name: string;
+  openingBalance?: number | string; currentBalance?: number | string;
+  status?: 'Active' | 'Inactive';
+}
+
+export type CashEntryType = 'In' | 'Out'
+export type CashEntryCategory = 'Loan Collection' | 'Expense' | 'Transfer' | 'Deposit' | 'Other'
+
+export interface CashbookEntry {
+  id: number;
+  cashAccountId: number; cashAccount?: { id: number; name: string; branchId: number };
+  entryDate: string; type: CashEntryType; category: CashEntryCategory;
+  amount: number | string; balanceAfter?: number | string;
+  description?: string | null;
+  creator?: { id: number; name: string } | null;
+  createdAt?: string;
+}
+
+export type CashTransferStatus = 'Pending' | 'Completed' | 'Rejected'
+
+export interface CashTransfer {
+  id: number;
+  fromCashAccountId: number; fromAccount?: { id: number; name: string };
+  toCashAccountId: number; toAccount?: { id: number; name: string };
+  transferDate: string;
+  amount: number | string;
+  description?: string | null;
+  status?: CashTransferStatus;
+  requester?: { id: number; name: string } | null;
+  approver?: { id: number; name: string } | null;
+  approvedAt?: string | null;
+}
+
+/** Denomination note value -> quantity counted, e.g. { "5000": 20, "2000": 0, ... }. */
+export type Denominations = Record<string, number>
+export const DENOMINATION_VALUES = [5000, 2000, 1000, 500, 200, 100, 50, 20, 10] as const
+
+export interface CashReconciliation {
+  id: number;
+  branchId: number; branch?: { id: number; name: string; code: string };
+  asAtDate: string;
+  systemCashTotal?: number | string; chequeInHandTotal?: number | string; postdatedChequeTotal?: number | string;
+  todayCashReceipts?: number | string; todayChequeReceipts?: number | string; chequeRealizedTotal?: number | string;
+  receiptsToBeCancelled?: number | string; encashment?: number | string; cashFloat?: number | string; pettyCash?: number | string;
+  otherBranchCash?: number | string; otherBranchCode?: string | null;
+  otherBranchCheque?: number | string; otherBranchChequeCode?: string | null;
+  totalCash?: number | string; totalCheque?: number | string;
+  denominations?: Denominations | null; coinsAmount?: number | string;
+  countedTotal?: number | string; variance?: number | string;
+  notes?: string | null;
+  reconciler?: { id: number; name: string } | null;
+}
+
+export interface CashReconciliationSummary {
+  cashAccounts: { id: number; name: string; currentBalance: number | string }[];
+  systemCashTotal: number | string;
+  chequeInHandTotal: number | string;
+  postdatedChequeTotal: number | string;
+  todayCashReceipts: number | string;
+  todayChequeReceipts: number | string;
+  chequeRealizedTotal: number | string;
+  existing: CashReconciliation | null;
+}
+
+export const cashAccountsApi = resource<CashAccount>('cash-accounts')
+
+export const cashbookEntriesApi = {
+  list: (cashAccountId?: number) =>
+    http.get('/cashbook-entries', { params: cashAccountId ? { cash_account_id: cashAccountId } : {} }).then((r) => camelize(r.data) as CashbookEntry[]),
+  create: (body: Partial<CashbookEntry>) => http.post('/cashbook-entries', snakeize(body)).then((r) => camelize(r.data) as CashbookEntry),
+  remove: (id: number) => http.delete(`/cashbook-entries/${id}`).then((r) => r.data),
+}
+
+export const cashTransfersApi = {
+  list: (cashAccountId?: number) =>
+    http.get('/cash-transfers', { params: cashAccountId ? { cash_account_id: cashAccountId } : {} }).then((r) => camelize(r.data) as CashTransfer[]),
+  create: (body: Partial<CashTransfer>) => http.post('/cash-transfers', snakeize(body)).then((r) => camelize(r.data) as CashTransfer),
+  approve: (id: number) => http.put(`/cash-transfers/${id}/approve`).then((r) => camelize(r.data) as CashTransfer),
+  reject: (id: number) => http.put(`/cash-transfers/${id}/reject`).then((r) => camelize(r.data) as CashTransfer),
+  remove: (id: number) => http.delete(`/cash-transfers/${id}`).then((r) => r.data),
+}
+
+export const cashReconciliationsApi = {
+  list: (branchId?: number) =>
+    http.get('/cash-reconciliations', { params: branchId ? { branch_id: branchId } : {} }).then((r) => camelize(r.data) as CashReconciliation[]),
+  summary: (branchId: number, asAtDate: string) =>
+    http.get('/cash-reconciliations/summary', { params: { branch_id: branchId, as_at_date: asAtDate } }).then((r) => camelize(r.data) as CashReconciliationSummary),
+  save: (body: Partial<CashReconciliation>) => http.post('/cash-reconciliations', snakeize(body)).then((r) => camelize(r.data) as CashReconciliation),
+  remove: (id: number) => http.delete(`/cash-reconciliations/${id}`).then((r) => r.data),
+}
+
 /** Shared lookup/category lists (Expense Categories, ...). Banks used to be one
  *  of these (type='bank') but got promoted to its own table/resource — see
  *  `Bank` / `banksApi` below — since it's a first-class entity other screens

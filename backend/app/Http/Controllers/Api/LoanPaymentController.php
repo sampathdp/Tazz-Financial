@@ -7,6 +7,7 @@ use App\Models\Branch;
 use App\Models\Loan;
 use App\Models\LoanPayment;
 use App\Services\NumberGenerator;
+use App\Support\CashbookPoster;
 use App\Support\LoanPaymentAllocator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -115,6 +116,11 @@ class LoanPaymentController extends Controller
                 LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $data['amount']);
             }
 
+            // Cash is physically in hand the moment it's recorded, independent of
+            // whether it's a pending settlement awaiting approval — post it to the
+            // Cashbook now rather than only when/if the allocation is applied.
+            CashbookPoster::postCashReceipt($payment);
+
             return $payment;
         });
 
@@ -151,13 +157,18 @@ class LoanPaymentController extends Controller
         }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
 
-        $payment->update([
-            'approval_status' => 'Rejected',
-            'status' => 'Voided',
-            'void_reason' => $data['void_reason'] ?? null,
-            'voided_by' => $request->user()->id,
-            'voided_at' => now(),
-        ]);
+        DB::transaction(function () use ($payment, $data, $request) {
+            $payment->update([
+                'approval_status' => 'Rejected',
+                'status' => 'Voided',
+                'void_reason' => $data['void_reason'] ?? null,
+                'voided_by' => $request->user()->id,
+                'voided_at' => now(),
+            ]);
+            // The cash was posted to the Cashbook at record time (see store()) — a
+            // rejected settlement means it's being handed back, so unwind that entry.
+            CashbookPoster::reverseCashReceipt($payment);
+        });
 
         return $payment->fresh()->load('voider:id,name');
     }
@@ -244,6 +255,7 @@ class LoanPaymentController extends Controller
                 'voided_by' => $request->user()->id,
                 'voided_at' => now(),
             ]);
+            CashbookPoster::reverseCashReceipt($payment);
         });
 
         return response()->noContent();
