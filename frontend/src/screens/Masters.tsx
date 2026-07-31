@@ -5,11 +5,12 @@
    list later is: a table/model/controller on the backend, a resource in
    api.ts, then one more exported screen here + a nav entry + an App.tsx route. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { expenseCategoriesApi, banksApi, type ExpenseCategory, type Bank, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const blankExpenseCategoryForm = (): Partial<ExpenseCategory> => ({ status: 'Active', sortOrder: 0 })
@@ -44,7 +45,7 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
       close(); refresh()
       notify.success(editing ? 'Expense Category updated' : 'Expense Category created', form.name)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.name?.[0] || ex?.response?.data?.errors?.code?.[0] || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -52,7 +53,7 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
     const ok = await notify.confirm({ title: `Delete "${r.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await expenseCategoriesApi.remove(r.id); refresh(); notify.success('Expense Category deleted', r.name) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -81,7 +82,7 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value }))} /></Field>
@@ -128,7 +129,7 @@ export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
       close(); refresh()
       notify.success(editing ? 'Bank updated' : 'Bank created', form.name)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.name?.[0] || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -136,7 +137,7 @@ export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
     const ok = await notify.confirm({ title: `Delete "${r.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await banksApi.remove(r.id); refresh(); notify.success('Bank deleted', r.name) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -165,7 +166,7 @@ export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value }))} /></Field>

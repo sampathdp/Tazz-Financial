@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Bank Management (API-backed) */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   branchesApi, bankAccountsApi, bankTransactionsApi, bankReconciliationsApi,
@@ -9,6 +9,7 @@ import {
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const money = (v: number | string | null | undefined) =>
@@ -49,7 +50,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
       close(); refresh()
       notify.success(editing ? 'Bank account updated' : 'Bank account created', form.name)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.account_number?.[0] || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -57,7 +58,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
     const ok = await notify.confirm({ title: `Delete account "${a.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await bankAccountsApi.remove(a.id); refresh(); notify.success('Bank account deleted', a.name) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const types: BankAccountType[] = ['Savings', 'Current', 'Fixed Deposit']
@@ -89,7 +90,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create Account')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Account Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Bank Name"><BankSelect value={form.bankName || ''} onChange={(v) => setForm((s) => ({ ...s, bankName: v }))} /></Field>
@@ -150,7 +151,7 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
       close(); refresh()
       notify.success('Transaction recorded')
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -158,7 +159,7 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
     const ok = await notify.confirm({ title: 'Delete this transaction?', msg: 'This reverses its effect on the account balance. This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await bankTransactionsApi.remove(t.id); refresh(); notify.success('Transaction deleted') }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const types: BankTxnType[] = ['Deposit', 'Withdrawal', 'TransferIn', 'TransferOut']
@@ -199,7 +200,7 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : 'Record Transaction'}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Bank Account" full><Select value={form.bankAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, bankAccountId: Number(e.target.value) || undefined }))}>
             <option value="">—</option>
@@ -260,7 +261,7 @@ export function BankReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
       close(); refresh()
       notify.success(editing ? 'Reconciliation updated' : 'Reconciliation recorded')
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -268,7 +269,7 @@ export function BankReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
     const ok = await notify.confirm({ title: 'Delete this reconciliation record?', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await bankReconciliationsApi.remove(r.id); refresh(); notify.success('Reconciliation deleted') }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -307,7 +308,7 @@ export function BankReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Record Reconciliation')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Bank Account" full><Select value={form.bankAccountId ?? ''} disabled={!!editing} onChange={(e) => setForm((s) => ({ ...s, bankAccountId: Number(e.target.value) || undefined }))}>
             <option value="">—</option>

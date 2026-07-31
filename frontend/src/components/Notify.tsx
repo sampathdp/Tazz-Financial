@@ -209,7 +209,7 @@ function ToastStack({ toasts, onClose }: { toasts: Toast[]; onClose: (id: number
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tx-0)' }}>{t.title}</div>
-              {t.msg && <div className="t-2" style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.4 }}>{t.msg}</div>}
+              {t.msg && <div className="t-2" style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.4, whiteSpace: 'pre-line' }}>{t.msg}</div>}
             </div>
             <button onClick={() => onClose(t.id)} aria-label="Dismiss" style={{
               background: 'transparent', border: 'none', color: 'var(--tx-3)', cursor: 'pointer', padding: 2,
@@ -410,7 +410,7 @@ export function NotificationBell() {
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</div>
                       <div className="t-3" style={{ fontSize: 10.5, flexShrink: 0, fontFamily: 'JetBrains Mono' }}>{timeAgo(it.at)}</div>
                     </div>
-                    {it.msg && <div className="t-2" style={{ fontSize: 12, marginTop: 2, lineHeight: 1.4 }}>{it.msg}</div>}
+                    {it.msg && <div className="t-2" style={{ fontSize: 12, marginTop: 2, lineHeight: 1.4, whiteSpace: 'pre-line' }}>{it.msg}</div>}
                   </div>
                   <button onClick={(e) => { e.stopPropagation(); n.remove(it.id) }} aria-label="Dismiss" style={{
                     background: 'transparent', border: 'none', color: 'var(--tx-3)', cursor: 'pointer', padding: 2, alignSelf: 'flex-start',

@@ -2,7 +2,7 @@
    Record a deposit, print its Deposit Slip, and later allocate it to an FD
    from the Fixed Deposits screen (fdDepositsApi status flips Available -> Allocated). */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   fdDepositsApi, branchesApi, customersApi, company,
@@ -10,6 +10,7 @@ import {
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const money = (v: number | string | null | undefined) =>
@@ -77,7 +78,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
       setSlip(deposit)
       notify.success('Deposit recorded', deposit.depositNumber)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -89,7 +90,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
     const ok = await notify.confirm({ title: `Delete deposit "${d.depositNumber}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await fdDepositsApi.remove(d.id); refresh(); notify.success('Deposit deleted', d.depositNumber) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   if (slip) {
@@ -168,7 +169,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : 'Record & Print Slip'}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Customer" full>
             <SearchSelect

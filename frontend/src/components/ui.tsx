@@ -99,6 +99,22 @@ export function Field({ label, children, style, full }: { label?: ReactNode; chi
   )
 }
 
+/** Inline error banner. `error` is one message, or several joined with '\n'
+ *  (see lib/apiError.ts) — multiple messages render as a bulleted list so
+ *  every validation failure is visible, not just the first/generic one. */
+export function ErrorBanner({ error, style }: { error?: string | null; style?: CSSProperties }) {
+  if (!error) return null
+  const lines = error.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (!lines.length) return null
+  return (
+    <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: lines.length > 1 ? '10px 14px' : '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 16, lineHeight: 1.5, ...style }}>
+      {lines.length > 1
+        ? <ul style={{ margin: 0, paddingLeft: 18 }}>{lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
+        : lines[0]}
+    </div>
+  )
+}
+
 export const inputStyle: CSSProperties = {
   background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)',
   padding: '9px 12px', color: 'var(--tx-0)', fontSize: 13.5, fontFamily: 'Outfit', width: '100%', outline: 'none',

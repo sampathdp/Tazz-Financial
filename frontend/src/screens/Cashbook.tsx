@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Cashbook Management (API-backed) */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   branchesApi, cashAccountsApi, cashbookEntriesApi, cashTransfersApi, cashReconciliationsApi,
@@ -9,6 +9,7 @@ import {
 } from '../api'
 import { Can, userCan } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const money = (v: number | string | null | undefined) =>
@@ -66,7 +67,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
       closeEntry(); refresh(); refreshAccounts()
       notify.success('Cashbook entry recorded')
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -74,7 +75,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
     const ok = await notify.confirm({ title: 'Delete this entry?', msg: 'This reverses its effect on the account balance. This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await cashbookEntriesApi.remove(e.id); refresh(); refreshAccounts(); notify.success('Entry deleted') }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const openAccounts = () => { setAcctView('list'); setAcctModal(true) }
@@ -91,7 +92,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
       setAcctView('list'); refreshAccounts()
       notify.success(acctEditing ? 'Cash account updated' : 'Cash account created', acctForm.name)
     } catch (ex: any) {
-      setAcctErr(ex?.response?.data?.message || 'Save failed')
+      setAcctErr(getErrorText(ex, 'Save failed'))
     } finally { setAcctBusy(false) }
   }
 
@@ -99,7 +100,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
     const ok = await notify.confirm({ title: `Delete account "${a.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await cashAccountsApi.remove(a.id); refreshAccounts(); notify.success('Cash account deleted', a.name) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const types: CashEntryType[] = ['In', 'Out']
@@ -142,7 +143,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           <Btn variant="plain" onClick={closeEntry}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={saveEntry} disabled={busy}>{busy ? 'Saving...' : 'Record Entry'}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Cash Account" full><Select value={entryForm.cashAccountId ?? ''} onChange={(e) => setEntryForm((s) => ({ ...s, cashAccountId: Number(e.target.value) || undefined }))}>
             <option value="">—</option>
@@ -183,7 +184,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
             </>} />
         ) : (
           <>
-            {acctErr && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{acctErr}</div>}
+            <ErrorBanner error={acctErr} style={{ marginBottom: 14 }} />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <Field label="Account Name" full><Input value={acctForm.name || ''} onChange={(e) => setAcctForm((s) => ({ ...s, name: e.target.value }))} /></Field>
               <Field label="Branch"><Select value={acctForm.branchId ?? ''} onChange={(e) => setAcctForm((s) => ({ ...s, branchId: Number(e.target.value) || undefined }))}>
@@ -237,7 +238,7 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
       close(); refresh()
       notify.success('Transfer requested')
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -245,21 +246,21 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
     const ok = await notify.confirm({ title: 'Approve this transfer?', msg: `Move ${money(t.amount)} from ${t.fromAccount?.name} to ${t.toAccount?.name}.`, okText: 'Approve' })
     if (!ok) return
     try { await cashTransfersApi.approve(t.id); refresh(); notify.success('Transfer approved') }
-    catch (ex: any) { notify.error('Approve failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Approve failed', getErrorText(ex)) }
   }
 
   const reject = async (t: CashTransfer) => {
     const ok = await notify.confirm({ title: 'Reject this transfer?', danger: true, okText: 'Reject' })
     if (!ok) return
     try { await cashTransfersApi.reject(t.id); refresh(); notify.success('Transfer rejected') }
-    catch (ex: any) { notify.error('Reject failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
   }
 
   const remove = async (t: CashTransfer) => {
     const ok = await notify.confirm({ title: 'Delete this transfer request?', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await cashTransfersApi.remove(t.id); refresh(); notify.success('Transfer deleted') }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const statusTone = (s?: string) => s === 'Completed' ? 'green' : s === 'Rejected' ? 'red' : 'amber'
@@ -303,7 +304,7 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : 'Request Transfer'}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="From Account"><Select value={form.fromCashAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, fromCashAccountId: Number(e.target.value) || undefined }))}>
             <option value="">—</option>
@@ -409,7 +410,7 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
       loadSummary(); loadHistory()
       notify.success('Cash reconciliation saved')
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -421,7 +422,7 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
       loadHistory()
       if (r.asAtDate === date) loadSummary()
       notify.success('Reconciliation deleted')
-    } catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    } catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -439,7 +440,7 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
         </div>
       </Card>
 
-      {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+      <ErrorBanner error={err} style={{ marginBottom: 14 }} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <Card>

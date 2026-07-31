@@ -1,10 +1,11 @@
 /* Tazz Investment & Credit — Administration (API-backed) */
 import { useEffect, useRef, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { api, company as companyApi, permissionsApi, branchesApi, rolesApi, type PermissionMatrix, type Branch, type Role, type AuthUser } from '../api'
 import { Can, userCan } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 type Grid = Record<string, Record<string, boolean>>
@@ -44,7 +45,7 @@ export function BranchesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
       close(); refresh()
       notify.success(editing ? 'Branch updated' : 'Branch created', form.name)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.code?.[0] || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -52,7 +53,7 @@ export function BranchesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
     const ok = await notify.confirm({ title: `Delete branch "${b.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await branchesApi.remove(b.id); refresh(); notify.success('Branch deleted', b.name) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -81,7 +82,7 @@ export function BranchesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create Branch')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Branch Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value.toUpperCase() }))} disabled={!!editing?.isHeadOffice} /></Field>
@@ -200,7 +201,7 @@ export function RolesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
     if (!selectedId) return
     setSaving(true)
     try { await permissionsApi.updateRole(selectedId, grid); setDirty(false); notify.success('Role permissions saved') }
-    catch (ex: any) { notify.error('Save failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Save failed', getErrorText(ex)) }
     finally { setSaving(false) }
   }
 
@@ -216,7 +217,7 @@ export function RolesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
       close(); refresh()
       notify.success(editing ? 'Role updated' : 'Role created', form.name)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
   const removeRole = async (r: Role) => {
@@ -227,7 +228,7 @@ export function RolesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
       if (selectedId === r.id) setSelectedId(null)
       refresh()
       notify.success('Role deleted', r.name)
-    } catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    } catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -280,7 +281,7 @@ export function RolesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={saveRole} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create Role')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} />
         <div className="col gap-4">
           <Field label="Role Name"><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Description"><Input value={form.description || ''} onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} /></Field>
@@ -344,7 +345,7 @@ export function UsersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
       close(); refresh()
       notify.success(editing ? 'User updated' : 'User created', form.name || undefined)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.email?.[0] || ex?.response?.data?.errors?.branch_id?.[0] || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -353,7 +354,7 @@ export function UsersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
     const ok = await notify.confirm({ title: `Delete user "${u.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await api.users.remove(u.id); refresh(); notify.success('User deleted', u.name) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message || undefined) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -383,7 +384,7 @@ export function UsersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create User')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Full Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Email"><Input type="email" value={form.email || ''} onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))} /></Field>
@@ -465,7 +466,7 @@ export function PermScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | nu
       load()
       setMsg({ tone: 'ok', text: 'Permissions saved.' })
     } catch (ex: any) {
-      setMsg({ tone: 'err', text: ex?.response?.data?.message || 'Save failed' })
+      setMsg({ tone: 'err', text: getErrorText(ex, 'Save failed') })
     } finally { setSaving(false) }
   }
 
@@ -479,7 +480,7 @@ export function PermScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | nu
       setPending((p) => { const np = { ...p[key] }; delete np[m]; return { ...p, [key]: np } })
       load()
     } catch (ex: any) {
-      notify.error('Reset failed', ex?.response?.data?.message)
+      notify.error('Reset failed', getErrorText(ex))
     } finally { setResetting(false) }
   }
 

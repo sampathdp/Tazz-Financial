@@ -10,11 +10,12 @@
    Posts to the same loans/{loan}/payments endpoint the Active Loans > Receipts
    tab uses, so history and outstanding balances stay in sync either way. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, BankSelect, SearchSelect, Table, Td, Modal, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, BankSelect, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loansApi, loanPaymentsApi, loanPostDatedChequesApi, company, type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser } from '../api'
 import { Can, userCan } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const num = (v: unknown) => Number(v ?? 0)
@@ -203,7 +204,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       setReceipt({ payment, loan: fresh, balanceBefore })
       refresh()
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Payment failed')
+      setErr(getErrorText(ex, 'Payment failed'))
     } finally { setBusy(false) }
   }
 
@@ -223,7 +224,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       notify.success('Settlement request submitted', 'Awaiting Branch Manager approval')
       await reloadSelected()
     } catch (ex: any) {
-      setSettleErr(ex?.response?.data?.message || 'Could not submit the settlement request.')
+      setSettleErr(getErrorText(ex, 'Could not submit the settlement request.'))
     } finally { setSettleBusy(false) }
   }
 
@@ -236,7 +237,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       resetChequeForm()
       notify.success('Cheque recorded', 'Track it on the loan\'s Post Dated Cheques tab')
     } catch (ex: any) {
-      setChequeErr(ex?.response?.data?.message || 'Could not record the cheque.')
+      setChequeErr(getErrorText(ex, 'Could not record the cheque.'))
     } finally { setChequeBusy(false) }
   }
 
@@ -250,7 +251,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       setReceipt({ payment: approved, loan: fresh, balanceBefore })
       refresh()
     } catch (ex: any) {
-      notify.error('Approval failed', ex?.response?.data?.message)
+      notify.error('Approval failed', getErrorText(ex))
     } finally { setBusy(false) }
   }
 
@@ -262,7 +263,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       await loanPaymentsApi.rejectSettlement(pendingSettlement.id, reason || undefined)
       notify.success('Settlement request rejected')
       await reloadSelected()
-    } catch (ex: any) { notify.error('Rejection failed', ex?.response?.data?.message) }
+    } catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
   const startOver = () => {
@@ -466,7 +467,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <Btn variant="primary" icon="check" onClick={record} disabled={busy}>{busy ? 'Recording…' : 'Record Payment & Print Receipt'}</Btn>
         </>}>
         <div className="col gap-3">
-          {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>{err}</div>}
+          <ErrorBanner error={err} style={{ marginBottom: 0 }} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px 16px', fontSize: 12.5, paddingBottom: 12, borderBottom: '1px solid var(--line)' }}>
             <div><span className="t-2">Date</span><br /><b>{dateOnly(todayIso())}</b></div>
             <div><span className="t-2">Outstanding Balance</span><br /><b style={{ fontFamily: 'JetBrains Mono', color: 'var(--bad)' }}>{money(outstanding)}</b></div>
@@ -484,7 +485,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <Btn variant="primary" icon="check" onClick={submitSettlement} disabled={settleBusy}>{settleBusy ? 'Submitting…' : 'Submit for Approval'}</Btn>
         </>}>
         <div className="col gap-3">
-          {settleErr && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>{settleErr}</div>}
+          <ErrorBanner error={settleErr} style={{ marginBottom: 0 }} />
           <div className="t-2" style={{ fontSize: 12.5 }}>This pays off the full outstanding balance of <b style={{ fontFamily: 'JetBrains Mono' }}>{money(outstanding)}</b> and must be approved by a Branch Manager before the loan closes and the receipt can be printed.</div>
           <PaymentFields method={settleMethod} setMethod={setSettleMethod} paidAt={settlePaidAt} setPaidAt={setSettlePaidAt} refNo={settleRefNo} setRefNo={setSettleRefNo} nextReceipt={nextReceipt}
             bankName={settleBankName} setBankName={setSettleBankName} chequeDate={settleChequeDate} setChequeDate={setSettleChequeDate} notes={settleNotes} setNotes={setSettleNotes} />
@@ -497,7 +498,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <Btn variant="primary" icon="check" onClick={submitCheque} disabled={chequeBusy}>{chequeBusy ? 'Recording…' : 'Record Cheque'}</Btn>
         </>}>
         <div className="col gap-3">
-          {chequeErr && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>{chequeErr}</div>}
+          <ErrorBanner error={chequeErr} style={{ marginBottom: 0 }} />
           <div className="t-2" style={{ fontSize: 12.5 }}>This is a record only — it won't reduce the outstanding balance until the cheque is marked Realized on the loan's Post Dated Cheques tab.</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
             <Field label="Cheque No"><Input value={chequeNo} onChange={(e) => setChequeNo(e.target.value)} /></Field>

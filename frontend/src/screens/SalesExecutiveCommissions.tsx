@@ -1,11 +1,12 @@
 /* Tazz Investment & Credit — Sales Executive Commissions */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
 import {
   api, loanTypesApi, salesExecutiveCommissionsApi,
   type AuthUser, type LoanType, type SalesExecutiveCommission, type CommissionStatus, type PaymentMethod,
 } from '../api'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const money = (v: number | string | null | undefined) =>
@@ -72,7 +73,7 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
       closePay(); refresh()
       notify.success('Commission paid', payTarget.salesExecutiveName)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Payment failed')
+      setErr(getErrorText(ex, 'Payment failed'))
     } finally { setBusy(false) }
   }
 
@@ -135,7 +136,7 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
           <Btn variant="plain" onClick={closePay}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={savePay} disabled={busy}>{busy ? 'Saving...' : 'Record Payment'}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} />
         {payForm && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Field label="Payment Date"><DateInput value={payForm.paymentDate} onChange={(iso) => setPayForm((s) => s && ({ ...s, paymentDate: iso }))} /></Field>

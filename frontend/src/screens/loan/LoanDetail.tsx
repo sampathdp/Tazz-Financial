@@ -3,7 +3,7 @@
    and Active Loans (the live contract, with disbursement/payments). One
    implementation so the two screens never drift out of sync with each other. */
 import { useEffect, useRef, useState } from 'react'
-import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, inputStyle } from '../../components/ui'
+import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, inputStyle, ErrorBanner } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import {
   loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, api,
@@ -14,6 +14,7 @@ import {
 } from '../../api'
 import { Can } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
+import { getErrorText } from '../../lib/apiError'
 import type { Go } from '../types'
 
 const num = (v: unknown) => Number(v ?? 0)
@@ -240,7 +241,7 @@ function RecoveryDetails({ loan, me, onChanged, notify }: { loan: Loan; me?: Aut
     try {
       await loansApi.update(loan.id, { loanOfficerId: loanOfficerId || null, recoveryOfficerId: recoveryOfficerId || null } as any)
       setEditing(false); onChanged(); notify.success('Officers updated')
-    } catch (ex: any) { notify.error('Update failed', ex?.response?.data?.message) } finally { setBusy(false) }
+    } catch (ex: any) { notify.error('Update failed', getErrorText(ex)) } finally { setBusy(false) }
   }
 
   return (
@@ -429,7 +430,7 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
     const ok = await notify.confirm({ title: `Delete cheque ${c.chequeNo}?`, danger: true, okText: 'Delete' })
     if (!ok) return
     try { await loanPostDatedChequesApi.remove(c.id); notify.success('Cheque deleted'); onChanged() }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -507,13 +508,13 @@ function DiaryPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser
     try {
       await loanDiaryNotesApi.create(loan.id, { note: note.trim(), followUpDate: followUpDate || undefined })
       setNote(''); setFollowUpDate(''); notify.success('Note added'); onChanged()
-    } catch (ex: any) { notify.error('Add failed', ex?.response?.data?.message) } finally { setBusy(false) }
+    } catch (ex: any) { notify.error('Add failed', getErrorText(ex)) } finally { setBusy(false) }
   }
   const remove = async (n: LoanDiaryNote) => {
     const ok = await notify.confirm({ title: 'Delete this note?', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await loanDiaryNotesApi.remove(n.id); notify.success('Note deleted'); onChanged() }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -586,7 +587,7 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
     if (!file) return
     setUploading(true)
     try { await loanDocumentsApi.upload(loan.id, file, docType); refresh(); notify.success('Image uploaded') }
-    catch (ex: any) { notify.error('Upload failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Upload failed', getErrorText(ex)) }
     finally { setUploading(false) }
   }
   const view = async (d: LoanDocument) => {
@@ -601,7 +602,7 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
     const ok = await notify.confirm({ title: 'Delete this document?', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await loanDocumentsApi.remove(loan.id, d.id); refresh() }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -658,7 +659,7 @@ function StatusFlagsModal({ open, onClose, loan, onChanged, notify }: {
     try {
       await loansApi.updateStatusFlags(loan.id, { isTerminated, isLegal, seizingOrderIssued, isRepossessed, freezeDate: freezeDate || undefined })
       notify.success('Contract status updated'); onChanged(); onClose()
-    } catch (ex: any) { notify.error('Update failed', ex?.response?.data?.message) } finally { setBusy(false) }
+    } catch (ex: any) { notify.error('Update failed', getErrorText(ex)) } finally { setBusy(false) }
   }
 
   const row = (label: string, checked: boolean, set: (v: boolean) => void) => (
@@ -701,14 +702,14 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
       notify.success('Loan disbursed', loan.code)
       onChanged()
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Disbursement failed')
+      setErr(getErrorText(ex, 'Disbursement failed'))
     } finally { setBusy(false) }
   }
 
   return (
     <Card>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Disburse this loan to generate its repayment schedule</div>
-      {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+      <ErrorBanner error={err} style={{ marginBottom: 14 }} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 16 }}>
         <Field label="Disbursed Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <Field label="Disbursed Date"><Input type="date" value={disbursedAt} onChange={(e) => setDisbursedAt(e.target.value)} /></Field>

@@ -6,6 +6,7 @@ import {
   fundingReportsApi, customersApi,
   type FundingReportType, type FixedDeposit, type FdDeposit, type FdInterestPayment, type FdRenewal, type Customer, type AuthUser,
 } from '../api'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const money = (v: number | string | null | undefined) =>
@@ -107,7 +108,7 @@ export function FundingReportsScreen({ go: _go, user: _me }: { go: Go; user?: Au
       tab === 'interest-paid' ? { from: fromDate || undefined, to: toDate || undefined } :
       tab === 'deposit-history' ? { customerId: customerId || undefined } :
       tab === 'customer-funding-history' ? { customerId } : {}
-    fundingReportsApi.get(tab, params).then(setData).catch((ex) => { setErr(ex?.response?.data?.message || 'Failed to load report'); setData(null) }).finally(() => setLoading(false))
+    fundingReportsApi.get(tab, params).then(setData).catch((ex) => { setErr(getErrorText(ex, 'Failed to load report')); setData(null) }).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [tab, days, monthlyStatus, fromDate, toDate, customerId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -147,7 +148,7 @@ export function FundingReportsScreen({ go: _go, user: _me }: { go: Go; user?: Au
 
       <Card pad={0}>
         {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
-         err ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)' }}>{err}</div> :
+         err ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)', whiteSpace: 'pre-line' }}>{err}</div> :
          tab === 'customer-funding-history' && !customerId ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Pick a customer to view their funding history.</div> :
          (tab === 'active' || tab === 'maturing-soon' || tab === 'matured') ? <FdRows rows={data || []} /> :
          (tab === 'monthly-interest' || tab === 'interest-paid') ? <InterestPaymentRows rows={data || []} /> :

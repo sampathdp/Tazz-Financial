@@ -1,10 +1,11 @@
 /* Tazz Investment & Credit — Loan Types (self-referencing tree: category or product) */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loanTypesApi, type LoanType, type LoanFrequency, type InterestMethod, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import { DEFAULT_REFERENCE_FORMAT, previewReferenceNumber } from '../lib/referenceNumber'
 import type { Go } from './types'
 
@@ -147,7 +148,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
       close(); refresh()
       notify.success(editing ? 'Loan type updated' : 'Loan type created', form.name)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -155,7 +156,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
     const ok = await notify.confirm({ title: `Delete "${n.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await loanTypesApi.remove(n.id); refresh(); notify.success('Loan type deleted', n.name) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const parentLabel = form.parentId ? nameChain(rows, form.parentId) : null
@@ -178,7 +179,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           <Field label="Name"><Input value={form.name || ''} onChange={(e) => set('name', e.target.value)} /></Field>

@@ -11,6 +11,7 @@ import {
   type AuthUser, type LoanPostDatedCheque, type ChequeStatus,
 } from '../api'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const money = (v: unknown) => Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -58,7 +59,7 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
       notify.success(next === 'Realized' ? 'Cheque realized' : 'Cheque rejected')
       refresh()
     } catch (ex: any) {
-      notify.error('Update failed', ex?.response?.data?.message)
+      notify.error('Update failed', getErrorText(ex))
     } finally { setBusyId(null) }
   }
 

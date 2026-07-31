@@ -4,7 +4,7 @@
    action (create/renew/withdraw/pay-interest) prints a document following the
    same window.print()/.no-print pattern as PaymentReceipt.tsx. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   fixedDepositsApi, fdDepositsApi, fundingProductsApi, fdInterestPaymentsApi, company,
@@ -13,6 +13,7 @@ import {
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const money = (v: number | string | null | undefined) =>
@@ -201,7 +202,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
       onCreated(fd)
       notify.success('Fixed Deposit created', fd.fdNumber)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || Object.values(ex?.response?.data?.errors || {})[0]?.[0] || 'Could not create the Fixed Deposit.')
+      setErr(getErrorText(ex, 'Could not create the Fixed Deposit.'))
     } finally { setBusy(false) }
   }
 
@@ -211,7 +212,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
         <Btn variant="plain" onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Creating...' : 'Create & Print Certificate'}</Btn>
       </>}>
-      {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+      <ErrorBanner error={err} style={{ marginBottom: 14 }} />
       <div className="col gap-3">
         <Field label="Available Deposit">
           <SearchSelect
@@ -302,7 +303,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
       onRenewed(result.fixedDeposit, result.enhancementDeposit)
       notify.success('Fixed Deposit renewed', result.fixedDeposit.fdNumber)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Could not renew this Fixed Deposit.')
+      setErr(getErrorText(ex, 'Could not renew this Fixed Deposit.'))
     } finally { setBusy(false) }
   }
 
@@ -312,7 +313,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
         <Btn variant="plain" onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Renewing...' : 'Renew & Print Certificate'}</Btn>
       </>}>
-      {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+      <ErrorBanner error={err} style={{ marginBottom: 14 }} />
       <div className="col gap-3">
         <Field label="New Term">
           <div className="row gap-2 wrap">
@@ -378,7 +379,7 @@ function WithdrawModal({ fd, open, onClose, onWithdrawn }: { fd: FixedDeposit | 
       onWithdrawn(result, result.fixedDeposit)
       notify.success('Fixed Deposit withdrawn', fd.fdNumber)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Could not withdraw this Fixed Deposit.')
+      setErr(getErrorText(ex, 'Could not withdraw this Fixed Deposit.'))
     } finally { setBusy(false) }
   }
 
@@ -388,7 +389,7 @@ function WithdrawModal({ fd, open, onClose, onWithdrawn }: { fd: FixedDeposit | 
         <Btn variant="plain" onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Processing...' : 'Withdraw & Print Voucher'}</Btn>
       </>}>
-      {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+      <ErrorBanner error={err} style={{ marginBottom: 14 }} />
       <div className="col gap-3">
         <div style={{ background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', padding: 14, fontSize: 12.5 }}>
           <div className="row between"><span className="t-2">Principal</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(fd.principalAmount)}</b></div>
@@ -428,7 +429,7 @@ function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInter
       onPaid()
       notify.success('Interest payment recorded')
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || 'Could not record this interest payment.')
+      setErr(getErrorText(ex, 'Could not record this interest payment.'))
     } finally { setBusy(false) }
   }
 
@@ -438,7 +439,7 @@ function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInter
         <Btn variant="plain" onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Recording...' : 'Record Payment'}</Btn>
       </>}>
-      {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+      <ErrorBanner error={err} style={{ marginBottom: 14 }} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as FdPaymentMethod)}>
           {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}

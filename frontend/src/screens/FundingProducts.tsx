@@ -1,10 +1,11 @@
 /* Funding Management — Funding Products (Fixed Deposit product catalog) */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { fundingProductsApi, type FundingProduct, type FdInterestMethod, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const STANDARD_TERMS = [3, 6, 9, 12]
@@ -59,7 +60,7 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
       close(); refresh()
       notify.success(editing ? 'Funding product updated' : 'Funding product created', form.name)
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.code?.[0] || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -67,7 +68,7 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
     const ok = await notify.confirm({ title: `Delete product "${p.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await fundingProductsApi.remove(p.id); refresh(); notify.success('Funding product deleted', p.name) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const methods: { value: FdInterestMethod; label: string }[] = [
@@ -102,7 +103,7 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
           <Btn variant="plain" onClick={close}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create Product')}</Btn>
         </>}>
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 14 }}>{err}</div>}
+        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Product Name" full><Input value={form.name || ''} onChange={(e) => set({ name: e.target.value })} /></Field>
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => set({ code: e.target.value.toUpperCase() })} disabled={!!editing} /></Field>

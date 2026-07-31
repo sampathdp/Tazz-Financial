@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Loan Applications (intake → approve/reject workflow) */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   loansApi, customersApi, customerLoansApi, loanTypesApi, branchesApi, api,
@@ -9,6 +9,7 @@ import {
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import { DEFAULT_REFERENCE_FORMAT, previewReferenceNumber } from '../lib/referenceNumber'
 import { LoanDetail } from './loan/LoanDetail'
 import type { Go } from './types'
@@ -109,7 +110,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
       setQuickAdd(false)
       notify.success('Customer added', created.fullName)
     } catch (ex: any) {
-      setQuickAddErr(ex?.response?.data?.message || ex?.response?.data?.errors?.nic_no?.[0] || 'Save failed')
+      setQuickAddErr(getErrorText(ex, 'Save failed'))
     } finally { setQuickAddBusy(false) }
   }
 
@@ -171,8 +172,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
       back(); refresh()
       notify.success(editing ? 'Application updated' : 'Application submitted', customer?.fullName)
     } catch (ex: any) {
-      const errs = ex?.response?.data?.errors
-      setErr(ex?.response?.data?.message || (errs && Object.values(errs)[0] as any)?.[0] || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -180,21 +180,21 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     const ok = await notify.confirm({ title: 'Withdraw this application?', msg: 'This action cannot be undone.', danger: true, okText: 'Withdraw' })
     if (!ok) return
     try { await loansApi.remove(loan.id); refresh(); notify.success('Application withdrawn', loan.code) }
-    catch (ex: any) { notify.error('Failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
   }
 
   const approve = async (loan: Loan) => {
     const ok = await notify.confirm({ title: `Approve loan ${loan.code}?`, msg: `${loan.customer?.fullName} — ${Number(loan.principalAmount).toLocaleString()}`, okText: 'Approve' })
     if (!ok) return
     try { await loansApi.approve(loan.id); refresh(); notify.success('Loan approved', loan.code) }
-    catch (ex: any) { notify.error('Approve failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Approve failed', getErrorText(ex)) }
   }
 
   const reject = async (loan: Loan) => {
     const reason = await notify.prompt({ title: `Reject loan ${loan.code}?`, msg: 'Give a reason — this is shown to branch staff.', placeholder: 'Reason for rejection', required: true, danger: true, okText: 'Reject' })
     if (!reason) return
     try { await loansApi.reject(loan.id, reason); refresh(); notify.success('Loan rejected', loan.code) }
-    catch (ex: any) { notify.error('Reject failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
   }
 
   const addGuarantor = () => setForm((s) => ({ ...s, guarantors: [...s.guarantors, { guarantorId: 0, guaranteedAmount: '' }] }))
@@ -241,7 +241,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Submit Application')}</Btn>
           </>} />
 
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 16 }}>{err}</div>}
+        <ErrorBanner error={err} />
 
         <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 16 }}>
           <span className="t-2" style={{ fontSize: 12 }}>{editing ? 'Loan ID' : 'Loan ID (preview — assigned on submit)'}</span>
@@ -272,7 +272,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
 
             {quickAdd && (
               <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
-                {quickAddErr && <div style={{ gridColumn: '1/-1', background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '6px 10px', borderRadius: 'var(--r-s)', fontSize: 12 }}>{quickAddErr}</div>}
+                <ErrorBanner error={quickAddErr} style={{ gridColumn: '1/-1', marginBottom: 0, padding: '6px 10px', fontSize: 12 }} />
                 <Field label="Surname"><Input value={quickAddForm.surname} onChange={(e) => setQuickAddForm((s) => ({ ...s, surname: e.target.value }))} /></Field>
                 <Field label="Initial in Full without Surname"><Input value={quickAddForm.nameInFull} onChange={(e) => setQuickAddForm((s) => ({ ...s, nameInFull: e.target.value }))} /></Field>
                 <Field label="Initial"><Input value={quickAddForm.initials} onChange={(e) => setQuickAddForm((s) => ({ ...s, initials: e.target.value }))} placeholder="e.g. J.K." /></Field>

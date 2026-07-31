@@ -1,10 +1,11 @@
 /* Tazz Investment & Credit — Customer Management (API-backed) */
 import { useEffect, useRef, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, inputStyle } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type FdDeposit, type FixedDeposit, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import { LoanDetail } from './loan/LoanDetail'
 import type { Go } from './types'
 
@@ -52,7 +53,7 @@ function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser 
     if (!file) return
     setUploading(true)
     try { await customerDocumentsApi.upload(customerId, file, docType); refresh(); notify.success('Document uploaded') }
-    catch (ex: any) { notify.error('Upload failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Upload failed', getErrorText(ex)) }
     finally { setUploading(false) }
   }
 
@@ -69,7 +70,7 @@ function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser 
     const ok = await notify.confirm({ title: 'Delete this document?', msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await customerDocumentsApi.remove(customerId, d.id); refresh() }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
@@ -332,7 +333,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
       back(); refresh()
       notify.success(editing ? 'Customer updated' : 'Customer created', [form.title, form.initials, form.surname].filter(Boolean).join(' '))
     } catch (ex: any) {
-      setErr(ex?.response?.data?.message || ex?.response?.data?.errors?.nic_no?.[0] || 'Save failed')
+      setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
   }
 
@@ -340,7 +341,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     const ok = await notify.confirm({ title: `Delete customer "${c.fullName}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await customersApi.remove(c.id); refresh(); notify.success('Customer deleted', c.fullName) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const isEmployed = form.occupationType === 'Employed'
@@ -386,7 +387,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
             <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create Customer')}</Btn>
           </>} />
 
-        {err && <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 16 }}>{err}</div>}
+        <ErrorBanner error={err} />
 
         <Card style={{ marginBottom: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Personal Details</div>

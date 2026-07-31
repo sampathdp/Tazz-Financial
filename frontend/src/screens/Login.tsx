@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Icon } from '../components/Icon'
-import { Btn } from '../components/ui'
+import { Btn, ErrorBanner } from '../components/ui'
 import { auth, company, type AuthUser } from '../api'
+import { getErrorText } from '../lib/apiError'
 
 const FEATURES: { icon: string; label: string }[] = [
   { icon: 'truck', label: 'Track stock across every store in real time' },
@@ -31,10 +32,7 @@ export default function Login({ onAuth }: { onAuth: (user: AuthUser) => void }) 
       localStorage.setItem('mms-route', 'dash')
       onAuth(user)
     } catch (ex: any) {
-      const msg = ex?.response?.data?.message
-        || ex?.response?.data?.errors?.email?.[0]
-        || 'Login failed. Check credentials and try again.'
-      setErr(msg)
+      setErr(getErrorText(ex, 'Login failed. Check credentials and try again.'))
     } finally {
       setBusy(false)
     }
@@ -176,12 +174,7 @@ export default function Login({ onAuth }: { onAuth: (user: AuthUser) => void }) 
             </div>
           </label>
 
-          {err && (
-            <div style={{
-              background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)',
-              padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5,
-            }}>{err}</div>
-          )}
+          <ErrorBanner error={err} style={{ marginBottom: 0 }} />
 
           <Btn variant="primary" size="lg" icon="shield" disabled={busy} style={{ marginTop: 4 }}>
             {busy ? 'Signing in...' : 'Sign in'}

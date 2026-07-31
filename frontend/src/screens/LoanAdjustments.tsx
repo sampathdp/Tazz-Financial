@@ -14,6 +14,7 @@ import {
 } from '../api'
 import { Icon } from '../components/Icon'
 import { useNotify } from '../components/Notify'
+import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
 const num = (v: unknown) => Number(v ?? 0)
@@ -70,7 +71,7 @@ function SkipByLoan({ notify }: { notify: ReturnType<typeof useNotify> }) {
       setSelected(fresh)
       notify.success('Installment skipped', 'Moved to the end of the schedule')
     } catch (ex: any) {
-      notify.error('Could not skip installment', ex?.response?.data?.message)
+      notify.error('Could not skip installment', getErrorText(ex))
     } finally { setSkipBusy(null) }
   }
 
@@ -170,7 +171,7 @@ function SkipByLoanType({ notify }: { notify: ReturnType<typeof useNotify> }) {
       }
       loadDates(typeId)
     } catch (ex: any) {
-      notify.error('Bulk skip failed', ex?.response?.data?.message)
+      notify.error('Bulk skip failed', getErrorText(ex))
     } finally { setBusy(false) }
   }
 
@@ -245,14 +246,14 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
       await loanWaiversApi.create(selected.id, { waiverType: form.waiverType, amount: form.amount, reason: form.reason || undefined })
       setForm({ waiverType: 'Interest', amount: '', reason: '' }); notify.success('Waiver recorded'); await reload()
     } catch (ex: any) {
-      notify.error('Add failed', ex?.response?.data?.message)
+      notify.error('Add failed', getErrorText(ex))
     } finally { setBusy(false) }
   }
   const remove = async (w: LoanWaiver) => {
     const ok = await notify.confirm({ title: 'Delete this waiver?', danger: true, okText: 'Delete' })
     if (!ok) return
     try { await loanWaiversApi.remove(w.id); notify.success('Waiver deleted'); await reload() }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const waivers = selected?.waivers || []
@@ -371,14 +372,14 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
       notify.success('Charge recorded')
       loadCharges(selected.id)
     } catch (ex: any) {
-      notify.error('Add failed', ex?.response?.data?.message)
+      notify.error('Add failed', getErrorText(ex))
     } finally { setBusy(false) }
   }
   const remove = async (c: LoanCharge) => {
     const ok = await notify.confirm({ title: `Delete this ${c.chargeType.toLowerCase()} charge?`, danger: true, okText: 'Delete' })
     if (!ok || !selected) return
     try { await loanChargesApi.remove(c.id); notify.success('Charge deleted'); loadCharges(selected.id) }
-    catch (ex: any) { notify.error('Delete failed', ex?.response?.data?.message) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
