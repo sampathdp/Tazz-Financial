@@ -249,6 +249,11 @@ class LoanController extends Controller
         if ($loan->status !== 'Approved') {
             return response()->json(['message' => 'Only approved loans can be disbursed.'], 422);
         }
+        $unpaidDocumentCharge = $loan->charges()->where('charge_type', 'Document')->get()
+            ->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
+        if ($unpaidDocumentCharge > 0) {
+            return response()->json(['message' => 'Settle the document charge before disbursing this loan.'], 422);
+        }
         $data = $request->validate([
             'disbursed_amount' => 'nullable|numeric|min:0',
             'disbursed_at' => 'nullable|date',

@@ -180,7 +180,10 @@ class LoanPaymentAllocator
             ]);
         }
 
-        if (self::outstandingBalance($loan) <= 0) {
+        // Only an already-active loan closes on full payoff — an Approved loan
+        // paying off a pre-disbursement charge (see LoanController::disburse())
+        // has no schedule yet and must stay Approved, ready to disburse.
+        if ($loan->status === 'Active' && self::outstandingBalance($loan) <= 0) {
             $loan->update(['status' => 'Closed', 'closed_at' => $asOf]);
         }
     }

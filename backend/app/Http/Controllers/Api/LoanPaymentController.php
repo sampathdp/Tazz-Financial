@@ -41,8 +41,11 @@ class LoanPaymentController extends Controller
 
     public function store(Request $request, Loan $loan)
     {
-        if ($loan->status !== 'Active') {
-            return response()->json(['message' => 'Payments can only be recorded against an active loan.'], 422);
+        // Active covers normal loan servicing; Approved covers a pre-disbursement
+        // charge (e.g. Document) being paid off before the loan generates a
+        // schedule — see LoanController::disburse()'s gate on that charge.
+        if (!in_array($loan->status, ['Active', 'Approved'], true)) {
+            return response()->json(['message' => 'Payments can only be recorded against an active or approved loan.'], 422);
         }
         if ($loan->payments()->where('is_settlement', true)->where('approval_status', 'PendingApproval')->exists()) {
             return response()->json(['message' => 'A full settlement request is already pending approval for this loan — approve or reject it before recording further payments.'], 422);
@@ -59,6 +62,12 @@ class LoanPaymentController extends Controller
         ]);
         $isSettlement = (bool) ($data['is_settlement'] ?? false);
         $isCheque = ($data['payment_method'] ?? 'Cash') === 'Cheque';
+
+        // Full settlement pays off and closes an active loan — meaningless before
+        // the loan has even been disbursed.
+        if ($isSettlement && $loan->status !== 'Active') {
+            return response()->json(['message' => 'A loan can only be settled once it is active.'], 422);
+        }
 
         // Full settlement is a distinct, higher-stakes action (pays off the whole
         // loan at once and requires a second person's approval to close it) — kept

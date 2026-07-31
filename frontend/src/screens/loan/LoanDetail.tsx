@@ -3,13 +3,14 @@
    and Active Loans (the live contract, with disbursement/payments). One
    implementation so the two screens never drift out of sync with each other. */
 import { useEffect, useRef, useState } from 'react'
-import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, inputStyle, ErrorBanner } from '../../components/ui'
+import { Card, Btn, Badge, Field, Input, Select, BankSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import {
-  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, api,
+  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, api,
   type Loan, type LoanStatus, type LoanSchedule,
   type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type LoanDocType, type LoanDiaryNote,
+  type LoanCharge, type PaymentMethod,
   type AuthUser,
 } from '../../api'
 import { Can } from '../../lib/permissions'
@@ -694,8 +695,13 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
+  const docCharge = loan.charges?.find((c) => c.chargeType === 'Document')
+  const docBalance = docCharge ? Math.max(0, num(docCharge.dueAmount) - num(docCharge.paidAmount)) : 0
+  const chargeBlocking = !!docCharge && docBalance > 0
+
   const disburse = async () => {
     if (!firstDate) { setErr('Pick the first installment date.'); return }
+    if (chargeBlocking) { setErr('Settle the document charge before disbursing this loan.'); return }
     setBusy(true); setErr('')
     try {
       await loansApi.disburse(loan.id, { disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate })
@@ -710,6 +716,9 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
     <Card>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Disburse this loan to generate its repayment schedule</div>
       <ErrorBanner error={err} style={{ marginBottom: 14 }} />
+
+      <DocumentChargeSection loan={loan} me={me} docCharge={docCharge} docBalance={docBalance} onChanged={onChanged} notify={notify} />
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 16 }}>
         <Field label="Disbursed Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <Field label="Disbursed Date"><Input type="date" value={disbursedAt} onChange={(e) => setDisbursedAt(e.target.value)} /></Field>
@@ -720,7 +729,128 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         {num(loan.downPayment) > 0 && <> · Down payment {money(loan.downPayment)} already settled — schedule covers the remaining {money(financedAmount)}</>}
       </div>
       <Can user={me} module="Active Loans" action="Approve">
-        <Btn variant="primary" icon="check" onClick={disburse} disabled={busy}>{busy ? 'Disbursing…' : 'Disburse Loan'}</Btn>
+        <div className="row gap-2" style={{ alignItems: 'center' }}>
+          <Btn variant="primary" icon="check" onClick={disburse} disabled={busy || chargeBlocking}>{busy ? 'Disbursing…' : 'Disburse Loan'}</Btn>
+          {chargeBlocking && <span className="t-2" style={{ fontSize: 12 }}>Settle the document charge above first.</span>}
+        </div>
+      </Can>
+    </Card>
+  )
+}
+
+/* ---------- Document Charge gate — add/pay a Document charge before disbursing ---------- */
+const DOC_CHARGE_METHODS: { value: PaymentMethod; label: string }[] = [
+  { value: 'Cash', label: 'Cash' },
+  { value: 'Bank', label: 'Bank Transfer' },
+  { value: 'Cheque', label: 'Cheque' },
+]
+
+function DocumentChargeSection({ loan, me, docCharge, docBalance, onChanged, notify }: {
+  loan: Loan; me?: AuthUser | null; docCharge?: LoanCharge; docBalance: number
+  onChanged: () => void; notify: ReturnType<typeof useNotify>
+}) {
+  const [dueAmount, setDueAmount] = useState('')
+  const [notes, setNotes] = useState('')
+  const [addBusy, setAddBusy] = useState(false)
+  const [addErr, setAddErr] = useState('')
+
+  const [method, setMethod] = useState<PaymentMethod>('Cash')
+  const [paidAt, setPaidAt] = useState(todayIso())
+  const [refNo, setRefNo] = useState('')
+  const [bankName, setBankName] = useState('')
+  const [chequeDate, setChequeDate] = useState(todayIso())
+  const [nextReceipt, setNextReceipt] = useState('')
+  const [payBusy, setPayBusy] = useState(false)
+  const [payErr, setPayErr] = useState('')
+
+  const paid = !!docCharge && docBalance <= 0
+
+  useEffect(() => {
+    if (!docCharge || method !== 'Cash' || paid) { setNextReceipt(''); return }
+    let cancelled = false
+    loanPaymentsApi.nextReceiptNo(loan.id, 'Cash').then((code) => { if (!cancelled) setNextReceipt(code) }).catch(() => { if (!cancelled) setNextReceipt('') })
+    return () => { cancelled = true }
+  }, [loan.id, docCharge, method, paid])
+
+  const addCharge = async () => {
+    if (!dueAmount || Number(dueAmount) <= 0) { setAddErr('Enter the document charge amount.'); return }
+    setAddBusy(true); setAddErr('')
+    try {
+      await loanChargesApi.create(loan.id, { chargeType: 'Document', dueAmount, notes: notes || undefined })
+      setDueAmount(''); setNotes('')
+      notify.success('Document charge added')
+      onChanged()
+    } catch (ex: any) {
+      setAddErr(getErrorText(ex, 'Could not add the document charge.'))
+    } finally { setAddBusy(false) }
+  }
+
+  const payCharge = async () => {
+    if (method === 'Cheque' && (!bankName || !chequeDate)) { setPayErr('Bank and Cheque Date are required for a cheque payment.'); return }
+    setPayBusy(true); setPayErr('')
+    try {
+      await loanPaymentsApi.create(loan.id, {
+        amount: docBalance, paymentMethod: method, paidAt, receiptNo: refNo || undefined,
+        bankName: method === 'Cheque' ? bankName : undefined,
+        chequeDate: method === 'Cheque' ? chequeDate : undefined,
+        notes: `Document charge${notes ? ` — ${notes}` : ''}`,
+      })
+      notify.success('Document charge paid')
+      onChanged()
+    } catch (ex: any) {
+      setPayErr(getErrorText(ex, 'Payment failed'))
+    } finally { setPayBusy(false) }
+  }
+
+  if (!docCharge) {
+    return (
+      <Card style={{ marginBottom: 16, background: 'var(--bg-0)' }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Document Charge (optional)</div>
+        <ErrorBanner error={addErr} style={{ marginBottom: 10 }} />
+        <div className="row gap-2 wrap" style={{ alignItems: 'flex-end' }}>
+          <Field label="Amount"><Input type="number" value={dueAmount} onChange={(e) => setDueAmount(e.target.value)} style={{ maxWidth: 140 }} /></Field>
+          <Field label="Notes"><Input value={notes} onChange={(e) => setNotes(e.target.value)} style={{ minWidth: 200 }} /></Field>
+          <Can user={me} module="Active Loans" action="Create">
+            <Btn variant="solid" icon="plus" onClick={addCharge} disabled={addBusy}>{addBusy ? 'Adding…' : 'Add Document Charge'}</Btn>
+          </Can>
+        </div>
+      </Card>
+    )
+  }
+
+  if (paid) {
+    return (
+      <Card style={{ marginBottom: 16, background: 'var(--ok-dim)', border: '1px solid var(--ok)' }}>
+        <div className="row gap-2" style={{ alignItems: 'center' }}>
+          <Icon n="check" s={15} c="var(--ok)" />
+          <span style={{ fontSize: 12.5 }}>Document charge settled — {money(docCharge.dueAmount)} paid in full.</span>
+        </div>
+      </Card>
+    )
+  }
+
+  return (
+    <Card style={{ marginBottom: 16, background: 'var(--warn-dim)', border: '1px solid var(--warn)' }}>
+      <div className="row between wrap" style={{ marginBottom: 10 }}>
+        <div className="eyebrow">Document Charge — payment required before disbursing</div>
+        <span style={{ fontSize: 12.5 }}>Due {money(docCharge.dueAmount)} · Paid {money(docCharge.paidAmount)} · Balance <b style={{ fontFamily: 'JetBrains Mono' }}>{money(docBalance)}</b></span>
+      </div>
+      <ErrorBanner error={payErr} style={{ marginBottom: 10 }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+        <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+          {DOC_CHARGE_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </Select></Field>
+        <Field label="Date"><Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field>
+        {method === 'Cash'
+          ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
+          : <Field label={method === 'Cheque' ? 'Cheque No.' : 'Transfer Reference'}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
+        {method === 'Cheque' && <>
+          <Field label="Bank"><BankSelect value={bankName} onChange={setBankName} /></Field>
+          <Field label="Cheque Date"><Input type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} /></Field>
+        </>}
+      </div>
+      <Can user={me} module="Loan Payments" action="Create">
+        <Btn variant="primary" icon="check" onClick={payCharge} disabled={payBusy} style={{ marginTop: 12 }}>{payBusy ? 'Recording…' : `Record Payment (${money(docBalance)})`}</Btn>
       </Can>
     </Card>
   )
