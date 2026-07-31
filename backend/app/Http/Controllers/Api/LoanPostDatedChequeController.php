@@ -38,10 +38,10 @@ class LoanPostDatedChequeController extends Controller
      */
     public function all(Request $request)
     {
-        $status = $request->filled('status') ? $request->string('status')->toString() : null;
+        $status = $request->filled('status') ? (string) $request->input('status') : null;
         $dueToday = $request->boolean('due_today');
-        $fromDate = $request->filled('from_date') ? $request->string('from_date')->toString() : null;
-        $toDate = $request->filled('to_date') ? $request->string('to_date')->toString() : null;
+        $fromDate = $request->filled('from_date') ? (string) $request->input('from_date') : null;
+        $toDate = $request->filled('to_date') ? (string) $request->input('to_date') : null;
         $today = now()->toDateString();
 
         $postDated = LoanPostDatedCheque::with([
