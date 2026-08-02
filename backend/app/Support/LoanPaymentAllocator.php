@@ -16,33 +16,35 @@ use Carbon\Carbon;
  */
 class LoanPaymentAllocator
 {
-    /** Standard-practice loan servicing figures for this loan's penalty config
-     *  (see LoanSummary::penaltyDueForRow) — shared by outstandingBalance() and
-     *  applyAllocation() so both price "OD" identically. */
+    /** Standard-practice loan servicing figures for this loan's default charge
+     *  config (see LoanSummary::penaltyDueForRow) — shared by outstandingBalance()
+     *  and applyAllocation() so both price "OD" identically. */
     public static function penaltyTerms(Loan $loan): array
     {
         return [
             (int) ($loan->loanType?->grace_period_days ?? 5),
-            (float) ($loan->loanType?->penalty_rate_percent ?? 0),
-            $loan->loanType?->penalty_method ?? 'flat',
+            (float) ($loan->loanType?->default_charge_rate_percent ?? 0),
         ];
     }
 
     /** Everything this loan owes as of $asOf (defaults to today): unpaid
      *  principal+interest, unpaid penalty/OD (live estimate as of that date,
      *  same formula as the Contract Status tab), and unpaid Document/Legal/
-     *  Valuation/Other charges. */
+     *  Valuation/Other charges — net of any waivers (write-offs; see
+     *  LoanWaiver), so a loan waived down to zero can still close on its own,
+     *  the same way the Contract Status tab's Amount To Be Collected already
+     *  nets waivers off (see LoanSummary::build). */
     public static function outstandingBalance(Loan $loan, ?Carbon $asOf = null): float
     {
         $schedules = $loan->schedules()->with('allocations.payment:id,status,approval_status')->get();
         $scheduleBalance = $schedules->where('status', '!=', 'Paid')
             ->sum(fn ($s) => (float) $s->total_due - (float) $s->paid_amount);
 
-        [$graceDays, $penaltyRate, $penaltyMethod] = self::penaltyTerms($loan);
+        [$graceDays, $chargeRate] = self::penaltyTerms($loan);
         $asOf ??= Carbon::today();
-        $penaltyBalance = $penaltyRate > 0
-            ? $schedules->sum(function ($s) use ($graceDays, $penaltyRate, $penaltyMethod, $asOf) {
-                $due = LoanSummary::penaltyDueForRow($s, $graceDays, $penaltyRate, $penaltyMethod, $asOf);
+        $penaltyBalance = $chargeRate > 0
+            ? $schedules->sum(function ($s) use ($graceDays, $chargeRate, $asOf) {
+                $due = LoanSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $asOf);
                 $paid = LoanSummary::activePenaltyPaid($s);
 
                 return max(0, round($due - $paid, 2));
@@ -50,8 +52,9 @@ class LoanPaymentAllocator
             : 0.0;
 
         $chargesBalance = (float) $loan->charges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
+        $waived = (float) $loan->waivers->sum('amount');
 
-        return round($scheduleBalance + $penaltyBalance + $chargesBalance, 2);
+        return max(0, round($scheduleBalance + $penaltyBalance + $chargesBalance - $waived, 2));
     }
 
     /**
@@ -71,7 +74,7 @@ class LoanPaymentAllocator
         $asOf ??= Carbon::today();
         $schedules = $loan->schedules()->where('status', '!=', 'Paid')->orderBy('installment_no')
             ->with('allocations.payment:id,status,approval_status')->get();
-        [$graceDays, $penaltyRate, $penaltyMethod] = self::penaltyTerms($loan);
+        [$graceDays, $chargeRate] = self::penaltyTerms($loan);
 
         // A void doesn't delete allocation rows (kept for audit trail), so every
         // "how much of this row is already paid" lookup below must exclude a
@@ -111,12 +114,12 @@ class LoanPaymentAllocator
         }
 
         // 2) OD / penalty — live estimate as of $asOf per installment, oldest first.
-        if ($remaining > 0 && $penaltyRate > 0) {
+        if ($remaining > 0 && $chargeRate > 0) {
             foreach ($schedules as $row) {
                 if ($remaining <= 0) {
                     break;
                 }
-                $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $penaltyRate, $penaltyMethod, $asOf);
+                $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf);
                 $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied'), 2));
                 if ($due <= 0) {
                     continue;

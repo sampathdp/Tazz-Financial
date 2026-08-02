@@ -63,18 +63,21 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Accounting', icon: 'list', items: [
-    { id: 'acc/coa', label: 'Chart of Accounts', icon: 'list', soon: true },
-    { id: 'acc/journal', label: 'Journal Entries', icon: 'doc', soon: true },
-    { id: 'acc/gl', label: 'General Ledger', icon: 'layers', soon: true },
-    { id: 'acc/tb', label: 'Trial Balance', icon: 'chart', soon: true },
-    { id: 'acc/pl', label: 'Profit & Loss', icon: 'pie', soon: true },
-    { id: 'acc/bs', label: 'Balance Sheet', icon: 'grid', soon: true },
+    { id: 'acc/coa', label: 'Chart of Accounts', icon: 'list' },
+    { id: 'acc/journal', label: 'Journal Entries', icon: 'doc' },
+    { id: 'acc/gl', label: 'General Ledger', icon: 'layers' },
+    { id: 'acc/tb', label: 'Trial Balance', icon: 'chart' },
+    { id: 'acc/pl', label: 'Profit & Loss', icon: 'pie' },
+    { id: 'acc/bs', label: 'Balance Sheet', icon: 'grid' },
     { id: 'acc/cf', label: 'Cash Flow', icon: 'swap', soon: true },
   ] },
 
   { section: 'Expense Management', icon: 'wallet', items: [
-    { id: 'exp/vendors', label: 'Vendors', icon: 'store', soon: true },
-    { id: 'exp/expenses', label: 'Expenses', icon: 'wallet', soon: true },
+    { id: 'exp/vendors', label: 'Vendors', icon: 'store' },
+    { id: 'exp/expenses', label: 'Expenses', icon: 'wallet' },
+    /** No dedicated screen — a voucher is only ever the result of paying an
+     *  Expense (see Expenses.tsx), shown inline there rather than as a
+     *  second, separately-browsable resource. */
     { id: 'exp/vouchers', label: 'Payment Vouchers', icon: 'doc', soon: true },
   ] },
 

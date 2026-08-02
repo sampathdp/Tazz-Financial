@@ -22,7 +22,7 @@ class CashbookPoster
         if ($payment->payment_method !== 'Cash') {
             return;
         }
-        $account = self::branchCashAccount((int) $payment->branch_id);
+        $account = CashAccount::branchPrimary((int) $payment->branch_id);
         if (!$account) {
             return;
         }
@@ -65,11 +65,5 @@ class CashbookPoster
             }
             $entry->delete();
         });
-    }
-
-    /** The branch's primary till for auto-posted collections — its oldest active cash account. Branches expected to keep exactly one; if several exist, the first one created wins. */
-    private static function branchCashAccount(int $branchId): ?CashAccount
-    {
-        return CashAccount::where('branch_id', $branchId)->where('status', 'Active')->orderBy('id')->first();
     }
 }

@@ -32,7 +32,7 @@ class LoanController extends Controller
         'customer:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,employer_name,job_title,business_name,monthly_income,status,is_guarantor,branch_id',
         'customer.branch:id,name,code',
         'branch:id,name,code',
-        'loanType:id,name,code,parent_id,interest_method,interest_rate_percent,rate_period,penalty_rate_percent,penalty_method,grace_period_days',
+        'loanType:id,name,code,parent_id,interest_method,interest_rate_percent,rate_period,default_charge_rate_percent,grace_period_days,processing_fee_percent',
         'loanOfficer:id,name',
         'recoveryOfficer:id,name',
         'applier:id,name',
@@ -75,7 +75,7 @@ class LoanController extends Controller
             ->with([
                 'customer:id,full_name,code,nic_no,phone',
                 'branch:id,name,code',
-                'loanType:id,name,code,penalty_rate_percent,penalty_method,grace_period_days',
+                'loanType:id,name,code,default_charge_rate_percent,grace_period_days',
                 'loanOfficer:id,name',
                 'recoveryOfficer:id,name',
                 'schedules' => fn ($q) => $q->where('due_date', '<', $today)->where('status', '!=', 'Paid')->orderBy('due_date'),
@@ -86,8 +86,7 @@ class LoanController extends Controller
 
         return $loans->map(function ($loan) use ($today) {
             $graceDays = (int) ($loan->loanType?->grace_period_days ?? 5);
-            $penaltyRate = (float) ($loan->loanType?->penalty_rate_percent ?? 0);
-            $penaltyMethod = $loan->loanType?->penalty_method ?? 'flat';
+            $chargeRate = (float) ($loan->loanType?->default_charge_rate_percent ?? 0);
 
             $overdueSchedules = $loan->schedules;
             $oldestDueDate = $overdueSchedules->min('due_date');
@@ -100,7 +99,7 @@ class LoanController extends Controller
                 fn ($s) => max(0, (float) $s->principal_due + (float) $s->interest_due - (float) $s->paid_amount)
             ), 2);
             $data['penaltyDue'] = round((float) $overdueSchedules->sum(
-                fn ($s) => LoanSummary::penaltyDueForRow($s, $graceDays, $penaltyRate, $penaltyMethod, $today)
+                fn ($s) => LoanSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $today)
             ), 2);
 
             return $data;
@@ -142,6 +141,21 @@ class LoanController extends Controller
         if (($data['is_repossessed'] ?? false) && !$loan->is_repossessed) {
             $data['repossessed_at'] = $data['repossessed_at'] ?? now();
         }
+
+        $loan->update($data);
+
+        return $this->show($loan);
+    }
+
+    /** Reassign the Marketing Executive / Follow Up Officer. Separate from update()
+     *  (which is locked to Pending applications) so officers can be reassigned for
+     *  the life of the loan, including while it's Active. */
+    public function updateOfficers(Request $request, Loan $loan)
+    {
+        $data = $request->validate([
+            'loan_officer_id' => 'nullable|exists:users,id',
+            'recovery_officer_id' => 'nullable|exists:users,id',
+        ]);
 
         $loan->update($data);
 
@@ -249,8 +263,12 @@ class LoanController extends Controller
         if ($loan->status !== 'Approved') {
             return response()->json(['message' => 'Only approved loans can be disbursed.'], 422);
         }
-        $unpaidDocumentCharge = $loan->charges()->where('charge_type', 'Document')->get()
-            ->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
+        $loanType = LoanType::find($loan->loan_type_id);
+        $documentCharges = $loan->charges()->where('charge_type', 'Document')->get();
+        if ($loanType && (float) $loanType->processing_fee_percent > 0 && $documentCharges->isEmpty()) {
+            return response()->json(['message' => 'Add the document charge before disbursing this loan.'], 422);
+        }
+        $unpaidDocumentCharge = $documentCharges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
         if ($unpaidDocumentCharge > 0) {
             return response()->json(['message' => 'Settle the document charge before disbursing this loan.'], 422);
         }
@@ -274,9 +292,11 @@ class LoanController extends Controller
         return $loan->load(self::DETAIL_RELATIONS);
     }
 
-    /** Creates the (single, immutable-loan_id) commission record for the loan's
-     *  sales executive, if its loan type has a commission configured — only for
-     *  loans disbursed from now on, since this only runs at disbursal time. */
+    /** Creates the first commission cycle for the loan's sales executive, if its
+     *  loan type has a commission configured — only for loans disbursed from now
+     *  on, since this only runs at disbursal time. A percentage-type commission
+     *  goes on to pay out repeatedly, once per cycle of required_installments
+     *  paid installments — see SalesExecutiveCommissionController::maybeStartNextCycle(). */
     private function generateSalesExecutiveCommission(Loan $loan): void
     {
         $loanType = LoanType::find($loan->loan_type_id);
@@ -284,14 +304,20 @@ class LoanController extends Controller
             return;
         }
 
+        // Percentage commissions are earned against interest actually collected over
+        // this cycle, not the capital disbursed — nothing has been collected yet at
+        // disbursal time, so this starts at 0 and is recalculated live (see
+        // SalesExecutiveCommissionController::commissionAmount()) until it's paid.
         $commissionAmount = $loanType->commission_type === 'percentage'
-            ? round((float) $loan->disbursed_amount * (float) $loanType->commission_value / 100, 2)
+            ? 0.0
             : (float) $loanType->commission_value;
 
         SalesExecutiveCommission::create([
             'loan_id' => $loan->id,
             'sales_executive_id' => $loan->loan_officer_id,
             'loan_type_id' => $loanType->id,
+            'cycle_no' => 1,
+            'from_installment' => 0,
             'commission_type' => $loanType->commission_type,
             'commission_value' => $loanType->commission_value,
             'commission_amount' => $commissionAmount,

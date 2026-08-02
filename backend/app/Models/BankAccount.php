@@ -30,4 +30,10 @@ class BankAccount extends Model
     {
         return $this->hasMany(BankReconciliation::class)->orderByDesc('statement_date');
     }
+
+    /** The chart_of_accounts leaf row this bank account posts to in the general ledger — see BankAccountLink. */
+    public function ledgerLink()
+    {
+        return $this->hasOne(BankAccountLink::class);
+    }
 }

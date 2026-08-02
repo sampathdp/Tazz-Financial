@@ -296,6 +296,9 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
               <div style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 14, color: 'var(--ac-bright)' }}>{money(arrears.amountToBeCollected)}</div>
             </div>
           </div>
+          <div className="t-2" style={{ fontSize: 11.5, marginTop: 10 }}>
+            Already waived off this loan: <strong>{money(arrears.totalWaived)}</strong> — netted out of the figures above.
+          </div>
         </Card>
       )}
 

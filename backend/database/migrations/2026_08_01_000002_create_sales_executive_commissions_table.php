@@ -19,6 +19,11 @@ return new class extends Migration
             // later edit to the loan type never retroactively changes this record.
             $table->string('commission_type', 16);
             $table->decimal('commission_value', 15, 2);
+            // For 'percentage' type this is priced against interest actually
+            // collected on the loan, not the disbursed capital — so it starts at 0
+            // and is recalculated live (see SalesExecutiveCommissionController::
+            // commissionAmount()) until the commission is paid, at which point the
+            // live figure is frozen into this column.
             $table->decimal('commission_amount', 15, 2);
             $table->unsignedSmallInteger('required_installments');
             // "Pending" vs "Eligible" is derived live from paid installments, never

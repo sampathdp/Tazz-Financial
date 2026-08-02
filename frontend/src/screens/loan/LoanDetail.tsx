@@ -218,6 +218,7 @@ function ArrearsPanel({ loan }: { loan: Loan }) {
         { label: 'Future Interest', value: money(a.futureInterest), icon: 'chart', tone: 'blue' },
         { label: 'Balance Pre-Payment', value: money(a.balancePrePayment), icon: 'wallet', tone: a.balancePrePayment > 0 ? 'amber' : 'green' },
         { label: 'Amount To Be Collected', value: money(a.amountToBeCollected), icon: 'target', tone: 'amber' },
+        { label: 'Total Waived', value: money(a.totalWaived), icon: 'refund', tone: a.totalWaived > 0 ? 'blue' : 'neutral' },
       ]} />
     </>
   )
@@ -240,7 +241,7 @@ function RecoveryDetails({ loan, me, onChanged, notify }: { loan: Loan; me?: Aut
   const save = async () => {
     setBusy(true)
     try {
-      await loansApi.update(loan.id, { loanOfficerId: loanOfficerId || null, recoveryOfficerId: recoveryOfficerId || null } as any)
+      await loansApi.updateOfficers(loan.id, { loanOfficerId: loanOfficerId || null, recoveryOfficerId: recoveryOfficerId || null })
       setEditing(false); onChanged(); notify.success('Officers updated')
     } catch (ex: any) { notify.error('Update failed', getErrorText(ex)) } finally { setBusy(false) }
   }
@@ -468,12 +469,13 @@ function LedgerCard({ loan }: { loan: Loan }) {
   for (const s of loan.schedules || []) rows.push({ date: s.dueDate, particulars: `Installment #${s.installmentNo} due`, debit: num(s.totalDue), credit: 0 })
   for (const p of loan.payments || []) {
     if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval') continue
-    rows.push({ date: dateOnly(p.paidAt), particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount) })
+    rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount) })
   }
-  for (const c of loan.charges || []) {
-    rows.push({ date: c.chargedAt, particulars: `${c.chargeType} charge`, debit: num(c.dueAmount), credit: 0 })
-    if (num(c.paidAmount) > 0) rows.push({ date: c.chargedAt, particulars: `${c.chargeType} charge paid`, debit: 0, credit: num(c.paidAmount) })
-  }
+  // Only the due side is logged here — a charge's paid_amount always comes from
+  // a real LoanPayment (see LoanPaymentAllocator::applyAllocation), which is
+  // already its own Receipt row above. Adding a second "charge paid" row here
+  // would credit that same money twice and understate the running balance.
+  for (const c of loan.charges || []) rows.push({ date: c.chargedAt, particulars: `${c.chargeType} charge`, debit: num(c.dueAmount), credit: 0 })
   for (const w of loan.waivers || []) rows.push({ date: w.waivedAt, particulars: `${w.waiverType} waived${w.reason ? ` — ${w.reason}` : ''}`, debit: 0, credit: num(w.amount) })
 
   rows.sort((a, b) => a.date.localeCompare(b.date))
@@ -695,9 +697,12 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
+  const feePercent = num(loan.loanType?.processingFeePercent)
+  const computedDocCharge = Math.round(num(amount) * feePercent) / 100
   const docCharge = loan.charges?.find((c) => c.chargeType === 'Document')
   const docBalance = docCharge ? Math.max(0, num(docCharge.dueAmount) - num(docCharge.paidAmount)) : 0
-  const chargeBlocking = !!docCharge && docBalance > 0
+  const chargeRequired = feePercent > 0
+  const chargeBlocking = chargeRequired && (!docCharge || docBalance > 0)
 
   const disburse = async () => {
     if (!firstDate) { setErr('Pick the first installment date.'); return }
@@ -717,7 +722,7 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
       <div className="eyebrow" style={{ marginBottom: 12 }}>Disburse this loan to generate its repayment schedule</div>
       <ErrorBanner error={err} style={{ marginBottom: 14 }} />
 
-      <DocumentChargeSection loan={loan} me={me} docCharge={docCharge} docBalance={docBalance} onChanged={onChanged} notify={notify} />
+      <DocumentChargeSection loan={loan} me={me} docCharge={docCharge} docBalance={docBalance} computedAmount={computedDocCharge} feePercent={feePercent} onChanged={onChanged} notify={notify} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 16 }}>
         <Field label="Disbursed Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
@@ -731,7 +736,7 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
       <Can user={me} module="Active Loans" action="Approve">
         <div className="row gap-2" style={{ alignItems: 'center' }}>
           <Btn variant="primary" icon="check" onClick={disburse} disabled={busy || chargeBlocking}>{busy ? 'Disbursing…' : 'Disburse Loan'}</Btn>
-          {chargeBlocking && <span className="t-2" style={{ fontSize: 12 }}>Settle the document charge above first.</span>}
+          {chargeBlocking && <span className="t-2" style={{ fontSize: 12 }}>{docCharge ? 'Settle' : 'Add and settle'} the document charge above first.</span>}
         </div>
       </Can>
     </Card>
@@ -745,11 +750,10 @@ const DOC_CHARGE_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'Cheque', label: 'Cheque' },
 ]
 
-function DocumentChargeSection({ loan, me, docCharge, docBalance, onChanged, notify }: {
-  loan: Loan; me?: AuthUser | null; docCharge?: LoanCharge; docBalance: number
+function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount, feePercent, onChanged, notify }: {
+  loan: Loan; me?: AuthUser | null; docCharge?: LoanCharge; docBalance: number; computedAmount: number; feePercent: number
   onChanged: () => void; notify: ReturnType<typeof useNotify>
 }) {
-  const [dueAmount, setDueAmount] = useState('')
   const [notes, setNotes] = useState('')
   const [addBusy, setAddBusy] = useState(false)
   const [addErr, setAddErr] = useState('')
@@ -773,11 +777,11 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, onChanged, not
   }, [loan.id, docCharge, method, paid])
 
   const addCharge = async () => {
-    if (!dueAmount || Number(dueAmount) <= 0) { setAddErr('Enter the document charge amount.'); return }
+    if (computedAmount <= 0) { setAddErr('Enter the disbursed amount first.'); return }
     setAddBusy(true); setAddErr('')
     try {
-      await loanChargesApi.create(loan.id, { chargeType: 'Document', dueAmount, notes: notes || undefined })
-      setDueAmount(''); setNotes('')
+      await loanChargesApi.create(loan.id, { chargeType: 'Document', dueAmount: computedAmount, notes: notes || undefined })
+      setNotes('')
       notify.success('Document charge added')
       onChanged()
     } catch (ex: any) {
@@ -803,15 +807,17 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, onChanged, not
   }
 
   if (!docCharge) {
+    if (feePercent <= 0) return null
     return (
       <Card style={{ marginBottom: 16, background: 'var(--bg-0)' }}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>Document Charge (optional)</div>
+        <div className="eyebrow" style={{ marginBottom: 4 }}>Document Charge — required before disbursing</div>
+        <div className="t-2" style={{ fontSize: 12, marginBottom: 10 }}>{feePercent}% processing fee on the disbursed amount.</div>
         <ErrorBanner error={addErr} style={{ marginBottom: 10 }} />
         <div className="row gap-2 wrap" style={{ alignItems: 'flex-end' }}>
-          <Field label="Amount"><Input type="number" value={dueAmount} onChange={(e) => setDueAmount(e.target.value)} style={{ maxWidth: 140 }} /></Field>
+          <Field label="Amount"><Input type="number" value={computedAmount.toFixed(2)} readOnly disabled style={{ maxWidth: 140, color: 'var(--tx-2)' }} /></Field>
           <Field label="Notes"><Input value={notes} onChange={(e) => setNotes(e.target.value)} style={{ minWidth: 200 }} /></Field>
           <Can user={me} module="Active Loans" action="Create">
-            <Btn variant="solid" icon="plus" onClick={addCharge} disabled={addBusy}>{addBusy ? 'Adding…' : 'Add Document Charge'}</Btn>
+            <Btn variant="solid" icon="plus" onClick={addCharge} disabled={addBusy || computedAmount <= 0}>{addBusy ? 'Adding…' : 'Add Document Charge'}</Btn>
           </Can>
         </div>
       </Card>

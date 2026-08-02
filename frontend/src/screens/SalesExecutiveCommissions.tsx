@@ -105,7 +105,7 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
         {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
         <Table
           cols={[
-            { label: 'Sales Executive' }, { label: 'Loan Number' }, { label: 'Customer' }, { label: 'Loan Type' },
+            { label: 'Sales Executive' }, { label: 'Loan Number' }, { label: 'Cycle', align: 'center' }, { label: 'Customer' }, { label: 'Loan Type' },
             { label: 'Loan Amount', align: 'right' }, { label: 'Commission', align: 'right' },
             { label: 'Installments', align: 'center' }, { label: 'Commission Status', align: 'center' },
             { label: 'Payment Status', align: 'center' }, { label: '', align: 'right', w: 130 },
@@ -114,6 +114,7 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
           render={(c) => <>
             <Td>{c.salesExecutiveName || '—'}</Td>
             <Td>{c.loanCode}</Td>
+            <Td align="center">{c.cycleNo}</Td>
             <Td>{c.customerName || '—'}</Td>
             <Td>{c.loanTypeName || '—'}</Td>
             <Td align="right" mono>{money(c.loanAmount)}</Td>
@@ -131,7 +132,7 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
       </Card>
 
       <Modal open={!!payTarget} onClose={closePay} width={520} title="Pay Commission"
-        sub={payTarget ? `${payTarget.salesExecutiveName} — ${payTarget.loanCode}` : undefined}
+        sub={payTarget ? `${payTarget.salesExecutiveName} — ${payTarget.loanCode} (Cycle ${payTarget.cycleNo})` : undefined}
         footer={<>
           <Btn variant="plain" onClick={closePay}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={savePay} disabled={busy}>{busy ? 'Saving...' : 'Record Payment'}</Btn>

@@ -46,6 +46,16 @@ const BankReconciliationScreen = named(() => import('./screens/Bank'), 'BankReco
 const ExpenseCategoriesScreen = named(() => import('./screens/Masters'), 'ExpenseCategoriesScreen')
 const BanksScreen = named(() => import('./screens/Masters'), 'BanksScreen')
 
+const ChartOfAccountsScreen = named(() => import('./screens/Accounting'), 'ChartOfAccountsScreen')
+const JournalEntriesScreen = named(() => import('./screens/Accounting'), 'JournalEntriesScreen')
+const GeneralLedgerScreen = named(() => import('./screens/Accounting'), 'GeneralLedgerScreen')
+const TrialBalanceScreen = named(() => import('./screens/Accounting'), 'TrialBalanceScreen')
+const ProfitLossScreen = named(() => import('./screens/Accounting'), 'ProfitLossScreen')
+const BalanceSheetScreen = named(() => import('./screens/Accounting'), 'BalanceSheetScreen')
+
+const VendorsScreen = named(() => import('./screens/Expenses'), 'VendorsScreen')
+const ExpensesScreen = named(() => import('./screens/Expenses'), 'ExpensesScreen')
+
 type ScreenComp = ComponentType<ScreenProps & { setBrand?: (v: { name: string, tagline: string }) => void }>
 
 // Shown only for the split-second a screen chunk is downloading on first visit.
@@ -97,6 +107,14 @@ const SCREENS: Record<string, ScreenComp> = {
   'bank/recon': BankReconciliationScreen,
   'masters/expense-categories': ExpenseCategoriesScreen,
   'masters/banks': BanksScreen,
+  'acc/coa': ChartOfAccountsScreen,
+  'acc/journal': JournalEntriesScreen,
+  'acc/gl': GeneralLedgerScreen,
+  'acc/tb': TrialBalanceScreen,
+  'acc/pl': ProfitLossScreen,
+  'acc/bs': BalanceSheetScreen,
+  'exp/vendors': VendorsScreen,
+  'exp/expenses': ExpensesScreen,
   'fund/dashboard': FundingDashboardScreen,
   'fund/products': FundingProductsScreen,
   'fund/deposits': DepositsScreen,

@@ -23,7 +23,6 @@ const blankForm = (parentId: number | null): Partial<LoanType> => ({
   parentId: parentId ?? undefined,
   isProduct: true,
   ratePeriod: 'monthly',
-  penaltyMethod: 'flat',
   gracePeriodDays: 5,
   collectionDays: 'all_days',
   status: 'Active',
@@ -216,14 +215,11 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
               <Field label="Max Amount"><Input type="number" value={form.maxAmount ?? ''} onChange={(e) => set('maxAmount', e.target.value as any)} /></Field>
               <Field label="Min Term (months)"><Input type="number" value={form.minTermMonths ?? ''} onChange={(e) => set('minTermMonths', Number(e.target.value) as any)} /></Field>
               <Field label="Max Term (months)"><Input type="number" value={form.maxTermMonths ?? ''} onChange={(e) => set('maxTermMonths', Number(e.target.value) as any)} /></Field>
-              <Field label="Penalty Rate %"><Input type="number" step="0.001" value={form.penaltyRatePercent ?? ''} onChange={(e) => set('penaltyRatePercent', e.target.value as any)} /></Field>
-              <Field label="Penalty Method"><Select value={form.penaltyMethod || 'flat'} onChange={(e) => set('penaltyMethod', e.target.value as any)}>
-                <option value="flat">Flat</option><option value="daily">Daily</option>
-              </Select></Field>
               <Field label="Grace Period (Days)"><Input type="number" min={0} value={form.gracePeriodDays ?? 5} onChange={(e) => set('gracePeriodDays', Number(e.target.value) as any)} /></Field>
+              <Field label="Default Charges Rate %"><Input type="number" step="0.001" value={form.defaultChargeRatePercent ?? ''} onChange={(e) => set('defaultChargeRatePercent', e.target.value as any)} /></Field>
               <Field label="Processing Fee %"><Input type="number" step="0.001" value={form.processingFeePercent ?? ''} onChange={(e) => set('processingFeePercent', e.target.value as any)} /></Field>
               <Field label="Sales Executive Commission Type"><Select value={form.commissionType || 'fixed'} onChange={(e) => set('commissionType', e.target.value as any)}>
-                <option value="fixed">Fixed Amount</option><option value="percentage">Percentage of Disbursed Amount</option>
+                <option value="fixed">Fixed Amount</option><option value="percentage">Percentage of Interest Collected</option>
               </Select></Field>
               <Field label={form.commissionType === 'percentage' ? 'Commission %' : 'Commission Amount'}>
                 <Input type="number" step="0.01" min={0} value={form.commissionValue ?? 0} onChange={(e) => set('commissionValue', e.target.value as any)} />
@@ -231,6 +227,9 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
               <Field label="Min. Paid Installments for Commission Eligibility">
                 <Input type="number" min={0} value={form.minPaidInstallments ?? 0} onChange={(e) => set('minPaidInstallments', Number(e.target.value) as any)} />
               </Field>
+            </div>
+            <div className="t-2" style={{ fontSize: 11.5, marginTop: 8 }}>
+              Default Charges = an overdue installment's unpaid balance × Default Charges Rate% × days late, starting once it's past the Grace Period.
             </div>
 
             <div style={{ marginTop: 16 }}>

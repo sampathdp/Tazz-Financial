@@ -8,6 +8,7 @@ use App\Models\Loan;
 use App\Models\LoanPayment;
 use App\Services\NumberGenerator;
 use App\Support\CashbookPoster;
+use App\Support\LoanLedgerPoster;
 use App\Support\LoanPaymentAllocator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -129,6 +130,7 @@ class LoanPaymentController extends Controller
             // whether it's a pending settlement awaiting approval — post it to the
             // Cashbook now rather than only when/if the allocation is applied.
             CashbookPoster::postCashReceipt($payment);
+            LoanLedgerPoster::postCashReceipt($payment);
 
             return $payment;
         });
@@ -149,6 +151,7 @@ class LoanPaymentController extends Controller
 
         DB::transaction(function () use ($loan, $payment, $request) {
             LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $payment->amount);
+            LoanLedgerPoster::postSettlementApplied($payment);
             $payment->update([
                 'approval_status' => 'Approved',
                 'approved_by' => $request->user()->id,
@@ -177,6 +180,7 @@ class LoanPaymentController extends Controller
             // The cash was posted to the Cashbook at record time (see store()) — a
             // rejected settlement means it's being handed back, so unwind that entry.
             CashbookPoster::reverseCashReceipt($payment);
+            LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
         });
 
         return $payment->fresh()->load('voider:id,name');
@@ -207,6 +211,7 @@ class LoanPaymentController extends Controller
             DB::transaction(function () use ($loan, $payment, $asOf) {
                 LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $payment->amount, $asOf);
                 $payment->update(['clearance_status' => 'Realized', 'realized_at' => $asOf]);
+                LoanLedgerPoster::postChequeRealized($payment);
             });
         } else {
             // Bounced — it was never applied to the schedule, so there's nothing to
@@ -265,6 +270,7 @@ class LoanPaymentController extends Controller
                 'voided_at' => now(),
             ]);
             CashbookPoster::reverseCashReceipt($payment);
+            LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
         });
 
         return response()->noContent();

@@ -8,6 +8,7 @@ use App\Models\Loan;
 use App\Models\LoanPayment;
 use App\Models\LoanPostDatedCheque;
 use App\Services\NumberGenerator;
+use App\Support\LoanLedgerPoster;
 use App\Support\LoanPaymentAllocator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -215,6 +216,7 @@ class LoanPostDatedChequeController extends Controller
                 NumberGenerator::attach($code, $payment);
 
                 LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $cheque->amount, $asOf);
+                LoanLedgerPoster::postChequeRealized($payment);
 
                 $cheque->update([
                     'status' => 'Realized',

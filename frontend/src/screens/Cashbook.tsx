@@ -306,14 +306,24 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
         </>}>
         <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Field label="From Account"><Select value={form.fromCashAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, fromCashAccountId: Number(e.target.value) || undefined }))}>
-            <option value="">—</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({money(a.currentBalance)})</option>)}
-          </Select></Field>
-          <Field label="To Account"><Select value={form.toCashAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, toCashAccountId: Number(e.target.value) || undefined }))}>
-            <option value="">—</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({money(a.currentBalance)})</option>)}
-          </Select></Field>
+          <Field label="From Account">
+            <Select value={form.fromCashAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, fromCashAccountId: Number(e.target.value) || undefined }))}>
+              <option value="">—</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </Select>
+            <span style={{ fontSize: 12, color: 'var(--tx-2)' }}>
+              Available: {money(accounts.find((a) => a.id === form.fromCashAccountId)?.currentBalance)}
+            </span>
+          </Field>
+          <Field label="To Account">
+            <Select value={form.toCashAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, toCashAccountId: Number(e.target.value) || undefined }))}>
+              <option value="">—</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </Select>
+            <span style={{ fontSize: 12, color: 'var(--tx-2)' }}>
+              Available: {money(accounts.find((a) => a.id === form.toCashAccountId)?.currentBalance)}
+            </span>
+          </Field>
           <Field label="Date"><DateInput value={form.transferDate} onChange={(iso) => setForm((s) => ({ ...s, transferDate: iso }))} /></Field>
           <Field label="Amount"><Input type="number" step="0.01" value={form.amount ?? ''} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
           <Field label="Description" full><Input value={form.description || ''} onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} /></Field>
@@ -457,7 +467,12 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
             <Field label="Petty Cash"><Input value="0.00" disabled title="Expense Management isn't built yet — this will pull live petty-cash spend once it ships." /></Field>
             <div className="row gap-2">
               <Field label="Other Branch (Cash)" style={{ flex: 1 }}><Input type="number" step="0.01" value={form.otherBranchCash} onChange={(e) => setForm((s) => ({ ...s, otherBranchCash: e.target.value }))} /></Field>
-              <Field label="Branch Code" style={{ width: 110 }}><Input value={form.otherBranchCode} onChange={(e) => setForm((s) => ({ ...s, otherBranchCode: e.target.value.toUpperCase() }))} /></Field>
+              <Field label="Branch" style={{ width: 160 }}>
+                <Select value={form.otherBranchCode} onChange={(e) => setForm((s) => ({ ...s, otherBranchCode: e.target.value }))}>
+                  <option value="">—</option>
+                  {branches.filter((b) => b.id !== branchId).map((b) => <option key={b.id} value={b.code}>{b.code} — {b.name}</option>)}
+                </Select>
+              </Field>
             </div>
             <Field label="Total Cash"><Input value={money(totalCash)} disabled style={{ fontWeight: 700, color: 'var(--tx-0)' }} /></Field>
           </div>
@@ -469,7 +484,12 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
             <Field label="Cheque in Hand (undeposited)"><Input value={money(chequeInHandTotal)} disabled /></Field>
             <div className="row gap-2">
               <Field label="Other Branch (Cheque)" style={{ flex: 1 }}><Input type="number" step="0.01" value={form.otherBranchCheque} onChange={(e) => setForm((s) => ({ ...s, otherBranchCheque: e.target.value }))} /></Field>
-              <Field label="Branch Code" style={{ width: 110 }}><Input value={form.otherBranchChequeCode} onChange={(e) => setForm((s) => ({ ...s, otherBranchChequeCode: e.target.value.toUpperCase() }))} /></Field>
+              <Field label="Branch" style={{ width: 160 }}>
+                <Select value={form.otherBranchChequeCode} onChange={(e) => setForm((s) => ({ ...s, otherBranchChequeCode: e.target.value }))}>
+                  <option value="">—</option>
+                  {branches.filter((b) => b.id !== branchId).map((b) => <option key={b.id} value={b.code}>{b.code} — {b.name}</option>)}
+                </Select>
+              </Field>
             </div>
             <Field label="Total Cheque"><Input value={money(totalCheque)} disabled style={{ fontWeight: 700, color: 'var(--tx-0)' }} /></Field>
             <Field label="Postdated Cheque"><Input value={money(postdatedChequeTotal)} disabled /></Field>

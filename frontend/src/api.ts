@@ -197,12 +197,12 @@ export interface LoanType {
   maxAmount?: number | string | null;
   minTermMonths?: number | null;
   maxTermMonths?: number | null;
-  penaltyRatePercent?: number | string | null;
-  penaltyMethod?: 'flat' | 'daily' | null;
-  /** Days after due_date before default interest starts accruing. Default 5. */
+  /** Days after due_date before default charges start accruing. Default 5. */
   gracePeriodDays?: number | null;
+  /** Rate applied per day (day-by-day, non-compounding) to an overdue installment's remaining balance, once past gracePeriodDays. Default Charges = installment balance x this rate% x days late. */
+  defaultChargeRatePercent?: number | string | null;
   processingFeePercent?: number | string | null;
-  /** Fixed amount, or a percentage of the loan's disbursed_amount — see commissionType. */
+  /** Fixed amount, or a percentage of interest collected on the loan so far — see commissionType. */
   commissionType?: 'fixed' | 'percentage' | null;
   commissionValue?: number | string | null;
   /** Paid installments required before the sales executive becomes commission-eligible. 0 = immediately eligible on disbursal. */
@@ -230,7 +230,7 @@ export interface Loan {
   id: number; code: string;
   branchId: number; branch?: { id: number; name: string; code: string };
   customerId: number; customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null };
-  loanTypeId: number; loanType?: { id: number; name: string; code: string; parentId?: number | null };
+  loanTypeId: number; loanType?: { id: number; name: string; code: string; parentId?: number | null; processingFeePercent?: number | string | null };
   principalAmount: number | string;
   /** Paid upfront; the schedule amortizes principalAmount - downPayment. */
   downPayment?: number | string;
@@ -278,14 +278,21 @@ export interface Loan {
 export type CommissionStatus = 'Pending' | 'Eligible' | 'Paid'
 export type CommissionPaymentStatus = 'Current' | 'Overdue' | 'Closed'
 
-/** One row per loan (created at disbursal — see backend LoanController::disburse()),
- *  tracking the sales executive's commission through Pending -> Eligible -> Paid. */
+/** One row per commission cycle (the first created at disbursal — see backend
+ *  LoanController::disburse() — with a percentage-type loan going on to start a
+ *  new cycle each time one is paid, so a loan can have several of these over its
+ *  life), tracking the sales executive's commission through Pending -> Eligible -> Paid. */
 export interface SalesExecutiveCommission {
   id: number;
   loanId: number; loanCode: string; customerName: string;
   loanTypeId: number; loanTypeName: string;
   salesExecutiveId: number; salesExecutiveName: string;
+  /** 1-based cycle number for this loan — cycle 2+ only exists for a percentage-type
+   *  commission whose previous cycle has already been paid. */
+  cycleNo: number;
   loanAmount: number | string; commissionAmount: number | string;
+  /** paidInstallments counts only installments paid within THIS cycle (capped at
+   *  requiredInstallments) — not the loan's total paid installments. */
   requiredInstallments: number; paidInstallments: number;
   /** Pending/Eligible are derived live server-side (never persisted); only Paid is a real stored state. */
   commissionStatus: CommissionStatus;
@@ -411,6 +418,8 @@ export interface LoanSummary {
     rentalArrears: number; otherChargeArrears: number; defaultCharges: number; totalArrears: number;
     overPayment: number; futureCapital: number; futureInterest: number; totalInterestRemaining: number;
     balancePrePayment: number; amountToBeCollected: number;
+    /** Sum of all waivers (write-offs) recorded on this loan — already netted out of every figure above. */
+    totalWaived: number;
     /** Past due date and not fully paid — same definition as loansApi.overdue(). */
     daysOverdue: number; overdueInstallments: number;
   };
@@ -604,6 +613,10 @@ export interface ExpenseCategory {
   id: number; name: string;
   code?: string | null;
   description?: string | null;
+  // Which chart-of-accounts expense account (e.g. 5010 Operating Expenses) this
+  // category's spend posts to — required before any expense in it can be paid.
+  accountId?: number | null;
+  account?: { id: number; code: string; name: string } | null;
   status?: 'Active' | 'Inactive';
   sortOrder?: number;
 }
@@ -632,6 +645,8 @@ export const loansApi = {
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>
     http.patch(`/loans/${id}/status-flags`, snakeize(body)).then((r) => camelize(r.data) as Loan),
+  updateOfficers: (id: number, body: { loanOfficerId?: number | null; recoveryOfficerId?: number | null }) =>
+    http.patch(`/loans/${id}/officers`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   overdue: () => http.get('/loans-overdue').then((r) => camelize(r.data) as OverdueLoan[]),
 }
 
@@ -898,6 +913,109 @@ export const customerFundingApi = {
   /** Every deposit and Fixed Deposit this customer holds. */
   list: (customerId: number) =>
     http.get(`/customers/${customerId}/funding`).then((r) => camelize(r.data) as { deposits: FdDeposit[]; fixedDeposits: FixedDeposit[] }),
+}
+
+/* ============================================================
+   Accounting: Chart of Accounts / Journal / Reports
+   No stored balance/report tables anywhere — every figure below is computed
+   live off journal_lines (see ChartOfAccount::balancesAsOf on the backend),
+   so Trial Balance, P&L, Balance Sheet and the Chart of Accounts list can
+   never disagree with each other.
+   ============================================================ */
+export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Income' | 'Expense'
+
+export interface ChartOfAccount {
+  id: number; code: string; name: string; type: AccountType; normalBalance: 'Debit' | 'Credit';
+  parentId?: number | null; parent?: { id: number; code: string; name: string } | null;
+  isSystem?: boolean; status?: 'Active' | 'Inactive';
+  totalDebit?: string; totalCredit?: string; balance?: string;
+}
+export const chartOfAccountsApi = {
+  list: (asOf?: string) => http.get('/chart-of-accounts', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as ChartOfAccount[]),
+  create: (body: { code: string; name: string; type: AccountType; normalBalance: 'Debit' | 'Credit'; parentId?: number | null; status?: string }) =>
+    http.post('/chart-of-accounts', snakeize(body)).then((r) => camelize(r.data) as ChartOfAccount),
+  update: (id: number, body: Partial<ChartOfAccount>) => http.put(`/chart-of-accounts/${id}`, snakeize(body)).then((r) => camelize(r.data) as ChartOfAccount),
+}
+
+export interface JournalLine {
+  id: number; accountId: number; account?: { id: number; code: string; name: string } | null;
+  debit: string | number; credit: string | number; description?: string | null;
+}
+export interface JournalEntry {
+  id: number; code: string; entryDate: string;
+  referenceType?: string | null; referenceId?: number | null; description?: string | null;
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  postedBy?: number | null; poster?: { id: number; name: string } | null; postedAt?: string | null;
+  status: 'Posted' | 'Reversed'; reversalOfId?: number | null;
+  lines?: JournalLine[];
+}
+export const journalEntriesApi = {
+  list: (params?: { from?: string; to?: string; branchId?: number; status?: string }) =>
+    http.get('/journal-entries', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as JournalEntry[]),
+}
+
+export interface GeneralLedgerLine {
+  journalEntryCode: string; entryDate: string; description?: string | null;
+  referenceType?: string | null; referenceId?: number | null;
+  debit: string | number; credit: string | number; runningBalance: string;
+}
+export interface GeneralLedgerReport {
+  account: { id: number; code: string; name: string; type: AccountType; normalBalance: 'Debit' | 'Credit' };
+  lines: GeneralLedgerLine[];
+}
+export interface TrialBalanceRow { accountId: number; code: string; name: string; type: AccountType; totalDebit: string; totalCredit: string; balance: string }
+export interface PLRow { accountId: number; code: string; name: string; balance: string }
+export interface ProfitLossReport { from?: string | null; to?: string | null; income: PLRow[]; expense: PLRow[]; totalIncome: string; totalExpense: string; netProfit: string }
+export interface BalanceSheetRow { accountId: number; code: string; name: string; balance: string }
+export interface BalanceSheetReport {
+  asOf: string; assets: BalanceSheetRow[]; liabilities: BalanceSheetRow[]; equity: BalanceSheetRow[];
+  totalAssets: string; totalLiabilities: string; totalEquity: string; totalLiabilitiesAndEquity: string; balanced: boolean;
+}
+export const accountingReportsApi = {
+  trialBalance: (asOf?: string) => http.get('/accounting-reports/trial-balance', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as TrialBalanceRow[]),
+  generalLedger: (accountId: number, params?: { from?: string; to?: string }) =>
+    http.get('/accounting-reports/general-ledger', { params: snakeize({ accountId, ...params }) }).then((r) => camelize(r.data) as GeneralLedgerReport),
+  profitLoss: (params?: { from?: string; to?: string }) =>
+    http.get('/accounting-reports/profit-loss', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as ProfitLossReport),
+  balanceSheet: (asOf?: string) => http.get('/accounting-reports/balance-sheet', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as BalanceSheetReport),
+}
+
+/* ============================================================
+   Expense Management: Vendors / Expenses / Payment Vouchers
+   ============================================================ */
+export interface Vendor {
+  id: number; name: string; code: string;
+  contactPerson?: string | null; phone?: string | null; email?: string | null; address?: string | null; taxNo?: string | null;
+  status?: 'Active' | 'Inactive';
+}
+export const vendorsApi = resource<Vendor>('vendors')
+
+export type ExpenseStatus = 'Pending' | 'Approved' | 'Rejected' | 'Paid'
+export interface PaymentVoucher {
+  id: number; code: string; expenseId?: number | null; vendorId?: number | null; amount: string | number;
+  paymentMethod: PaymentMethod; paidAt: string; paidBy?: number | null;
+  cashAccountId?: number | null; bankAccountId?: number | null; chequeNo?: string | null;
+  status: string; journalEntryId?: number | null; journalEntry?: JournalEntry | null;
+}
+export interface Expense {
+  id: number; code: string; branchId: number; branch?: { id: number; name: string; code: string } | null;
+  expenseCategoryId: number; category?: { id: number; name: string; accountId?: number | null } | null;
+  vendorId?: number | null; vendor?: { id: number; name: string } | null;
+  amount: string | number; expenseDate: string; description?: string | null;
+  status: ExpenseStatus;
+  requestedBy?: number | null; requester?: { id: number; name: string } | null;
+  approvedBy?: number | null; approver?: { id: number; name: string } | null; approvedAt?: string | null;
+  voucher?: PaymentVoucher | null;
+}
+export const expensesApi = {
+  list: (params?: { status?: ExpenseStatus; branchId?: number }) =>
+    http.get('/expenses', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as Expense[]),
+  create: (body: { branchId: number; expenseCategoryId: number; vendorId?: number; amount: number | string; expenseDate: string; description?: string }) =>
+    http.post('/expenses', snakeize(body)).then((r) => camelize(r.data) as Expense),
+  approve: (id: number) => http.put(`/expenses/${id}/approve`).then((r) => camelize(r.data) as Expense),
+  reject: (id: number) => http.put(`/expenses/${id}/reject`).then((r) => camelize(r.data) as Expense),
+  pay: (id: number, body: { paymentMethod: PaymentMethod; cashAccountId?: number; bankAccountId?: number; chequeNo?: string; paidAt?: string }) =>
+    http.post(`/expenses/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as PaymentVoucher),
 }
 
 export const rolesApi = {

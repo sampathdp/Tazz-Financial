@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AccountingReportController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BankAccountController;
 use App\Http\Controllers\Api\BankController;
@@ -10,10 +11,13 @@ use App\Http\Controllers\Api\CashAccountController;
 use App\Http\Controllers\Api\CashbookEntryController;
 use App\Http\Controllers\Api\CashReconciliationController;
 use App\Http\Controllers\Api\CashTransferController;
+use App\Http\Controllers\Api\ChartOfAccountController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerDocumentController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ExpenseCategoryController;
+use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\FdDepositController;
 use App\Http\Controllers\Api\FdInterestPaymentController;
 use App\Http\Controllers\Api\FixedDepositController;
@@ -33,6 +37,7 @@ use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SalesExecutiveCommissionController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\VendorController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -123,6 +128,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Loan Management: Active Loans ---
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
     Route::patch('loans/{loan}/status-flags', [LoanController::class, 'updateStatusFlags'])->middleware('perm:Active Loans,Edit');
+    Route::patch('loans/{loan}/officers', [LoanController::class, 'updateOfficers'])->middleware('perm:Active Loans,Edit');
     // Admin-only — see the frontend's "Loan Adjustments" screen (installment skip / cheque clearance / waivers).
     Route::post('loans/{loan}/schedules/{schedule}/skip', [LoanController::class, 'skipInstallment'])->middleware('admin');
     // Bulk installment skip, by loan type — skips the matching due-date installment
@@ -260,4 +266,24 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Funding Management: Reports & Dashboard ---
     Route::get('funding-reports/{type}', [FundingReportController::class, 'show'])->middleware('perm:Funding Reports,View');
     Route::get('funding-dashboard', [FundingDashboardController::class, 'index'])->middleware('perm:Funding Reports,View');
+
+    // --- Accounting: Chart of Accounts + Trial Balance / General Ledger ---
+    Route::get('chart-of-accounts', [ChartOfAccountController::class, 'index'])->middleware('perm:Chart of Accounts,View');
+    Route::post('chart-of-accounts', [ChartOfAccountController::class, 'store'])->middleware('perm:Chart of Accounts,Create');
+    Route::put('chart-of-accounts/{chartOfAccount}', [ChartOfAccountController::class, 'update'])->middleware('perm:Chart of Accounts,Edit');
+    Route::get('accounting-reports/{type}', [AccountingReportController::class, 'show'])->middleware('perm:Accounting Reports,View');
+    Route::get('journal-entries', [JournalEntryController::class, 'index'])->middleware('perm:Accounting Reports,View');
+
+    // --- Expense Management: Vendors ---
+    Route::get('vendors', [VendorController::class, 'index'])->middleware('perm:Vendors,View');
+    Route::post('vendors', [VendorController::class, 'store'])->middleware('perm:Vendors,Create');
+    Route::put('vendors/{vendor}', [VendorController::class, 'update'])->middleware('perm:Vendors,Edit');
+    Route::delete('vendors/{vendor}', [VendorController::class, 'destroy'])->middleware('perm:Vendors,Delete');
+
+    // --- Expense Management: Expenses (request -> approve/reject -> pay) ---
+    Route::get('expenses', [ExpenseController::class, 'index'])->middleware('perm:Expenses,View');
+    Route::post('expenses', [ExpenseController::class, 'store'])->middleware('perm:Expenses,Create');
+    Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve'])->middleware('perm:Expenses,Approve');
+    Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject'])->middleware('perm:Expenses,Approve');
+    Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware('perm:Expenses,Edit');
 });

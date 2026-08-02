@@ -37,6 +37,10 @@ class Permissions
         'Deposits',
         'Fixed Deposits',
         'Funding Reports',
+        'Chart of Accounts',
+        'Accounting Reports',
+        'Vendors',
+        'Expenses',
     ];
 
     public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve', 'Export'];

@@ -37,4 +37,16 @@ class CashAccount extends Model
     {
         return $this->hasMany(CashTransfer::class, 'to_cash_account_id');
     }
+
+    /** The chart_of_accounts leaf row this till posts to in the general ledger — see CashTillLink. */
+    public function ledgerLink()
+    {
+        return $this->hasOne(CashTillLink::class);
+    }
+
+    /** The branch's primary till for auto-posted collections — its oldest active cash account. Branches expected to keep exactly one; if several exist, the first one created wins. Shared by CashbookPoster and LoanLedgerPoster so there's one definition of "the branch's till", not two. */
+    public static function branchPrimary(int $branchId): ?self
+    {
+        return static::where('branch_id', $branchId)->where('status', 'Active')->orderBy('id')->first();
+    }
 }

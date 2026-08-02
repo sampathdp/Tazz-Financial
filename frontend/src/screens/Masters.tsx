@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { expenseCategoriesApi, banksApi, type ExpenseCategory, type Bank, type AuthUser } from '../api'
+import { expenseCategoriesApi, banksApi, chartOfAccountsApi, type ExpenseCategory, type Bank, type ChartOfAccount, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -24,12 +24,14 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
   const [modal, setModal] = useState(false)
   const [editing, setEditing] = useState<ExpenseCategory | null>(null)
   const [form, setForm] = useState<Partial<ExpenseCategory>>(blankExpenseCategoryForm())
+  const [expenseAccounts, setExpenseAccounts] = useState<ChartOfAccount[]>([])
 
   const refresh = () => {
     setLoading(true)
     expenseCategoriesApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
   }
   useEffect(refresh, [])
+  useEffect(() => { chartOfAccountsApi.list().then((d) => setExpenseAccounts(d.filter((a) => a.type === 'Expense'))).catch(() => setExpenseAccounts([])) }, [])
 
   const openCreate = () => { setEditing(null); setForm(blankExpenseCategoryForm()); setErr(''); setModal(true) }
   const openEdit = (r: ExpenseCategory) => { setEditing(r); setForm({ ...r }); setErr(''); setModal(true) }
@@ -62,13 +64,13 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
         actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Expense Category</Btn></Can>} />
       <Card pad={0}>
         {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
-        <Table cols={[{ label: 'Name' }, { label: 'Code' }, { label: 'Description' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+        <Table cols={[{ label: 'Name' }, { label: 'Code' }, { label: 'Posts To' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No expense categories yet"
           rows={rows}
           render={(r) => <>
             <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}</Td>
             <Td>{r.code || '—'}</Td>
-            <Td>{r.description || '—'}</Td>
+            <Td>{r.account ? `${r.account.code} ${r.account.name}` : <span style={{ color: 'var(--bad)' }}>Not linked — expenses can't be paid</span>}</Td>
             <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
             <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
               <Can user={me} module="Masters" action="Edit"><button className="mms-act" title="Edit" onClick={() => openEdit(r)}><Icon n="edit" s={15} /></button></Can>
@@ -87,6 +89,12 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
           <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value }))} /></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
+          <Field label="Posts To (GL Account)" full>
+            <Select value={form.accountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, accountId: Number(e.target.value) || undefined }))}>
+              <option value="">Not linked yet — expenses in this category can't be paid</option>
+              {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+            </Select>
+          </Field>
           <Field label="Description" full><textarea value={form.description || ''} onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
         </div>
       </Modal>
