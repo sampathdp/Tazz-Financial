@@ -13,7 +13,7 @@ class Loan extends Model
     protected $fillable = [
         'branch_id', 'code', 'customer_id', 'loan_type_id',
         'principal_amount', 'down_payment', 'interest_rate_percent', 'interest_method', 'rate_period',
-        'term_months', 'installment_frequency', 'purpose',
+        'term_months', 'installment_frequency', 'purpose', 'application_date',
         'reference_name', 'reference_id_no', 'reference_address',
         'loan_officer_id', 'recovery_officer_id',
         'disbursed_amount', 'disbursed_at', 'first_installment_date',
@@ -29,6 +29,7 @@ class Loan extends Model
         'interest_rate_percent' => 'decimal:3',
         'disbursed_amount' => 'decimal:2',
         'disbursed_at' => 'datetime',
+        'application_date' => 'date',
         'first_installment_date' => 'date',
         'approved_at' => 'datetime',
         'closed_at' => 'datetime',

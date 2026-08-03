@@ -239,6 +239,8 @@ export interface Loan {
   termMonths: number;
   installmentFrequency: LoanFrequency;
   purpose?: string | null;
+  /** Back-datable application date shown/printed as the loan's date — distinct from createdAt (the real save timestamp). */
+  applicationDate?: string | null;
   /** Reference person recorded on the application — a contactable third party, not a guarantor. */
   referenceName?: string | null;
   referenceIdNo?: string | null;

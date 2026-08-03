@@ -20,6 +20,7 @@ const FREQ_OPTIONS: { value: LoanFrequency; label: string }[] = [
   { value: 'monthly', label: 'Monthly' },
 ]
 const COLLATERAL_TYPES = ['Vehicle', 'Property', 'Equipment', 'Other']
+const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
   Pending: 'amber', Approved: 'blue', Rejected: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
@@ -50,6 +51,7 @@ interface FormState {
   termMonths?: number
   installmentFrequency?: LoanFrequency
   purpose?: string
+  applicationDate?: string
   referenceName?: string
   referenceIdNo?: string
   referenceAddress?: string
@@ -57,7 +59,7 @@ interface FormState {
   guarantors: LoanGuarantorInput[]
   collateral: LoanCollateralInput[]
 }
-const blankForm = (): FormState => ({ installmentFrequency: 'monthly', guarantors: [], collateral: [] })
+const blankForm = (): FormState => ({ installmentFrequency: 'monthly', applicationDate: todayIso(), guarantors: [], collateral: [] })
 
 export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -76,6 +78,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const [editing, setEditing] = useState<Loan | null>(null)
   const [viewing, setViewing] = useState<Loan | null>(null) // read-only detail (non-pending)
   const [form, setForm] = useState<FormState>(blankForm())
+  const [backDated, setBackDated] = useState(false)
 
   const [quickAdd, setQuickAdd] = useState(false)
   const [quickAddForm, setQuickAddForm] = useState(blankQuickAdd())
@@ -118,22 +121,25 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const selectedType = loanTypes.find((t) => t.id === form.loanTypeId)
   const selectedCustomer = customers.find((c) => c.id === form.customerId)
 
-  const openCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setErr(''); setMode('form') }
+  const openCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setBackDated(false); setErr(''); setMode('form') }
   const openRow = async (row: Loan) => {
     // The list only loads summary relations — fetch full detail (guarantors,
     // collateral, officer/applier/approver names) before showing the form or view.
     const loan = await loansApi.get(row.id).catch(() => row)
     if (loan.status === 'Pending') {
       setEditing(loan); setViewing(null)
+      const applicationDate = loan.applicationDate || (loan.createdAt || '').slice(0, 10) || todayIso()
       setForm({
         customerId: loan.customerId, loanTypeId: loan.loanTypeId, branchId: loan.branchId,
         principalAmount: loan.principalAmount, downPayment: loan.downPayment,
         interestRatePercent: loan.interestRatePercent, termMonths: loan.termMonths,
         installmentFrequency: loan.installmentFrequency, purpose: loan.purpose || '',
+        applicationDate,
         referenceName: loan.referenceName || '', referenceIdNo: loan.referenceIdNo || '', referenceAddress: loan.referenceAddress || '',
         loanOfficerId: loan.loanOfficerId || undefined,
         guarantors: loan.guarantors || [], collateral: loan.collateral || [],
       })
+      setBackDated(applicationDate !== todayIso())
       setErr(''); setMode('form')
     } else {
       setViewing(loan); setEditing(null); setMode('view')
@@ -158,6 +164,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
       termMonths: form.termMonths,
       installmentFrequency: form.installmentFrequency,
       purpose: form.purpose || null,
+      applicationDate: backDated ? form.applicationDate : todayIso(),
       referenceName: form.referenceName || null,
       referenceIdNo: form.referenceIdNo || null,
       referenceAddress: form.referenceAddress || null,
@@ -336,6 +343,18 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             <Field label="Marketing Executive"><Select value={form.loanOfficerId ?? ''} onChange={(e) => setForm((s) => ({ ...s, loanOfficerId: Number(e.target.value) || undefined }))}>
               <option value="">—</option>{officers.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </Select></Field>
+            <Field label="Application Date">
+              <Input type="date" value={form.applicationDate || todayIso()} max={todayIso()} disabled={!backDated}
+                onChange={(e) => setForm((s) => ({ ...s, applicationDate: e.target.value }))} />
+              <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>
+                <input type="checkbox" checked={backDated} onChange={(e) => {
+                  const checked = e.target.checked
+                  setBackDated(checked)
+                  if (!checked) setForm((s) => ({ ...s, applicationDate: todayIso() }))
+                }} />
+                <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
+              </label>
+            </Field>
             <Field label="Purpose" full><textarea value={form.purpose || ''} onChange={(e) => setForm((s) => ({ ...s, purpose: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
           </div>
         </Card>

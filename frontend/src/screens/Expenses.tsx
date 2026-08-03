@@ -119,9 +119,10 @@ const blankCreateForm = (): CreateForm => ({
 })
 
 interface PayForm {
-  paymentMethod: PaymentMethod; cashAccountId: number | ''; bankAccountId: number | ''; chequeNo: string; paidAt: string
+  paymentMethod: PaymentMethod; cashAccountId: number | ''; bankAccountId: number | ''; chequeNo: string; paidAt: string; backDated: boolean
 }
-const blankPayForm = (): PayForm => ({ paymentMethod: 'Cash', cashAccountId: '', bankAccountId: '', chequeNo: '', paidAt: new Date().toISOString().slice(0, 10) })
+const todayIso = () => new Date().toISOString().slice(0, 10)
+const blankPayForm = (): PayForm => ({ paymentMethod: 'Cash', cashAccountId: '', bankAccountId: '', chequeNo: '', paidAt: todayIso(), backDated: false })
 
 export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -286,7 +287,16 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
           <Field label="Payment Method"><Select value={payForm.paymentMethod} onChange={(e) => setPayForm((s) => ({ ...s, paymentMethod: e.target.value as PaymentMethod }))}>
             <option value="Cash">Cash</option><option value="Bank">Bank</option><option value="Cheque">Cheque</option>
           </Select></Field>
-          <Field label="Paid At"><DateInput value={payForm.paidAt} onChange={(iso) => setPayForm((s) => ({ ...s, paidAt: iso }))} /></Field>
+          <Field label="Paid At">
+            <DateInput value={payForm.paidAt} disabled={!payForm.backDated} onChange={(iso) => setPayForm((s) => ({ ...s, paidAt: iso }))} />
+            <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>
+              <input type="checkbox" checked={payForm.backDated} onChange={(e) => {
+                const checked = e.target.checked
+                setPayForm((s) => ({ ...s, backDated: checked, paidAt: checked ? s.paidAt : todayIso() }))
+              }} />
+              <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
+            </label>
+          </Field>
           {payForm.paymentMethod === 'Cash' ? (
             <Field label="Cash Till" full><Select value={payForm.cashAccountId} onChange={(e) => setPayForm((s) => ({ ...s, cashAccountId: Number(e.target.value) || '' }))}>
               <option value="">Select till…</option>

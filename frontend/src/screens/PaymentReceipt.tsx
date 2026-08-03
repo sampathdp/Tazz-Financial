@@ -57,9 +57,10 @@ interface ReceiptData { payment: LoanPayment; loan: Loan; balanceBefore: number 
    is just the date printed on the cheque, captured for the audit trail. This is
    distinct from "Record Cheque" (Post Dated Cheques), which logs a future cheque
    the same way — also untouched until realized. */
-function PaymentFields({ method, setMethod, paidAt, setPaidAt, refNo, setRefNo, nextReceipt, bankName, setBankName, chequeDate, setChequeDate, notes, setNotes }: {
+function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBackDated, refNo, setRefNo, nextReceipt, bankName, setBankName, chequeDate, setChequeDate, notes, setNotes }: {
   method: PaymentMethod; setMethod: (v: PaymentMethod) => void
   paidAt: string; setPaidAt: (v: string) => void
+  backDated: boolean; setBackDated: (v: boolean) => void
   refNo: string; setRefNo: (v: string) => void
   nextReceipt: string
   bankName: string; setBankName: (v: string) => void
@@ -71,7 +72,17 @@ function PaymentFields({ method, setMethod, paidAt, setPaidAt, refNo, setRefNo, 
       <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
         {METHOD_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
       </Select></Field>
-      <Field label="Date"><Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></Field>
+      <Field label="Date">
+        <Input type="date" value={paidAt} max={todayIso()} disabled={!backDated} onChange={(e) => setPaidAt(e.target.value)} />
+        <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>
+          <input type="checkbox" checked={backDated} onChange={(e) => {
+            const checked = e.target.checked
+            setBackDated(checked)
+            if (!checked) setPaidAt(todayIso())
+          }} />
+          <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
+        </label>
+      </Field>
       {method === 'Cash'
         ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
         : <Field label={REF_LABEL[method]}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
@@ -99,6 +110,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState<PaymentMethod>('Cash')
   const [paidAt, setPaidAt] = useState(todayIso())
+  const [payBackDated, setPayBackDated] = useState(false)
   const [refNo, setRefNo] = useState('')
   const [payBankName, setPayBankName] = useState('')
   const [payChequeDate, setPayChequeDate] = useState(todayIso())
@@ -110,6 +122,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [settleOpen, setSettleOpen] = useState(false)
   const [settleMethod, setSettleMethod] = useState<PaymentMethod>('Cash')
   const [settlePaidAt, setSettlePaidAt] = useState(todayIso())
+  const [settleBackDated, setSettleBackDated] = useState(false)
   const [settleRefNo, setSettleRefNo] = useState('')
   const [settleBankName, setSettleBankName] = useState('')
   const [settleChequeDate, setSettleChequeDate] = useState(todayIso())
@@ -165,8 +178,8 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     : allSchedules
   const locked = !!pendingSettlement
 
-  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setRefNo(''); setPayBankName(''); setPayChequeDate(todayIso()); setNotes(''); setErr('') }
-  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleRefNo(''); setSettleBankName(''); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
+  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankName(''); setPayChequeDate(todayIso()); setNotes(''); setErr('') }
+  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleRefNo(''); setSettleBankName(''); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
   const resetChequeForm = () => { setChequeOpen(false); setChequeNo(''); setRcBankName(''); setRcChequeDate(todayIso()); setChequeAmount(''); setChequeErr('') }
 
   const pickLoan = async (_n: string, opt?: Loan) => {
@@ -184,7 +197,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   }
 
   const openPay = () => {
-    setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setRefNo(''); setPayBankName(''); setPayChequeDate(todayIso()); setNotes(''); setErr('')
+    setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankName(''); setPayChequeDate(todayIso()); setNotes(''); setErr('')
   }
 
   const record = async () => {
@@ -469,12 +482,11 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
         <div className="col gap-3">
           <ErrorBanner error={err} style={{ marginBottom: 0 }} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px 16px', fontSize: 12.5, paddingBottom: 12, borderBottom: '1px solid var(--line)' }}>
-            <div><span className="t-2">Date</span><br /><b>{dateOnly(todayIso())}</b></div>
             <div><span className="t-2">Outstanding Balance</span><br /><b style={{ fontFamily: 'JetBrains Mono', color: 'var(--bad)' }}>{money(outstanding)}</b></div>
             <div><span className="t-2">Already Paid</span><br /><b style={{ fontFamily: 'JetBrains Mono' }}>{money(totalPaid)}</b></div>
           </div>
           <Field label="Payment Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Up to ${money(outstanding)}`} /></Field>
-          <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} refNo={refNo} setRefNo={setRefNo} nextReceipt={nextReceipt}
+          <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} backDated={payBackDated} setBackDated={setPayBackDated} refNo={refNo} setRefNo={setRefNo} nextReceipt={nextReceipt}
             bankName={payBankName} setBankName={setPayBankName} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes} />
         </div>
       </Modal>
@@ -487,7 +499,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
         <div className="col gap-3">
           <ErrorBanner error={settleErr} style={{ marginBottom: 0 }} />
           <div className="t-2" style={{ fontSize: 12.5 }}>This pays off the full outstanding balance of <b style={{ fontFamily: 'JetBrains Mono' }}>{money(outstanding)}</b> and must be approved by a Branch Manager before the loan closes and the receipt can be printed.</div>
-          <PaymentFields method={settleMethod} setMethod={setSettleMethod} paidAt={settlePaidAt} setPaidAt={setSettlePaidAt} refNo={settleRefNo} setRefNo={setSettleRefNo} nextReceipt={nextReceipt}
+          <PaymentFields method={settleMethod} setMethod={setSettleMethod} paidAt={settlePaidAt} setPaidAt={setSettlePaidAt} backDated={settleBackDated} setBackDated={setSettleBackDated} refNo={settleRefNo} setRefNo={setSettleRefNo} nextReceipt={nextReceipt}
             bankName={settleBankName} setBankName={setSettleBankName} chequeDate={settleChequeDate} setChequeDate={setSettleChequeDate} notes={settleNotes} setNotes={setSettleNotes} />
         </div>
       </Modal>

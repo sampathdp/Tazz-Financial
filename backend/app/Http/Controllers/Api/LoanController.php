@@ -167,6 +167,7 @@ class LoanController extends Controller
         [$data, $guarantors, $collateral] = $this->validated($request);
         $data['applied_by'] = $request->user()->id;
         $data['created_by'] = $request->user()->id;
+        $data['application_date'] = $data['application_date'] ?? now()->toDateString();
         $data['status'] = 'Pending';
 
         $loan = DB::transaction(function () use ($data, $guarantors, $collateral, $request) {
@@ -458,6 +459,7 @@ class LoanController extends Controller
             'term_months' => 'required|integer|min:1',
             'installment_frequency' => ['required', Rule::in(self::FREQUENCIES)],
             'purpose' => 'nullable|string|max:255',
+            'application_date' => 'nullable|date|before_or_equal:today',
             'reference_name' => 'nullable|string|max:150',
             'reference_id_no' => 'nullable|string|max:64',
             'reference_address' => 'nullable|string|max:255',
@@ -506,6 +508,7 @@ class LoanController extends Controller
             'term_months' => $validated['term_months'],
             'installment_frequency' => $validated['installment_frequency'],
             'purpose' => $validated['purpose'] ?? null,
+            'application_date' => $validated['application_date'] ?? null,
             'reference_name' => $validated['reference_name'] ?? null,
             'reference_id_no' => $validated['reference_id_no'] ?? null,
             'reference_address' => $validated['reference_address'] ?? null,
