@@ -35,7 +35,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
   const q = search.trim().toLowerCase()
   const filtered = rows.filter((l) => {
     if (!q) return true
-    return [l.code, l.customer?.fullName, l.customer?.code, l.loanType?.name].some((v) => (v || '').toLowerCase().includes(q))
+    return [l.code, l.customer?.fullName, l.customer?.code, l.loanDetail?.loanType?.name].some((v) => (v || '').toLowerCase().includes(q))
   })
   const totalOverdueAmount = rows.reduce((a, l) => a + num(l.overdueAmount) + num(l.penaltyDue), 0)
 
@@ -43,7 +43,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
     return (
       <div>
         <PageHead crumbs="Loan Management / Overdue Loans" title={detailLoading || !loan ? 'Loading…' : `Loan ${loan.code}`} icon="alert"
-          sub={loan ? `${loan.customer?.fullName} — ${loan.loanType?.name}` : undefined}
+          sub={loan ? `${loan.customer?.fullName} — ${loan.loanDetail?.loanType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={back}>← Back to Overdue Loans</Btn>} />
         {detailLoading || !loan ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
           : <LoanDetail loan={loan} me={me} onChanged={reloadLoan} go={go} context="active" />}
@@ -75,13 +75,13 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
           render={(l) => <>
             <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
             <Td><div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div><div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div></Td>
-            <Td>{l.loanType?.name}</Td>
+            <Td>{l.loanDetail?.loanType?.name}</Td>
             <Td align="center"><Badge tone={daysTone(l.daysOverdue)} dot>{l.daysOverdue}d</Badge></Td>
             <Td align="center">{l.overdueInstallments}</Td>
             <Td mono align="right">{money(l.overdueAmount)}</Td>
             <Td mono align="right">{money(l.penaltyDue)}</Td>
             <Td mono align="right">{money(num(l.totalDueSum) - num(l.paidSum))}</Td>
-            <Td>{l.recoveryOfficer?.name || '—'}</Td>
+            <Td>{l.loanDetail?.recoveryOfficer?.name || '—'}</Td>
           </>} />}
       </Card>
     </div>

@@ -17,7 +17,7 @@ class BranchController extends Controller
     public function store(Request $request)
     {
         $data = $this->validated($request);
-        $branch = Branch::create($data + ['status' => $data['status'] ?? 'Active', 'type' => $data['type'] ?? 'Branch']);
+        $branch = Branch::create($data + ['status' => $data['status'] ?? 'Active', 'branch_type' => $data['branch_type'] ?? 'Branch']);
 
         return response()->json($branch->load('parent:id,name,code'), 201);
     }
@@ -51,19 +51,19 @@ class BranchController extends Controller
 
     private function validated(Request $request, ?Branch $branch = null): array
     {
-        $type = $request->input('type', $branch?->type ?? 'Branch');
+        $type = $request->input('branch_type', $branch?->branch_type ?? 'Branch');
 
         $data = $request->validate([
             'name' => 'required|string|max:128',
             'code' => ['required', 'string', 'max:16', Rule::unique('branches', 'code')->ignore($branch?->id)],
-            'type' => [Rule::in(['Branch', 'Center'])],
+            'branch_type' => [Rule::in(['Branch', 'Center'])],
             'parent_id' => [
                 $type === 'Center' ? 'required' : 'nullable',
                 'exists:branches,id',
                 Rule::notIn([$branch?->id]),
             ],
             'address' => 'nullable|string|max:255',
-            'phone' => 'nullable|string|max:32',
+            'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:190',
             'is_head_office' => 'boolean',
             'status' => [Rule::in(['Active', 'Inactive'])],
@@ -71,11 +71,11 @@ class BranchController extends Controller
 
         if (!empty($data['parent_id'])) {
             $parent = Branch::find($data['parent_id']);
-            if (!$parent || $parent->type !== 'Branch') {
+            if (!$parent || $parent->branch_type !== 'Branch') {
                 return $this->fail('A center must be linked to a Branch, not another Center.');
             }
         }
-        if (($data['type'] ?? $type) !== 'Center') {
+        if (($data['branch_type'] ?? $type) !== 'Center') {
             $data['parent_id'] = null;
         }
 

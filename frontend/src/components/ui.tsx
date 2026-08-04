@@ -3,7 +3,7 @@ import { Children, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
-import { banksApi } from '../api'
+import { banksApi, type Bank } from '../api'
 
 /* ---------- primitives ---------- */
 type Variant = 'primary' | 'solid' | 'ghost' | 'danger' | 'ok' | 'plain'
@@ -208,38 +208,34 @@ export function Select({ children, ...p }: React.SelectHTMLAttributes<HTMLSelect
   )
 }
 
-/** BankSelect — a plain bank-name string field (matches the existing
- *  free-text `bank_name` columns every screen writes to), sourced from the
- *  Banks master (Masters > Banks) instead of typed by hand. The list is
- *  fetched once and shared across every instance on the page. If the current
- *  value isn't in the master list (e.g. older free-text data, or a bank an
- *  admin later deactivated/renamed), it's kept as an extra option so it
- *  still displays instead of silently reverting to blank. */
-let bankNamesCache: string[] | null = null
-let bankNamesPromise: Promise<string[]> | null = null
-function loadBankNames(): Promise<string[]> {
-  if (bankNamesCache) return Promise.resolve(bankNamesCache)
-  if (!bankNamesPromise) {
-    bankNamesPromise = banksApi.list()
-      .then((rows) => (bankNamesCache = rows.filter((r) => (r.status || 'Active') === 'Active').map((r) => r.name)))
-      .catch(() => (bankNamesCache = []))
+/** BankSelect — picks a bank_id from the Banks master (Masters > Banks),
+ *  used everywhere a bank reference is needed (Bank Accounts, Loan Payments/
+ *  Cheques, Fixed Deposits) instead of the old free-typed `bank_name` text.
+ *  The list is fetched once and shared across every instance on the page. */
+let banksCache: Bank[] | null = null
+let banksPromise: Promise<Bank[]> | null = null
+function loadBanks(): Promise<Bank[]> {
+  if (banksCache) return Promise.resolve(banksCache)
+  if (!banksPromise) {
+    banksPromise = banksApi.list()
+      .then((rows) => (banksCache = rows.filter((r) => (r.status || 'Active') === 'Active')))
+      .catch(() => (banksCache = []))
   }
-  return bankNamesPromise
+  return banksPromise
 }
 export function BankSelect({ value, onChange, style, disabled, placeholder = 'Select bank…' }: {
-  value: string
-  onChange: (v: string) => void
+  value: number | '' | null | undefined
+  onChange: (v: number | undefined) => void
   style?: CSSProperties
   disabled?: boolean
   placeholder?: string
 }) {
-  const [names, setNames] = useState<string[]>(bankNamesCache || [])
-  useEffect(() => { loadBankNames().then(setNames) }, [])
+  const [banks, setBanks] = useState<Bank[]>(banksCache || [])
+  useEffect(() => { loadBanks().then(setBanks) }, [])
   return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)} style={style} disabled={disabled}>
+    <Select value={value ?? ''} onChange={(e) => onChange(Number(e.target.value) || undefined)} style={style} disabled={disabled}>
       <option value="">{placeholder}</option>
-      {value && !names.includes(value) && <option value={value}>{value}</option>}
-      {names.map((n) => <option key={n} value={n}>{n}</option>)}
+      {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
     </Select>
   )
 }

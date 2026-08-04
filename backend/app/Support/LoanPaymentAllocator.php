@@ -2,10 +2,10 @@
 
 namespace App\Support;
 
+use App\Models\FacilityChargeAllocation;
+use App\Models\FacilityPayment;
+use App\Models\FacilityPaymentAllocation;
 use App\Models\Loan;
-use App\Models\LoanChargeAllocation;
-use App\Models\LoanPayment;
-use App\Models\LoanPaymentAllocation;
 use Carbon\Carbon;
 
 /**
@@ -21,9 +21,11 @@ class LoanPaymentAllocator
      *  and applyAllocation() so both price "OD" identically. */
     public static function penaltyTerms(Loan $loan): array
     {
+        $loanType = $loan->loanDetail?->loanType;
+
         return [
-            (int) ($loan->loanType?->grace_period_days ?? 5),
-            (float) ($loan->loanType?->default_charge_rate_percent ?? 0),
+            (int) ($loanType?->grace_period_days ?? 5),
+            (float) ($loanType?->default_charge_rate_percent ?? 0),
         ];
     }
 
@@ -31,7 +33,7 @@ class LoanPaymentAllocator
      *  principal+interest, unpaid penalty/OD (live estimate as of that date,
      *  same formula as the Contract Status tab), and unpaid Document/Legal/
      *  Valuation/Other charges — net of any waivers (write-offs; see
-     *  LoanWaiver), so a loan waived down to zero can still close on its own,
+     *  FacilityWaiver), so a loan waived down to zero can still close on its own,
      *  the same way the Contract Status tab's Amount To Be Collected already
      *  nets waivers off (see LoanSummary::build). */
     public static function outstandingBalance(Loan $loan, ?Carbon $asOf = null): float
@@ -51,8 +53,15 @@ class LoanPaymentAllocator
             })
             : 0.0;
 
-        $chargesBalance = (float) $loan->charges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
-        $waived = (float) $loan->waivers->sum('amount');
+        // Queried fresh every time (not the cached $loan->charges/$loan->waivers
+        // property) — this method runs more than once against the same $loan
+        // instance within a single request (e.g. a pre-check in
+        // LoanPaymentController::approveSettlement() followed by this same
+        // method's own post-allocation call inside applyAllocation() below), and
+        // a cached collection from the first call would silently ignore charge
+        // payments the second call needs to see.
+        $chargesBalance = (float) $loan->charges()->get()->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
+        $waived = (float) $loan->waivers()->sum('amount');
 
         return max(0, round($scheduleBalance + $penaltyBalance + $chargesBalance - $waived, 2));
     }
@@ -69,7 +78,7 @@ class LoanPaymentAllocator
      * both the OD/penalty calculation and the settled installment's paid_at,
      * defaulting to today for payment types that don't defer settlement.
      */
-    public static function applyAllocation(Loan $loan, LoanPayment $payment, float $amount, ?Carbon $asOf = null): void
+    public static function applyAllocation(Loan $loan, FacilityPayment $payment, float $amount, ?Carbon $asOf = null): void
     {
         $asOf ??= Carbon::today();
         $schedules = $loan->schedules()->where('status', '!=', 'Paid')->orderBy('installment_no')
@@ -143,7 +152,7 @@ class LoanPaymentAllocator
                 }
                 $pay = min($remaining, $due);
                 $charge->update(['paid_amount' => round((float) $charge->paid_amount + $pay, 2)]);
-                LoanChargeAllocation::create(['loan_payment_id' => $payment->id, 'loan_charge_id' => $charge->id, 'amount_applied' => $pay]);
+                FacilityChargeAllocation::create(['facility_payment_id' => $payment->id, 'facility_charge_id' => $charge->id, 'amount_applied' => $pay]);
                 $remaining = round($remaining - $pay, 2);
             }
         }
@@ -163,9 +172,9 @@ class LoanPaymentAllocator
         }
 
         foreach ($applied as $scheduleId => $buckets) {
-            LoanPaymentAllocation::create([
-                'loan_payment_id' => $payment->id,
-                'loan_schedule_id' => $scheduleId,
+            FacilityPaymentAllocation::create([
+                'facility_payment_id' => $payment->id,
+                'facility_schedule_id' => $scheduleId,
                 'principal_applied' => round($buckets['principal'], 2),
                 'interest_applied' => round($buckets['interest'], 2),
                 'penalty_applied' => round($buckets['penalty'], 2),
@@ -183,10 +192,16 @@ class LoanPaymentAllocator
             ]);
         }
 
+        // Keeps credit_facilities.outstanding_balance_cache in step with this
+        // method's own result — every caller that allocates a payment gets a
+        // fresh cache for free, rather than each one refreshing it separately.
+        $outstanding = self::outstandingBalance($loan);
+        $loan->update(['outstanding_balance_cache' => $outstanding]);
+
         // Only an already-active loan closes on full payoff — an Approved loan
         // paying off a pre-disbursement charge (see LoanController::disburse())
         // has no schedule yet and must stay Approved, ready to disburse.
-        if ($loan->status === 'Active' && self::outstandingBalance($loan) <= 0) {
+        if ($loan->status === 'Active' && $outstanding <= 0) {
             $loan->update(['status' => 'Closed', 'closed_at' => $asOf]);
         }
     }

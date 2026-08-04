@@ -5,13 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\FdInterestPayment;
 use App\Models\FixedDeposit;
+use App\Support\FdCashbookPoster;
+use App\Support\FdLedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class FdInterestPaymentController extends Controller
 {
-    private const PAYMENT_METHODS = ['Cash', 'Cheque', 'BankTransfer'];
+    private const PAYMENT_METHODS = ['Cash', 'Bank', 'Cheque'];
 
     public function index(FixedDeposit $fixedDeposit)
     {
@@ -47,6 +49,9 @@ class FdInterestPaymentController extends Controller
 
             $next = $fd->interestPayments()->where('status', 'Pending')->orderBy('due_date')->first();
             $fd->update(['next_interest_date' => $next?->due_date]);
+
+            FdCashbookPoster::postInterestPaid($fdInterestPayment->fresh());
+            FdLedgerPoster::postInterestPaid($fdInterestPayment->fresh());
         });
 
         return $fdInterestPayment->fresh(['fixedDeposit:id,fd_number,customer_id', 'payer:id,name']);

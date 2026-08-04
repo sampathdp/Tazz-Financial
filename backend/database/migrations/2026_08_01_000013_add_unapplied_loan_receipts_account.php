@@ -22,7 +22,7 @@ return new class extends Migration
         DB::table('chart_of_accounts')->insert([
             'code' => '2100',
             'name' => 'Unapplied Loan Receipts',
-            'type' => 'Liability',
+            'account_type' => 'Liability',
             'normal_balance' => 'Credit',
             'parent_id' => null,
             'is_system' => true,

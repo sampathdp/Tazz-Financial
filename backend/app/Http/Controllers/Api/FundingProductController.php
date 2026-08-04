@@ -11,7 +11,6 @@ use Illuminate\Validation\ValidationException;
 class FundingProductController extends Controller
 {
     private const INTEREST_METHODS = ['monthly', 'maturity'];
-    private const PAYMENT_METHODS = ['Cash', 'Cheque', 'BankTransfer'];
 
     public function index()
     {
@@ -48,7 +47,7 @@ class FundingProductController extends Controller
     {
         $data = $request->validate([
             'name' => 'required|string|max:128',
-            'code' => ['required', 'string', 'max:32', Rule::unique('funding_products', 'code')->ignore($product?->id)],
+            'code' => ['required', 'string', 'max:24', Rule::unique('funding_products', 'code')->ignore($product?->id)],
             'interest_method' => ['required', Rule::in(self::INTEREST_METHODS)],
             'annual_rate_percent' => 'required|numeric|min:0|max:999',
             'monthly_rate_percent' => 'nullable|numeric|min:0|max:999',
@@ -58,7 +57,7 @@ class FundingProductController extends Controller
             'allow_custom_term' => 'boolean',
             'min_deposit_amount' => 'required|numeric|min:0',
             'max_deposit_amount' => 'nullable|numeric|gte:min_deposit_amount',
-            'reference_format' => 'nullable|string|max:191',
+            'reference_format' => 'nullable|string|max:64',
             'sort_order' => 'nullable|integer|min:0',
             'status' => ['nullable', Rule::in(['Active', 'Inactive'])],
         ]);

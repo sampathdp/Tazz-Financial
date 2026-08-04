@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
+use App\Models\FacilityPayment;
 use App\Models\Loan;
-use App\Models\LoanPayment;
 use App\Services\NumberGenerator;
 use App\Support\CashbookPoster;
 use App\Support\LoanLedgerPoster;
@@ -22,7 +22,7 @@ class LoanPaymentController extends Controller
 
     public function index(Loan $loan)
     {
-        return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name'])->get();
+        return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name', 'bank:id,name'])->get();
     }
 
     /** Preview-only: the receipt number the next payment on this loan would get,
@@ -48,7 +48,7 @@ class LoanPaymentController extends Controller
         if (!in_array($loan->status, ['Active', 'Approved'], true)) {
             return response()->json(['message' => 'Payments can only be recorded against an active or approved loan.'], 422);
         }
-        if ($loan->payments()->where('is_settlement', true)->where('approval_status', 'PendingApproval')->exists()) {
+        if ($loan->payments()->where('payment_type', 'Settlement')->where('approval_status', 'PendingApproval')->exists()) {
             return response()->json(['message' => 'A full settlement request is already pending approval for this loan — approve or reject it before recording further payments.'], 422);
         }
         $data = $request->validate([
@@ -56,7 +56,7 @@ class LoanPaymentController extends Controller
             'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
             'paid_at' => 'nullable|date',
             'receipt_no' => 'nullable|string|max:32',
-            'bank_name' => 'required_if:payment_method,Cheque|nullable|string|max:191',
+            'bank_id' => 'required_if:payment_method,Cheque|nullable|exists:banks,id',
             'cheque_date' => 'required_if:payment_method,Cheque|nullable|date',
             'notes' => 'nullable|string|max:255',
             'is_settlement' => 'boolean',
@@ -98,22 +98,22 @@ class LoanPaymentController extends Controller
                 'type_code' => self::TYPE_CODES[$method] ?? 'CA',
                 'user_id' => $request->user()->id,
             ]);
-            $payment = LoanPayment::create([
+            $payment = FacilityPayment::create([
                 'code' => $code,
-                'loan_id' => $loan->id,
+                'credit_facility_id' => $loan->id,
                 'branch_id' => $loan->branch_id,
                 'amount' => $data['amount'],
-                'payment_method' => $data['payment_method'] ?? 'Cash',
+                'payment_method' => $method,
+                'payment_type' => $isSettlement ? 'Settlement' : 'Regular',
                 // Cash/Bank and settlement payments have no clearance concept (null).
                 // A regular cheque payment starts Pending — see clearCheque().
                 'clearance_status' => (!$isSettlement && $isCheque) ? 'Pending' : null,
                 'received_by' => $request->user()->id,
                 'paid_at' => $data['paid_at'] ?? now(),
                 'receipt_no' => $data['receipt_no'] ?? null,
-                'bank_name' => $data['bank_name'] ?? null,
+                'bank_id' => $data['bank_id'] ?? null,
                 'cheque_date' => $data['cheque_date'] ?? null,
                 'notes' => $data['notes'] ?? null,
-                'is_settlement' => $isSettlement,
                 'approval_status' => $isSettlement ? 'PendingApproval' : 'Approved',
             ]);
             NumberGenerator::attach($code, $payment);
@@ -138,12 +138,12 @@ class LoanPaymentController extends Controller
         return response()->json($payment->load('receiver:id,name'), 201);
     }
 
-    public function approveSettlement(Request $request, LoanPayment $payment)
+    public function approveSettlement(Request $request, FacilityPayment $payment)
     {
-        if (!$payment->is_settlement || $payment->approval_status !== 'PendingApproval') {
+        if ($payment->payment_type !== 'Settlement' || $payment->approval_status !== 'PendingApproval') {
             return response()->json(['message' => 'This payment is not a pending settlement request.'], 422);
         }
-        $loan = $payment->loan;
+        $loan = Loan::findOrFail($payment->credit_facility_id);
         $outstanding = LoanPaymentAllocator::outstandingBalance($loan);
         if ((float) $payment->amount > $outstanding) {
             return response()->json(['message' => "The outstanding balance has changed since this request was made (now {$outstanding}). Reject it and ask the cashier to resubmit."], 422);
@@ -162,9 +162,9 @@ class LoanPaymentController extends Controller
         return $payment->fresh()->load('receiver:id,name', 'approver:id,name');
     }
 
-    public function rejectSettlement(Request $request, LoanPayment $payment)
+    public function rejectSettlement(Request $request, FacilityPayment $payment)
     {
-        if (!$payment->is_settlement || $payment->approval_status !== 'PendingApproval') {
+        if ($payment->payment_type !== 'Settlement' || $payment->approval_status !== 'PendingApproval') {
             return response()->json(['message' => 'This payment is not a pending settlement request.'], 422);
         }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
@@ -187,7 +187,7 @@ class LoanPaymentController extends Controller
     }
 
     /** Manually realize or bounce a cheque payment that's been held pending clearance. */
-    public function clearCheque(Request $request, LoanPayment $payment)
+    public function clearCheque(Request $request, FacilityPayment $payment)
     {
         if ($payment->payment_method !== 'Cheque' || $payment->clearance_status !== 'Pending') {
             return response()->json(['message' => 'This payment is not a pending cheque awaiting clearance.'], 422);
@@ -202,7 +202,7 @@ class LoanPaymentController extends Controller
         ]);
 
         if ($data['status'] === 'Realized') {
-            $loan = $payment->loan;
+            $loan = Loan::findOrFail($payment->credit_facility_id);
             $asOf = Carbon::parse($data['realized_at']);
             $outstanding = LoanPaymentAllocator::outstandingBalance($loan, $asOf);
             if ((float) $payment->amount > $outstanding) {
@@ -229,12 +229,12 @@ class LoanPaymentController extends Controller
         return $payment->fresh()->load('receiver:id,name');
     }
 
-    public function destroy(Request $request, LoanPayment $payment)
+    public function destroy(Request $request, FacilityPayment $payment)
     {
         if ($payment->status === 'Voided') {
             return response()->json(['message' => 'This payment is already voided.'], 422);
         }
-        if ($payment->is_settlement && $payment->approval_status === 'PendingApproval') {
+        if ($payment->payment_type === 'Settlement' && $payment->approval_status === 'PendingApproval') {
             return response()->json(['message' => 'Reject the pending settlement request instead of voiding it.'], 422);
         }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
@@ -257,7 +257,7 @@ class LoanPaymentController extends Controller
                 $charge = $chargeAlloc->charge;
                 $charge->update(['paid_amount' => max(0, round((float) $charge->paid_amount - $chargeAlloc->amount_applied, 2))]);
             }
-            $loan = $payment->loan;
+            $loan = Loan::findOrFail($payment->credit_facility_id);
             if ($loan->status === 'Closed') {
                 $loan->update(['status' => 'Active', 'closed_at' => null]);
             }
@@ -269,6 +269,7 @@ class LoanPaymentController extends Controller
                 'voided_by' => $request->user()->id,
                 'voided_at' => now(),
             ]);
+            $this->refreshOutstandingCache($loan);
             CashbookPoster::reverseCashReceipt($payment);
             LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
         });
@@ -276,4 +277,9 @@ class LoanPaymentController extends Controller
         return response()->noContent();
     }
 
+    /** Keeps credit_facilities.outstanding_balance_cache in step with LoanPaymentAllocator::outstandingBalance() after every mutation that could change it — see that column's docblock on the credit_facilities migration. */
+    private function refreshOutstandingCache(Loan $loan): void
+    {
+        $loan->update(['outstanding_balance_cache' => LoanPaymentAllocator::outstandingBalance($loan->fresh())]);
+    }
 }

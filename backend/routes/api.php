@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\FundingProductController;
 use App\Http\Controllers\Api\FundingReportController;
 use App\Http\Controllers\Api\GeneratedNumberController;
 use App\Http\Controllers\Api\LoanChargeController;
+use App\Http\Controllers\Api\LoanCollateralDocumentController;
 use App\Http\Controllers\Api\LoanController;
 use App\Http\Controllers\Api\LoanDiaryNoteController;
 use App\Http\Controllers\Api\LoanDocumentController;
@@ -36,6 +37,11 @@ use App\Http\Controllers\Api\LoanWaiverController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SalesExecutiveCommissionController;
+use App\Http\Controllers\Api\SpeedDraftCollateralController;
+use App\Http\Controllers\Api\SpeedDraftCollateralDocumentController;
+use App\Http\Controllers\Api\SpeedDraftController;
+use App\Http\Controllers\Api\SpeedDraftPaymentController;
+use App\Http\Controllers\Api\SpeedDraftTypeController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\VendorController;
 use Illuminate\Support\Facades\Route;
@@ -173,6 +179,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('loans/{loan}/documents', [LoanDocumentController::class, 'store'])->middleware('perm:Active Loans,Create');
     Route::delete('loans/{loan}/documents/{document}', [LoanDocumentController::class, 'destroy'])->middleware('perm:Active Loans,Delete');
 
+    // --- Loan Management: Collateral Documents (e.g. vehicle photos, RC book copy) ---
+    Route::get('loans/{loan}/collateral/{collateral}/documents/{document}/file', [LoanCollateralDocumentController::class, 'show'])->middleware('perm:Loan Applications,View');
+    Route::post('loans/{loan}/collateral/{collateral}/documents', [LoanCollateralDocumentController::class, 'store'])->middleware('perm:Loan Applications,Create');
+    Route::delete('loans/{loan}/collateral/{collateral}/documents/{document}', [LoanCollateralDocumentController::class, 'destroy'])->middleware('perm:Loan Applications,Delete');
+
     // --- Loan Management: Diarizing (follow-up notes) ---
     Route::get('loans/{loan}/diary-notes', [LoanDiaryNoteController::class, 'index'])->middleware('perm:Active Loans,View');
     Route::post('loans/{loan}/diary-notes', [LoanDiaryNoteController::class, 'store'])->middleware('perm:Active Loans,Create');
@@ -184,6 +195,41 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('loans/{loan}/waivers', [LoanWaiverController::class, 'index'])->middleware('perm:Active Loans,View');
     Route::post('loans/{loan}/waivers', [LoanWaiverController::class, 'store'])->middleware('admin');
     Route::delete('loan-waivers/{waiver}', [LoanWaiverController::class, 'destroy'])->middleware('admin');
+
+    // --- Speed Drafts: Types ---
+    Route::get('speed-draft-types', [SpeedDraftTypeController::class, 'index'])->middleware('perm:Speed Draft Types,View');
+    Route::post('speed-draft-types', [SpeedDraftTypeController::class, 'store'])->middleware('perm:Speed Draft Types,Create');
+    Route::put('speed-draft-types/{speedDraftType}', [SpeedDraftTypeController::class, 'update'])->middleware('perm:Speed Draft Types,Edit');
+    Route::delete('speed-draft-types/{speedDraftType}', [SpeedDraftTypeController::class, 'destroy'])->middleware('perm:Speed Draft Types,Delete');
+
+    // --- Speed Drafts: Drafts (Loans / Mortgages / Gold Pawning / Leases, interest-only repayment) ---
+    Route::get('speed-drafts', [SpeedDraftController::class, 'index'])->middleware('perm:Speed Drafts,View');
+    // Flat path (not speed-drafts/overdue) so it can never collide with the speed-drafts/{speedDraft} route below.
+    Route::get('speed-drafts-overdue', [SpeedDraftController::class, 'overdue'])->middleware('perm:Speed Drafts,View');
+    Route::get('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'show'])->middleware('perm:Speed Drafts,View');
+    Route::post('speed-drafts', [SpeedDraftController::class, 'store'])->middleware('perm:Speed Drafts,Create');
+    Route::put('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'update'])->middleware('perm:Speed Drafts,Edit');
+    Route::delete('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'destroy'])->middleware('perm:Speed Drafts,Delete');
+    Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve'])->middleware('perm:Speed Drafts,Approve');
+    Route::post('speed-drafts/{speedDraft}/reject', [SpeedDraftController::class, 'reject'])->middleware('perm:Speed Drafts,Approve');
+    Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware('perm:Speed Drafts,Approve');
+
+    // --- Speed Drafts: Collateral (Gold Pawning / Lease asset records) ---
+    Route::get('speed-drafts/{speedDraft}/collateral', [SpeedDraftCollateralController::class, 'index'])->middleware('perm:Speed Drafts,View');
+    Route::post('speed-drafts/{speedDraft}/collateral', [SpeedDraftCollateralController::class, 'store'])->middleware('perm:Speed Drafts,Edit');
+    Route::put('speed-draft-collateral/{collateral}', [SpeedDraftCollateralController::class, 'update'])->middleware('perm:Speed Drafts,Edit');
+    Route::delete('speed-draft-collateral/{collateral}', [SpeedDraftCollateralController::class, 'destroy'])->middleware('perm:Speed Drafts,Edit');
+
+    // --- Speed Drafts: Collateral Documents (e.g. gold item photos) ---
+    Route::get('speed-draft-collateral/{collateral}/documents/{document}/file', [SpeedDraftCollateralDocumentController::class, 'show'])->middleware('perm:Speed Drafts,View');
+    Route::post('speed-draft-collateral/{collateral}/documents', [SpeedDraftCollateralDocumentController::class, 'store'])->middleware('perm:Speed Drafts,Edit');
+    Route::delete('speed-draft-collateral/{collateral}/documents/{document}', [SpeedDraftCollateralDocumentController::class, 'destroy'])->middleware('perm:Speed Drafts,Edit');
+
+    // --- Speed Drafts: Payments (interest / capital-reduction / full settlement) ---
+    Route::get('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'index'])->middleware('perm:Speed Draft Payments,View');
+    Route::get('speed-drafts/{speedDraft}/next-receipt-no', [SpeedDraftPaymentController::class, 'nextReceiptNo'])->middleware('perm:Speed Draft Payments,Create');
+    Route::post('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'store'])->middleware('perm:Speed Draft Payments,Create');
+    Route::delete('speed-draft-payments/{payment}', [SpeedDraftPaymentController::class, 'destroy'])->middleware('perm:Speed Draft Payments,Delete');
 
     // --- Bank Management: Bank Accounts ---
     Route::get('bank-accounts', [BankAccountController::class, 'index'])->middleware('perm:Bank Accounts,View');

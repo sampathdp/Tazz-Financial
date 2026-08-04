@@ -9,7 +9,7 @@ class ChartOfAccount extends Model
 {
     protected $table = 'chart_of_accounts';
 
-    protected $fillable = ['code', 'name', 'type', 'normal_balance', 'parent_id', 'is_system', 'status'];
+    protected $fillable = ['code', 'name', 'account_type', 'normal_balance', 'parent_id', 'is_system', 'status'];
 
     protected $casts = [
         'is_system' => 'boolean',
@@ -30,14 +30,14 @@ class ChartOfAccount extends Model
         return $this->hasMany(JournalLine::class, 'account_id');
     }
 
-    public function cashTillLink()
+    public function cashAccount()
     {
-        return $this->hasOne(CashTillLink::class, 'account_id');
+        return $this->hasOne(CashAccount::class);
     }
 
-    public function bankAccountLink()
+    public function bankAccount()
     {
-        return $this->hasOne(BankAccountLink::class, 'account_id');
+        return $this->hasOne(BankAccount::class);
     }
 
     /** A seeded control account by its code (e.g. '1100', '4010') — throws with a clear message if the chart-of-accounts seed hasn't run, instead of a bare "trying to get property of null" further down. */
@@ -56,21 +56,20 @@ class ChartOfAccount extends Model
      */
     public static function forCashTill(CashAccount $till): self
     {
-        $link = CashTillLink::where('cash_account_id', $till->id)->first();
-        if ($link) {
-            return $link->account;
+        if ($till->chart_of_account_id) {
+            return $till->chartOfAccount;
         }
         $parent = static::system('1010');
         $account = static::create([
             'code' => "1010-{$till->id}",
             'name' => "Cash in Hand - {$till->name}",
-            'type' => 'Asset',
+            'account_type' => 'Asset',
             'normal_balance' => 'Debit',
             'parent_id' => $parent->id,
             'is_system' => false,
             'status' => $till->status,
         ]);
-        CashTillLink::create(['account_id' => $account->id, 'cash_account_id' => $till->id]);
+        $till->update(['chart_of_account_id' => $account->id]);
 
         return $account;
     }
@@ -78,21 +77,20 @@ class ChartOfAccount extends Model
     /** Bank equivalent of forCashTill() — see its docblock. */
     public static function forBankAccount(BankAccount $bank): self
     {
-        $link = BankAccountLink::where('bank_account_id', $bank->id)->first();
-        if ($link) {
-            return $link->account;
+        if ($bank->chart_of_account_id) {
+            return $bank->chartOfAccount;
         }
         $parent = static::system('1020');
         $account = static::create([
             'code' => "1020-{$bank->id}",
             'name' => "Bank - {$bank->name}",
-            'type' => 'Asset',
+            'account_type' => 'Asset',
             'normal_balance' => 'Debit',
             'parent_id' => $parent->id,
             'is_system' => false,
             'status' => $bank->status,
         ]);
-        BankAccountLink::create(['account_id' => $account->id, 'bank_account_id' => $bank->id]);
+        $bank->update(['chart_of_account_id' => $account->id]);
 
         return $account;
     }

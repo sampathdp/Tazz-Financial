@@ -57,13 +57,13 @@ interface ReceiptData { payment: LoanPayment; loan: Loan; balanceBefore: number 
    is just the date printed on the cheque, captured for the audit trail. This is
    distinct from "Record Cheque" (Post Dated Cheques), which logs a future cheque
    the same way — also untouched until realized. */
-function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBackDated, refNo, setRefNo, nextReceipt, bankName, setBankName, chequeDate, setChequeDate, notes, setNotes }: {
+function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBackDated, refNo, setRefNo, nextReceipt, bankId, setBankId, chequeDate, setChequeDate, notes, setNotes }: {
   method: PaymentMethod; setMethod: (v: PaymentMethod) => void
   paidAt: string; setPaidAt: (v: string) => void
   backDated: boolean; setBackDated: (v: boolean) => void
   refNo: string; setRefNo: (v: string) => void
   nextReceipt: string
-  bankName: string; setBankName: (v: string) => void
+  bankId: number | undefined; setBankId: (v: number | undefined) => void
   chequeDate: string; setChequeDate: (v: string) => void
   notes: string; setNotes: (v: string) => void
 }) {
@@ -87,7 +87,7 @@ function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBac
         ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
         : <Field label={REF_LABEL[method]}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
       {method === 'Cheque' && <>
-        <Field label="Bank"><BankSelect value={bankName} onChange={setBankName} /></Field>
+        <Field label="Bank"><BankSelect value={bankId} onChange={setBankId} /></Field>
         <Field label="Cheque Date"><Input type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} /></Field>
       </>}
       <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
@@ -112,7 +112,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [paidAt, setPaidAt] = useState(todayIso())
   const [payBackDated, setPayBackDated] = useState(false)
   const [refNo, setRefNo] = useState('')
-  const [payBankName, setPayBankName] = useState('')
+  const [payBankId, setPayBankId] = useState<number | undefined>(undefined)
   const [payChequeDate, setPayChequeDate] = useState(todayIso())
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
@@ -124,7 +124,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [settlePaidAt, setSettlePaidAt] = useState(todayIso())
   const [settleBackDated, setSettleBackDated] = useState(false)
   const [settleRefNo, setSettleRefNo] = useState('')
-  const [settleBankName, setSettleBankName] = useState('')
+  const [settleBankId, setSettleBankId] = useState<number | undefined>(undefined)
   const [settleChequeDate, setSettleChequeDate] = useState(todayIso())
   const [settleNotes, setSettleNotes] = useState('')
   const [settleBusy, setSettleBusy] = useState(false)
@@ -133,7 +133,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   // Record-cheque modal (Post Dated Cheques) — a record only, never applied to the balance.
   const [chequeOpen, setChequeOpen] = useState(false)
   const [chequeNo, setChequeNo] = useState('')
-  const [rcBankName, setRcBankName] = useState('')
+  const [rcBankId, setRcBankId] = useState<number | undefined>(undefined)
   const [rcChequeDate, setRcChequeDate] = useState(todayIso())
   const [chequeAmount, setChequeAmount] = useState('')
   const [chequeBusy, setChequeBusy] = useState(false)
@@ -170,7 +170,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const payable = loans.filter((l) => l.status === 'Active')
   const outstanding = selected ? outstandingOf(selected) : 0
   const totalPaid = (selected?.schedules || []).reduce((s, r) => s + num(r.paidAmount), 0)
-  const pendingSettlement = selected?.payments?.find((p) => p.isSettlement && p.approvalStatus === 'PendingApproval')
+  const pendingSettlement = selected?.payments?.find((p) => p.paymentType === 'Settlement' && p.approvalStatus === 'PendingApproval')
   const allSchedules = (selected?.schedules || []).slice().sort((a, b) => a.installmentNo - b.installmentNo)
   const paymentHistory = (selected?.payments || []).slice().sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
   const scheduleRows = scheduleTab === 'paid' ? allSchedules.filter((s) => s.status === 'Paid')
@@ -178,9 +178,9 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     : allSchedules
   const locked = !!pendingSettlement
 
-  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankName(''); setPayChequeDate(todayIso()); setNotes(''); setErr('') }
-  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleRefNo(''); setSettleBankName(''); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
-  const resetChequeForm = () => { setChequeOpen(false); setChequeNo(''); setRcBankName(''); setRcChequeDate(todayIso()); setChequeAmount(''); setChequeErr('') }
+  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('') }
+  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleRefNo(''); setSettleBankId(undefined); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
+  const resetChequeForm = () => { setChequeOpen(false); setChequeNo(''); setRcBankId(undefined); setRcChequeDate(todayIso()); setChequeAmount(''); setChequeErr('') }
 
   const pickLoan = async (_n: string, opt?: Loan) => {
     resetPayForm(); resetSettleForm(); resetChequeForm(); setScheduleTab('unpaid'); setPanelTab('history')
@@ -197,19 +197,19 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   }
 
   const openPay = () => {
-    setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankName(''); setPayChequeDate(todayIso()); setNotes(''); setErr('')
+    setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
   }
 
   const record = async () => {
     if (!selected) return
     if (!amount || Number(amount) <= 0) { setErr('Enter a payment amount.'); return }
-    if (method === 'Cheque' && (!payBankName || !payChequeDate)) { setErr('Bank and Cheque Date are required for a cheque payment.'); return }
+    if (method === 'Cheque' && (!payBankId || !payChequeDate)) { setErr('Bank and Cheque Date are required for a cheque payment.'); return }
     setBusy(true); setErr('')
     try {
       const balanceBefore = outstandingOf(selected)
       const payment = await loanPaymentsApi.create(selected.id, {
         amount, paymentMethod: method, paidAt, receiptNo: refNo || undefined,
-        bankName: method === 'Cheque' ? payBankName : undefined,
+        bankId: method === 'Cheque' ? payBankId : undefined,
         chequeDate: method === 'Cheque' ? payChequeDate : undefined,
         notes: notes || undefined,
       })
@@ -223,13 +223,13 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
   const submitSettlement = async () => {
     if (!selected) return
-    if (settleMethod === 'Cheque' && (!settleBankName || !settleChequeDate)) { setSettleErr('Bank and Cheque Date are required for a cheque settlement.'); return }
+    if (settleMethod === 'Cheque' && (!settleBankId || !settleChequeDate)) { setSettleErr('Bank and Cheque Date are required for a cheque settlement.'); return }
     setSettleBusy(true); setSettleErr('')
     try {
       await loanPaymentsApi.create(selected.id, {
         amount: outstanding, paymentMethod: settleMethod, paidAt: settlePaidAt,
         receiptNo: settleRefNo || undefined,
-        bankName: settleMethod === 'Cheque' ? settleBankName : undefined,
+        bankId: settleMethod === 'Cheque' ? settleBankId : undefined,
         chequeDate: settleMethod === 'Cheque' ? settleChequeDate : undefined,
         notes: settleNotes || undefined, isSettlement: true,
       })
@@ -243,10 +243,10 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
   const submitCheque = async () => {
     if (!selected) return
-    if (!chequeNo || !rcBankName || !chequeAmount) { setChequeErr('Cheque no., bank, and amount are required.'); return }
+    if (!chequeNo || !rcBankId || !chequeAmount) { setChequeErr('Cheque no., bank, and amount are required.'); return }
     setChequeBusy(true); setChequeErr('')
     try {
-      await loanPostDatedChequesApi.create(selected.id, { chequeNo, bankName: rcBankName, chequeDate: rcChequeDate, amount: chequeAmount })
+      await loanPostDatedChequesApi.create(selected.id, { chequeNo, bankId: rcBankId, chequeDate: rcChequeDate, amount: chequeAmount })
       resetChequeForm()
       notify.success('Cheque recorded', 'Track it on the loan\'s Post Dated Cheques tab')
     } catch (ex: any) {
@@ -292,7 +292,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       <div>
         <div className="row between wrap gap-2 no-print" style={{ marginBottom: 16 }}>
           <PageHead crumbs="Loan Management" title="Payment Receipt" icon="receipt"
-            sub={payment.isSettlement ? 'Settlement approved — loan closed. Print or issue the receipt below.'
+            sub={payment.paymentType === 'Settlement' ? 'Settlement approved — loan closed. Print or issue the receipt below.'
               : pendingClearance ? 'Cheque recorded — held pending clearance, not yet applied to the balance. Print or issue the receipt below.'
               : 'Payment recorded — print or issue the receipt below.'} />
         </div>
@@ -305,7 +305,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <div className="col gap-1" style={{ textAlign: 'center', marginBottom: 18, paddingBottom: 18, borderBottom: '1px dashed var(--line)' }}>
             <div style={{ fontFamily: 'Saira', fontWeight: 800, fontSize: 20 }}>{brand.name || 'Company'}</div>
             {brand.tagline && <div className="t-2" style={{ fontSize: 12 }}>{brand.tagline}</div>}
-            <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '.08em', marginTop: 8 }}>{payment.isSettlement ? 'FULL SETTLEMENT RECEIPT' : 'PAYMENT RECEIPT'}</div>
+            <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '.08em', marginTop: 8 }}>{payment.paymentType === 'Settlement' ? 'FULL SETTLEMENT RECEIPT' : 'PAYMENT RECEIPT'}</div>
           </div>
 
           <div className="row between" style={{ marginBottom: 14, fontSize: 13 }}>
@@ -317,17 +317,17 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             <div className="row between"><span className="t-2">Received From</span><b>{loan.customer?.fullName}</b></div>
             <div className="row between"><span className="t-2">NIC No</span><b>{loan.customer?.nicNo || '—'}</b></div>
             <div className="row between"><span className="t-2">Loan / Contract No</span><b>{loan.code}</b></div>
-            <div className="row between"><span className="t-2">Product</span><b>{loan.loanType?.name || '—'}</b></div>
-            {payment.isSettlement && <div className="row between"><span className="t-2">Loan Status</span><b>Closed</b></div>}
+            <div className="row between"><span className="t-2">Product</span><b>{loan.loanDetail?.loanType?.name || '—'}</b></div>
+            {payment.paymentType === 'Settlement' && <div className="row between"><span className="t-2">Loan Status</span><b>Closed</b></div>}
           </div>
 
           <div className="col gap-2" style={{ fontSize: 13, marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--line)' }}>
             <div className="row between"><span className="t-2">Payment Method</span><b>{METHOD_OPTIONS.find((m) => m.value === payment.paymentMethod)?.label || payment.paymentMethod}</b></div>
             {payment.receiptNo && <div className="row between"><span className="t-2">{REF_LABEL[payment.paymentMethod]}</span><b>{payment.receiptNo}</b></div>}
-            {payment.paymentMethod === 'Cheque' && payment.bankName && <div className="row between"><span className="t-2">Bank</span><b>{payment.bankName}</b></div>}
+            {payment.paymentMethod === 'Cheque' && payment.bank?.name && <div className="row between"><span className="t-2">Bank</span><b>{payment.bank.name}</b></div>}
             {payment.paymentMethod === 'Cheque' && payment.chequeDate && <div className="row between"><span className="t-2">Cheque Date</span><b>{dateOnly(payment.chequeDate)}</b></div>}
             {payment.notes && <div className="row between"><span className="t-2">Notes</span><b>{payment.notes}</b></div>}
-            {payment.isSettlement && <div className="row between"><span className="t-2">Approved By</span><b>{payment.approver?.name || '—'}</b></div>}
+            {payment.paymentType === 'Settlement' && <div className="row between"><span className="t-2">Approved By</span><b>{payment.approver?.name || '—'}</b></div>}
           </div>
 
           {pendingClearance && (
@@ -393,7 +393,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
               <div><span className="t-2">Customer: </span><b>{selected.customer?.fullName}</b></div>
               <div><span className="t-2">NIC: </span><b>{selected.customer?.nicNo || '—'}</b></div>
               <div><span className="t-2">Loan Code: </span><b>{selected.code}</b></div>
-              <div><span className="t-2">Product: </span><b>{selected.loanType?.name || '—'}</b></div>
+              <div><span className="t-2">Product: </span><b>{selected.loanDetail?.loanType?.name || '—'}</b></div>
               <div><span className="t-2">Status: </span><Badge tone="green" dot>{selected.status}</Badge></div>
               <div><span className="t-2">Outstanding Balance: </span><b style={{ fontFamily: 'JetBrains Mono', color: outstanding > 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(outstanding)}</b></div>
             </div>
@@ -407,7 +407,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 <div><span className="t-2">Method: </span><b>{METHOD_OPTIONS.find((m) => m.value === pendingSettlement.paymentMethod)?.label}</b></div>
                 <div><span className="t-2">Requested By: </span><b>{pendingSettlement.receiver?.name || '—'}</b></div>
                 <div><span className="t-2">Requested At: </span><b>{dateOnly(pendingSettlement.createdAt || pendingSettlement.paidAt)}</b></div>
-                {pendingSettlement.paymentMethod === 'Cheque' && pendingSettlement.bankName && <div><span className="t-2">Bank: </span><b>{pendingSettlement.bankName}</b></div>}
+                {pendingSettlement.paymentMethod === 'Cheque' && pendingSettlement.bank?.name && <div><span className="t-2">Bank: </span><b>{pendingSettlement.bank.name}</b></div>}
                 {pendingSettlement.paymentMethod === 'Cheque' && pendingSettlement.chequeDate && <div><span className="t-2">Cheque Date: </span><b>{dateOnly(pendingSettlement.chequeDate)}</b></div>}
               </div>
               {userCan(me, 'Loan Payments', 'Approve') ? (
@@ -434,7 +434,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 render={(p: LoanPayment) => <>
                   <Td mono style={{ fontWeight: 600 }}>{p.code}</Td>
                   <Td>{dateOnly(p.paidAt)}</Td>
-                  <Td>{METHOD_OPTIONS.find((m) => m.value === p.paymentMethod)?.label || p.paymentMethod}{p.isSettlement ? ' (Settlement)' : ''}</Td>
+                  <Td>{METHOD_OPTIONS.find((m) => m.value === p.paymentMethod)?.label || p.paymentMethod}{p.paymentType === 'Settlement' ? ' (Settlement)' : ''}</Td>
                   <Td mono align="right">{money(p.amount)}</Td>
                   <Td>{p.receiver?.name || '—'}</Td>
                   <Td align="center"><PaymentStatusBadge p={p} /></Td>
@@ -487,7 +487,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           </div>
           <Field label="Payment Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Up to ${money(outstanding)}`} /></Field>
           <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} backDated={payBackDated} setBackDated={setPayBackDated} refNo={refNo} setRefNo={setRefNo} nextReceipt={nextReceipt}
-            bankName={payBankName} setBankName={setPayBankName} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes} />
+            bankId={payBankId} setBankId={setPayBankId} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes} />
         </div>
       </Modal>
 
@@ -500,7 +500,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <ErrorBanner error={settleErr} style={{ marginBottom: 0 }} />
           <div className="t-2" style={{ fontSize: 12.5 }}>This pays off the full outstanding balance of <b style={{ fontFamily: 'JetBrains Mono' }}>{money(outstanding)}</b> and must be approved by a Branch Manager before the loan closes and the receipt can be printed.</div>
           <PaymentFields method={settleMethod} setMethod={setSettleMethod} paidAt={settlePaidAt} setPaidAt={setSettlePaidAt} backDated={settleBackDated} setBackDated={setSettleBackDated} refNo={settleRefNo} setRefNo={setSettleRefNo} nextReceipt={nextReceipt}
-            bankName={settleBankName} setBankName={setSettleBankName} chequeDate={settleChequeDate} setChequeDate={setSettleChequeDate} notes={settleNotes} setNotes={setSettleNotes} />
+            bankId={settleBankId} setBankId={setSettleBankId} chequeDate={settleChequeDate} setChequeDate={setSettleChequeDate} notes={settleNotes} setNotes={setSettleNotes} />
         </div>
       </Modal>
 
@@ -514,7 +514,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <div className="t-2" style={{ fontSize: 12.5 }}>This is a record only — it won't reduce the outstanding balance until the cheque is marked Realized on the loan's Post Dated Cheques tab.</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
             <Field label="Cheque No"><Input value={chequeNo} onChange={(e) => setChequeNo(e.target.value)} /></Field>
-            <Field label="Bank"><BankSelect value={rcBankName} onChange={setRcBankName} /></Field>
+            <Field label="Bank"><BankSelect value={rcBankId} onChange={setRcBankId} /></Field>
             <Field label="Cheque Date"><Input type="date" value={rcChequeDate} onChange={(e) => setRcChequeDate(e.target.value)} /></Field>
             <Field label="Amount"><Input type="number" value={chequeAmount} onChange={(e) => setChequeAmount(e.target.value)} /></Field>
           </div>
@@ -533,16 +533,16 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
               <div className="row between" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}>
                 <span className="t-2">Amount</span><span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700 }}>{money(p.amount)}</span>
               </div>
-              <div className="row between"><span className="t-2">Payment Method</span><b>{METHOD_OPTIONS.find((m) => m.value === p.paymentMethod)?.label || p.paymentMethod}{p.isSettlement ? ' (Settlement)' : ''}</b></div>
+              <div className="row between"><span className="t-2">Payment Method</span><b>{METHOD_OPTIONS.find((m) => m.value === p.paymentMethod)?.label || p.paymentMethod}{p.paymentType === 'Settlement' ? ' (Settlement)' : ''}</b></div>
               {p.receiptNo && <div className="row between"><span className="t-2">{REF_LABEL[p.paymentMethod]}</span><b>{p.receiptNo}</b></div>}
-              {p.paymentMethod === 'Cheque' && p.bankName && <div className="row between"><span className="t-2">Bank</span><b>{p.bankName}</b></div>}
+              {p.paymentMethod === 'Cheque' && p.bank?.name && <div className="row between"><span className="t-2">Bank</span><b>{p.bank.name}</b></div>}
               {p.paymentMethod === 'Cheque' && p.chequeDate && <div className="row between"><span className="t-2">Cheque Date</span><b>{dateOnly(p.chequeDate)}</b></div>}
               {p.paymentMethod === 'Cheque' && p.clearanceStatus && <div className="row between"><span className="t-2">Clearance</span><b>{p.clearanceStatus}</b></div>}
               {p.clearanceStatus === 'Realized' && p.realizedAt && <div className="row between"><span className="t-2">Realized On</span><b>{dateOnly(p.realizedAt)}</b></div>}
               {p.notes && <div className="row between"><span className="t-2">Notes</span><b>{p.notes}</b></div>}
               <div className="row between" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}><span className="t-2">Received By</span><b>{p.receiver?.name || '—'}</b></div>
-              {p.isSettlement && <div className="row between"><span className="t-2">Approval Status</span><b>{p.approvalStatus || '—'}</b></div>}
-              {p.isSettlement && p.approver?.name && <div className="row between"><span className="t-2">Approved By</span><b>{p.approver.name}{p.approvedAt ? ` · ${dateOnly(p.approvedAt)}` : ''}</b></div>}
+              {p.paymentType === 'Settlement' && <div className="row between"><span className="t-2">Approval Status</span><b>{p.approvalStatus || '—'}</b></div>}
+              {p.paymentType === 'Settlement' && p.approver?.name && <div className="row between"><span className="t-2">Approved By</span><b>{p.approver.name}{p.approvedAt ? ` · ${dateOnly(p.approvedAt)}` : ''}</b></div>}
               {p.status === 'Voided' && (
                 <div className="col gap-1" style={{ marginTop: 8, padding: '8px 12px', background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
                   <div>Voided {dateOnly(p.voidedAt)} by {p.voider?.name || '—'}</div>

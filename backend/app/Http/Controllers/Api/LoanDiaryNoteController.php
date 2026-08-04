@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\FacilityDiaryNote;
 use App\Models\Loan;
-use App\Models\LoanDiaryNote;
 use Illuminate\Http\Request;
 
 class LoanDiaryNoteController extends Controller
@@ -30,7 +30,7 @@ class LoanDiaryNoteController extends Controller
         return response()->json($note->load('creator:id,name'), 201);
     }
 
-    public function destroy(LoanDiaryNote $note)
+    public function destroy(FacilityDiaryNote $note)
     {
         $note->delete();
 

@@ -190,10 +190,10 @@ class DatabaseSeeder extends Seeder
     private function seedSampleBranches(Branch $headOffice): void
     {
         $kandy = Branch::updateOrCreate(['code' => 'KND'], [
-            'name' => 'Kandy', 'type' => 'Branch', 'status' => 'Active',
+            'name' => 'Kandy', 'branch_type' => 'Branch', 'status' => 'Active',
         ]);
         Branch::updateOrCreate(['code' => 'PRD-C'], [
-            'name' => 'Peradeniya Center', 'type' => 'Center', 'parent_id' => $kandy->id, 'status' => 'Active',
+            'name' => 'Peradeniya Center', 'branch_type' => 'Center', 'parent_id' => $kandy->id, 'status' => 'Active',
         ]);
     }
 
@@ -255,20 +255,27 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($people as $i => $p) {
-            Customer::updateOrCreate(['nic_no' => $p['nic']], [
+            $customer = Customer::updateOrCreate(['nic_no' => $p['nic']], [
                 'branch_id' => $headOffice->id,
                 'code' => 'CUS-' . str_pad((string) ($i + 1), 6, '0', STR_PAD_LEFT),
                 'full_name' => $p['name'],
                 'phone' => $p['phone'],
                 'occupation_type' => $p['occ'],
-                'employer_name' => $p['employer'] ?? null,
-                'job_title' => $p['job'] ?? null,
-                'business_name' => $p['biz'] ?? null,
                 'monthly_income' => $p['income'],
                 'is_guarantor' => $p['guarantor'] ?? false,
                 'status' => 'Active',
                 'created_by' => $admin->id,
             ]);
+
+            if (isset($p['employer'])) {
+                $customer->employmentDetail()->updateOrCreate([], [
+                    'employer_name' => $p['employer'],
+                    'job_title' => $p['job'] ?? null,
+                ]);
+            }
+            if (isset($p['biz'])) {
+                $customer->businessDetail()->updateOrCreate([], ['business_name' => $p['biz']]);
+            }
         }
     }
 }

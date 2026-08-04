@@ -4,9 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
+use App\Models\FacilityPayment;
+use App\Models\FacilityPostDatedCheque;
 use App\Models\Loan;
-use App\Models\LoanPayment;
-use App\Models\LoanPostDatedCheque;
 use App\Services\NumberGenerator;
 use App\Support\LoanLedgerPoster;
 use App\Support\LoanPaymentAllocator;
@@ -21,15 +21,15 @@ class LoanPostDatedChequeController extends Controller
 
     public function index(Loan $loan)
     {
-        return $loan->postDatedCheques()->with('creator:id,name')->get();
+        return $loan->postDatedCheques()->with(['creator:id,name', 'bank:id,name'])->get();
     }
 
     /**
      * Flat, cross-loan list for the Cheque Management screen — every cheque the
      * user's branch scope can see. Merges two sources:
-     *   - LoanPostDatedCheque: cheques handed over for future collection, with
+     *   - FacilityPostDatedCheque: cheques handed over for future collection, with
      *     a real Pending/Handed/Realized/Bounced/Returned workflow.
-     *   - LoanPayment rows recorded with paymentMethod=Cheque: held Pending
+     *   - FacilityPayment rows recorded with paymentMethod=Cheque: held Pending
      *     (not applied to the balance) until manually cleared via
      *     LoanPaymentController::clearCheque() — see PaymentReceipt.tsx's
      *     "Cheque" payment method vs. "Record Cheque" (Post Dated Cheques).
@@ -45,45 +45,47 @@ class LoanPostDatedChequeController extends Controller
         $toDate = $request->filled('to_date') ? (string) $request->input('to_date') : null;
         $today = now()->toDateString();
 
-        $postDated = LoanPostDatedCheque::with([
-            'loan:id,code,customer_id,branch_id',
-            'loan.customer:id,full_name',
-            'loan.branch:id,name,code',
+        $postDated = FacilityPostDatedCheque::with([
+            'facility:id,code,customer_id,branch_id',
+            'facility.customer:id,full_name',
+            'facility.branch:id,name,code',
             'creator:id,name',
-        ])->get()->map(fn (LoanPostDatedCheque $c) => [
+            'bank:id,name',
+        ])->get()->map(fn (FacilityPostDatedCheque $c) => [
             'id' => $c->id,
             'source' => 'PostDated',
             'cheque_no' => $c->cheque_no,
-            'bank_name' => $c->bank_name,
+            'bank_name' => $c->bank?->name,
             'cheque_date' => optional($c->cheque_date)->toDateString(),
             'realized_at' => optional($c->realized_at)->toDateString(),
             'amount' => $c->amount,
             'status' => $c->status,
-            'loan' => $this->loanSummary($c->loan),
+            'loan' => $this->loanSummary($c->facility),
             'creator' => $c->creator ? ['id' => $c->creator->id, 'name' => $c->creator->name] : null,
         ]);
 
-        $payments = LoanPayment::with([
-            'loan:id,code,customer_id,branch_id',
-            'loan.customer:id,full_name',
-            'loan.branch:id,name,code',
+        $payments = FacilityPayment::with([
+            'facility:id,code,customer_id,branch_id',
+            'facility.customer:id,full_name',
+            'facility.branch:id,name,code',
             'receiver:id,name',
+            'bank:id,name',
         ])
             ->where('payment_method', 'Cheque')
             ->where('approval_status', '!=', 'PendingApproval')
             // A cheque realized from the Post Dated Cheques flow already
-            // appears via $postDated above (with its own loan_payment_id
+            // appears via $postDated above (with its own facility_payment_id
             // link) — excluding it here keeps it from listing twice.
             ->whereDoesntHave('postDatedCheque')
             // Keep live payments plus ones voided specifically because the cheque
             // bounced (so its rejection still shows up in the history); drop
             // payments voided for any other reason (a cancelled receipt entirely).
             ->where(fn ($q) => $q->where('status', '!=', 'Voided')->orWhere('clearance_status', 'Bounced'))
-            ->get()->map(fn (LoanPayment $p) => [
+            ->get()->map(fn (FacilityPayment $p) => [
                 'id' => $p->id,
                 'source' => 'Payment',
                 'cheque_no' => $p->receipt_no,
-                'bank_name' => $p->bank_name,
+                'bank_name' => $p->bank?->name,
                 'cheque_date' => optional($p->cheque_date)->toDateString(),
                 'realized_at' => optional($p->realized_at)->toDateString(),
                 'amount' => $p->amount,
@@ -91,7 +93,7 @@ class LoanPostDatedChequeController extends Controller
                 // clearance_status; an approved settlement cheque has none (its
                 // approval already implies it applied), so it reads as Realized.
                 'status' => $p->clearance_status ?? 'Realized',
-                'loan' => $this->loanSummary($p->loan),
+                'loan' => $this->loanSummary($p->facility),
                 'creator' => $p->receiver ? ['id' => $p->receiver->id, 'name' => $p->receiver->name] : null,
             ]);
 
@@ -144,8 +146,8 @@ class LoanPostDatedChequeController extends Controller
     public function store(Request $request, Loan $loan)
     {
         $data = $request->validate([
-            'cheque_no' => 'required|string|max:32',
-            'bank_name' => 'required|string|max:128',
+            'cheque_no' => 'required|string|max:20',
+            'bank_id' => 'required|exists:banks,id',
             'cheque_date' => 'required|date',
             'amount' => 'required|numeric|min:0.01',
             'notes' => 'nullable|string|max:255',
@@ -154,7 +156,7 @@ class LoanPostDatedChequeController extends Controller
         $cheque = $loan->postDatedCheques()->create([
             'branch_id' => $loan->branch_id,
             'cheque_no' => $data['cheque_no'],
-            'bank_name' => $data['bank_name'],
+            'bank_id' => $data['bank_id'],
             'cheque_date' => $data['cheque_date'],
             'amount' => $data['amount'],
             'status' => 'Pending',
@@ -162,10 +164,10 @@ class LoanPostDatedChequeController extends Controller
             'created_by' => $request->user()->id,
         ]);
 
-        return response()->json($cheque->load('creator:id,name'), 201);
+        return response()->json($cheque->load(['creator:id,name', 'bank:id,name']), 201);
     }
 
-    public function updateStatus(Request $request, LoanPostDatedCheque $cheque)
+    public function updateStatus(Request $request, FacilityPostDatedCheque $cheque)
     {
         $data = $request->validate([
             'status' => ['required', Rule::in(self::STATUSES)],
@@ -181,7 +183,7 @@ class LoanPostDatedChequeController extends Controller
             if ($cheque->status === 'Realized') {
                 return response()->json(['message' => 'This cheque has already been realized.'], 422);
             }
-            $loan = $cheque->loan;
+            $loan = Loan::findOrFail($cheque->credit_facility_id);
             $asOf = Carbon::parse($data['realized_at']);
             $outstanding = LoanPaymentAllocator::outstandingBalance($loan, $asOf);
             if ((float) $cheque->amount > $outstanding) {
@@ -196,21 +198,21 @@ class LoanPostDatedChequeController extends Controller
                     'type_code' => 'CQ',
                     'user_id' => $request->user()->id,
                 ]);
-                $payment = LoanPayment::create([
+                $payment = FacilityPayment::create([
                     'code' => $code,
-                    'loan_id' => $loan->id,
+                    'credit_facility_id' => $loan->id,
                     'branch_id' => $loan->branch_id,
                     'amount' => $cheque->amount,
                     'payment_method' => 'Cheque',
+                    'payment_type' => 'Regular',
                     'clearance_status' => 'Realized',
                     'received_by' => $request->user()->id,
                     'paid_at' => $asOf,
                     'receipt_no' => $cheque->cheque_no,
-                    'bank_name' => $cheque->bank_name,
+                    'bank_id' => $cheque->bank_id,
                     'cheque_date' => $cheque->cheque_date,
                     'realized_at' => $asOf,
                     'notes' => $data['notes'] ?? $cheque->notes,
-                    'is_settlement' => false,
                     'approval_status' => 'Approved',
                 ]);
                 NumberGenerator::attach($code, $payment);
@@ -221,7 +223,7 @@ class LoanPostDatedChequeController extends Controller
                 $cheque->update([
                     'status' => 'Realized',
                     'realized_at' => $asOf,
-                    'loan_payment_id' => $payment->id,
+                    'facility_payment_id' => $payment->id,
                     'notes' => $data['notes'] ?? $cheque->notes,
                 ]);
             });
@@ -233,10 +235,10 @@ class LoanPostDatedChequeController extends Controller
             ]);
         }
 
-        return $cheque->fresh()->load('creator:id,name');
+        return $cheque->fresh()->load(['creator:id,name', 'bank:id,name']);
     }
 
-    public function destroy(LoanPostDatedCheque $cheque)
+    public function destroy(FacilityPostDatedCheque $cheque)
     {
         if ($cheque->status === 'Realized') {
             return response()->json(['message' => 'This cheque has already been realized and applied to the loan — void the linked payment instead of deleting the cheque record.'], 422);

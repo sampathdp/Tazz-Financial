@@ -3,28 +3,31 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\HasPublicUuid;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Model;
 
 class Customer extends Model
 {
-    use BelongsToBranch, SoftDeletes;
+    use BelongsToBranch, HasPublicUuid, SoftDeletes;
 
     protected $fillable = [
-        'branch_id', 'code', 'full_name', 'title', 'surname', 'name_in_full', 'initials',
+        'branch_id', 'code', 'full_name', 'title', 'surname', 'name_denoted_by_initials', 'initials',
         'nic_no', 'passport_no', 'driving_license_no',
         'dob', 'gender', 'phone', 'alt_phone', 'email', 'address',
-        'occupation_type', 'employer_name', 'job_title', 'employer_address', 'employer_phone', 'employment_start_date',
-        'business_name', 'business_reg_no', 'business_type', 'business_address', 'business_phone',
-        'monthly_income', 'photo_path', 'status', 'is_guarantor', 'notes', 'created_by',
+        'occupation_type', 'monthly_income', 'photo_path', 'status', 'is_guarantor', 'notes', 'created_by',
     ];
 
     protected $casts = [
         'dob' => 'date',
-        'employment_start_date' => 'date',
         'monthly_income' => 'decimal:2',
         'is_guarantor' => 'boolean',
     ];
+
+    // Generated column backing customers_nic_no_active_unique — an
+    // implementation detail of the soft-delete-safe NIC constraint, not data
+    // callers should ever read (see the create_customers_table migration).
+    protected $hidden = ['nic_no_active'];
 
     protected static function booted(): void
     {
@@ -52,5 +55,17 @@ class Customer extends Model
     public function documents()
     {
         return $this->hasMany(CustomerDocument::class);
+    }
+
+    /** Populated only when occupation_type = Employed. */
+    public function employmentDetail()
+    {
+        return $this->hasOne(CustomerEmploymentDetail::class);
+    }
+
+    /** Populated only when occupation_type = SelfEmployed | BusinessOwner. */
+    public function businessDetail()
+    {
+        return $this->hasOne(CustomerBusinessDetail::class);
     }
 }

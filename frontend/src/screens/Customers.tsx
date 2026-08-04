@@ -129,7 +129,7 @@ function LoanHistoryTable({ loans, loading, showBorrower, onOpen, empty }: {
       rows={loans} empty={empty}
       render={(l) => <>
         <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{l.code}</Td>
-        <Td>{l.loanType?.name || '—'}</Td>
+        <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
         {showBorrower && <Td>{l.customer?.fullName || '—'}</Td>}
         <Td align="right" mono>{money(l.principalAmount)}</Td>
         <Td align="right" mono>{l.status === 'Approved' ? '—' : money(num(l.totalDueSum) - num(l.paidSum))}</Td>
@@ -229,20 +229,20 @@ function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer
           </div>
           {isEmployed && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', fontSize: 12.5, padding: 12, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
-              <div><span className="t-2">Employer: </span><b>{customer.employerName || '—'}</b></div>
-              <div><span className="t-2">Job Title: </span><b>{customer.jobTitle || '—'}</b></div>
-              <div><span className="t-2">Employer Phone: </span><b>{customer.employerPhone || '—'}</b></div>
-              <div><span className="t-2">Employed Since: </span><b>{dateOnly(customer.employmentStartDate)}</b></div>
-              <div style={{ gridColumn: '1/-1' }}><span className="t-2">Employer Address: </span><b>{customer.employerAddress || '—'}</b></div>
+              <div><span className="t-2">Employer: </span><b>{customer.employmentDetail?.employerName || '—'}</b></div>
+              <div><span className="t-2">Job Title: </span><b>{customer.employmentDetail?.jobTitle || '—'}</b></div>
+              <div><span className="t-2">Employer Phone: </span><b>{customer.employmentDetail?.employerPhone || '—'}</b></div>
+              <div><span className="t-2">Employed Since: </span><b>{dateOnly(customer.employmentDetail?.employmentStartDate)}</b></div>
+              <div style={{ gridColumn: '1/-1' }}><span className="t-2">Employer Address: </span><b>{customer.employmentDetail?.employerAddress || '—'}</b></div>
             </div>
           )}
           {isBusiness && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', fontSize: 12.5, padding: 12, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
-              <div><span className="t-2">Business Name: </span><b>{customer.businessName || '—'}</b></div>
-              <div><span className="t-2">Reg. No: </span><b>{customer.businessRegNo || '—'}</b></div>
-              <div><span className="t-2">Business Type: </span><b>{customer.businessType || '—'}</b></div>
-              <div><span className="t-2">Business Phone: </span><b>{customer.businessPhone || '—'}</b></div>
-              <div style={{ gridColumn: '1/-1' }}><span className="t-2">Business Address: </span><b>{customer.businessAddress || '—'}</b></div>
+              <div><span className="t-2">Business Name: </span><b>{customer.businessDetail?.businessName || '—'}</b></div>
+              <div><span className="t-2">Reg. No: </span><b>{customer.businessDetail?.businessRegNo || '—'}</b></div>
+              <div><span className="t-2">Business Type: </span><b>{customer.businessDetail?.businessType || '—'}</b></div>
+              <div><span className="t-2">Business Phone: </span><b>{customer.businessDetail?.businessPhone || '—'}</b></div>
+              <div style={{ gridColumn: '1/-1' }}><span className="t-2">Business Address: </span><b>{customer.businessDetail?.businessAddress || '—'}</b></div>
             </div>
           )}
         </Card>
@@ -310,7 +310,13 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   }, [])
 
   const openCreate = () => { setEditing(null); setForm(blankForm()); setErr(''); setMode('form') }
-  const openEdit = (c: Customer) => { setEditing(c); setForm({ ...c }); setErr(''); setMode('form') }
+  const openEdit = (c: Customer) => {
+    setEditing(c)
+    // employmentDetail/businessDetail are read-only nested relations — flatten
+    // them back onto the form's flat fields, which is what the save API accepts.
+    setForm({ ...c, ...(c.employmentDetail || {}), ...(c.businessDetail || {}) })
+    setErr(''); setMode('form')
+  }
   const openView = async (c: Customer) => {
     setMode('view'); setViewLoading(true)
     try { setViewing(await customersApi.get(c.id)) } catch { setViewing(c) } finally { setViewLoading(false) }
@@ -369,7 +375,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     return (
       <div>
         <PageHead crumbs={`Customers / ${viewing?.fullName || ''}`} title={loanLoading || !viewingLoan ? 'Loading…' : `Loan ${viewingLoan.code}`} icon="coins"
-          sub={viewingLoan ? `${viewingLoan.customer?.fullName} — ${viewingLoan.loanType?.name}` : undefined}
+          sub={viewingLoan ? `${viewingLoan.customer?.fullName} — ${viewingLoan.loanDetail?.loanType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={backToCustomer}>← Back to Customer</Btn>} />
         {loanLoading || !viewingLoan ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
           : <LoanDetail loan={viewingLoan} me={me} onChanged={() => openLoan(viewingLoan.id)} go={go} context="active" />}
@@ -393,7 +399,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
           <div className="eyebrow" style={{ marginBottom: 10 }}>Personal Details</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Field label="Surname"><Input value={form.surname || ''} onChange={(e) => set('surname', e.target.value)} /></Field>
-            <Field label="Initial in Full without Surname"><Input value={form.nameInFull || ''} onChange={(e) => set('nameInFull', e.target.value)} /></Field>
+            <Field label="Initial in Full without Surname"><Input value={form.nameDenotedByInitials || ''} onChange={(e) => set('nameDenotedByInitials', e.target.value)} /></Field>
             <Field label="Initial"><Input value={form.initials || ''} onChange={(e) => set('initials', e.target.value)} placeholder="e.g. J.K." /></Field>
             <Field label="Title"><Select value={form.title || ''} onChange={(e) => set('title', (e.target.value || undefined) as any)}>
               <option value="">—</option>{TITLE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}

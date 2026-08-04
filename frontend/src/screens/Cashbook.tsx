@@ -22,7 +22,7 @@ const blankAccountForm = (): AccountForm => ({ status: 'Active', openingBalance:
 
 interface EntryForm extends Partial<CashbookEntry> {}
 const blankEntryForm = (accountId?: number): EntryForm =>
-  ({ cashAccountId: accountId, type: 'In', category: 'Other', entryDate: new Date().toISOString().slice(0, 10) })
+  ({ cashAccountId: accountId, direction: 'In', category: 'Other', entryDate: new Date().toISOString().slice(0, 10) })
 
 export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -129,10 +129,10 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           render={(e) => <>
             <Td>{e.entryDate}</Td>
             <Td>{e.cashAccount?.name || '—'}</Td>
-            <Td><Badge tone={e.type === 'In' ? 'green' : 'red'}>{e.type}</Badge></Td>
+            <Td><Badge tone={e.direction === 'In' ? 'green' : 'red'}>{e.direction}</Badge></Td>
             <Td><Badge tone="neutral">{e.category}</Badge></Td>
             <Td c="var(--tx-2)" style={{ fontSize: 12.5, whiteSpace: 'normal' }}>{e.description || '—'}</Td>
-            <Td align="right" mono c={e.type === 'In' ? 'var(--ok)' : 'var(--bad)'}>{e.type === 'In' ? '+' : '-'}{money(e.amount)}</Td>
+            <Td align="right" mono c={e.direction === 'In' ? 'var(--ok)' : 'var(--bad)'}>{e.direction === 'In' ? '+' : '-'}{money(e.amount)}</Td>
             <Td align="right" mono>{money(e.balanceAfter)}</Td>
             <Td align="right"><Can user={me} module="Cashbook" action="Delete"><button className="mms-act" title="Delete" onClick={() => removeEntry(e)}><Icon n="trash" s={15} /></button></Can></Td>
           </>} />}
@@ -150,7 +150,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </Select></Field>
           <Field label="Date"><DateInput value={entryForm.entryDate} onChange={(iso) => setEntryForm((s) => ({ ...s, entryDate: iso }))} /></Field>
-          <Field label="Type"><Select value={entryForm.type || 'In'} onChange={(e) => setEntryForm((s) => ({ ...s, type: e.target.value as any }))}>
+          <Field label="Type"><Select value={entryForm.direction || 'In'} onChange={(e) => setEntryForm((s) => ({ ...s, direction: e.target.value as any }))}>
             {types.map((t) => <option key={t}>{t}</option>)}
           </Select></Field>
           <Field label="Category"><Select value={entryForm.category || 'Other'} onChange={(e) => setEntryForm((s) => ({ ...s, category: e.target.value as any }))}>
@@ -342,14 +342,14 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
 
 interface ReconForm {
   receiptsToBeCancelled: number | string; encashment: number | string; cashFloat: number | string; pettyCash: number | string
-  otherBranchCash: number | string; otherBranchCode: string
-  otherBranchCheque: number | string; otherBranchChequeCode: string
+  otherBranchCash: number | string; otherBranchId: number | ''
+  otherBranchCheque: number | string; otherBranchChequeBranchId: number | ''
   denominations: Denominations; coinsAmount: number | string
   notes: string
 }
 const blankReconForm = (): ReconForm => ({
   receiptsToBeCancelled: 0, encashment: 0, cashFloat: 0, pettyCash: 0,
-  otherBranchCash: 0, otherBranchCode: '', otherBranchCheque: 0, otherBranchChequeCode: '',
+  otherBranchCash: 0, otherBranchId: '', otherBranchCheque: 0, otherBranchChequeBranchId: '',
   denominations: {}, coinsAmount: 0, notes: '',
 })
 const NOTE_COLS: number[][] = [[5000, 2000, 1000, 500, 200, 100], [50, 20, 10]]
@@ -381,9 +381,9 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
           cashFloat: e?.cashFloat ?? 0,
           pettyCash: e?.pettyCash ?? 0,
           otherBranchCash: e?.otherBranchCash ?? 0,
-          otherBranchCode: e?.otherBranchCode ?? '',
+          otherBranchId: e?.otherBranchId ?? '',
           otherBranchCheque: e?.otherBranchCheque ?? 0,
-          otherBranchChequeCode: e?.otherBranchChequeCode ?? '',
+          otherBranchChequeBranchId: e?.otherBranchChequeBranchId ?? '',
           denominations: e?.denominations ?? {},
           coinsAmount: e?.coinsAmount ?? 0,
           notes: e?.notes ?? '',
@@ -416,7 +416,11 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
     if (!branchId) { setErr('Branch is required.'); return }
     setBusy(true); setErr('')
     try {
-      await cashReconciliationsApi.save({ branchId, asAtDate: date, ...form })
+      await cashReconciliationsApi.save({
+        branchId, asAtDate: date, ...form,
+        otherBranchId: form.otherBranchId || null,
+        otherBranchChequeBranchId: form.otherBranchChequeBranchId || null,
+      })
       loadSummary(); loadHistory()
       notify.success('Cash reconciliation saved')
     } catch (ex: any) {
@@ -468,9 +472,9 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
             <div className="row gap-2">
               <Field label="Other Branch (Cash)" style={{ flex: 1 }}><Input type="number" step="0.01" value={form.otherBranchCash} onChange={(e) => setForm((s) => ({ ...s, otherBranchCash: e.target.value }))} /></Field>
               <Field label="Branch" style={{ width: 160 }}>
-                <Select value={form.otherBranchCode} onChange={(e) => setForm((s) => ({ ...s, otherBranchCode: e.target.value }))}>
+                <Select value={form.otherBranchId} onChange={(e) => setForm((s) => ({ ...s, otherBranchId: Number(e.target.value) || '' }))}>
                   <option value="">—</option>
-                  {branches.filter((b) => b.id !== branchId).map((b) => <option key={b.id} value={b.code}>{b.code} — {b.name}</option>)}
+                  {branches.filter((b) => b.id !== branchId).map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}
                 </Select>
               </Field>
             </div>
@@ -485,9 +489,9 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
             <div className="row gap-2">
               <Field label="Other Branch (Cheque)" style={{ flex: 1 }}><Input type="number" step="0.01" value={form.otherBranchCheque} onChange={(e) => setForm((s) => ({ ...s, otherBranchCheque: e.target.value }))} /></Field>
               <Field label="Branch" style={{ width: 160 }}>
-                <Select value={form.otherBranchChequeCode} onChange={(e) => setForm((s) => ({ ...s, otherBranchChequeCode: e.target.value }))}>
+                <Select value={form.otherBranchChequeBranchId} onChange={(e) => setForm((s) => ({ ...s, otherBranchChequeBranchId: Number(e.target.value) || '' }))}>
                   <option value="">—</option>
-                  {branches.filter((b) => b.id !== branchId).map((b) => <option key={b.id} value={b.code}>{b.code} — {b.name}</option>)}
+                  {branches.filter((b) => b.id !== branchId).map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}
                 </Select>
               </Field>
             </div>

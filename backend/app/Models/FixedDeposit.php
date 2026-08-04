@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasPublicUuid;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 
 class FixedDeposit extends Model
 {
+    use HasPublicUuid;
+
     protected $fillable = [
         'fd_number', 'branch_id', 'customer_id', 'funding_product_id',
         'principal_amount', 'interest_rate_percent', 'interest_payment_method',

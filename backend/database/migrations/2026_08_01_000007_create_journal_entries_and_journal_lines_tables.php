@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -22,19 +23,27 @@ return new class extends Migration
             $table->id();
             $table->string('code', 32)->unique();
             $table->date('entry_date');
-            // Which business record caused this posting (LoanPayment, PaymentVoucher, ...).
-            $table->string('reference_type', 191)->nullable();
-            $table->unsignedBigInteger('reference_id')->nullable();
+            // Which business record caused this posting. A closed, business-
+            // meaningful enum instead of a raw Laravel class-name string (the
+            // original `reference_type` stored e.g. "App\Models\LoanPayment" —
+            // an implementation detail leaking into the database, silently wrong
+            // the instant that class is renamed or namespaced differently).
+            $table->enum('source_type', [
+                'Loan', 'Customer', 'LoanPayment', 'SpeedDraft', 'SpeedDraftPayment',
+                'FdDeposit', 'FixedDeposit', 'FdWithdrawal', 'FdInterestPayment', 'FdRenewal',
+                'CashTransfer', 'Expense', 'PaymentVoucher', 'ManualAdjustment', 'OpeningBalance',
+            ])->nullable();
+            $table->unsignedBigInteger('source_id')->nullable();
             $table->string('description', 255)->nullable();
             $table->foreignId('branch_id')->nullable()->constrained('branches')->nullOnDelete();
             $table->foreignId('posted_by')->nullable()->constrained('users')->nullOnDelete();
             $table->dateTime('posted_at')->nullable();
-            $table->string('status', 16)->default('Posted'); // Posted | Reversed
+            $table->enum('status', ['Posted', 'Reversed'])->default('Posted');
             // Set on the reversing entry, pointing back at the entry it reverses —
             // never edit or delete a posted entry, only reverse it (see LedgerPoster::reverse()).
             $table->foreignId('reversal_of_id')->nullable()->constrained('journal_entries')->nullOnDelete();
             $table->timestamps();
-            $table->index(['reference_type', 'reference_id']);
+            $table->index(['source_type', 'source_id']);
             $table->index('entry_date');
         });
 
@@ -42,12 +51,25 @@ return new class extends Migration
             $table->id();
             $table->foreignId('journal_entry_id')->constrained('journal_entries')->cascadeOnDelete();
             $table->foreignId('account_id')->constrained('chart_of_accounts')->restrictOnDelete();
-            $table->decimal('debit', 15, 2)->default(0);
-            $table->decimal('credit', 15, 2)->default(0);
+            // Denormalized copy of the parent entry's entry_date — deliberate,
+            // not an oversight. This table is the highest-write-volume table in
+            // the system (every payment/expense/transfer posts >=2 rows here),
+            // and its dominant query ("every line for account X between two
+            // dates" — the account ledger / trial balance report) would
+            // otherwise force a join to journal_entries on every row, forever.
+            $table->date('entry_date');
+            $table->decimal('debit', 15, 2)->unsigned()->default(0);
+            $table->decimal('credit', 15, 2)->unsigned()->default(0);
             $table->string('description', 255)->nullable();
             $table->timestamps();
-            $table->index('account_id');
+            $table->index(['account_id', 'entry_date']);
         });
+
+        DB::statement(<<<'SQL'
+            ALTER TABLE `journal_lines` ADD CONSTRAINT `chk_journal_lines_one_side` CHECK (
+                (`debit` = 0 AND `credit` > 0) OR (`debit` > 0 AND `credit` = 0)
+            )
+        SQL);
     }
 
     public function down(): void

@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class Branch extends Model
 {
-    protected $fillable = ['parent_id', 'name', 'code', 'type', 'address', 'phone', 'email', 'is_head_office', 'status'];
+    protected $fillable = ['parent_id', 'name', 'code', 'branch_type', 'address', 'phone', 'email', 'is_head_office', 'status'];
 
     protected $casts = [
         'is_head_office' => 'boolean',

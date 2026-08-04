@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\GeneratedNumber;
+use App\Models\DocumentNumberLog;
 use App\Models\NumberSequence;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -28,11 +28,7 @@ use Illuminate\Support\Facades\DB;
  * loan/receipt at the same instant must land on different {SEQ} values, not
  * both "00001". Concurrent requests — even from different branches — safely
  * serialize on the same number_sequences row via lockForUpdate() below, since
- * branch is no longer part of that row's key. See the
- * 2026_07_30_000001_globalize_number_sequences migration for the one-time
- * seed that carried each key's highest already-issued sequence forward when
- * this stopped being per-branch, so the switch never re-issues a number that
- * some branch already used this year.
+ * branch is no longer part of that row's key.
  */
 class NumberGenerator
 {
@@ -54,17 +50,24 @@ class NumberGenerator
         'journal' => 'JV-{YEAR:2}-{SEQ:6}',
         'expense' => '{BRANCH}-EXP-{YEAR:2}-{SEQ:5}',
         'payment_voucher' => '{BRANCH}-PV-{YEAR:2}-{SEQ:5}',
+        // No {CODE} — Speed Draft Types aren't wired into the loan_type_id/
+        // funding_product_id key columns (see SpeedDraftController::store()),
+        // so numbering is one company-wide series per year across all types.
+        'speed_draft' => '{BRANCH}-SD-{YEAR:2}-{SEQ:6}',
+        // {TYPE} is the payment's intent short code (INT/CAP/SET) — see
+        // SpeedDraftPaymentController::TYPE_CODES.
+        'speed_draft_payment' => '{BRANCH}-SDP-{TYPE}-{YEAR:2}-{MONTH:2}-{SEQ:5}',
     ];
 
     // Modules whose {CODE} placeholder is keyed off a funding product (own
-    // number_sequences column) rather than a loan type — see the
-    // 2026_07_28_102007 migration for why they can't share loan_type_id.
+    // number_sequences column) rather than a loan type, since a funding
+    // product and a loan type are different tables with different id spaces.
     private const PRODUCT_SCOPED_MODULES = ['fixed_deposit'];
 
     public static function next(string $module, array $context = [], ?string $format = null): string
     {
         $format ??= self::formatFor($module);
-        [$key, $branchId, $loanTypeId, $productId, $year] = self::resolveKey($module, $context, $format);
+        $key = self::resolveKey($module, $context, $format);
 
         // Atomically create the counter row if this is the first number ever
         // issued for this key, then lock it so concurrent requests serialize
@@ -76,14 +79,12 @@ class NumberGenerator
 
         $number = self::format($format, $context, $sequence);
 
-        GeneratedNumber::create([
-            'module' => $module,
-            'number' => $number,
-            'branch_id' => $branchId ?: null,
-            'loan_type_id' => $loanTypeId ?: null,
-            'funding_product_id' => $productId ?: null,
-            'year' => $year ?: null,
-            'sequence' => $sequence,
+        // source_type/source_id start null and are filled in shortly after by
+        // attach(), once the record this number is for actually has an id —
+        // see the document_number_log migration.
+        DocumentNumberLog::create([
+            'number_sequence_id' => $seqRow->id,
+            'generated_number' => $number,
             'generated_by' => $context['user_id'] ?? null,
         ]);
 
@@ -94,14 +95,14 @@ class NumberGenerator
      * Non-mutating preview of the number `next()` would produce for this key right
      * now — for UI display before the record actually exists (e.g. showing the
      * receipt number a payment form will get, before it's submitted). Doesn't lock
-     * or increment the counter and doesn't write a generated_numbers row, so it's
+     * or increment the counter and doesn't write a document_number_log row, so it's
      * only a preview: if another request calls next() for the same key first, the
      * real number issued can end up different from what was previewed here.
      */
     public static function peek(string $module, array $context = [], ?string $format = null): string
     {
         $format ??= self::formatFor($module);
-        [$key] = self::resolveKey($module, $context, $format);
+        $key = self::resolveKey($module, $context, $format);
 
         $sequence = (int) (NumberSequence::where($key)->value('last_sequence') ?? 0) + 1;
 
@@ -111,7 +112,10 @@ class NumberGenerator
     /** Links a just-generated number to the record it was created for. */
     public static function attach(string $number, Model $record): void
     {
-        GeneratedNumber::where('number', $number)->latest('id')->first()?->reference()->associate($record)->save();
+        DocumentNumberLog::where('generated_number', $number)->latest('id')->first()?->update([
+            'source_type' => class_basename($record),
+            'source_id' => $record->getKey(),
+        ]);
     }
 
     private static function formatFor(string $module): string
@@ -119,27 +123,29 @@ class NumberGenerator
         return self::DEFAULT_FORMATS[$module] ?? throw new \InvalidArgumentException("No default reference format for module [{$module}].");
     }
 
-    /** @return array{0: array, 1: int, 2: int, 3: int, 4: int} [sequence key, branch id, loan type id, product id, year] */
+    /**
+     * The number_sequences row key for this module/context — null (not 0)
+     * for every dimension the format doesn't use, since branch_id/
+     * loan_type_id/funding_product_id/year are now real nullable foreign
+     * keys rather than 0-sentinel columns (see that table's migration).
+     */
     private static function resolveKey(string $module, array $context, string $format): array
     {
-        $usesBranch = str_contains($format, '{BRANCH}');
         $usesCode = str_contains($format, '{CODE}');
         $isProductScoped = in_array($module, self::PRODUCT_SCOPED_MODULES, true);
         $usesLoanType = $usesCode && !$isProductScoped;
         $usesProduct = $usesCode && $isProductScoped;
         $usesYear = (bool) preg_match('/\{YEAR(?::\d+)?\}/', $format);
 
-        // Kept only for the {BRANCH} placeholder substitution and the audit
-        // trail on generated_numbers below — NOT part of the sequence key
-        // (see class docblock: {SEQ} is always one global series).
-        $branchId = $usesBranch ? (int) ($context['branch_id'] ?? 0) : 0;
-        $loanTypeId = $usesLoanType ? (int) ($context['loan_type_id'] ?? 0) : 0;
-        $productId = $usesProduct ? (int) ($context['funding_product_id'] ?? 0) : 0;
-        $year = $usesYear ? (int) now()->format('Y') : 0;
-
-        $key = ['module' => $module, 'branch_id' => 0, 'loan_type_id' => $loanTypeId, 'funding_product_id' => $productId, 'year' => $year];
-
-        return [$key, $branchId, $loanTypeId, $productId, $year];
+        return [
+            'module' => $module,
+            // Reserved on number_sequences but never part of today's key —
+            // {SEQ} is always one company-wide series (see class docblock).
+            'branch_id' => null,
+            'loan_type_id' => $usesLoanType ? ($context['loan_type_id'] ?? null) : null,
+            'funding_product_id' => $usesProduct ? ($context['funding_product_id'] ?? null) : null,
+            'year' => $usesYear ? (int) now()->format('Y') : null,
+        ];
     }
 
     private static function format(string $format, array $context, int $sequence): string

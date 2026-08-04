@@ -9,7 +9,7 @@ import { Icon } from '../components/Icon'
 import {
   chartOfAccountsApi, journalEntriesApi, accountingReportsApi,
   type ChartOfAccount, type AccountType, type JournalEntry, type GeneralLedgerReport,
-  type TrialBalanceRow, type ProfitLossReport, type BalanceSheetReport, type AuthUser,
+  type TrialBalanceRow, type ProfitLossReport, type BalanceSheetReport, type LedgerDriftReport, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -25,7 +25,7 @@ const typeTone = (t: AccountType) => t === 'Asset' ? 'blue' : t === 'Liability' 
 
 const TYPES: AccountType[] = ['Asset', 'Liability', 'Equity', 'Income', 'Expense']
 const defaultNormalBalance = (t: AccountType) => (t === 'Asset' || t === 'Expense' ? 'Debit' : 'Credit')
-const blankAccountForm = (): Partial<ChartOfAccount> => ({ type: 'Expense', normalBalance: 'Debit', status: 'Active' })
+const blankAccountForm = (): Partial<ChartOfAccount> => ({ accountType: 'Expense', normalBalance: 'Debit', status: 'Active' })
 
 export function ChartOfAccountsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -53,7 +53,7 @@ export function ChartOfAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
     setBusy(true); setErr('')
     try {
       if (editing) await chartOfAccountsApi.update(editing.id, editing.isSystem ? { name: form.name, status: form.status } : form)
-      else await chartOfAccountsApi.create({ code: form.code!, name: form.name!, type: form.type!, normalBalance: form.normalBalance!, parentId: form.parentId || null, status: form.status })
+      else await chartOfAccountsApi.create({ code: form.code!, name: form.name!, accountType: form.accountType!, normalBalance: form.normalBalance!, parentId: form.parentId || null, status: form.status })
       close(); refresh()
       notify.success(editing ? 'Account updated' : 'Account created', form.name)
     } catch (ex: any) {
@@ -77,7 +77,7 @@ export function ChartOfAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
                 {r.name}{r.isSystem && <Icon n="shield" s={12} c="var(--tx-3)" />}
               </span>
             </Td>
-            <Td align="center"><Badge tone={typeTone(r.type)} dot>{r.type}</Badge></Td>
+            <Td align="center"><Badge tone={typeTone(r.accountType)} dot>{r.accountType}</Badge></Td>
             <Td>{r.parent ? `${r.parent.code} ${r.parent.name}` : '—'}</Td>
             <Td align="right" mono>{money(r.balance)}</Td>
             <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
@@ -98,7 +98,7 @@ export function ChartOfAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
           <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           {!editing?.isSystem && <>
             <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value }))} disabled={!!editing} /></Field>
-            <Field label="Type"><Select value={form.type} onChange={(e) => { const t = e.target.value as AccountType; setForm((s) => ({ ...s, type: t, normalBalance: defaultNormalBalance(t) })) }}>
+            <Field label="Type"><Select value={form.accountType} onChange={(e) => { const t = e.target.value as AccountType; setForm((s) => ({ ...s, accountType: t, normalBalance: defaultNormalBalance(t) })) }}>
               {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </Select></Field>
             <Field label="Normal Balance"><Select value={form.normalBalance} onChange={(e) => setForm((s) => ({ ...s, normalBalance: e.target.value as any }))}>
@@ -155,7 +155,7 @@ export function JournalEntriesScreen({ user: _me }: { go: Go; user?: AuthUser | 
             <Td>{dateOnly(e.entryDate)}</Td>
             <Td mono>{e.code}</Td>
             <Td>{e.description || '—'}</Td>
-            <Td c="var(--tx-2)" style={{ fontSize: 12 }}>{e.referenceType ? e.referenceType.split('\\').pop() + ' #' + e.referenceId : '—'}</Td>
+            <Td c="var(--tx-2)" style={{ fontSize: 12 }}>{e.sourceType ? e.sourceType + ' #' + e.sourceId : '—'}</Td>
             <Td align="right" mono>{money(total(e))}</Td>
             <Td align="center"><Badge tone={e.status === 'Posted' ? 'green' : 'neutral'} dot>{e.status}</Badge></Td>
           </>} />}
@@ -255,7 +255,7 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
           render={(r) => <>
             <Td mono>{r.code}</Td>
             <Td>{r.name}</Td>
-            <Td align="center"><Badge tone={typeTone(r.type)} dot>{r.type}</Badge></Td>
+            <Td align="center"><Badge tone={typeTone(r.accountType)} dot>{r.accountType}</Badge></Td>
             <Td align="right" mono>{Number(r.totalDebit) > 0 ? money(r.totalDebit) : '—'}</Td>
             <Td align="right" mono>{Number(r.totalCredit) > 0 ? money(r.totalCredit) : '—'}</Td>
             <Td align="right" mono style={{ fontWeight: 600 }}>{money(r.balance)}</Td>
@@ -368,6 +368,50 @@ export function BalanceSheetScreen({ user: _me }: { go: Go; user?: AuthUser | nu
           </Card>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ---------------------------- Ledger Drift ---------------------------- */
+/* Cash/bank tills keep their own current_balance ("book") alongside a fully
+   derived chart_of_accounts/journal_lines balance for the same account (see
+   the ledger-account-link migration) — two independent ledgers for the same
+   money, with nothing enforcing they agree. This checks that they actually
+   do, instead of assuming it. */
+
+export function LedgerDriftScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
+  const [asOf, setAsOf] = useState('')
+  const [report, setReport] = useState<LedgerDriftReport | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const refresh = () => {
+    setLoading(true)
+    accountingReportsApi.ledgerDrift(asOf || undefined).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [asOf]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div>
+      <PageHead crumbs="Accounting" title="Ledger Drift" icon="adjust"
+        sub="Book balance (cash/bank account) vs. the general ledger's own derived balance for the same account"
+        actions={report && <Badge tone={report.hasDrift ? 'red' : 'green'} dot>{report.hasDrift ? 'Drift found' : 'In agreement'}</Badge>} />
+      <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
+      <Card pad={0}>
+        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        <Table cols={[{ label: 'Account' }, { label: 'Kind', align: 'center' }, { label: 'GL Account' }, { label: 'Book Balance', align: 'right' }, { label: 'GL Balance', align: 'right' }, { label: 'Variance', align: 'right' }]}
+          empty="No cash tills or bank accounts linked to the ledger yet" rows={report?.rows || []}
+          render={(r) => {
+            const drifted = Number(r.variance) !== 0
+            return <>
+              <Td style={{ fontWeight: 600 }}>{r.name}</Td>
+              <Td align="center"><Badge tone={r.kind === 'CashAccount' ? 'blue' : 'amber'} dot>{r.kind === 'CashAccount' ? 'Cash' : 'Bank'}</Badge></Td>
+              <Td mono c="var(--tx-2)">{r.glAccountCode}</Td>
+              <Td align="right" mono>{money(r.bookBalance)}</Td>
+              <Td align="right" mono>{money(r.glBalance)}</Td>
+              <Td align="right" mono style={{ fontWeight: 700, color: drifted ? 'var(--bad)' : undefined }}>{money(r.variance)}</Td>
+            </>
+          }} />}
+      </Card>
     </div>
   )
 }

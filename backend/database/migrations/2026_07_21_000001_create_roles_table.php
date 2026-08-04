@@ -10,7 +10,7 @@ class CreateRolesTable extends Migration
     {
         Schema::create('roles', function (Blueprint $table) {
             $table->id();
-            $table->string('name', 64);
+            $table->string('name', 64)->unique();
             $table->string('slug', 64)->unique();
             $table->string('description', 255)->nullable();
             // The 'admin' role: bypasses the permission matrix entirely and cannot be edited/deleted.

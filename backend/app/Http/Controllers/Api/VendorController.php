@@ -44,12 +44,12 @@ class VendorController extends Controller
     {
         return $request->validate([
             'name' => ['required', 'string', 'max:191'],
-            'code' => ['required', 'string', 'max:32', Rule::unique('vendors', 'code')->ignore($vendor?->id)],
-            'contact_person' => 'nullable|string|max:191',
-            'phone' => 'nullable|string|max:32',
-            'email' => 'nullable|email|max:190',
-            'address' => 'nullable|string',
-            'tax_no' => 'nullable|string|max:64',
+            'code' => ['required', 'string', 'max:24', Rule::unique('vendors', 'code')->ignore($vendor?->id)],
+            'contact_person' => 'nullable|string|max:150',
+            'phone' => 'nullable|string|max:20',
+            'email' => 'nullable|email|max:255',
+            'address' => 'nullable|string|max:255',
+            'tax_no' => 'nullable|string|max:32',
             'status' => [Rule::in(['Active', 'Inactive'])],
         ]);
     }

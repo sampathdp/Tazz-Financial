@@ -11,7 +11,7 @@ class ExpenseCategoryController extends Controller
 {
     public function index()
     {
-        return ExpenseCategory::with('account:id,code,name')->orderBy('sort_order')->orderBy('name')->get();
+        return ExpenseCategory::with('chartOfAccount:id,code,name')->orderBy('sort_order')->orderBy('name')->get();
     }
 
     public function store(Request $request)
@@ -43,13 +43,13 @@ class ExpenseCategoryController extends Controller
             'name' => ['required', 'string', 'max:128'],
             // `code` is the table's unique key (not `name`) — it predates this
             // controller (see schema.sql, spec 3.9) and already enforces this.
-            'code' => ['required', 'string', 'max:32', Rule::unique('expense_categories', 'code')->ignore($expenseCategory?->id)],
+            'code' => ['required', 'string', 'max:24', Rule::unique('expense_categories', 'code')->ignore($expenseCategory?->id)],
             'description' => 'nullable|string|max:255',
             // Which chart-of-accounts expense account this category's spend posts
             // to (see LedgerPoster) — required before any expense in this
             // category can be paid, but not at category-creation time, since
             // the Masters screen and the Chart of Accounts are managed separately.
-            'account_id' => 'nullable|exists:chart_of_accounts,id',
+            'chart_of_account_id' => 'nullable|exists:chart_of_accounts,id',
             'status' => [Rule::in(['Active', 'Inactive'])],
             'sort_order' => 'nullable|integer',
         ]);

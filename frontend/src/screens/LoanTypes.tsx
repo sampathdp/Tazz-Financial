@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { loanTypesApi, type LoanType, type LoanFrequency, type InterestMethod, type AuthUser } from '../api'
+import { loanTypesApi, type LoanType, type LoanTypeCategory, type LoanFrequency, type InterestMethod, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -18,6 +18,14 @@ const INTEREST_METHOD_OPTIONS: { value: InterestMethod; label: string }[] = [
   { value: 'flat', label: 'Flat' },
   { value: 'reducing_balance', label: 'Reducing Balance' },
 ]
+const CATEGORY_OPTIONS: { value: LoanTypeCategory; label: string }[] = [
+  { value: 'Consumer', label: 'Consumer Loan' },
+  { value: 'Leasing', label: 'Leasing' },
+  { value: 'Mortgage', label: 'Mortgage' },
+  { value: 'RealEstate', label: 'Real Estate' },
+  { value: 'SME', label: 'SME' },
+]
+const categoryLabel = (c?: LoanTypeCategory | null) => CATEGORY_OPTIONS.find((o) => o.value === c)?.label || c
 
 const blankForm = (parentId: number | null): Partial<LoanType> => ({
   parentId: parentId ?? undefined,
@@ -77,6 +85,7 @@ function Row({ node, depth, me, onAddChild, onEdit, onDelete }: {
           <span style={{ fontWeight: 600, fontSize: 13.5 }}>{node.name}</span>
           <span className="t-2" style={{ fontSize: 11 }}>{node.code}</span>
           <Badge tone={node.isProduct ? 'blue' : 'neutral'}>{node.isProduct ? 'Product' : 'Category'}</Badge>
+          {node.category && <Badge tone="amber">{categoryLabel(node.category)}</Badge>}
           {node.frequency && <Badge tone="neutral">{FREQ_OPTIONS.find((f) => f.value === node.frequency)?.label}</Badge>}
           {node.frequency === 'daily' && node.collectionDays === 'week_days' && <Badge tone="amber">Week Days Only</Badge>}
           {node.status === 'Inactive' && <Badge tone="red" dot>Inactive</Badge>}
@@ -134,6 +143,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
     if (!form.name) { setErr('Name is required.'); return }
     if (!form.code) { setErr('Code is required.'); return }
     if (form.isProduct) {
+      if (!form.category) { setErr('Type is required for a loan product.'); return }
       if (!form.interestMethod) { setErr('Interest method is required for a loan product.'); return }
       if (form.interestRatePercent == null || form.interestRatePercent === '') { setErr('Interest rate is required for a loan product.'); return }
       if (form.minAmount == null || form.maxAmount == null || form.minAmount === '' || form.maxAmount === '') { setErr('Min/Max amount is required for a loan product.'); return }
@@ -193,6 +203,9 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
         {form.isProduct && (
           <div style={{ padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)', marginBottom: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Field label="Type"><Select value={form.category || ''} onChange={(e) => set('category', (e.target.value || null) as any)}>
+                <option value="">—</option>{CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select></Field>
               <Field label="Repayment Frequency"><Select value={form.frequency || ''} onChange={(e) => set('frequency', (e.target.value || null) as any)}>
                 <option value="">—</option>{FREQ_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select></Field>
@@ -216,7 +229,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
               <Field label="Min Term (months)"><Input type="number" value={form.minTermMonths ?? ''} onChange={(e) => set('minTermMonths', Number(e.target.value) as any)} /></Field>
               <Field label="Max Term (months)"><Input type="number" value={form.maxTermMonths ?? ''} onChange={(e) => set('maxTermMonths', Number(e.target.value) as any)} /></Field>
               <Field label="Grace Period (Days)"><Input type="number" min={0} value={form.gracePeriodDays ?? 5} onChange={(e) => set('gracePeriodDays', Number(e.target.value) as any)} /></Field>
-              <Field label="Default Charges Rate %"><Input type="number" step="0.001" value={form.defaultChargeRatePercent ?? ''} onChange={(e) => set('defaultChargeRatePercent', e.target.value as any)} /></Field>
+              <Field label="Default Charges Rate % (Monthly)"><Input type="number" step="0.001" value={form.defaultChargeRatePercent ?? ''} onChange={(e) => set('defaultChargeRatePercent', e.target.value as any)} /></Field>
               <Field label="Processing Fee %"><Input type="number" step="0.001" value={form.processingFeePercent ?? ''} onChange={(e) => set('processingFeePercent', e.target.value as any)} /></Field>
               <Field label="Sales Executive Commission Type"><Select value={form.commissionType || 'fixed'} onChange={(e) => set('commissionType', e.target.value as any)}>
                 <option value="fixed">Fixed Amount</option><option value="percentage">Percentage of Interest Collected</option>
@@ -229,7 +242,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
               </Field>
             </div>
             <div className="t-2" style={{ fontSize: 11.5, marginTop: 8 }}>
-              Default Charges = an overdue installment's unpaid balance × Default Charges Rate% × days late, starting once it's past the Grace Period.
+              Default Charges = an overdue installment's unpaid balance × (Default Charges Rate% ÷ 30) × days late, starting once it's past the Grace Period. The rate is monthly, prorated to a daily rate.
             </div>
 
             <div style={{ marginTop: 16 }}>

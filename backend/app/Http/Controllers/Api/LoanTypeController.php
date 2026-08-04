@@ -10,6 +10,7 @@ use Illuminate\Validation\ValidationException;
 
 class LoanTypeController extends Controller
 {
+    private const CATEGORIES = ['Consumer', 'Leasing', 'Mortgage', 'RealEstate', 'SME'];
     private const FREQUENCIES = ['daily', 'weekly', 'monthly'];
     private const INTEREST_METHODS = ['flat', 'reducing_balance'];
     private const RATE_PERIODS = ['monthly', 'annual'];
@@ -59,9 +60,10 @@ class LoanTypeController extends Controller
         $data = $request->validate([
             'parent_id' => ['nullable', 'exists:loan_types,id'],
             'name' => 'required|string|max:128',
-            'code' => ['required', 'string', 'max:32', Rule::unique('loan_types', 'code')->ignore($loanType?->id)],
-            'reference_format' => 'nullable|string|max:191',
+            'code' => ['required', 'string', 'max:24', Rule::unique('loan_types', 'code')->ignore($loanType?->id)],
+            'reference_format' => 'nullable|string|max:64',
             'is_product' => 'boolean',
+            'category' => [$isProduct ? 'required' : 'nullable', Rule::in(self::CATEGORIES)],
             'frequency' => ['nullable', Rule::in(self::FREQUENCIES)],
             'collection_days' => ['nullable', Rule::in(self::COLLECTION_DAYS)],
             'sort_order' => 'nullable|integer|min:0',
@@ -89,7 +91,7 @@ class LoanTypeController extends Controller
 
         // Non-product (category) nodes carry no terms of their own.
         if (!$isProduct) {
-            foreach (['frequency', 'interest_method', 'interest_rate_percent', 'min_amount', 'max_amount', 'min_term_months', 'max_term_months'] as $field) {
+            foreach (['category', 'frequency', 'interest_method', 'interest_rate_percent', 'min_amount', 'max_amount', 'min_term_months', 'max_term_months'] as $field) {
                 $data[$field] = null;
             }
             $data['collection_days'] = 'all_days';

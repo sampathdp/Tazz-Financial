@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\FacilityCharge;
 use App\Models\Loan;
-use App\Models\LoanCharge;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -40,7 +40,7 @@ class LoanChargeController extends Controller
         return response()->json($charge->load('creator:id,name'), 201);
     }
 
-    public function update(Request $request, LoanCharge $charge)
+    public function update(Request $request, FacilityCharge $charge)
     {
         $data = $request->validate([
             'charge_type' => ['sometimes', Rule::in(self::CHARGE_TYPES)],
@@ -55,7 +55,7 @@ class LoanChargeController extends Controller
         return $charge->load('creator:id,name');
     }
 
-    public function destroy(LoanCharge $charge)
+    public function destroy(FacilityCharge $charge)
     {
         $charge->delete();
 

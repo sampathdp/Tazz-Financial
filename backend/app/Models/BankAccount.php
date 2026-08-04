@@ -7,8 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class BankAccount extends Model
 {
     protected $fillable = [
-        'branch_id', 'name', 'bank_name', 'branch_name', 'account_number', 'account_type',
-        'currency', 'opening_balance', 'current_balance', 'status', 'notes',
+        'branch_id', 'chart_of_account_id', 'bank_id', 'name', 'bank_branch_name', 'account_number',
+        'account_type', 'currency', 'opening_balance', 'current_balance', 'status', 'notes',
     ];
 
     protected $casts = [
@@ -21,6 +21,11 @@ class BankAccount extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function bank()
+    {
+        return $this->belongsTo(Bank::class);
+    }
+
     public function transactions()
     {
         return $this->hasMany(BankTransaction::class)->orderByDesc('txn_date')->orderByDesc('id');
@@ -31,9 +36,9 @@ class BankAccount extends Model
         return $this->hasMany(BankReconciliation::class)->orderByDesc('statement_date');
     }
 
-    /** The chart_of_accounts leaf row this bank account posts to in the general ledger — see BankAccountLink. */
-    public function ledgerLink()
+    /** The chart_of_accounts leaf row this bank account posts to in the general ledger. */
+    public function chartOfAccount()
     {
-        return $this->hasOne(BankAccountLink::class);
+        return $this->belongsTo(ChartOfAccount::class);
     }
 }

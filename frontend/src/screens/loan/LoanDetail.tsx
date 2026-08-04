@@ -6,12 +6,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, BankSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import {
-  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, api,
+  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, api,
   type Loan, type LoanStatus, type LoanSchedule,
   type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type LoanDocType, type LoanDiaryNote,
-  type LoanCharge, type PaymentMethod,
-  type AuthUser,
+  type LoanCharge, type PaymentMethod, type LoanCollateralDocument,
+  type FacilityStatusEventType, type AuthUser,
 } from '../../api'
 import { Can } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
@@ -67,11 +67,12 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
     return <DisburseForm loan={loan} me={me} onChanged={onChanged} notify={notify} />
   }
 
+  const eventOf = (type: FacilityStatusEventType) => (loan.statusEvents || []).find((e) => e.eventType === type)
   const flags: { label: string; on?: boolean; at?: string | null }[] = [
-    { label: 'Terminated', on: loan.isTerminated, at: loan.terminatedAt },
-    { label: 'Legal', on: loan.isLegal, at: loan.legalAt },
-    { label: 'Seizing Order', on: loan.seizingOrderIssued, at: loan.seizingOrderAt },
-    { label: 'Repossessed', on: loan.isRepossessed, at: loan.repossessedAt },
+    { label: 'Terminated', on: !!eventOf('Terminated'), at: eventOf('Terminated')?.eventDate },
+    { label: 'Legal', on: !!eventOf('Legal'), at: eventOf('Legal')?.eventDate },
+    { label: 'Seizing Order', on: !!eventOf('SeizingOrderIssued'), at: eventOf('SeizingOrderIssued')?.eventDate },
+    { label: 'Repossessed', on: !!eventOf('Repossessed'), at: eventOf('Repossessed')?.eventDate },
   ].filter((f) => f.on)
 
   return (
@@ -156,9 +157,9 @@ function ContractSummary({ loan }: { loan: Loan }) {
         { label: 'Contract No', value: loan.code, icon: 'doc', tone: 'blue' },
         { label: 'Member', value: <>{loan.customer?.fullName}<div className="t-2" style={{ fontSize: 11, fontWeight: 400 }}>{loan.customer?.code}</div></>, icon: 'users', tone: 'blue' },
         { label: 'Branch', value: loan.branch?.name || '—', icon: 'building', tone: 'neutral' },
-        { label: 'Product', value: loan.loanType?.name || '—', icon: 'tag', tone: 'blue' },
+        { label: 'Product', value: loan.loanDetail?.loanType?.name || '—', icon: 'tag', tone: 'blue' },
         { label: 'Contract Amount', value: money(loan.principalAmount), icon: 'coins', tone: 'green' },
-        { label: 'Down Payment', value: money(loan.downPayment), icon: 'wallet', tone: 'neutral' },
+        { label: 'Down Payment', value: money(loan.loanDetail?.downPayment), icon: 'wallet', tone: 'neutral' },
         { label: 'Period', value: `${loan.termMonths} mo`, icon: 'calendar', tone: 'neutral' },
         { label: 'Interest Rate', value: `${loan.interestRatePercent}%`, icon: 'chart', tone: 'amber' },
         { label: 'Activated', value: dateOnly(loan.disbursedAt), icon: 'calendar', tone: 'green' },
@@ -229,13 +230,13 @@ function RecoveryDetails({ loan, me, onChanged, notify }: { loan: Loan; me?: Aut
   const r = loan.summary?.recovery
   const [editing, setEditing] = useState(false)
   const [officers, setOfficers] = useState<{ id: number; name: string }[]>([])
-  const [loanOfficerId, setLoanOfficerId] = useState<number | ''>(loan.loanOfficerId || '')
-  const [recoveryOfficerId, setRecoveryOfficerId] = useState<number | ''>(loan.recoveryOfficerId || '')
+  const [loanOfficerId, setLoanOfficerId] = useState<number | ''>(loan.loanDetail?.loanOfficerId || '')
+  const [recoveryOfficerId, setRecoveryOfficerId] = useState<number | ''>(loan.loanDetail?.recoveryOfficerId || '')
   const [busy, setBusy] = useState(false)
 
   const openEdit = () => {
     api.users.marketingExecutives().then(setOfficers).catch(() => setOfficers([]))
-    setLoanOfficerId(loan.loanOfficerId || ''); setRecoveryOfficerId(loan.recoveryOfficerId || '')
+    setLoanOfficerId(loan.loanDetail?.loanOfficerId || ''); setRecoveryOfficerId(loan.loanDetail?.recoveryOfficerId || '')
     setEditing(true)
   }
   const save = async () => {
@@ -253,8 +254,8 @@ function RecoveryDetails({ loan, me, onChanged, notify }: { loan: Loan; me?: Aut
         <Can user={me} module="Active Loans" action="Edit"><Btn size="sm" variant="solid" icon="edit" onClick={openEdit}>Assign Officers</Btn></Can>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5 }}>
-        <div><span className="t-2">Follow Up Officer: </span>{loan.recoveryOfficer?.name || '—'}</div>
-        <div><span className="t-2">Marketing Executive: </span>{loan.loanOfficer?.name || '—'}</div>
+        <div><span className="t-2">Follow Up Officer: </span>{loan.loanDetail?.recoveryOfficer?.name || '—'}</div>
+        <div><span className="t-2">Marketing Executive: </span>{loan.loanDetail?.loanOfficer?.name || '—'}</div>
         <div><span className="t-2">Last Payment: </span>{r?.lastPaymentDate ? `${dateOnly(r.lastPaymentDate)} · ${money(r.lastPaymentAmount)}` : '—'}</div>
         <div><span className="t-2">Fallen Due Rentals: </span>{r?.fallenDueRentals ?? 0}</div>
         <div><span className="t-2">Settled Rentals: </span>{r?.settledRentals ?? 0}</div>
@@ -343,7 +344,7 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
                 <div className="row gap-2" style={{ alignItems: 'center' }}>
                   <Icon n="cheque" s={15} c="var(--warn)" />
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.code} · Cheque</span>
-                  <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.bankName}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · awaiting clearance, not yet applied to the schedule</span>
+                  <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.bank?.name}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · awaiting clearance, not yet applied to the schedule</span>
                 </div>
                 <div className="row gap-2" style={{ alignItems: 'center' }}>
                   <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
@@ -391,17 +392,46 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
 
 /* ---------- Security & Collateral ---------- */
 function SecurityPanel({ loan }: { loan: Loan }) {
-  const hasReference = !!(loan.referenceName || loan.referenceIdNo || loan.referenceAddress)
+  const notify = useNotify()
+  const hasReference = !!(loan.loanDetail?.referenceName || loan.loanDetail?.referenceIdNo || loan.loanDetail?.referenceAddress)
+  const viewDoc = async (collateralId: number, doc: LoanCollateralDocument) => {
+    try {
+      const blob = await loanCollateralDocumentsApi.download(loan.id, collateralId, doc.id)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank')
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch { notify.error('Could not open attachment') }
+  }
+  const insurance = loan.insurance
   return (
     <Card>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Security, Collateral & Equipment Details</div>
-      {!loan.guarantors?.length && !loan.collateral?.length && !hasReference && <div className="t-2" style={{ fontSize: 12.5 }}>No guarantors, collateral or reference person recorded.</div>}
+      {!loan.guarantors?.length && !loan.collateral?.length && !hasReference && !loan.loanDetail?.vehicleNo && !insurance && <div className="t-2" style={{ fontSize: 12.5 }}>No guarantors, collateral or reference person recorded.</div>}
+      {!!loan.loanDetail?.vehicleNo && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Vehicle</div>
+          <div style={{ fontSize: 12.5 }}><span className="t-2">Vehicle No: </span><b>{loan.loanDetail.vehicleNo}</b></div>
+        </div>
+      )}
+      {!!insurance && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Insurance Policy</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px', fontSize: 12.5 }}>
+            <div><span className="t-2">Company: </span>{insurance.insuranceCompany || '—'}</div>
+            <div><span className="t-2">Policy No: </span>{insurance.policyNo || '—'}</div>
+            <div><span className="t-2">Amount: </span>{insurance.amount != null ? money(insurance.amount) : '—'}</div>
+            <div><span className="t-2">Contact Person: </span>{insurance.contactPerson || '—'}</div>
+            <div><span className="t-2">Coverage: </span>{insurance.coverage || '—'}</div>
+            {insurance.remarks && <div style={{ gridColumn: '1/-1' }}><span className="t-2">Remark: </span>{insurance.remarks}</div>}
+          </div>
+        </div>
+      )}
       {hasReference && (<>
         <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Reference Person</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px', fontSize: 12.5, marginBottom: 14 }}>
-          <div><span className="t-2">Name: </span>{loan.referenceName || '—'}</div>
-          <div><span className="t-2">NIC / Other ID No: </span>{loan.referenceIdNo || '—'}</div>
-          <div><span className="t-2">Address: </span>{loan.referenceAddress || '—'}</div>
+          <div><span className="t-2">Name: </span>{loan.loanDetail?.referenceName || '—'}</div>
+          <div><span className="t-2">NIC / Other ID No: </span>{loan.loanDetail?.referenceIdNo || '—'}</div>
+          <div><span className="t-2">Address: </span>{loan.loanDetail?.referenceAddress || '—'}</div>
         </div>
       </>)}
       {!!loan.guarantors?.length && (<>
@@ -414,11 +444,34 @@ function SecurityPanel({ loan }: { loan: Loan }) {
       </>)}
       {!!loan.collateral?.length && (<>
         <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', margin: '14px 0 6px' }}>Collateral / Equipment</div>
-        {loan.collateral.map((c, i) => (
-          <div key={i} className="row between" style={{ padding: '6px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 12.5 }}>
-            <span>{c.type} — {c.description}</span><span className="t-2">{c.estimatedValue ? money(c.estimatedValue) : '—'}</span>
-          </div>
-        ))}
+        {loan.collateral.map((c, i) => {
+          const v = c.vehicleDetail
+          const vehicleBits = [
+            v?.vehicleType, v?.makeModel,
+            v?.registrationNo && `Reg: ${v.registrationNo}`,
+            v?.chassisNo && `Chassis: ${v.chassisNo}`,
+            v?.engineNo && `Engine: ${v.engineNo}`,
+            v?.yearOfManufacture && `Yr: ${v.yearOfManufacture}`,
+          ].filter(Boolean)
+          return (
+            <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <div className="row between" style={{ fontSize: 12.5 }}>
+                <span>{c.collateralType} — {c.description}</span><span className="t-2">{c.estimatedValue ? money(c.estimatedValue) : '—'}</span>
+              </div>
+              {!!vehicleBits.length && <div className="t-2" style={{ fontSize: 11.5, marginTop: 2 }}>{vehicleBits.join(' · ')}</div>}
+              {!!c.documents?.length && (
+                <div className="row gap-1 wrap" style={{ marginTop: 6 }}>
+                  {c.documents.map((d) => (
+                    <button key={d.id} className="mms-act" title="View attachment" onClick={() => viewDoc(c.id!, d)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', fontSize: 11, border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
+                      <Icon n="doc" s={12} /> {d.filePath.split('/').pop()}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </>)}
     </Card>
   )
@@ -445,7 +498,7 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         rows={cheques} empty="No post dated cheques"
         render={(c: LoanPostDatedCheque) => <>
           <Td mono>{c.chequeNo}</Td>
-          <Td>{c.bankName}</Td>
+          <Td>{c.bank?.name || '—'}</Td>
           <Td>{dateOnly(c.chequeDate)}</Td>
           <Td>{c.status === 'Realized' ? dateOnly(c.realizedAt) : '—'}</Td>
           <Td mono align="right">{money(c.amount)}</Td>
@@ -643,18 +696,22 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
 function StatusFlagsModal({ open, onClose, loan, onChanged, notify }: {
   open: boolean; onClose: () => void; loan: Loan; onChanged: () => void; notify: ReturnType<typeof useNotify>
 }) {
-  const [isTerminated, setIsTerminated] = useState(!!loan.isTerminated)
-  const [isLegal, setIsLegal] = useState(!!loan.isLegal)
-  const [seizingOrderIssued, setSeizingOrderIssued] = useState(!!loan.seizingOrderIssued)
-  const [isRepossessed, setIsRepossessed] = useState(!!loan.isRepossessed)
-  const [freezeDate, setFreezeDate] = useState(loan.freezeDate || '')
+  // Each checkbox here records a NEW FacilityStatusEvent row when checked and
+  // saved — it's a one-shot "log this occurrence now" action, not a toggle
+  // reflecting current state (the backend keeps an append-only history, not a
+  // boolean flag — see the badges/history list below for what's already recorded).
+  // So these always start unchecked, regardless of past events.
+  const [isTerminated, setIsTerminated] = useState(false)
+  const [isLegal, setIsLegal] = useState(false)
+  const [seizingOrderIssued, setSeizingOrderIssued] = useState(false)
+  const [isRepossessed, setIsRepossessed] = useState(false)
+  const [freezeDate, setFreezeDate] = useState(loan.loanDetail?.freezeDate || '')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!open) return
-    setIsTerminated(!!loan.isTerminated); setIsLegal(!!loan.isLegal)
-    setSeizingOrderIssued(!!loan.seizingOrderIssued); setIsRepossessed(!!loan.isRepossessed)
-    setFreezeDate(loan.freezeDate || '')
+    setIsTerminated(false); setIsLegal(false); setSeizingOrderIssued(false); setIsRepossessed(false)
+    setFreezeDate(loan.loanDetail?.freezeDate || '')
   }, [open, loan])
 
   const save = async () => {
@@ -672,17 +729,33 @@ function StatusFlagsModal({ open, onClose, loan, onChanged, notify }: {
     </label>
   )
 
+  const history = loan.statusEvents || []
+
   return (
     <Modal open={open} onClose={onClose} title="Contract Status Change" sub={loan.code} footer={<>
       <Btn variant="solid" onClick={onClose}>Cancel</Btn>
       <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Btn>
     </>}>
       <div className="col gap-3">
+        <div className="t-2" style={{ fontSize: 11.5 }}>Checking a box below logs a new occurrence now — it doesn't toggle an existing one off.</div>
         {row('Terminated', isTerminated, setIsTerminated)}
         {row('Legal', isLegal, setIsLegal)}
         {row('Seizing Order Issued', seizingOrderIssued, setSeizingOrderIssued)}
         {row('Repossessed', isRepossessed, setIsRepossessed)}
         <Field label="Freeze Date"><Input type="date" value={freezeDate} onChange={(e) => setFreezeDate(e.target.value)} /></Field>
+        {!!history.length && (
+          <div>
+            <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>History</div>
+            <div className="col gap-1">
+              {history.map((e) => (
+                <div key={e.id} className="row between" style={{ fontSize: 12 }}>
+                  <span>{e.eventType}{e.notes ? ` — ${e.notes}` : ''}</span>
+                  <span className="t-2">{dateOnly(e.eventDate)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   )
@@ -690,14 +763,14 @@ function StatusFlagsModal({ open, onClose, loan, onChanged, notify }: {
 
 /* ---------- Disburse (Approved -> Active) ---------- */
 function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
-  const financedAmount = num(loan.principalAmount) - num(loan.downPayment)
+  const financedAmount = num(loan.principalAmount) - num(loan.loanDetail?.downPayment)
   const [amount, setAmount] = useState<string>(String(financedAmount))
   const [disbursedAt, setDisbursedAt] = useState(todayIso())
   const [firstDate, setFirstDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  const feePercent = num(loan.loanType?.processingFeePercent)
+  const feePercent = num(loan.loanDetail?.loanType?.processingFeePercent)
   const computedDocCharge = Math.round(num(amount) * feePercent) / 100
   const docCharge = loan.charges?.find((c) => c.chargeType === 'Document')
   const docBalance = docCharge ? Math.max(0, num(docCharge.dueAmount) - num(docCharge.paidAmount)) : 0
@@ -730,8 +803,8 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         <Field label="First Installment Date"><Input type="date" value={firstDate} onChange={(e) => setFirstDate(e.target.value)} /></Field>
       </div>
       <div className="t-2" style={{ fontSize: 12, marginBottom: 16 }}>
-        {loan.termMonths} months · {loan.installmentFrequency} · {loan.interestMethod === 'reducing_balance' ? 'Reducing balance' : 'Flat'} interest at {loan.interestRatePercent}%
-        {num(loan.downPayment) > 0 && <> · Down payment {money(loan.downPayment)} already settled — schedule covers the remaining {money(financedAmount)}</>}
+        {loan.termMonths} months · {loan.loanDetail?.installmentFrequency} · {loan.loanDetail?.interestMethod === 'reducing_balance' ? 'Reducing balance' : 'Flat'} interest at {loan.interestRatePercent}%
+        {num(loan.loanDetail?.downPayment) > 0 && <> · Down payment {money(loan.loanDetail?.downPayment)} already settled — schedule covers the remaining {money(financedAmount)}</>}
       </div>
       <Can user={me} module="Active Loans" action="Approve">
         <div className="row gap-2" style={{ alignItems: 'center' }}>
@@ -761,7 +834,7 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
   const [method, setMethod] = useState<PaymentMethod>('Cash')
   const [paidAt, setPaidAt] = useState(todayIso())
   const [refNo, setRefNo] = useState('')
-  const [bankName, setBankName] = useState('')
+  const [bankId, setBankId] = useState<number | undefined>(undefined)
   const [chequeDate, setChequeDate] = useState(todayIso())
   const [nextReceipt, setNextReceipt] = useState('')
   const [payBusy, setPayBusy] = useState(false)
@@ -790,12 +863,12 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
   }
 
   const payCharge = async () => {
-    if (method === 'Cheque' && (!bankName || !chequeDate)) { setPayErr('Bank and Cheque Date are required for a cheque payment.'); return }
+    if (method === 'Cheque' && (!bankId || !chequeDate)) { setPayErr('Bank and Cheque Date are required for a cheque payment.'); return }
     setPayBusy(true); setPayErr('')
     try {
       await loanPaymentsApi.create(loan.id, {
         amount: docBalance, paymentMethod: method, paidAt, receiptNo: refNo || undefined,
-        bankName: method === 'Cheque' ? bankName : undefined,
+        bankId: method === 'Cheque' ? bankId : undefined,
         chequeDate: method === 'Cheque' ? chequeDate : undefined,
         notes: `Document charge${notes ? ` — ${notes}` : ''}`,
       })
@@ -851,7 +924,7 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
           ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
           : <Field label={method === 'Cheque' ? 'Cheque No.' : 'Transfer Reference'}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
         {method === 'Cheque' && <>
-          <Field label="Bank"><BankSelect value={bankName} onChange={setBankName} /></Field>
+          <Field label="Bank"><BankSelect value={bankId} onChange={setBankId} /></Field>
           <Field label="Cheque Date"><Input type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} /></Field>
         </>}
       </div>

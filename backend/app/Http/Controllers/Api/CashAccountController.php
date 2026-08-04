@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CashAccount;
+use App\Support\OpeningBalanceLedgerPoster;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class CashAccountController extends Controller
@@ -18,7 +20,13 @@ class CashAccountController extends Controller
     {
         $data = $this->validated($request);
         $data['current_balance'] = $data['opening_balance'] ?? 0;
-        $account = CashAccount::create($data);
+
+        $account = DB::transaction(function () use ($data) {
+            $account = CashAccount::create($data);
+            OpeningBalanceLedgerPoster::postForCashAccount($account);
+
+            return $account;
+        });
 
         return response()->json($account->load('branch:id,name,code'), 201);
     }

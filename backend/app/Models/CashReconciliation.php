@@ -11,7 +11,7 @@ class CashReconciliation extends Model
         'system_cash_total', 'cheque_in_hand_total', 'postdated_cheque_total',
         'today_cash_receipts', 'today_cheque_receipts', 'cheque_realized_total',
         'receipts_to_be_cancelled', 'encashment', 'cash_float', 'petty_cash',
-        'other_branch_cash', 'other_branch_code', 'other_branch_cheque', 'other_branch_cheque_code',
+        'other_branch_cash', 'other_branch_id', 'other_branch_cheque', 'other_branch_cheque_branch_id',
         'total_cash', 'total_cheque',
         'denominations', 'coins_amount', 'counted_total', 'variance',
         'notes', 'reconciled_by',
@@ -45,6 +45,19 @@ class CashReconciliation extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function otherBranch()
+    {
+        return $this->belongsTo(Branch::class, 'other_branch_id');
+    }
+
+    /** Named otherBranchChequeBranch (not otherBranchCheque) — that name would
+     *  serialize to the same JSON key as the other_branch_cheque amount
+     *  column above, silently clobbering it whenever both are present. */
+    public function otherBranchChequeBranch()
+    {
+        return $this->belongsTo(Branch::class, 'other_branch_cheque_branch_id');
     }
 
     public function reconciler()

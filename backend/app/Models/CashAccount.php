@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class CashAccount extends Model
 {
-    protected $fillable = ['branch_id', 'name', 'opening_balance', 'current_balance', 'status'];
+    protected $fillable = ['branch_id', 'chart_of_account_id', 'name', 'opening_balance', 'current_balance', 'status'];
 
     protected $casts = [
         'opening_balance' => 'decimal:2',
@@ -25,7 +25,7 @@ class CashAccount extends Model
 
     public function reconciliations()
     {
-        return $this->hasMany(CashReconciliation::class)->orderByDesc('reconciliation_date');
+        return $this->hasMany(CashReconciliation::class)->orderByDesc('as_at_date');
     }
 
     public function transfersOut()
@@ -38,10 +38,10 @@ class CashAccount extends Model
         return $this->hasMany(CashTransfer::class, 'to_cash_account_id');
     }
 
-    /** The chart_of_accounts leaf row this till posts to in the general ledger — see CashTillLink. */
-    public function ledgerLink()
+    /** The chart_of_accounts leaf row this till posts to in the general ledger. */
+    public function chartOfAccount()
     {
-        return $this->hasOne(CashTillLink::class);
+        return $this->belongsTo(ChartOfAccount::class);
     }
 
     /** The branch's primary till for auto-posted collections — its oldest active cash account. Branches expected to keep exactly one; if several exist, the first one created wins. Shared by CashbookPoster and LoanLedgerPoster so there's one definition of "the branch's till", not two. */

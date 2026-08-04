@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class JournalEntry extends Model
 {
     protected $fillable = [
-        'code', 'entry_date', 'reference_type', 'reference_id', 'description',
+        'code', 'entry_date', 'source_type', 'source_id', 'description',
         'branch_id', 'posted_by', 'posted_at', 'status', 'reversal_of_id',
     ];
 
@@ -21,11 +21,6 @@ class JournalEntry extends Model
     public function lines()
     {
         return $this->hasMany(JournalLine::class);
-    }
-
-    public function reference()
-    {
-        return $this->morphTo();
     }
 
     public function branch()

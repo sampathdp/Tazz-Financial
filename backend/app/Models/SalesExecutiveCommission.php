@@ -6,8 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class SalesExecutiveCommission extends Model
 {
+    public $timestamps = false;
+
     protected $fillable = [
-        'loan_id', 'sales_executive_id', 'loan_type_id', 'cycle_no', 'from_installment',
+        'credit_facility_id', 'sales_executive_id', 'loan_type_id', 'cycle_no', 'from_installment',
         'commission_type', 'commission_value', 'commission_amount', 'required_installments',
         'paid_at', 'payment_amount', 'payment_method', 'reference_no', 'notes', 'paid_by',
     ];
@@ -22,9 +24,9 @@ class SalesExecutiveCommission extends Model
         'payment_amount' => 'decimal:2',
     ];
 
-    public function loan()
+    public function facility()
     {
-        return $this->belongsTo(Loan::class);
+        return $this->belongsTo(Loan::class, 'credit_facility_id');
     }
 
     public function salesExecutive()

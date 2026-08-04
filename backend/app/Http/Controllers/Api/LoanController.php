@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
+use App\Models\FacilityCollateralVehicleDetail;
+use App\Models\FacilitySchedule;
 use App\Models\Loan;
-use App\Models\LoanSchedule;
+use App\Models\LoanFacilityDetail;
 use App\Models\LoanType;
 use App\Models\SalesExecutiveCommission;
 use App\Services\NumberGenerator;
@@ -14,40 +16,50 @@ use App\Support\LoanSummary;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class LoanController extends Controller
 {
     private const FREQUENCIES = ['daily', 'weekly', 'monthly'];
+    private const COLLATERAL_TYPES = ['Vehicle', 'Jewelry', 'Property', 'Other'];
 
     private const SUMMARY_RELATIONS = [
         'customer:id,full_name,code,nic_no,phone',
         'branch:id,name,code',
-        'loanType:id,name,code',
-        'loanOfficer:id,name',
+        'loanDetail.loanType:id,name,code',
+        'loanDetail.loanOfficer:id,name',
     ];
 
     private const DETAIL_RELATIONS = [
-        'customer:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,employer_name,job_title,business_name,monthly_income,status,is_guarantor,branch_id',
+        'customer:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income,status,is_guarantor,branch_id',
         'customer.branch:id,name,code',
+        'customer.employmentDetail',
+        'customer.businessDetail',
         'branch:id,name,code',
-        'loanType:id,name,code,parent_id,interest_method,interest_rate_percent,rate_period,default_charge_rate_percent,grace_period_days,processing_fee_percent',
-        'loanOfficer:id,name',
-        'recoveryOfficer:id,name',
+        'loanDetail.loanType:id,name,code,parent_id,category,interest_method,interest_rate_percent,rate_period,default_charge_rate_percent,grace_period_days,processing_fee_percent',
+        'loanDetail.loanOfficer:id,name',
+        'loanDetail.recoveryOfficer:id,name',
+        'loanDetail.confirmedBy:id,name',
+        'insurance',
         'applier:id,name',
         'approver:id,name',
-        'confirmedBy:id,name',
         'guarantors.guarantor:id,full_name,code,nic_no,phone',
-        'collateral',
+        'collateral.vehicleDetail',
+        'collateral.jewelryDetail',
+        'collateral.documents.uploader:id,name',
         'schedules.allocations.payment:id,status,approval_status',
         'payments.receiver:id,name',
         'payments.voider:id,name',
+        'payments.bank:id,name',
         'charges.creator:id,name',
         'postDatedCheques.creator:id,name',
+        'postDatedCheques.bank:id,name',
         'documents.uploader:id,name',
         'diaryNotes.creator:id,name',
         'waivers.approver:id,name',
+        'statusEvents.recordedBy:id,name',
     ];
 
     public function index()
@@ -60,7 +72,7 @@ class LoanController extends Controller
 
     /**
      * Active loans with at least one installment past its due date and not
-     * fully paid. There's no persisted "overdue" flag (LoanSchedule.status
+     * fully paid. There's no persisted "overdue" flag (FacilitySchedule.status
      * only ever becomes Pending/Partial/Paid — see LoanPaymentAllocator), so
      * this is computed live, the same way app\Support\LoanSummary does for a
      * single loan's arrears — penaltyDueForRow() is reused directly so the OD
@@ -75,9 +87,9 @@ class LoanController extends Controller
             ->with([
                 'customer:id,full_name,code,nic_no,phone',
                 'branch:id,name,code',
-                'loanType:id,name,code,default_charge_rate_percent,grace_period_days',
-                'loanOfficer:id,name',
-                'recoveryOfficer:id,name',
+                'loanDetail.loanType:id,name,code,default_charge_rate_percent,grace_period_days',
+                'loanDetail.loanOfficer:id,name',
+                'loanDetail.recoveryOfficer:id,name',
                 'schedules' => fn ($q) => $q->where('due_date', '<', $today)->where('status', '!=', 'Paid')->orderBy('due_date'),
             ])
             ->withSum('schedules as total_due_sum', 'total_due')
@@ -85,8 +97,9 @@ class LoanController extends Controller
             ->get();
 
         return $loans->map(function ($loan) use ($today) {
-            $graceDays = (int) ($loan->loanType?->grace_period_days ?? 5);
-            $chargeRate = (float) ($loan->loanType?->default_charge_rate_percent ?? 0);
+            $loanType = $loan->loanDetail?->loanType;
+            $graceDays = (int) ($loanType?->grace_period_days ?? 5);
+            $chargeRate = (float) ($loanType?->default_charge_rate_percent ?? 0);
 
             $overdueSchedules = $loan->schedules;
             $oldestDueDate = $overdueSchedules->min('due_date');
@@ -115,6 +128,13 @@ class LoanController extends Controller
         return $data;
     }
 
+    /**
+     * Records a recovery-workflow event (Terminated/Legal/SeizingOrderIssued/
+     * Repossessed) — one row per occurrence, so a status that's issued,
+     * withdrawn, and reissued keeps its full history instead of only the
+     * latest flag (see the facility_status_events migration). freeze_date is
+     * a plain loanDetail field, not an event, and is updated directly.
+     */
     public function updateStatusFlags(Request $request, Loan $loan)
     {
         $data = $request->validate([
@@ -127,22 +147,31 @@ class LoanController extends Controller
             'is_repossessed' => 'boolean',
             'repossessed_at' => 'nullable|date',
             'freeze_date' => 'nullable|date',
+            'notes' => 'nullable|string|max:255',
         ]);
 
-        if (($data['is_terminated'] ?? false) && !$loan->is_terminated) {
-            $data['terminated_at'] = $data['terminated_at'] ?? now();
-        }
-        if (($data['is_legal'] ?? false) && !$loan->is_legal) {
-            $data['legal_at'] = $data['legal_at'] ?? now();
-        }
-        if (($data['seizing_order_issued'] ?? false) && !$loan->seizing_order_issued) {
-            $data['seizing_order_at'] = $data['seizing_order_at'] ?? now();
-        }
-        if (($data['is_repossessed'] ?? false) && !$loan->is_repossessed) {
-            $data['repossessed_at'] = $data['repossessed_at'] ?? now();
-        }
+        $eventMap = [
+            'is_terminated' => ['Terminated', 'terminated_at'],
+            'is_legal' => ['Legal', 'legal_at'],
+            'seizing_order_issued' => ['SeizingOrderIssued', 'seizing_order_at'],
+            'is_repossessed' => ['Repossessed', 'repossessed_at'],
+        ];
 
-        $loan->update($data);
+        DB::transaction(function () use ($loan, $data, $eventMap, $request) {
+            foreach ($eventMap as $flag => [$eventType, $dateField]) {
+                if ($data[$flag] ?? false) {
+                    $loan->statusEvents()->create([
+                        'event_type' => $eventType,
+                        'event_date' => $data[$dateField] ?? now()->toDateString(),
+                        'notes' => $data['notes'] ?? null,
+                        'recorded_by' => $request->user()->id,
+                    ]);
+                }
+            }
+            if (array_key_exists('freeze_date', $data)) {
+                $loan->loanDetail()->update(['freeze_date' => $data['freeze_date']]);
+            }
+        });
 
         return $this->show($loan);
     }
@@ -157,23 +186,23 @@ class LoanController extends Controller
             'recovery_officer_id' => 'nullable|exists:users,id',
         ]);
 
-        $loan->update($data);
+        $loan->loanDetail()->update($data);
 
         return $this->show($loan);
     }
 
     public function store(Request $request)
     {
-        [$data, $guarantors, $collateral] = $this->validated($request);
-        $data['applied_by'] = $request->user()->id;
-        $data['created_by'] = $request->user()->id;
-        $data['application_date'] = $data['application_date'] ?? now()->toDateString();
-        $data['status'] = 'Pending';
+        [$facilityData, $detailData, $guarantors, $collateral, $insurance] = $this->validated($request);
+        $facilityData['applied_by'] = $request->user()->id;
+        $facilityData['created_by'] = $request->user()->id;
+        $facilityData['status'] = 'Pending';
+        $detailData['application_date'] = $detailData['application_date'] ?? now()->toDateString();
 
-        $loan = DB::transaction(function () use ($data, $guarantors, $collateral, $request) {
-            $branch = Branch::find($data['branch_id']);
-            $loanType = LoanType::find($data['loan_type_id']);
-            $data['code'] = NumberGenerator::next('loan', [
+        $loan = DB::transaction(function () use ($facilityData, $detailData, $guarantors, $collateral, $insurance, $request) {
+            $branch = Branch::find($facilityData['branch_id']);
+            $loanType = LoanType::find($detailData['loan_type_id']);
+            $facilityData['code'] = NumberGenerator::next('loan', [
                 'branch_id' => $branch->id,
                 'branch_code' => $branch->code,
                 'loan_type_id' => $loanType->id,
@@ -181,13 +210,17 @@ class LoanController extends Controller
                 'user_id' => $request->user()->id,
             ], $loanType->reference_format);
 
-            $loan = Loan::create($data);
-            NumberGenerator::attach($data['code'], $loan);
+            $loan = Loan::create($facilityData);
+            NumberGenerator::attach($facilityData['code'], $loan);
+            $loan->loanDetail()->create($detailData);
+            if ($insurance) {
+                $loan->insurance()->create($insurance);
+            }
             foreach ($guarantors as $g) {
                 $loan->guarantors()->create($g);
             }
             foreach ($collateral as $c) {
-                $loan->collateral()->create($c);
+                $this->createCollateral($loan, $c);
             }
 
             return $loan;
@@ -201,17 +234,43 @@ class LoanController extends Controller
         if ($loan->status !== 'Pending') {
             return response()->json(['message' => 'Only pending applications can be edited.'], 422);
         }
-        [$data, $guarantors, $collateral] = $this->validated($request, $loan);
+        [$facilityData, $detailData, $guarantors, $collateral, $insurance] = $this->validated($request, $loan);
 
-        DB::transaction(function () use ($loan, $data, $guarantors, $collateral) {
-            $loan->update($data);
+        DB::transaction(function () use ($loan, $facilityData, $detailData, $guarantors, $collateral, $insurance) {
+            $loan->update($facilityData);
+            $loan->loanDetail()->update($detailData);
+            $this->syncInsuranceDetail($loan, $insurance);
             $loan->guarantors()->delete();
             foreach ($guarantors as $g) {
                 $loan->guarantors()->create($g);
             }
-            $loan->collateral()->delete();
+            // Update-in-place / create-new keyed by id, rather than delete-all-recreate,
+            // so previously uploaded collateral documents (which cascade-delete with
+            // their parent row) survive edits that don't touch that collateral item.
+            $keepIds = array_values(array_filter(array_column($collateral, 'id')));
+            $removed = $loan->collateral()->whereNotIn('id', $keepIds ?: [0])->get();
+            foreach ($removed as $r) {
+                foreach ($r->documents as $doc) {
+                    Storage::disk('public')->delete($doc->file_path);
+                }
+            }
+            $loan->collateral()->whereNotIn('id', $keepIds ?: [0])->delete();
             foreach ($collateral as $c) {
-                $loan->collateral()->create($c);
+                $id = $c['id'] ?? null;
+                unset($c['id']);
+                $vehicle = $c['vehicle'] ?? null;
+                unset($c['vehicle']);
+                if ($id) {
+                    $loan->collateral()->whereKey($id)->update($c);
+                    if ($c['collateral_type'] === 'Vehicle' && $vehicle) {
+                        FacilityCollateralVehicleDetail::updateOrCreate(['facility_collateral_id' => $id], $vehicle);
+                    }
+                } else {
+                    $row = $loan->collateral()->create($c);
+                    if ($row->collateral_type === 'Vehicle' && $vehicle) {
+                        $row->vehicleDetail()->create($vehicle);
+                    }
+                }
             }
         });
 
@@ -264,7 +323,8 @@ class LoanController extends Controller
         if ($loan->status !== 'Approved') {
             return response()->json(['message' => 'Only approved loans can be disbursed.'], 422);
         }
-        $loanType = LoanType::find($loan->loan_type_id);
+        $detail = $loan->loanDetail()->with('loanType')->firstOrFail();
+        $loanType = $detail->loanType;
         $documentCharges = $loan->charges()->where('charge_type', 'Document')->get();
         if ($loanType && (float) $loanType->processing_fee_percent > 0 && $documentCharges->isEmpty()) {
             return response()->json(['message' => 'Add the document charge before disbursing this loan.'], 422);
@@ -279,15 +339,17 @@ class LoanController extends Controller
             'first_installment_date' => 'required|date',
         ]);
 
-        DB::transaction(function () use ($loan, $data) {
+        DB::transaction(function () use ($loan, $detail, $data) {
+            $financed = $data['disbursed_amount'] ?? ((float) $loan->principal_amount - (float) $detail->down_payment);
             $loan->update([
-                'disbursed_amount' => $data['disbursed_amount'] ?? ($loan->principal_amount - $loan->down_payment),
+                'disbursed_amount' => $financed,
                 'disbursed_at' => $data['disbursed_at'] ?? now(),
-                'first_installment_date' => $data['first_installment_date'],
+                'outstanding_balance_cache' => $financed,
                 'status' => 'Active',
             ]);
-            $loan->schedules()->insert(LoanAmortizer::generate($loan, $data['first_installment_date']));
-            $this->generateSalesExecutiveCommission($loan);
+            $detail->update(['first_installment_date' => $data['first_installment_date']]);
+            $loan->schedules()->insert(LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $data['first_installment_date']));
+            $this->generateSalesExecutiveCommission($loan->fresh(), $detail);
         });
 
         return $loan->load(self::DETAIL_RELATIONS);
@@ -298,10 +360,10 @@ class LoanController extends Controller
      *  on, since this only runs at disbursal time. A percentage-type commission
      *  goes on to pay out repeatedly, once per cycle of required_installments
      *  paid installments — see SalesExecutiveCommissionController::maybeStartNextCycle(). */
-    private function generateSalesExecutiveCommission(Loan $loan): void
+    private function generateSalesExecutiveCommission(Loan $loan, LoanFacilityDetail $detail): void
     {
-        $loanType = LoanType::find($loan->loan_type_id);
-        if (!$loan->loan_officer_id || !$loanType || (float) $loanType->commission_value <= 0) {
+        $loanType = $detail->loanType ?? LoanType::find($detail->loan_type_id);
+        if (!$detail->loan_officer_id || !$loanType || (float) $loanType->commission_value <= 0) {
             return;
         }
 
@@ -314,8 +376,8 @@ class LoanController extends Controller
             : (float) $loanType->commission_value;
 
         SalesExecutiveCommission::create([
-            'loan_id' => $loan->id,
-            'sales_executive_id' => $loan->loan_officer_id,
+            'credit_facility_id' => $loan->id,
+            'sales_executive_id' => $detail->loan_officer_id,
             'loan_type_id' => $loanType->id,
             'cycle_no' => 1,
             'from_installment' => 0,
@@ -329,9 +391,9 @@ class LoanController extends Controller
     /** Pushes an unpaid installment to the back of the schedule (due one period
      *  after the current last installment) instead of collecting it on time —
      *  the loan simply runs one period longer. */
-    public function skipInstallment(Loan $loan, LoanSchedule $schedule)
+    public function skipInstallment(Loan $loan, FacilitySchedule $schedule)
     {
-        if ($schedule->loan_id !== $loan->id) {
+        if ($schedule->credit_facility_id !== $loan->id) {
             abort(404);
         }
         if ($loan->status !== 'Active') {
@@ -340,11 +402,12 @@ class LoanController extends Controller
         if ($schedule->status === 'Paid' || (float) $schedule->paid_amount > 0) {
             return response()->json(['message' => 'A paid or partially paid installment cannot be skipped.'], 422);
         }
+        $frequency = $loan->loanDetail->installment_frequency;
 
-        DB::transaction(function () use ($loan, $schedule) {
-            $last = $loan->schedules()->orderByDesc('due_date')->firstOrFail();
+        DB::transaction(function () use ($loan, $schedule, $frequency) {
+            $last = FacilitySchedule::where('credit_facility_id', $loan->id)->orderByDesc('due_date')->firstOrFail();
             $schedule->update([
-                'due_date' => LoanAmortizer::nextDueDate($last->due_date, $loan->installment_frequency)->format('Y-m-d'),
+                'due_date' => LoanAmortizer::nextDueDate($last->due_date, $frequency)->format('Y-m-d'),
                 'status' => 'Pending',
             ]);
 
@@ -364,11 +427,12 @@ class LoanController extends Controller
      *  picklist on the Loan Adjustments > Installment Skip (bulk) screen. */
     public function skipDates(LoanType $loanType)
     {
-        $rows = LoanSchedule::query()
-            ->whereHas('loan', fn ($q) => $q->where('status', 'Active')->where('loan_type_id', $loanType->id))
+        $rows = FacilitySchedule::query()
+            ->whereHas('facility', fn ($q) => $q->where('status', 'Active')
+                ->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $loanType->id)))
             ->where('status', '!=', 'Paid')
             ->where('paid_amount', 0)
-            ->selectRaw('due_date, COUNT(DISTINCT loan_id) as loan_count, COUNT(*) as installment_count, SUM(total_due) as total_amount')
+            ->selectRaw('due_date, COUNT(DISTINCT credit_facility_id) as loan_count, COUNT(*) as installment_count, SUM(total_due) as total_amount')
             ->groupBy('due_date')
             ->orderBy('due_date')
             ->get();
@@ -399,8 +463,9 @@ class LoanController extends Controller
         $dates = collect($data['dates'])->map(fn ($d) => Carbon::parse($d)->toDateString())->unique()->values()->all();
 
         $loans = Loan::where('status', 'Active')
-            ->where('loan_type_id', $loanType->id)
+            ->whereHas('loanDetail', fn ($q) => $q->where('loan_type_id', $loanType->id))
             ->whereHas('schedules', fn ($q) => $q->whereIn('due_date', $dates)->where('status', '!=', 'Paid')->where('paid_amount', 0))
+            ->with('loanDetail:credit_facility_id,installment_frequency')
             ->get();
 
         $loansAffected = 0;
@@ -408,6 +473,7 @@ class LoanController extends Controller
         $errors = [];
 
         foreach ($loans as $loan) {
+            $frequency = $loan->loanDetail->installment_frequency;
             $rows = $loan->schedules()->whereIn('due_date', $dates)
                 ->where('status', '!=', 'Paid')->where('paid_amount', 0)
                 ->orderBy('due_date')->get();
@@ -415,14 +481,14 @@ class LoanController extends Controller
                 continue;
             }
             try {
-                DB::transaction(function () use ($loan, $rows) {
+                DB::transaction(function () use ($loan, $rows, $frequency) {
                     foreach ($rows as $schedule) {
                         // Re-queried fresh each pass (not the eager-loaded $rows/schedules
                         // collection) so a loan with two skippable dates in this batch
                         // correctly stacks the second skip behind the first.
-                        $last = $loan->schedules()->orderByDesc('due_date')->firstOrFail();
+                        $last = FacilitySchedule::where('credit_facility_id', $loan->id)->orderByDesc('due_date')->firstOrFail();
                         $schedule->update([
-                            'due_date' => LoanAmortizer::nextDueDate($last->due_date, $loan->installment_frequency)->format('Y-m-d'),
+                            'due_date' => LoanAmortizer::nextDueDate($last->due_date, $frequency)->format('Y-m-d'),
                             'status' => 'Pending',
                         ]);
                     }
@@ -446,7 +512,17 @@ class LoanController extends Controller
         ]);
     }
 
-    /** @return array{0: array, 1: array, 2: array} [loan fields, guarantors, collateral] */
+    private function createCollateral(Loan $loan, array $c): void
+    {
+        $vehicle = $c['vehicle'] ?? null;
+        unset($c['vehicle']);
+        $row = $loan->collateral()->create($c);
+        if ($row->collateral_type === 'Vehicle' && $vehicle) {
+            $row->vehicleDetail()->create($vehicle);
+        }
+    }
+
+    /** @return array{0: array, 1: array, 2: array, 3: array, 4: ?array} [facility fields, loanDetail fields, guarantors, collateral, insurance] */
     private function validated(Request $request, ?Loan $loan = null): array
     {
         $validated = $request->validate([
@@ -464,13 +540,29 @@ class LoanController extends Controller
             'reference_id_no' => 'nullable|string|max:64',
             'reference_address' => 'nullable|string|max:255',
             'loan_officer_id' => 'nullable|exists:users,id',
+            'vehicle_no' => 'nullable|string|max:20',
+            'insurance' => 'nullable|array',
+            'insurance.insurance_company' => 'nullable|string|max:150',
+            'insurance.policy_no' => 'nullable|string|max:64',
+            'insurance.amount' => 'nullable|numeric|min:0',
+            'insurance.contact_person' => 'nullable|string|max:150',
+            'insurance.coverage' => 'nullable|string|max:255',
+            'insurance.remarks' => 'nullable|string',
             'guarantors' => 'array',
-            'guarantors.*.guarantor_id' => 'required|exists:customers,id',
+            'guarantors.*.guarantor_customer_id' => 'required|exists:customers,id',
             'guarantors.*.guaranteed_amount' => 'required|numeric|min:0',
             'collateral' => 'array',
-            'collateral.*.type' => 'required|string|max:64',
+            'collateral.*.id' => 'nullable|integer|exists:facility_collateral,id',
+            'collateral.*.collateral_type' => ['nullable', Rule::in(self::COLLATERAL_TYPES)],
+            'collateral.*.collateral_category' => 'nullable|string|max:64',
             'collateral.*.description' => 'required|string|max:255',
             'collateral.*.estimated_value' => 'nullable|numeric|min:0',
+            'collateral.*.vehicle_type' => 'nullable|string|max:30',
+            'collateral.*.make_model' => 'nullable|string|max:150',
+            'collateral.*.registration_no' => 'nullable|string|max:20',
+            'collateral.*.chassis_no' => 'nullable|string|max:50',
+            'collateral.*.engine_no' => 'nullable|string|max:50',
+            'collateral.*.year_of_manufacture' => 'nullable|integer|min:1900|max:' . (date('Y') + 1),
         ]);
 
         $loanType = LoanType::find($validated['loan_type_id']);
@@ -488,24 +580,43 @@ class LoanController extends Controller
             throw ValidationException::withMessages(['down_payment' => 'Down payment must be less than the loan amount.']);
         }
 
+        // Leasing loans track the leased vehicle's registration number directly on
+        // the loan (separate from the optional facility_collateral list — see the
+        // loan_facility_details.vehicle_no migration docblock).
+        if ($loanType->category === 'Leasing' && empty($validated['vehicle_no'])) {
+            throw ValidationException::withMessages(['vehicle_no' => 'Vehicle No is required for a Leasing loan.']);
+        }
+        // Leasing/Mortgage loans require an insurance policy on the leased/mortgaged asset.
+        if (in_array($loanType->category, ['Leasing', 'Mortgage'], true)) {
+            foreach (['insurance_company', 'policy_no', 'amount', 'contact_person', 'coverage'] as $field) {
+                if (!isset($validated['insurance'][$field]) || $validated['insurance'][$field] === '') {
+                    throw ValidationException::withMessages(["insurance.$field" => 'Insurance details are required for a Leasing or Mortgage loan.']);
+                }
+            }
+        }
+
         $guarantors = $validated['guarantors'] ?? [];
         foreach ($guarantors as $g) {
-            if ((int) $g['guarantor_id'] === (int) $validated['customer_id']) {
+            if ((int) $g['guarantor_customer_id'] === (int) $validated['customer_id']) {
                 throw ValidationException::withMessages(['guarantors' => 'A customer cannot guarantee their own loan.']);
             }
         }
 
-        $data = [
+        $facilityData = [
             'branch_id' => $validated['branch_id'],
             'customer_id' => $validated['customer_id'],
-            'loan_type_id' => $validated['loan_type_id'],
             'principal_amount' => $validated['principal_amount'],
-            'down_payment' => $downPayment,
             // The product sets a default rate, but it's negotiable per application.
             'interest_rate_percent' => $validated['interest_rate_percent'] ?? $loanType->interest_rate_percent,
-            'interest_method' => $loanType->interest_method,
             'rate_period' => $loanType->rate_period,
             'term_months' => $validated['term_months'],
+        ];
+
+        $detailData = [
+            'loan_type_id' => $validated['loan_type_id'],
+            'vehicle_no' => $loanType->category === 'Leasing' ? $validated['vehicle_no'] : null,
+            'down_payment' => $downPayment,
+            'interest_method' => $loanType->interest_method,
             'installment_frequency' => $validated['installment_frequency'],
             'purpose' => $validated['purpose'] ?? null,
             'application_date' => $validated['application_date'] ?? null,
@@ -515,17 +626,56 @@ class LoanController extends Controller
             'loan_officer_id' => $validated['loan_officer_id'] ?? null,
         ];
 
-        $collateral = array_map(fn ($c) => [
-            'type' => $c['type'],
-            'description' => $c['description'],
-            'estimated_value' => $c['estimated_value'] ?? null,
-        ], $validated['collateral'] ?? []);
+        // Only meaningful for Leasing/Mortgage — see the loan_insurance_details
+        // migration docblock. Null (not an empty array) for every other category,
+        // which syncInsuranceDetail() below reads as "no insurance row for this loan".
+        $insurance = in_array($loanType->category, ['Leasing', 'Mortgage'], true) ? [
+            'insurance_company' => $validated['insurance']['insurance_company'],
+            'policy_no' => $validated['insurance']['policy_no'],
+            'amount' => $validated['insurance']['amount'],
+            'contact_person' => $validated['insurance']['contact_person'],
+            'coverage' => $validated['insurance']['coverage'],
+            'remarks' => $validated['insurance']['remarks'] ?? null,
+        ] : null;
+
+        $collateral = array_map(function ($c) {
+            $type = $c['collateral_type'] ?? 'Vehicle';
+
+            return [
+                'id' => $c['id'] ?? null,
+                'collateral_type' => $type,
+                'collateral_category' => $c['collateral_category'] ?? null,
+                'description' => $c['description'],
+                'estimated_value' => $c['estimated_value'] ?? null,
+                'vehicle' => $type === 'Vehicle' ? [
+                    'vehicle_type' => $c['vehicle_type'] ?? null,
+                    'make_model' => $c['make_model'] ?? null,
+                    'registration_no' => $c['registration_no'] ?? null,
+                    'chassis_no' => $c['chassis_no'] ?? null,
+                    'engine_no' => $c['engine_no'] ?? null,
+                    'year_of_manufacture' => $c['year_of_manufacture'] ?? null,
+                ] : null,
+            ];
+        }, $validated['collateral'] ?? []);
 
         $guarantors = array_map(fn ($g) => [
-            'guarantor_id' => $g['guarantor_id'],
+            'guarantor_customer_id' => $g['guarantor_customer_id'],
             'guaranteed_amount' => $g['guaranteed_amount'],
         ], $guarantors);
 
-        return [$data, $guarantors, $collateral];
+        return [$facilityData, $detailData, $guarantors, $collateral, $insurance];
+    }
+
+    /** Creates/updates/clears the loan's insurance row to match $insurance — null
+     *  means the current loan type's category doesn't require one (see validated()),
+     *  so any existing row (e.g. left over from before an edit changed loan_type_id
+     *  away from Leasing/Mortgage) is removed. */
+    private function syncInsuranceDetail(Loan $loan, ?array $insurance): void
+    {
+        if ($insurance) {
+            $loan->insurance()->updateOrCreate([], $insurance);
+        } else {
+            $loan->insurance()->delete();
+        }
     }
 }

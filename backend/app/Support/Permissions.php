@@ -2,10 +2,11 @@
 
 namespace App\Support;
 
+use App\Models\Permission;
 use App\Models\Role;
 use App\Models\RolePermission;
 use App\Models\User;
-use App\Models\UserPermission;
+use App\Models\UserPermissionOverride;
 use Illuminate\Support\Facades\Cache;
 
 class Permissions
@@ -26,6 +27,9 @@ class Permissions
         'Sales Executive Commissions',
         'Overdue Loans',
         'Document Tracking',
+        'Speed Draft Types',
+        'Speed Drafts',
+        'Speed Draft Payments',
         'Cashbook',
         'Cash Transfers',
         'Cash Reconciliation',
@@ -61,6 +65,38 @@ class Permissions
         return $grid;
     }
 
+    /**
+     * {module: {action: permission_id}} for every cell in the grid, creating
+     * any (module, action) rows that don't exist in `permissions` yet — e.g.
+     * the first time a newly shipped module is granted to a role. One or two
+     * queries regardless of grid size, not one firstOrCreate() per cell.
+     */
+    private static function permissionIdMap(): array
+    {
+        $mapFrom = fn ($rows) => $rows->reduce(function (array $map, Permission $p) {
+            $map[$p->module][$p->action] = $p->id;
+
+            return $map;
+        }, []);
+
+        $map = $mapFrom(Permission::all());
+
+        $missing = [];
+        foreach (self::MODULES as $m) {
+            foreach (self::ACTIONS as $a) {
+                if (!isset($map[$m][$a])) {
+                    $missing[] = ['module' => $m, 'action' => $a, 'created_at' => now()];
+                }
+            }
+        }
+        if ($missing) {
+            Permission::insert($missing);
+            $map = $mapFrom(Permission::all());
+        }
+
+        return $map;
+    }
+
     /** {module: {action: bool}} grid built from a role's stored role_permissions rows. */
     public static function gridForRole(Role $role): array
     {
@@ -74,9 +110,11 @@ class Permissions
 
             return $grid;
         }
-        foreach (RolePermission::where('role_id', $role->id)->get() as $p) {
-            if (isset($grid[$p->module][$p->action])) {
-                $grid[$p->module][$p->action] = true;
+        foreach (RolePermission::where('role_id', $role->id)->with('permission')->get() as $p) {
+            $module = $p->permission->module;
+            $action = $p->permission->action;
+            if (isset($grid[$module][$action])) {
+                $grid[$module][$action] = true;
             }
         }
 
@@ -94,6 +132,7 @@ class Permissions
             return;
         }
         RolePermission::where('role_id', $role->id)->delete();
+        $permissionIds = self::permissionIdMap();
         $rows = [];
         foreach ($modules as $module => $actions) {
             if (!in_array($module, self::MODULES, true)) {
@@ -105,8 +144,8 @@ class Permissions
                 }
                 if ($enabled) {
                     $rows[] = [
-                        'role_id' => $role->id, 'module' => $module, 'action' => $action,
-                        'created_at' => now(), 'updated_at' => now(),
+                        'role_id' => $role->id, 'permission_id' => $permissionIds[$module][$action],
+                        'created_at' => now(),
                     ];
                 }
             }
@@ -140,9 +179,11 @@ class Permissions
 
         $grid = $user->role ? self::gridForRole($user->role) : self::emptyGrid();
 
-        foreach (UserPermission::where('user_id', $user->id)->get() as $p) {
-            if (isset($grid[$p->module][$p->action])) {
-                $grid[$p->module][$p->action] = (bool) $p->allowed;
+        foreach (UserPermissionOverride::where('user_id', $user->id)->with('permission')->get() as $p) {
+            $module = $p->permission->module;
+            $action = $p->permission->action;
+            if (isset($grid[$module][$action])) {
+                $grid[$module][$action] = (bool) $p->allowed;
             }
         }
 
@@ -160,8 +201,8 @@ class Permissions
         if ($user->isAdmin()) {
             return $overrides;
         }
-        foreach (UserPermission::where('user_id', $user->id)->get() as $p) {
-            $overrides[$p->module][$p->action] = true;
+        foreach (UserPermissionOverride::where('user_id', $user->id)->with('permission')->get() as $p) {
+            $overrides[$p->permission->module][$p->permission->action] = true;
         }
 
         return $overrides;
@@ -178,6 +219,7 @@ class Permissions
         if ($user->isAdmin()) {
             return;
         }
+        $permissionIds = self::permissionIdMap();
         foreach ($modules as $module => $actions) {
             if (!in_array($module, self::MODULES, true)) {
                 continue;
@@ -186,12 +228,13 @@ class Permissions
                 if (!in_array($action, self::ACTIONS, true)) {
                     continue;
                 }
+                $permissionId = $permissionIds[$module][$action];
                 if ($value === null) {
-                    UserPermission::where('user_id', $user->id)
-                        ->where('module', $module)->where('action', $action)->delete();
+                    UserPermissionOverride::where('user_id', $user->id)
+                        ->where('permission_id', $permissionId)->delete();
                 } else {
-                    UserPermission::updateOrCreate(
-                        ['user_id' => $user->id, 'module' => $module, 'action' => $action],
+                    UserPermissionOverride::updateOrCreate(
+                        ['user_id' => $user->id, 'permission_id' => $permissionId],
                         ['allowed' => (bool) $value]
                     );
                 }

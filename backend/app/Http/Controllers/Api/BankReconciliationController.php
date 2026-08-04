@@ -12,7 +12,7 @@ class BankReconciliationController extends Controller
 {
     public function index(Request $request)
     {
-        $query = BankReconciliation::with(['bankAccount:id,name,bank_name,account_number', 'reconciler:id,name'])
+        $query = BankReconciliation::with(['bankAccount:id,name,bank_id,account_number', 'bankAccount.bank:id,name', 'reconciler:id,name'])
             ->orderByDesc('statement_date');
         if ($request->filled('bank_account_id')) {
             $query->where('bank_account_id', $request->integer('bank_account_id'));
@@ -25,7 +25,10 @@ class BankReconciliationController extends Controller
     {
         $data = $request->validate([
             'bank_account_id' => 'required|exists:bank_accounts,id',
-            'statement_date' => 'required|date',
+            'statement_date' => [
+                'required', 'date',
+                Rule::unique('bank_reconciliations')->where(fn ($q) => $q->where('bank_account_id', $request->input('bank_account_id'))),
+            ],
             'statement_balance' => 'required|numeric',
             'notes' => 'nullable|string|max:255',
         ]);
@@ -43,7 +46,7 @@ class BankReconciliationController extends Controller
             'reconciled_at' => $reconciled ? now() : null,
         ]);
 
-        return response()->json($recon->load(['bankAccount:id,name,bank_name,account_number', 'reconciler:id,name']), 201);
+        return response()->json($recon->load(['bankAccount:id,name,bank_id,account_number', 'bankAccount.bank:id,name', 'reconciler:id,name']), 201);
     }
 
     public function update(Request $request, BankReconciliation $bankReconciliation)
@@ -67,7 +70,7 @@ class BankReconciliationController extends Controller
             'reconciled_at' => $nowReconciled ? ($wasReconciled ? $bankReconciliation->reconciled_at : now()) : null,
         ]);
 
-        return $bankReconciliation->load(['bankAccount:id,name,bank_name,account_number', 'reconciler:id,name']);
+        return $bankReconciliation->load(['bankAccount:id,name,bank_id,account_number', 'bankAccount.bank:id,name', 'reconciler:id,name']);
     }
 
     public function destroy(BankReconciliation $bankReconciliation)

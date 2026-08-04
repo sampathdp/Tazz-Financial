@@ -5,23 +5,26 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Seeds the standard chart of accounts sized for what this system actually
- * does — lending plus customer fixed deposits — then creates one child leaf
- * account under 1010/1020 for every existing cash till / bank account and
- * links it via cash_till_links / bank_account_links (see that migration's
- * docblock for why this is a link, not a replacement).
+ * does — lending plus customer fixed deposits.
  *
  * Deliberately NOT one GL account per expense_categories row: 5010 stays a
  * single control account and expense_category_id rides along on each journal
  * line's originating expense as an analysis dimension instead, so the COA
  * doesn't grow every time someone adds a category.
  *
- * Idempotent — safe to run more than once (checked-before-insert on `code`,
- * matching 2026_07_30_000002_seed_bank_master_categories' convention).
+ * No longer backfills a leaf account per existing cash till / bank account:
+ * cash_accounts/bank_accounts now carry chart_of_account_id directly (set at
+ * creation via ChartOfAccount::forCashTill()/forBankAccount()) rather than
+ * through a separate cash_till_links/bank_account_links table this migration
+ * used to populate — and those two tables now run *after* this one in the
+ * migration order regardless, so they wouldn't exist yet at this point.
+ *
+ * Idempotent — safe to run more than once (checked-before-insert on `code`).
  */
 return new class extends Migration
 {
     private const ACCOUNTS = [
-        // code, name, type, normal_balance, parent_code
+        // code, name, account_type, normal_balance, parent_code
         ['1010', 'Cash in Hand', 'Asset', 'Debit', null],
         ['1020', 'Bank Accounts', 'Asset', 'Debit', null],
         ['1030', 'Cheques / Undeposited Funds', 'Asset', 'Debit', null],
@@ -56,7 +59,7 @@ return new class extends Migration
         $now = now();
         $idByCode = [];
 
-        foreach (self::ACCOUNTS as [$code, $name, $type, $normalBalance, $parentCode]) {
+        foreach (self::ACCOUNTS as [$code, $name, $accountType, $normalBalance, $parentCode]) {
             $existing = DB::table('chart_of_accounts')->where('code', $code)->first();
             if ($existing) {
                 $idByCode[$code] = $existing->id;
@@ -65,59 +68,11 @@ return new class extends Migration
             $idByCode[$code] = DB::table('chart_of_accounts')->insertGetId([
                 'code' => $code,
                 'name' => $name,
-                'type' => $type,
+                'account_type' => $accountType,
                 'normal_balance' => $normalBalance,
                 'parent_id' => $parentCode ? ($idByCode[$parentCode] ?? null) : null,
                 'is_system' => true,
                 'status' => 'Active',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-        }
-
-        foreach (DB::table('cash_accounts')->get() as $till) {
-            $code = "1010-{$till->id}";
-            if (DB::table('cash_till_links')->where('cash_account_id', $till->id)->exists()) {
-                continue;
-            }
-            $accountId = DB::table('chart_of_accounts')->insertGetId([
-                'code' => $code,
-                'name' => "Cash in Hand - {$till->name}",
-                'type' => 'Asset',
-                'normal_balance' => 'Debit',
-                'parent_id' => $idByCode['1010'],
-                'is_system' => false,
-                'status' => $till->status,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-            DB::table('cash_till_links')->insert([
-                'account_id' => $accountId,
-                'cash_account_id' => $till->id,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-        }
-
-        foreach (DB::table('bank_accounts')->get() as $bank) {
-            if (DB::table('bank_account_links')->where('bank_account_id', $bank->id)->exists()) {
-                continue;
-            }
-            $code = "1020-{$bank->id}";
-            $accountId = DB::table('chart_of_accounts')->insertGetId([
-                'code' => $code,
-                'name' => "Bank - {$bank->name}",
-                'type' => 'Asset',
-                'normal_balance' => 'Debit',
-                'parent_id' => $idByCode['1020'],
-                'is_system' => false,
-                'status' => $bank->status,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-            DB::table('bank_account_links')->insert([
-                'account_id' => $accountId,
-                'bank_account_id' => $bank->id,
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);

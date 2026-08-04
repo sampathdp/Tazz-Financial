@@ -21,6 +21,9 @@ const DocumentTrackingScreen = lazy(() => import('./screens/DocumentTracking').t
 const LoanAdjustmentsScreen = lazy(() => import('./screens/LoanAdjustments').then((m) => ({ default: m.LoanAdjustmentsScreen })))
 const ChequeClearanceScreen = lazy(() => import('./screens/ChequeClearance').then((m) => ({ default: m.ChequeClearanceScreen })))
 const SalesExecutiveCommissionsScreen = lazy(() => import('./screens/SalesExecutiveCommissions').then((m) => ({ default: m.SalesExecutiveCommissionsScreen })))
+const SpeedDraftTypesScreen = lazy(() => import('./screens/SpeedDraftTypes').then((m) => ({ default: m.SpeedDraftTypesScreen })))
+const SpeedDraftsScreen = lazy(() => import('./screens/SpeedDrafts').then((m) => ({ default: m.SpeedDraftsScreen })))
+const SpeedDraftPaymentReceiptScreen = lazy(() => import('./screens/SpeedDraftPaymentReceipt').then((m) => ({ default: m.SpeedDraftPaymentReceiptScreen })))
 const FundingDashboardScreen = lazy(() => import('./screens/FundingDashboard').then((m) => ({ default: m.FundingDashboardScreen })))
 const FundingProductsScreen = lazy(() => import('./screens/FundingProducts').then((m) => ({ default: m.FundingProductsScreen })))
 const DepositsScreen = lazy(() => import('./screens/Deposits').then((m) => ({ default: m.DepositsScreen })))
@@ -52,6 +55,7 @@ const GeneralLedgerScreen = named(() => import('./screens/Accounting'), 'General
 const TrialBalanceScreen = named(() => import('./screens/Accounting'), 'TrialBalanceScreen')
 const ProfitLossScreen = named(() => import('./screens/Accounting'), 'ProfitLossScreen')
 const BalanceSheetScreen = named(() => import('./screens/Accounting'), 'BalanceSheetScreen')
+const LedgerDriftScreen = named(() => import('./screens/Accounting'), 'LedgerDriftScreen')
 
 const VendorsScreen = named(() => import('./screens/Expenses'), 'VendorsScreen')
 const ExpensesScreen = named(() => import('./screens/Expenses'), 'ExpensesScreen')
@@ -94,6 +98,9 @@ const SCREENS: Record<string, ScreenComp> = {
   'loan/cheques': ChequeClearanceScreen,
   'loan/adjustments': LoanAdjustmentsScreen,
   'loan/commissions': SalesExecutiveCommissionsScreen,
+  'sd/types': SpeedDraftTypesScreen,
+  'sd/drafts': SpeedDraftsScreen,
+  'sd/payments': SpeedDraftPaymentReceiptScreen,
   'ad/branches': BranchesScreen,
   'ad/roles': RolesScreen,
   'ad/users': UsersScreen,
@@ -113,6 +120,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'acc/tb': TrialBalanceScreen,
   'acc/pl': ProfitLossScreen,
   'acc/bs': BalanceSheetScreen,
+  'acc/drift': LedgerDriftScreen,
   'exp/vendors': VendorsScreen,
   'exp/expenses': ExpensesScreen,
   'fund/dashboard': FundingDashboardScreen,

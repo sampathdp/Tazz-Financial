@@ -21,7 +21,7 @@ class ExpenseController extends Controller
 {
     public function index(Request $request)
     {
-        return Expense::with(['branch:id,name,code', 'category:id,name,account_id', 'vendor:id,name', 'requester:id,name', 'approver:id,name', 'voucher'])
+        return Expense::with(['branch:id,name,code', 'category:id,name,chart_of_account_id', 'vendor:id,name', 'requester:id,name', 'approver:id,name', 'voucher'])
             ->when($request->query('status'), fn ($q, $s) => $q->where('status', $s))
             ->when($request->query('branch_id'), fn ($q, $b) => $q->where('branch_id', $b))
             ->orderByDesc('id')
@@ -86,12 +86,12 @@ class ExpenseController extends Controller
             'payment_method' => ['required', Rule::in(['Cash', 'Bank', 'Cheque'])],
             'cash_account_id' => 'required_if:payment_method,Cash|nullable|exists:cash_accounts,id',
             'bank_account_id' => 'required_if:payment_method,Bank,Cheque|nullable|exists:bank_accounts,id',
-            'cheque_no' => 'required_if:payment_method,Cheque|nullable|string|max:32',
+            'cheque_no' => 'required_if:payment_method,Cheque|nullable|string|max:20',
             'paid_at' => 'nullable|date',
         ]);
 
         $category = ExpenseCategory::findOrFail($expense->expense_category_id);
-        if (!$category->account_id) {
+        if (!$category->chart_of_account_id) {
             return response()->json(['message' => "The expense category \"{$category->name}\" has no linked chart-of-accounts entry yet — set one in Masters > Expense Categories first."], 422);
         }
 
@@ -110,11 +110,11 @@ class ExpenseController extends Controller
             }
 
             $entry = LedgerPoster::post([
-                ['account_id' => $category->account_id, 'debit' => $expense->amount, 'credit' => 0, 'description' => $expense->description],
+                ['account_id' => $category->chart_of_account_id, 'debit' => $expense->amount, 'credit' => 0, 'description' => $expense->description],
                 ['account_id' => $outAccount->id, 'debit' => 0, 'credit' => $expense->amount],
             ], Carbon::parse($paidAt)->toDateString(), [
-                'reference_type' => Expense::class,
-                'reference_id' => $expense->id,
+                'source_type' => 'Expense',
+                'source_id' => $expense->id,
                 'description' => "Expense payment {$expense->code}",
                 'branch_id' => $expense->branch_id,
                 'posted_by' => $request->user()->id,

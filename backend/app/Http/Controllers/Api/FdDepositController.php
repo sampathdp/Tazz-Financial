@@ -6,15 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\FdDeposit;
 use App\Services\NumberGenerator;
+use App\Support\FdCashbookPoster;
+use App\Support\FdLedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class FdDepositController extends Controller
 {
-    private const PAYMENT_METHODS = ['Cash', 'Cheque', 'BankTransfer'];
+    private const PAYMENT_METHODS = ['Cash', 'Bank', 'Cheque'];
 
-    private const RELATIONS = ['customer:id,full_name,code,nic_no,phone', 'branch:id,name,code', 'fixedDeposit:id,fd_number', 'creator:id,name'];
+    private const RELATIONS = ['customer:id,full_name,code,nic_no,phone', 'branch:id,name,code', 'fixedDeposit:id,fd_number', 'bank:id,name', 'creator:id,name'];
 
     public function index(Request $request)
     {
@@ -50,6 +52,11 @@ class FdDepositController extends Controller
             $deposit = FdDeposit::create($data);
             NumberGenerator::attach($data['deposit_number'], $deposit);
 
+            // Cash is physically in hand the moment it's recorded — post it now
+            // rather than waiting for it to be allocated to a Fixed Deposit.
+            FdCashbookPoster::postDepositReceived($deposit);
+            FdLedgerPoster::postDepositReceived($deposit);
+
             return $deposit;
         });
 
@@ -61,7 +68,12 @@ class FdDepositController extends Controller
         if ($fdDeposit->status !== 'Available') {
             return response()->json(['message' => 'This deposit has already been allocated to a Fixed Deposit and cannot be deleted.'], 422);
         }
-        $fdDeposit->delete();
+
+        DB::transaction(function () use ($fdDeposit) {
+            FdCashbookPoster::reverseDepositReceived($fdDeposit);
+            FdLedgerPoster::reverseDepositReceived($fdDeposit);
+            $fdDeposit->delete();
+        });
 
         return response()->noContent();
     }
@@ -75,7 +87,7 @@ class FdDepositController extends Controller
             'amount' => 'required|numeric|min:0.01',
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
             'reference_no' => 'nullable|string|max:64',
-            'bank_name' => 'nullable|string|max:128|required_unless:payment_method,Cash',
+            'bank_id' => 'nullable|exists:banks,id|required_unless:payment_method,Cash',
             'notes' => 'nullable|string',
         ]);
     }

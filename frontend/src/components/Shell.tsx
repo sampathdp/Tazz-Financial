@@ -37,6 +37,12 @@ export const NAV: NavNode[] = [
     { id: 'loan/adjustments', label: 'Loan Adjustments', icon: 'shield' },
   ] },
 
+  { section: 'Speed Drafts', icon: 'coins', items: [
+    { id: 'sd/types', label: 'Speed Draft Types', icon: 'layers' },
+    { id: 'sd/drafts', label: 'Speed Drafts', icon: 'coins' },
+    { id: 'sd/payments', label: 'Speed Draft Payments', icon: 'receipt' },
+  ] },
+
   { section: 'Funding / Investment', icon: 'pie', items: [
     { id: 'fund/dashboard', label: 'Funding Dashboard', icon: 'pie' },
     { id: 'fund/products', label: 'Funding Products', icon: 'layers' },
@@ -70,6 +76,7 @@ export const NAV: NavNode[] = [
     { id: 'acc/pl', label: 'Profit & Loss', icon: 'pie' },
     { id: 'acc/bs', label: 'Balance Sheet', icon: 'grid' },
     { id: 'acc/cf', label: 'Cash Flow', icon: 'swap', soon: true },
+    { id: 'acc/drift', label: 'Ledger Drift', icon: 'adjust' },
   ] },
 
   { section: 'Expense Management', icon: 'wallet', items: [

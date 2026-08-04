@@ -4,7 +4,7 @@ namespace App\Support;
 
 use App\Models\CashAccount;
 use App\Models\CashbookEntry;
-use App\Models\LoanPayment;
+use App\Models\FacilityPayment;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\DB;
 class CashbookPoster
 {
     /** Posts a Cash-method loan payment as a Cashbook "In" entry. No-op for Bank/Cheque payments or a branch with no active cash account. */
-    public static function postCashReceipt(LoanPayment $payment): void
+    public static function postCashReceipt(FacilityPayment $payment): void
     {
         if ($payment->payment_method !== 'Cash') {
             return;
@@ -36,12 +36,12 @@ class CashbookPoster
                 'branch_id' => $account->branch_id,
                 'cash_account_id' => $account->id,
                 'entry_date' => optional($payment->paid_at)->toDateString() ?? now()->toDateString(),
-                'type' => 'In',
+                'direction' => 'In',
                 'category' => 'Loan Collection',
                 'amount' => $payment->amount,
                 'balance_after' => $newBalance,
-                'reference_type' => LoanPayment::class,
-                'reference_id' => $payment->id,
+                'source_type' => 'LoanPayment',
+                'source_id' => $payment->id,
                 'description' => "Loan payment {$payment->code}",
                 'created_by' => $payment->received_by,
             ]);
@@ -49,10 +49,10 @@ class CashbookPoster
     }
 
     /** Unwinds the Cashbook entry for a cash loan payment that's now voided/rejected — deletes it and reverses the balance (same "delete to reverse" convention as CashbookEntryController::destroy). No-op if the payment never had one (Bank/Cheque, or no cash account at the time). */
-    public static function reverseCashReceipt(LoanPayment $payment): void
+    public static function reverseCashReceipt(FacilityPayment $payment): void
     {
-        $entry = CashbookEntry::where('reference_type', LoanPayment::class)
-            ->where('reference_id', $payment->id)
+        $entry = CashbookEntry::where('source_type', 'LoanPayment')
+            ->where('source_id', $payment->id)
             ->first();
         if (!$entry) {
             return;

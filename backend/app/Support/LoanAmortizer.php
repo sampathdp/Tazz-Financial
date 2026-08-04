@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Loan;
+use App\Models\LoanFacilityDetail;
 use Carbon\Carbon;
 
 /**
@@ -10,18 +11,21 @@ use Carbon\Carbon;
  * intentionally simple: daily/weekly frequencies use calendar-day/7-day steps
  * (no holiday calendar), and reducing-balance uses a standard annuity formula
  * with the loan's monthly rate divided evenly across the periods in a month.
+ * $detail is the loan's loanDetail row, passed explicitly by the caller
+ * (down_payment/interest_method/installment_frequency live there, not on
+ * Loan itself) rather than lazy-loaded here.
  */
 class LoanAmortizer
 {
-    /** @return array<int, array<string, mixed>> rows ready for LoanSchedule::insert() */
-    public static function generate(Loan $loan, string $firstInstallmentDate): array
+    /** @return array<int, array<string, mixed>> rows ready for FacilitySchedule::insert() */
+    public static function generate(Loan $loan, LoanFacilityDetail $detail, string $firstInstallmentDate): array
     {
-        $loan->loadMissing('loanType');
-        $frequency = $loan->installment_frequency;
+        $detail->loadMissing('loanType');
+        $frequency = $detail->installment_frequency;
         // Daily products can be set to collect Mon-Fri only — installment count
         // is unchanged, due dates just skip weekends (the loan runs longer in
         // calendar time as a result).
-        $weekdaysOnly = $frequency === 'daily' && $loan->loanType?->collection_days === 'week_days';
+        $weekdaysOnly = $frequency === 'daily' && $detail->loanType?->collection_days === 'week_days';
         $periodsPerMonth = self::periodsPerMonth($frequency);
         $n = max(1, (int) round($loan->term_months * $periodsPerMonth));
 
@@ -32,8 +36,8 @@ class LoanAmortizer
 
         // The schedule amortizes what's actually financed — the down payment
         // is settled upfront and never part of the installment plan.
-        $principal = (float) $loan->principal_amount - (float) $loan->down_payment;
-        $rows = $loan->interest_method === 'reducing_balance'
+        $principal = (float) $loan->principal_amount - (float) $detail->down_payment;
+        $rows = $detail->interest_method === 'reducing_balance'
             ? self::reducingBalance($principal, $periodRate, $n)
             : self::flat($principal, $monthlyRate, $loan->term_months, $n);
 
@@ -41,12 +45,11 @@ class LoanAmortizer
         $out = [];
         foreach ($rows as $i => $row) {
             $out[] = [
-                'loan_id' => $loan->id,
+                'credit_facility_id' => $loan->id,
                 'installment_no' => $i + 1,
                 'due_date' => $date->copy()->format('Y-m-d'),
                 'principal_due' => $row['principal'],
                 'interest_due' => $row['interest'],
-                'penalty_due' => 0,
                 'total_due' => round($row['principal'] + $row['interest'], 2),
                 'paid_amount' => 0,
                 'status' => 'Pending',

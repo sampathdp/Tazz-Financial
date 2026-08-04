@@ -3,47 +3,58 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
-use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Concerns\HasPublicUuid;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
+/**
+ * A credit_facilities row where facility_type = 'Loan'. Shares the
+ * credit_facilities table (and every facility_* sub-resource table) with
+ * SpeedDraft — see the credit_facilities migration for why the two products
+ * were merged. Loan-specific columns (loan_type_id, down_payment,
+ * interest_method, ...) live on the 1:1 loanDetail relation
+ * (loan_facility_details), not on this model — accessed explicitly via
+ * ->loanDetail, never proxied, so both attribute access and query-builder
+ * calls stay unambiguous about which table they hit.
+ */
 class Loan extends Model
 {
-    use BelongsToBranch, SoftDeletes;
+    use BelongsToBranch, HasPublicUuid, SoftDeletes;
+
+    protected $table = 'credit_facilities';
 
     protected $fillable = [
-        'branch_id', 'code', 'customer_id', 'loan_type_id',
-        'principal_amount', 'down_payment', 'interest_rate_percent', 'interest_method', 'rate_period',
-        'term_months', 'installment_frequency', 'purpose', 'application_date',
-        'reference_name', 'reference_id_no', 'reference_address',
-        'loan_officer_id', 'recovery_officer_id',
-        'disbursed_amount', 'disbursed_at', 'first_installment_date',
+        'branch_id', 'code', 'customer_id',
+        'principal_amount', 'interest_rate_percent', 'rate_period', 'term_months',
+        'start_date', 'maturity_date',
+        'disbursed_amount', 'disbursed_at', 'outstanding_balance_cache',
         'status', 'applied_by', 'approved_by', 'approved_at', 'rejected_reason', 'closed_at', 'created_by',
-        'is_terminated', 'terminated_at', 'is_legal', 'legal_at',
-        'seizing_order_issued', 'seizing_order_at', 'is_repossessed', 'repossessed_at',
-        'freeze_date', 'confirmed_date', 'confirmed_by',
     ];
 
     protected $casts = [
         'principal_amount' => 'decimal:2',
-        'down_payment' => 'decimal:2',
         'interest_rate_percent' => 'decimal:3',
+        'term_months' => 'integer',
+        'start_date' => 'date',
+        'maturity_date' => 'date',
         'disbursed_amount' => 'decimal:2',
         'disbursed_at' => 'datetime',
-        'application_date' => 'date',
-        'first_installment_date' => 'date',
+        'outstanding_balance_cache' => 'decimal:2',
         'approved_at' => 'datetime',
         'closed_at' => 'datetime',
-        'is_terminated' => 'boolean',
-        'terminated_at' => 'datetime',
-        'is_legal' => 'boolean',
-        'legal_at' => 'datetime',
-        'seizing_order_issued' => 'boolean',
-        'seizing_order_at' => 'datetime',
-        'is_repossessed' => 'boolean',
-        'repossessed_at' => 'datetime',
-        'freeze_date' => 'date',
-        'confirmed_date' => 'date',
     ];
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope('facilityType', function (Builder $builder) {
+            $builder->where('credit_facilities.facility_type', 'Loan');
+        });
+
+        static::creating(function (Loan $loan) {
+            $loan->facility_type = 'Loan';
+        });
+    }
 
     public function branch()
     {
@@ -55,19 +66,17 @@ class Loan extends Model
         return $this->belongsTo(Customer::class);
     }
 
-    public function loanType()
+    /** The loan-specific attributes for this facility — always present for a Loan row. */
+    public function loanDetail()
     {
-        return $this->belongsTo(LoanType::class);
+        return $this->hasOne(LoanFacilityDetail::class, 'credit_facility_id');
     }
 
-    public function loanOfficer()
+    /** Insurance policy on the leased/mortgaged asset — only present for
+     *  Leasing/Mortgage category loans (see LoanType.category). */
+    public function insurance()
     {
-        return $this->belongsTo(User::class, 'loan_officer_id');
-    }
-
-    public function recoveryOfficer()
-    {
-        return $this->belongsTo(User::class, 'recovery_officer_id');
+        return $this->hasOne(LoanInsuranceDetail::class, 'credit_facility_id');
     }
 
     public function applier()
@@ -85,58 +94,60 @@ class Loan extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    public function confirmedBy()
+    /** Terminated/Legal/SeizingOrderIssued/Repossessed recovery events, newest first. */
+    public function statusEvents()
     {
-        return $this->belongsTo(User::class, 'confirmed_by');
+        return $this->hasMany(FacilityStatusEvent::class, 'credit_facility_id')->orderByDesc('created_at');
     }
 
     public function charges()
     {
-        return $this->hasMany(LoanCharge::class);
+        return $this->hasMany(FacilityCharge::class, 'credit_facility_id');
     }
 
     public function postDatedCheques()
     {
-        return $this->hasMany(LoanPostDatedCheque::class)->orderBy('cheque_date');
+        return $this->hasMany(FacilityPostDatedCheque::class, 'credit_facility_id')->orderBy('cheque_date');
     }
 
     public function documents()
     {
-        return $this->hasMany(LoanDocument::class);
+        return $this->hasMany(FacilityDocument::class, 'credit_facility_id');
     }
 
     public function diaryNotes()
     {
-        return $this->hasMany(LoanDiaryNote::class)->orderByDesc('created_at');
+        return $this->hasMany(FacilityDiaryNote::class, 'credit_facility_id')->orderByDesc('created_at');
     }
 
     public function waivers()
     {
-        return $this->hasMany(LoanWaiver::class)->orderByDesc('waived_at');
+        return $this->hasMany(FacilityWaiver::class, 'credit_facility_id')->orderByDesc('waived_at');
     }
 
     public function guarantors()
     {
-        return $this->hasMany(LoanGuarantor::class);
+        return $this->hasMany(FacilityGuarantor::class, 'credit_facility_id');
     }
 
     public function collateral()
     {
-        return $this->hasMany(LoanCollateral::class);
+        return $this->hasMany(FacilityCollateral::class, 'credit_facility_id');
     }
 
     public function schedules()
     {
-        return $this->hasMany(LoanSchedule::class)->orderBy('installment_no');
+        return $this->hasMany(FacilitySchedule::class, 'credit_facility_id')->orderBy('installment_no');
     }
 
     public function payments()
     {
-        return $this->hasMany(LoanPayment::class)->orderByDesc('paid_at');
+        return $this->hasMany(FacilityPayment::class, 'credit_facility_id')->orderByDesc('paid_at');
     }
 
-    public function salesExecutiveCommission()
+    /** Recurring commission cycles for this loan's sales executive — see facility_type SalesExecutiveCommission. */
+    public function salesExecutiveCommissions()
     {
-        return $this->hasOne(SalesExecutiveCommission::class);
+        return $this->hasMany(SalesExecutiveCommission::class, 'credit_facility_id');
     }
 }

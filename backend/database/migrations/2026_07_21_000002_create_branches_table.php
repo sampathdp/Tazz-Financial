@@ -10,13 +10,15 @@ class CreateBranchesTable extends Migration
     {
         Schema::create('branches', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('parent_id')->nullable()->constrained('branches')->restrictOnDelete();
             $table->string('name', 128);
             $table->string('code', 16)->unique();
-            $table->string('address', 255)->nullable();
-            $table->string('phone', 32)->nullable();
-            $table->string('email', 190)->nullable();
+            $table->enum('branch_type', ['Branch', 'Center'])->default('Branch');
             $table->boolean('is_head_office')->default(false);
-            $table->string('status', 16)->default('Active');
+            $table->string('address', 255)->nullable();
+            $table->string('phone', 20)->nullable();
+            $table->string('email', 255)->nullable();
+            $table->enum('status', ['Active', 'Inactive'])->default('Active');
             $table->timestamps();
             $table->index('status');
         });

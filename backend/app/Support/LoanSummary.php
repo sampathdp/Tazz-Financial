@@ -27,8 +27,9 @@ class LoanSummary
         // not persisted — recalculated on every view AND every real payment
         // (LoanPaymentController::applyAllocation), so display and actual
         // collection can never disagree about what's owed.
-        $graceDays = (int) ($loan->loanType?->grace_period_days ?? 5);
-        $chargeRate = (float) ($loan->loanType?->default_charge_rate_percent ?? 0);
+        $loanType = $loan->loanDetail?->loanType;
+        $graceDays = (int) ($loanType?->grace_period_days ?? 5);
+        $chargeRate = (float) ($loanType?->default_charge_rate_percent ?? 0);
 
         $rows = $schedules->map(function ($s) use ($today, $graceDays, $chargeRate) {
             $paidPrincipal = (float) $s->allocations->sum('principal_applied');
@@ -54,7 +55,7 @@ class LoanSummary
             ];
         });
 
-        // A waiver is a write-off, not a payment (see LoanWaiver — it's a lump
+        // A waiver is a write-off, not a payment (see FacilityWaiver — it's a lump
         // sum by type, not linked to a specific installment/charge), so it has
         // to reduce what's still owed everywhere that figure is shown: both the
         // Due Types breakdown below and the arrears further down. Each type nets
@@ -63,7 +64,7 @@ class LoanSummary
         // instead, so a waiver can never make the loan appear to owe less than
         // it collected while still leaving room to write off not-yet-due amounts.
         // "Charge" waivers aren't split across Document/Legal/Valuation/Other in
-        // the breakdown below — LoanWaiver has no link to a specific charge, so
+        // the breakdown below — FacilityWaiver has no link to a specific charge, so
         // there's no principled way to attribute one to a particular charge_type;
         // they're only netted into the aggregate otherChargeArrears further down.
         $totalWaived = round((float) $loan->waivers->sum('amount'), 2);
@@ -168,7 +169,8 @@ class LoanSummary
      *   - grace_period_days (default 5) after due_date before it starts.
      *   - Base is that installment's own unpaid principal+interest balance
      *     (its arrears), not the full outstanding loan principal.
-     *   - default_charge_rate_percent applied per day elapsed since the
+     *   - default_charge_rate_percent is a MONTHLY rate, prorated to a daily
+     *     rate by dividing by 30, then applied per day elapsed since the
      *     grace period ended (simple, non-compounding day-by-day accrual).
      */
     public static function penaltyDueForRow($schedule, int $graceDays, float $chargeRate, ?Carbon $asOf = null): float
@@ -184,7 +186,7 @@ class LoanSummary
             return 0.0;
         }
 
-        return round($overdueBalance * ($chargeRate / 100) * $daysLate, 2);
+        return round($overdueBalance * ($chargeRate / 100 / 30) * $daysLate, 2);
     }
 
     /**

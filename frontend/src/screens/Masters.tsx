@@ -31,7 +31,7 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
     expenseCategoriesApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
   }
   useEffect(refresh, [])
-  useEffect(() => { chartOfAccountsApi.list().then((d) => setExpenseAccounts(d.filter((a) => a.type === 'Expense'))).catch(() => setExpenseAccounts([])) }, [])
+  useEffect(() => { chartOfAccountsApi.list().then((d) => setExpenseAccounts(d.filter((a) => a.accountType === 'Expense'))).catch(() => setExpenseAccounts([])) }, [])
 
   const openCreate = () => { setEditing(null); setForm(blankExpenseCategoryForm()); setErr(''); setModal(true) }
   const openEdit = (r: ExpenseCategory) => { setEditing(r); setForm({ ...r }); setErr(''); setModal(true) }
@@ -70,7 +70,7 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
           render={(r) => <>
             <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}</Td>
             <Td>{r.code || '—'}</Td>
-            <Td>{r.account ? `${r.account.code} ${r.account.name}` : <span style={{ color: 'var(--bad)' }}>Not linked — expenses can't be paid</span>}</Td>
+            <Td>{r.chartOfAccount ? `${r.chartOfAccount.code} ${r.chartOfAccount.name}` : <span style={{ color: 'var(--bad)' }}>Not linked — expenses can't be paid</span>}</Td>
             <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
             <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
               <Can user={me} module="Masters" action="Edit"><button className="mms-act" title="Edit" onClick={() => openEdit(r)}><Icon n="edit" s={15} /></button></Can>
@@ -90,7 +90,7 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value }))} /></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
           <Field label="Posts To (GL Account)" full>
-            <Select value={form.accountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, accountId: Number(e.target.value) || undefined }))}>
+            <Select value={form.chartOfAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, chartOfAccountId: Number(e.target.value) || undefined }))}>
               <option value="">Not linked yet — expenses in this category can't be paid</option>
               {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
             </Select>
@@ -159,7 +159,7 @@ export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
           rows={rows}
           render={(r) => <>
             <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}</Td>
-            <Td>{r.code || '—'}</Td>
+            <Td>{r.shortCode || '—'}</Td>
             <Td>{r.description || '—'}</Td>
             <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
             <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
@@ -177,7 +177,7 @@ export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
         <ErrorBanner error={err} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
-          <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value }))} /></Field>
+          <Field label="Code"><Input value={form.shortCode || ''} onChange={(e) => setForm((s) => ({ ...s, shortCode: e.target.value }))} /></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
           <Field label="Description" full><textarea value={form.description || ''} onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
         </div>

@@ -41,7 +41,7 @@ class BankController extends Controller
     {
         return $request->validate([
             'name' => ['required', 'string', 'max:128', Rule::unique('banks', 'name')->ignore($bank?->id)],
-            'code' => 'nullable|string|max:32',
+            'short_code' => 'nullable|string|max:32',
             'description' => 'nullable|string|max:255',
             'status' => [Rule::in(['Active', 'Inactive'])],
             'sort_order' => 'nullable|integer',

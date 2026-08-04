@@ -13,7 +13,7 @@ type Grid = Record<string, Record<string, boolean>>
 /* ============================== Branches ============================== */
 
 interface BranchForm extends Partial<Branch> {}
-const blankBranchForm = (): BranchForm => ({ status: 'Active', isHeadOffice: false, type: 'Branch' })
+const blankBranchForm = (): BranchForm => ({ status: 'Active', isHeadOffice: false, branchType: 'Branch' })
 
 export function BranchesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -37,7 +37,7 @@ export function BranchesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
 
   const save = async () => {
     if (!form.name || !form.code) { setErr('Name and code are required.'); return }
-    if (form.type === 'Center' && !form.parentId) { setErr('A center must be linked to a parent branch.'); return }
+    if (form.branchType === 'Center' && !form.parentId) { setErr('A center must be linked to a parent branch.'); return }
     setBusy(true); setErr('')
     try {
       if (editing) await branchesApi.update(editing.id, form)
@@ -67,7 +67,7 @@ export function BranchesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           render={(b) => <>
             <Td c="var(--tx-0)"><div style={{ fontWeight: 600 }}>{b.name}{b.isHeadOffice && <Badge tone="blue" dot>Head Office</Badge>}</div><div className="t-2" style={{ fontSize: 11.5 }}>{b.address || '—'}</div></Td>
             <Td mono>{b.code}</Td>
-            <Td><Badge tone={b.type === 'Center' ? 'amber' : 'neutral'}>{b.type || 'Branch'}</Badge>{b.type === 'Center' && <div className="t-2" style={{ fontSize: 11, marginTop: 3 }}>under {b.parent?.name || '—'}</div>}</Td>
+            <Td><Badge tone={b.branchType === 'Center' ? 'amber' : 'neutral'}>{b.branchType || 'Branch'}</Badge>{b.branchType === 'Center' && <div className="t-2" style={{ fontSize: 11, marginTop: 3 }}>under {b.parent?.name || '—'}</div>}</Td>
             <Td>{b.phone || '—'}</Td>
             <Td align="center"><Badge tone={(b.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{b.status || 'Active'}</Badge></Td>
             <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
@@ -86,14 +86,14 @@ export function BranchesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Branch Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value.toUpperCase() }))} disabled={!!editing?.isHeadOffice} /></Field>
-          <Field label="Type"><Select value={form.type || 'Branch'} disabled={!!editing?.isHeadOffice}
-            onChange={(e) => setForm((s) => ({ ...s, type: e.target.value as any, parentId: e.target.value === 'Branch' ? null : s.parentId }))}>
+          <Field label="Type"><Select value={form.branchType || 'Branch'} disabled={!!editing?.isHeadOffice}
+            onChange={(e) => setForm((s) => ({ ...s, branchType: e.target.value as any, parentId: e.target.value === 'Branch' ? null : s.parentId }))}>
             <option>Branch</option><option>Center</option>
           </Select></Field>
-          {form.type === 'Center' && (
+          {form.branchType === 'Center' && (
             <Field label="Parent Branch" full><Select value={form.parentId ?? ''} onChange={(e) => setForm((s) => ({ ...s, parentId: Number(e.target.value) || undefined }))}>
               <option value="">—</option>
-              {rows.filter((r) => r.type !== 'Center' && r.id !== editing?.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {rows.filter((r) => r.branchType !== 'Center' && r.id !== editing?.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </Select></Field>
           )}
           <Field label="Phone"><Input value={form.phone || ''} onChange={(e) => setForm((s) => ({ ...s, phone: e.target.value }))} /></Field>

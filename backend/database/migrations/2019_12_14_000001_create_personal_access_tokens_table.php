@@ -17,9 +17,13 @@ class CreatePersonalAccessTokensTable extends Migration
             $table->id();
             $table->morphs('tokenable');
             $table->string('name');
-            $table->string('token', 64)->unique();
+            // Always a sha256 hex digest — fixed 64 chars, not a variable-length string.
+            $table->char('token', 64)->unique();
             $table->text('abilities')->nullable();
             $table->timestamp('last_used_at')->nullable();
+            // Sanctum has supported token expiry since 2.3; nothing in this app
+            // set it before, so every API token was effectively permanent.
+            $table->timestamp('expires_at')->nullable();
             $table->timestamps();
         });
     }

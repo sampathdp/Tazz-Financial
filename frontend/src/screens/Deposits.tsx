@@ -21,17 +21,17 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 const METHODS: { value: FdPaymentMethod; label: string }[] = [
   { value: 'Cash', label: 'Cash' },
   { value: 'Cheque', label: 'Cheque' },
-  { value: 'BankTransfer', label: 'Bank Transfer' },
+  { value: 'Bank', label: 'Bank Transfer' },
 ]
-const REF_LABEL: Record<FdPaymentMethod, string> = { Cash: 'Receipt No. (optional)', Cheque: 'Cheque No.', BankTransfer: 'Transfer Reference' }
+const REF_LABEL: Record<FdPaymentMethod, string> = { Cash: 'Receipt No. (optional)', Cheque: 'Cheque No.', Bank: 'Transfer Reference' }
 
 interface DepositForm {
   branchId?: number; customerId?: number; customerLabel?: string
   depositDate: string; amount: string; paymentMethod: FdPaymentMethod
-  referenceNo: string; bankName: string; notes: string
+  referenceNo: string; bankId?: number; notes: string
 }
 const blankForm = (branchId?: number): DepositForm => ({
-  branchId, depositDate: todayIso(), amount: '', paymentMethod: 'Cash', referenceNo: '', bankName: '', notes: '',
+  branchId, depositDate: todayIso(), amount: '', paymentMethod: 'Cash', referenceNo: '', bankId: undefined, notes: '',
 })
 
 export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
@@ -66,13 +66,13 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
     if (!form.branchId) { setErr('Branch is required.'); return }
     if (!form.customerId) { setErr('Select a customer.'); return }
     if (!form.amount || Number(form.amount) <= 0) { setErr('Amount must be greater than zero.'); return }
-    if (form.paymentMethod !== 'Cash' && !form.bankName) { setErr('Bank name is required for Cheque/Bank Transfer deposits.'); return }
+    if (form.paymentMethod !== 'Cash' && !form.bankId) { setErr('Bank name is required for Cheque/Bank Transfer deposits.'); return }
     setBusy(true); setErr('')
     try {
       const deposit = await fdDepositsApi.create({
         branchId: form.branchId, customerId: form.customerId, depositDate: form.depositDate, amount: form.amount,
         paymentMethod: form.paymentMethod, referenceNo: form.referenceNo || undefined,
-        bankName: form.paymentMethod !== 'Cash' ? form.bankName : undefined, notes: form.notes || undefined,
+        bankId: form.paymentMethod !== 'Cash' ? form.bankId : undefined, notes: form.notes || undefined,
       })
       close(); refresh()
       setSlip(deposit)
@@ -118,7 +118,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           <div className="col gap-2" style={{ fontSize: 13, marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--line)' }}>
             <div className="row between"><span className="t-2">Payment Method</span><b>{METHODS.find((m) => m.value === slip.paymentMethod)?.label || slip.paymentMethod}</b></div>
             {slip.referenceNo && <div className="row between"><span className="t-2">{REF_LABEL[slip.paymentMethod]}</span><b>{slip.referenceNo}</b></div>}
-            {slip.bankName && <div className="row between"><span className="t-2">Bank</span><b>{slip.bankName}</b></div>}
+            {slip.bank?.name && <div className="row between"><span className="t-2">Bank</span><b>{slip.bank.name}</b></div>}
             {slip.notes && <div className="row between"><span className="t-2">Notes</span><b>{slip.notes}</b></div>}
             <div className="row between"><span className="t-2">Status</span><b>{slip.fixedDeposit ? `Allocated — ${slip.fixedDeposit.fdNumber}` : 'Available for a Fixed Deposit'}</b></div>
           </div>
@@ -192,7 +192,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           </Select></Field>
           <Field label={REF_LABEL[form.paymentMethod]}><Input value={form.referenceNo} onChange={(e) => setForm((s) => ({ ...s, referenceNo: e.target.value }))} /></Field>
           {form.paymentMethod !== 'Cash' && (
-            <Field label="Bank Name"><BankSelect value={form.bankName} onChange={(v) => setForm((s) => ({ ...s, bankName: v }))} /></Field>
+            <Field label="Bank Name"><BankSelect value={form.bankId} onChange={(v) => setForm((s) => ({ ...s, bankId: v }))} /></Field>
           )}
           <Field label="Notes" full><textarea value={form.notes} onChange={(e) => setForm((s) => ({ ...s, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
         </div>

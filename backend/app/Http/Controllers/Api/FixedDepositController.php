@@ -9,7 +9,9 @@ use App\Models\FdWithdrawal;
 use App\Models\FixedDeposit;
 use App\Models\FundingProduct;
 use App\Services\NumberGenerator;
+use App\Support\FdCashbookPoster;
 use App\Support\FdInterestCalculator;
+use App\Support\FdLedgerPoster;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +20,7 @@ use Illuminate\Validation\ValidationException;
 
 class FixedDepositController extends Controller
 {
-    private const PAYMENT_METHODS = ['Cash', 'Cheque', 'BankTransfer'];
+    private const PAYMENT_METHODS = ['Cash', 'Bank', 'Cheque'];
 
     private const SUMMARY_RELATIONS = ['customer:id,full_name,code,nic_no,phone', 'branch:id,name,code', 'fundingProduct:id,name,code,interest_method'];
 
@@ -26,7 +28,7 @@ class FixedDepositController extends Controller
         'customer:id,full_name,code,nic_no,phone,email,address',
         'branch:id,name,code',
         'fundingProduct',
-        'deposits',
+        'deposits.bank:id,name',
         'interestPayments.payer:id,name',
         'withdrawal',
         'renewedFrom:id,fd_number',
@@ -93,6 +95,9 @@ class FixedDepositController extends Controller
                 userId: $request->user()->id,
             );
 
+            // The deposit's cash was already posted to the cashbook/ledger when it
+            // was recorded (see FdDepositController::store()) — allocating it to
+            // this FD is purely administrative, no further cash movement.
             $deposit->update(['status' => 'Allocated', 'fixed_deposit_id' => $fd->id]);
 
             return $fd;
@@ -116,7 +121,7 @@ class FixedDepositController extends Controller
             'enhancement.deposit_date' => 'nullable|date',
             'enhancement.payment_method' => ['required_with:enhancement', Rule::in(self::PAYMENT_METHODS)],
             'enhancement.reference_no' => 'nullable|string|max:64',
-            'enhancement.bank_name' => 'nullable|string|max:128',
+            'enhancement.bank_id' => 'nullable|exists:banks,id',
             'enhancement.notes' => 'nullable|string',
         ]);
 
@@ -140,6 +145,9 @@ class FixedDepositController extends Controller
                 renewedFromId: $fixedDeposit->id,
             );
 
+            // Only the enhancement portion is a real cash event — the old FD's
+            // principal simply rolls forward into the new FD's principal_amount
+            // above, with no cash changing hands (see FdLedgerPoster's docblock).
             $enhancementDeposit = null;
             if ($enhancementAmount > 0) {
                 $depositNumber = NumberGenerator::next('fd_deposit', [
@@ -155,13 +163,19 @@ class FixedDepositController extends Controller
                     'amount' => $enhancementAmount,
                     'payment_method' => $data['enhancement']['payment_method'],
                     'reference_no' => $data['enhancement']['reference_no'] ?? null,
-                    'bank_name' => $data['enhancement']['bank_name'] ?? null,
+                    'bank_id' => $data['enhancement']['bank_id'] ?? null,
                     'notes' => $data['enhancement']['notes'] ?? null,
+                    // Created already-allocated (unlike FdDepositController::store()'s
+                    // normal Available-first flow) since it's funding this new FD
+                    // in the same breath it's recorded.
                     'status' => 'Allocated',
                     'fixed_deposit_id' => $newFd->id,
                     'created_by' => $request->user()->id,
                 ]);
                 NumberGenerator::attach($depositNumber, $enhancementDeposit);
+
+                FdCashbookPoster::postDepositReceived($enhancementDeposit);
+                FdLedgerPoster::postDepositReceived($enhancementDeposit);
             }
 
             $fixedDeposit->update([
@@ -236,6 +250,10 @@ class FixedDepositController extends Controller
             NumberGenerator::attach($voucherNo, $withdrawal);
 
             $fixedDeposit->update(['status' => 'Closed', 'closed_at' => $closedAt]);
+
+            $withdrawal->setRelation('fixedDeposit', $fixedDeposit);
+            FdCashbookPoster::postWithdrawal($withdrawal);
+            FdLedgerPoster::postWithdrawal($withdrawal);
 
             return $withdrawal;
         });

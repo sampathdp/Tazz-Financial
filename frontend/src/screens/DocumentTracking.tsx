@@ -5,8 +5,18 @@ import { Icon } from '../components/Icon'
 import { generatedNumbersApi, type GeneratedNumber } from '../api'
 import type { ScreenProps } from './types'
 
-const MODULE_LABELS: Record<string, string> = { loan: 'Loan', customer: 'Customer', payment: 'Payment' }
-const moduleTone: Record<string, 'blue' | 'green' | 'amber' | 'neutral'> = { loan: 'blue', customer: 'green', payment: 'amber' }
+const MODULE_LABELS: Record<string, string> = {
+  loan: 'Loan', customer: 'Customer', payment: 'Payment',
+  speed_draft: 'Speed Draft', speed_draft_payment: 'Speed Draft Payment',
+  fd_deposit: 'FD Deposit', fixed_deposit: 'Fixed Deposit', fd_withdrawal: 'FD Withdrawal',
+  journal: 'Journal Entry', expense: 'Expense', payment_voucher: 'Payment Voucher',
+}
+const moduleTone: Record<string, 'blue' | 'green' | 'amber' | 'neutral'> = {
+  loan: 'blue', customer: 'green', payment: 'amber',
+  speed_draft: 'blue', speed_draft_payment: 'amber',
+  fd_deposit: 'green', fixed_deposit: 'blue', fd_withdrawal: 'amber',
+  journal: 'neutral', expense: 'amber', payment_voucher: 'amber',
+}
 
 export function DocumentTrackingScreen(_props: ScreenProps) {
   const [rows, setRows] = useState<GeneratedNumber[]>([])

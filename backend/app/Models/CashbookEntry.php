@@ -7,8 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class CashbookEntry extends Model
 {
     protected $fillable = [
-        'branch_id', 'cash_account_id', 'entry_date', 'type', 'category', 'amount',
-        'balance_after', 'reference_type', 'reference_id', 'description', 'created_by', 'approved_by',
+        'branch_id', 'cash_account_id', 'journal_entry_id', 'entry_date', 'direction', 'category', 'amount',
+        'balance_after', 'source_type', 'source_id', 'description', 'created_by', 'approved_by',
     ];
 
     protected $casts = [
@@ -17,7 +17,7 @@ class CashbookEntry extends Model
         'entry_date' => 'date',
     ];
 
-    public const TYPES = ['In', 'Out'];
+    public const DIRECTIONS = ['In', 'Out'];
     public const CATEGORIES = ['Loan Collection', 'Expense', 'Transfer', 'Deposit', 'Other'];
 
     public function branch()
@@ -28,6 +28,11 @@ class CashbookEntry extends Model
     public function cashAccount()
     {
         return $this->belongsTo(CashAccount::class);
+    }
+
+    public function journalEntry()
+    {
+        return $this->belongsTo(JournalEntry::class);
     }
 
     public function creator()

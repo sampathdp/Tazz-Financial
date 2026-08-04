@@ -1,11 +1,11 @@
 /* Tazz Investment & Credit — Loan Applications (intake → approve/reject workflow) */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
-  loansApi, customersApi, customerLoansApi, loanTypesApi, branchesApi, api,
+  loansApi, customersApi, customerLoansApi, loanTypesApi, branchesApi, api, loanCollateralDocumentsApi,
   type Loan, type LoanStatus, type LoanType, type Customer, type LoanFrequency, type CustomerTitle,
-  type LoanGuarantorInput, type LoanCollateralInput, type AuthUser,
+  type LoanGuarantorInput, type LoanCollateralInput, type LoanCollateralDocument, type LoanInsuranceDetail, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -19,7 +19,8 @@ const FREQ_OPTIONS: { value: LoanFrequency; label: string }[] = [
   { value: 'weekly', label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' },
 ]
-const COLLATERAL_TYPES = ['Vehicle', 'Property', 'Equipment', 'Other']
+const COLLATERAL_TYPES = ['Vehicle', 'Jewelry', 'Property', 'Other']
+const VEHICLE_TYPES = ['Car', 'Motorbike', 'Three-Wheeler', 'Van', 'Lorry', 'Bus', 'Other']
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
@@ -27,7 +28,7 @@ const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutr
 }
 const custStatusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'red', Blacklisted: 'amber' }
 const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.']
-const blankQuickAdd = () => ({ title: '' as CustomerTitle | '', surname: '', initials: '', nameInFull: '', branchId: undefined as number | undefined, nicNo: '', phone: '' })
+const blankQuickAdd = () => ({ title: '' as CustomerTitle | '', surname: '', initials: '', nameDenotedByInitials: '', branchId: undefined as number | undefined, nicNo: '', phone: '' })
 
 function loanTypePath(rows: LoanType[], id: number | null | undefined): string {
   if (!id) return ''
@@ -56,10 +57,13 @@ interface FormState {
   referenceIdNo?: string
   referenceAddress?: string
   loanOfficerId?: number
+  vehicleNo?: string
+  insurance?: Partial<LoanInsuranceDetail>
   guarantors: LoanGuarantorInput[]
   collateral: LoanCollateralInput[]
 }
 const blankForm = (): FormState => ({ installmentFrequency: 'monthly', applicationDate: todayIso(), guarantors: [], collateral: [] })
+const blankInsurance = (): Partial<LoanInsuranceDetail> => ({})
 
 export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -79,6 +83,10 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const [viewing, setViewing] = useState<Loan | null>(null) // read-only detail (non-pending)
   const [form, setForm] = useState<FormState>(blankForm())
   const [backDated, setBackDated] = useState(false)
+  // Newly-picked, not-yet-uploaded attachments per collateral row (index-aligned with form.collateral).
+  // Uploaded once the loan/collateral rows are saved and have real ids.
+  const [collateralFiles, setCollateralFiles] = useState<File[][]>([])
+  const collateralFileInputs = useRef<Record<number, HTMLInputElement | null>>({})
 
   const [quickAdd, setQuickAdd] = useState(false)
   const [quickAddForm, setQuickAddForm] = useState(blankQuickAdd())
@@ -105,7 +113,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     try {
       const created = await customersApi.create({
         title: quickAddForm.title, surname: quickAddForm.surname, initials: quickAddForm.initials,
-        nameInFull: quickAddForm.nameInFull || undefined, branchId: quickAddForm.branchId,
+        nameDenotedByInitials: quickAddForm.nameDenotedByInitials || undefined, branchId: quickAddForm.branchId,
         nicNo: quickAddForm.nicNo || undefined, phone: quickAddForm.phone || undefined, status: 'Active',
       })
       setCustomers((cs) => [created, ...cs])
@@ -120,25 +128,31 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const products = useMemo(() => loanTypes.filter((t) => t.isProduct), [loanTypes])
   const selectedType = loanTypes.find((t) => t.id === form.loanTypeId)
   const selectedCustomer = customers.find((c) => c.id === form.customerId)
+  const needsInsurance = selectedType?.category === 'Leasing' || selectedType?.category === 'Mortgage'
 
-  const openCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setBackDated(false); setErr(''); setMode('form') }
+  const openCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setCollateralFiles([]); setBackDated(false); setErr(''); setMode('form') }
   const openRow = async (row: Loan) => {
     // The list only loads summary relations — fetch full detail (guarantors,
     // collateral, officer/applier/approver names) before showing the form or view.
     const loan = await loansApi.get(row.id).catch(() => row)
     if (loan.status === 'Pending') {
       setEditing(loan); setViewing(null)
-      const applicationDate = loan.applicationDate || (loan.createdAt || '').slice(0, 10) || todayIso()
+      const applicationDate = loan.loanDetail?.applicationDate || (loan.createdAt || '').slice(0, 10) || todayIso()
       setForm({
-        customerId: loan.customerId, loanTypeId: loan.loanTypeId, branchId: loan.branchId,
-        principalAmount: loan.principalAmount, downPayment: loan.downPayment,
+        customerId: loan.customerId, loanTypeId: loan.loanDetail?.loanTypeId, branchId: loan.branchId,
+        principalAmount: loan.principalAmount, downPayment: loan.loanDetail?.downPayment ?? undefined,
         interestRatePercent: loan.interestRatePercent, termMonths: loan.termMonths,
-        installmentFrequency: loan.installmentFrequency, purpose: loan.purpose || '',
+        installmentFrequency: loan.loanDetail?.installmentFrequency, purpose: loan.loanDetail?.purpose || '',
         applicationDate,
-        referenceName: loan.referenceName || '', referenceIdNo: loan.referenceIdNo || '', referenceAddress: loan.referenceAddress || '',
-        loanOfficerId: loan.loanOfficerId || undefined,
-        guarantors: loan.guarantors || [], collateral: loan.collateral || [],
+        referenceName: loan.loanDetail?.referenceName || '', referenceIdNo: loan.loanDetail?.referenceIdNo || '', referenceAddress: loan.loanDetail?.referenceAddress || '',
+        loanOfficerId: loan.loanDetail?.loanOfficerId || undefined,
+        vehicleNo: loan.loanDetail?.vehicleNo || '',
+        insurance: loan.insurance || blankInsurance(),
+        // vehicleDetail is a read-only nested relation — flatten it back onto
+        // the row's flat write fields, which is what the collateral form edits.
+        guarantors: loan.guarantors || [], collateral: (loan.collateral || []).map((c) => ({ ...c, ...(c.vehicleDetail || {}) })),
       })
+      setCollateralFiles((loan.collateral || []).map(() => []))
       setBackDated(applicationDate !== todayIso())
       setErr(''); setMode('form')
     } else {
@@ -153,6 +167,10 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     if (!form.principalAmount) { setErr('Enter the loan amount.'); return }
     if (!form.termMonths) { setErr('Enter the term (months).'); return }
     if (Number(form.downPayment || 0) >= Number(form.principalAmount)) { setErr('Down payment must be less than the loan amount.'); return }
+    if (selectedType?.category === 'Leasing' && !form.vehicleNo) { setErr('Vehicle No is required for a Leasing loan.'); return }
+    if (needsInsurance && (!form.insurance?.insuranceCompany || !form.insurance?.policyNo || !form.insurance?.amount || !form.insurance?.contactPerson || !form.insurance?.coverage)) {
+      setErr('Insurance details are required for a Leasing or Mortgage loan.'); return
+    }
     const customer = customers.find((c) => c.id === form.customerId)
     const body = {
       customerId: form.customerId,
@@ -169,15 +187,31 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
       referenceIdNo: form.referenceIdNo || null,
       referenceAddress: form.referenceAddress || null,
       loanOfficerId: form.loanOfficerId || null,
-      guarantors: form.guarantors.map((g) => ({ guarantorId: g.guarantorId, guaranteedAmount: g.guaranteedAmount })),
+      vehicleNo: selectedType?.category === 'Leasing' ? (form.vehicleNo || null) : null,
+      insurance: needsInsurance ? form.insurance : undefined,
+      guarantors: form.guarantors.map((g) => ({ guarantorCustomerId: g.guarantorCustomerId, guaranteedAmount: g.guaranteedAmount })),
       collateral: form.collateral,
     }
     setBusy(true); setErr('')
     try {
-      if (editing) await loansApi.update(editing.id, body as any)
-      else await loansApi.create(body as any)
+      const saved = editing ? await loansApi.update(editing.id, body as any) : await loansApi.create(body as any)
+      // Collateral rows only get a real id once the loan is saved, so any attachments
+      // picked in this session are staged in collateralFiles and uploaded now, matched
+      // positionally against the collateral rows the save just returned.
+      const savedCollateral = saved.collateral || []
+      let uploadFailures = 0
+      for (let i = 0; i < collateralFiles.length; i++) {
+        const files = collateralFiles[i]
+        const row = savedCollateral[i]
+        if (!files?.length || !row?.id) continue
+        for (const file of files) {
+          try { await loanCollateralDocumentsApi.upload(saved.id, row.id, file) }
+          catch { uploadFailures++ }
+        }
+      }
       back(); refresh()
       notify.success(editing ? 'Application updated' : 'Application submitted', customer?.fullName)
+      if (uploadFailures) notify.error('Some attachments failed to upload', `${uploadFailures} file(s) — re-attach them from the application.`)
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
@@ -204,21 +238,57 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
   }
 
-  const addGuarantor = () => setForm((s) => ({ ...s, guarantors: [...s.guarantors, { guarantorId: 0, guaranteedAmount: '' }] }))
+  const addGuarantor = () => setForm((s) => ({ ...s, guarantors: [...s.guarantors, { guarantorCustomerId: 0, guaranteedAmount: '' }] }))
   const setGuarantor = (i: number, patch: Partial<LoanGuarantorInput>) =>
     setForm((s) => ({ ...s, guarantors: s.guarantors.map((g, gi) => (gi === i ? { ...g, ...patch } : g)) }))
   const removeGuarantor = (i: number) => setForm((s) => ({ ...s, guarantors: s.guarantors.filter((_, gi) => gi !== i) }))
 
-  const addCollateral = () => setForm((s) => ({ ...s, collateral: [...s.collateral, { type: 'Vehicle', description: '', estimatedValue: '' }] }))
+  const addCollateral = () => {
+    setForm((s) => ({ ...s, collateral: [...s.collateral, { collateralType: 'Vehicle', description: '', estimatedValue: '' }] }))
+    setCollateralFiles((s) => [...s, []])
+  }
   const setCollateral = (i: number, patch: Partial<LoanCollateralInput>) =>
     setForm((s) => ({ ...s, collateral: s.collateral.map((c, ci) => (ci === i ? { ...c, ...patch } : c)) }))
-  const removeCollateral = (i: number) => setForm((s) => ({ ...s, collateral: s.collateral.filter((_, ci) => ci !== i) }))
+  const removeCollateral = (i: number) => {
+    setForm((s) => ({ ...s, collateral: s.collateral.filter((_, ci) => ci !== i) }))
+    setCollateralFiles((s) => s.filter((_, ci) => ci !== i))
+  }
+
+  const stageCollateralFiles = (i: number, fileList: FileList | null) => {
+    if (!fileList?.length) return
+    setCollateralFiles((s) => s.map((files, ci) => (ci === i ? [...files, ...Array.from(fileList)] : files)))
+  }
+  const unstageCollateralFile = (i: number, fi: number) =>
+    setCollateralFiles((s) => s.map((files, ci) => (ci === i ? files.filter((_, fx) => fx !== fi) : files)))
+
+  // Deleting an already-uploaded attachment happens immediately (it has a real id).
+  // Newly-picked files aren't uploaded until save() — see collateralFiles above.
+  const removeCollateralDoc = async (i: number, doc: LoanCollateralDocument) => {
+    const c = form.collateral[i]
+    if (!editing || !c.id) return
+    const ok = await notify.confirm({ title: 'Delete this attachment?', danger: true, okText: 'Delete' })
+    if (!ok) return
+    try {
+      await loanCollateralDocumentsApi.remove(editing.id, c.id, doc.id)
+      setCollateral(i, { documents: (c.documents || []).filter((d) => d.id !== doc.id) })
+    } catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
+  }
+  const viewCollateralDoc = async (i: number, doc: LoanCollateralDocument) => {
+    const c = form.collateral[i]
+    if (!editing || !c.id) return
+    try {
+      const blob = await loanCollateralDocumentsApi.download(editing.id, c.id, doc.id)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank')
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch { notify.error('Could not open attachment') }
+  }
 
   const q = search.trim().toLowerCase()
   const filtered = rows.filter((l) => {
     if (statusFilter !== 'All' && l.status !== statusFilter) return false
     if (!q) return true
-    return [l.code, l.customer?.fullName, l.customer?.code, l.loanType?.name, l.branch?.name].some((v) => (v || '').toLowerCase().includes(q))
+    return [l.code, l.customer?.fullName, l.customer?.code, l.loanDetail?.loanType?.name, l.branch?.name].some((v) => (v || '').toLowerCase().includes(q))
   })
   const counts = useMemo(() => {
     const c: Record<string, number> = { All: rows.length }
@@ -231,7 +301,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     return (
       <div>
         <PageHead crumbs="Loan Management / Loan Applications" title={`Loan ${viewing.code}`} icon="doc"
-          sub={`${viewing.customer?.fullName} — ${viewing.loanType?.name}`}
+          sub={`${viewing.customer?.fullName} — ${viewing.loanDetail?.loanType?.name}`}
           actions={<Btn variant="solid" onClick={back}>← Back to Applications</Btn>} />
         <LoanDetail loan={viewing} me={me} onChanged={reloadViewing} go={go} context="applications" />
       </div>
@@ -281,7 +351,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
               <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
                 <ErrorBanner error={quickAddErr} style={{ gridColumn: '1/-1', marginBottom: 0, padding: '6px 10px', fontSize: 12 }} />
                 <Field label="Surname"><Input value={quickAddForm.surname} onChange={(e) => setQuickAddForm((s) => ({ ...s, surname: e.target.value }))} /></Field>
-                <Field label="Initial in Full without Surname"><Input value={quickAddForm.nameInFull} onChange={(e) => setQuickAddForm((s) => ({ ...s, nameInFull: e.target.value }))} /></Field>
+                <Field label="Initial in Full without Surname"><Input value={quickAddForm.nameDenotedByInitials} onChange={(e) => setQuickAddForm((s) => ({ ...s, nameDenotedByInitials: e.target.value }))} /></Field>
                 <Field label="Initial"><Input value={quickAddForm.initials} onChange={(e) => setQuickAddForm((s) => ({ ...s, initials: e.target.value }))} placeholder="e.g. J.K." /></Field>
                 <Field label="Title"><Select value={quickAddForm.title} onChange={(e) => setQuickAddForm((s) => ({ ...s, title: e.target.value as CustomerTitle }))}>
                   <option value="">—</option>{TITLE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -340,6 +410,9 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             <Field label="Repayment Frequency"><Select value={form.installmentFrequency || 'monthly'} onChange={(e) => setForm((s) => ({ ...s, installmentFrequency: e.target.value as any }))}>
               {FREQ_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select></Field>
+            {selectedType?.category === 'Leasing' && (
+              <Field label="Vehicle No"><Input value={form.vehicleNo || ''} onChange={(e) => setForm((s) => ({ ...s, vehicleNo: e.target.value }))} placeholder="e.g. ABC-1234" /></Field>
+            )}
             <Field label="Marketing Executive"><Select value={form.loanOfficerId ?? ''} onChange={(e) => setForm((s) => ({ ...s, loanOfficerId: Number(e.target.value) || undefined }))}>
               <option value="">—</option>{officers.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </Select></Field>
@@ -358,6 +431,20 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             <Field label="Purpose" full><textarea value={form.purpose || ''} onChange={(e) => setForm((s) => ({ ...s, purpose: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
           </div>
         </Card>
+
+        {needsInsurance && (
+          <Card style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Insurance Policy</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Field label="Insurance Company"><Input value={form.insurance?.insuranceCompany || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, insuranceCompany: e.target.value } }))} /></Field>
+              <Field label="Policy No"><Input value={form.insurance?.policyNo || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, policyNo: e.target.value } }))} /></Field>
+              <Field label="Amount"><Input type="number" value={form.insurance?.amount ?? ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, amount: e.target.value } }))} /></Field>
+              <Field label="Contact Person"><Input value={form.insurance?.contactPerson || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, contactPerson: e.target.value } }))} /></Field>
+              <Field label="Coverage"><Input value={form.insurance?.coverage || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, coverage: e.target.value } }))} placeholder="e.g. Comprehensive" /></Field>
+              <Field label="Remark" full><textarea value={form.insurance?.remarks || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, remarks: e.target.value } }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
+            </div>
+          </Card>
+        )}
 
         <Card style={{ marginBottom: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Reference Person <span className="t-2" style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></div>
@@ -378,8 +465,8 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             <div key={i} className="row gap-2" style={{ marginBottom: 10, alignItems: 'flex-start' }}>
               <div style={{ flex: 2 }}>
                 <SearchSelect
-                  value={g.guarantorId ? `${customers.find((c) => c.id === g.guarantorId)?.fullName || ''}` : ''}
-                  onChange={(_n, opt) => setGuarantor(i, { guarantorId: opt?.id })}
+                  value={g.guarantorCustomerId ? `${customers.find((c) => c.id === g.guarantorCustomerId)?.fullName || ''}` : ''}
+                  onChange={(_n, opt) => setGuarantor(i, { guarantorCustomerId: opt?.id })}
                   options={customers.filter((c) => c.id !== form.customerId)}
                   getLabel={(c) => `${c.fullName} (${c.code})`}
                   getSub={(c) => c.nicNo || c.phone || ''}
@@ -399,13 +486,50 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           </div>
           {form.collateral.length === 0 && <div className="t-2" style={{ fontSize: 12.5 }}>No collateral added.</div>}
           {form.collateral.map((c, i) => (
-            <div key={i} className="row gap-2" style={{ marginBottom: 10, alignItems: 'flex-start' }}>
-              <div style={{ width: 140 }}><Select value={c.type} onChange={(e) => setCollateral(i, { type: e.target.value })}>
-                {COLLATERAL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </Select></div>
-              <div style={{ flex: 2 }}><Input placeholder="Description" value={c.description} onChange={(e) => setCollateral(i, { description: e.target.value })} /></div>
-              <div style={{ flex: 1 }}><Input type="number" placeholder="Est. value" value={c.estimatedValue ?? ''} onChange={(e) => setCollateral(i, { estimatedValue: e.target.value as any })} /></div>
-              <button className="mms-act" title="Remove" onClick={() => removeCollateral(i)} style={{ marginTop: 6 }}><Icon n="trash" s={15} /></button>
+            <div key={i} style={{ marginBottom: 12, padding: 12, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
+              <div className="row gap-2" style={{ alignItems: 'flex-start' }}>
+                <div style={{ width: 140 }}><Select value={c.collateralType || ''} onChange={(e) => setCollateral(i, { collateralType: e.target.value as any })}>
+                  {COLLATERAL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </Select></div>
+                <div style={{ flex: 2 }}><Input placeholder="Description" value={c.description} onChange={(e) => setCollateral(i, { description: e.target.value })} /></div>
+                <div style={{ flex: 1 }}><Input type="number" placeholder="Est. value" value={c.estimatedValue ?? ''} onChange={(e) => setCollateral(i, { estimatedValue: e.target.value as any })} /></div>
+                <button className="mms-act" title="Remove" onClick={() => removeCollateral(i)} style={{ marginTop: 6 }}><Icon n="trash" s={15} /></button>
+              </div>
+
+              {c.collateralType === 'Vehicle' && (
+                <div className="row gap-2 wrap" style={{ marginTop: 8 }}>
+                  <div style={{ width: 140 }}><Select value={c.vehicleType || ''} onChange={(e) => setCollateral(i, { vehicleType: e.target.value })}>
+                    <option value="">Vehicle type…</option>
+                    {VEHICLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </Select></div>
+                  <div style={{ flex: 1, minWidth: 140 }}><Input placeholder="Make / Model" value={c.makeModel || ''} onChange={(e) => setCollateral(i, { makeModel: e.target.value })} /></div>
+                  <div style={{ flex: 1, minWidth: 130 }}><Input placeholder="Registration No" value={c.registrationNo || ''} onChange={(e) => setCollateral(i, { registrationNo: e.target.value })} /></div>
+                  <div style={{ flex: 1, minWidth: 130 }}><Input placeholder="Chassis No" value={c.chassisNo || ''} onChange={(e) => setCollateral(i, { chassisNo: e.target.value })} /></div>
+                  <div style={{ flex: 1, minWidth: 130 }}><Input placeholder="Engine No" value={c.engineNo || ''} onChange={(e) => setCollateral(i, { engineNo: e.target.value })} /></div>
+                  <div style={{ width: 110 }}><Input type="number" placeholder="Year" value={c.yearOfManufacture ?? ''} onChange={(e) => setCollateral(i, { yearOfManufacture: e.target.value as any })} /></div>
+                </div>
+              )}
+
+              <div className="row gap-2 wrap" style={{ marginTop: 8, alignItems: 'center' }}>
+                {(c.documents || []).map((d) => (
+                  <div key={d.id} className="row gap-1" style={{ alignItems: 'center', padding: '3px 8px', background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', fontSize: 11.5 }}>
+                    <Icon n="doc" s={13} />
+                    <span>{d.filePath.split('/').pop()}</span>
+                    <button className="mms-act" title="View" onClick={() => viewCollateralDoc(i, d)} style={{ padding: 0 }}><Icon n="eye" s={13} /></button>
+                    <button className="mms-act" title="Remove" onClick={() => removeCollateralDoc(i, d)} style={{ padding: 0 }}><Icon n="trash" s={13} /></button>
+                  </div>
+                ))}
+                {(collateralFiles[i] || []).map((f, fi) => (
+                  <div key={fi} className="row gap-1" style={{ alignItems: 'center', padding: '3px 8px', background: 'var(--bg-1)', border: '1px dashed var(--line)', borderRadius: 'var(--r-s)', fontSize: 11.5 }}>
+                    <span>{f.name}</span>
+                    <button className="mms-act" title="Remove" onClick={() => unstageCollateralFile(i, fi)} style={{ padding: 0 }}><Icon n="trash" s={13} /></button>
+                  </div>
+                ))}
+                <input ref={(el) => { collateralFileInputs.current[i] = el }} type="file" multiple
+                  accept="image/png,image/jpeg,image/webp,application/pdf"
+                  onChange={(e) => { stageCollateralFiles(i, e.target.files); e.target.value = '' }} style={{ display: 'none' }} />
+                <Btn size="sm" variant="solid" icon="upload" onClick={() => collateralFileInputs.current[i]?.click()}>Attach File</Btn>
+              </div>
             </div>
           ))}
         </Card>
@@ -443,7 +567,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           render={(l) => <>
             <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
             <Td><div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div><div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div></Td>
-            <Td>{l.loanType?.name}</Td>
+            <Td>{l.loanDetail?.loanType?.name}</Td>
             <Td mono>{Number(l.principalAmount).toLocaleString()}</Td>
             <Td>{l.termMonths}mo</Td>
             <Td align="center"><Badge tone={statusTone[l.status]} dot>{l.status}</Badge></Td>
@@ -470,8 +594,8 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
 
 function CustomerDetailCard({ c }: { c: Customer }) {
   const idNo = c.nicNo || c.passportNo || c.drivingLicenseNo || '—'
-  const occupation = c.occupationType === 'Employed' ? [c.jobTitle, c.employerName].filter(Boolean).join(' at ')
-    : (c.occupationType === 'SelfEmployed' || c.occupationType === 'BusinessOwner') ? c.businessName
+  const occupation = c.occupationType === 'Employed' ? [c.employmentDetail?.jobTitle, c.employmentDetail?.employerName].filter(Boolean).join(' at ')
+    : (c.occupationType === 'SelfEmployed' || c.occupationType === 'BusinessOwner') ? c.businessDetail?.businessName
     : c.occupationType
 
   const [activeOwn, setActiveOwn] = useState<Loan[]>([])
@@ -521,13 +645,13 @@ function CustomerDetailCard({ c }: { c: Customer }) {
           <div className="col gap-1">
             {activeOwn.map((l) => (
               <div key={`own-${l.id}`} className="row between" style={{ fontSize: 12 }}>
-                <span><b>{l.code}</b> · {l.loanType?.name || '—'} · <span className="t-2">Borrower</span></span>
+                <span><b>{l.code}</b> · {l.loanDetail?.loanType?.name || '—'} · <span className="t-2">Borrower</span></span>
                 <span style={{ fontFamily: 'JetBrains Mono' }}>{outstandingOf(l).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             ))}
             {activeGuaranteed.map((l) => (
               <div key={`grt-${l.id}`} className="row between" style={{ fontSize: 12 }}>
-                <span><b>{l.code}</b> · {l.loanType?.name || '—'} · <span className="t-2">Guarantor for {l.customer?.fullName}</span></span>
+                <span><b>{l.code}</b> · {l.loanDetail?.loanType?.name || '—'} · <span className="t-2">Guarantor for {l.customer?.fullName}</span></span>
                 <span style={{ fontFamily: 'JetBrains Mono' }}>{outstandingOf(l).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             ))}
@@ -541,10 +665,10 @@ function CustomerDetailCard({ c }: { c: Customer }) {
           empty="No active loans"
           render={({ l, role }) => <>
             <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{l.code}</Td>
-            <Td>{l.loanType?.name || '—'}</Td>
+            <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
             <Td>{role}</Td>
             <Td align="right" mono>{Number(l.principalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Td>
-            <Td>{l.termMonths ? `${l.termMonths}mo` : '—'}{l.installmentFrequency ? ` · ${l.installmentFrequency}` : ''}</Td>
+            <Td>{l.termMonths ? `${l.termMonths}mo` : '—'}{l.loanDetail?.installmentFrequency ? ` · ${l.loanDetail.installmentFrequency}` : ''}</Td>
             <Td align="right" mono>{outstandingOf(l).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Td>
             <Td align="center"><Badge tone="green" dot>{l.status}</Badge></Td>
           </>} />

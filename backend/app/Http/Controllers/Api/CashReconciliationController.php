@@ -5,15 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CashAccount;
 use App\Models\CashReconciliation;
-use App\Models\LoanPayment;
-use App\Models\LoanPostDatedCheque;
+use App\Models\FacilityPayment;
+use App\Models\FacilityPostDatedCheque;
 use Illuminate\Http\Request;
 
 class CashReconciliationController extends Controller
 {
     public function index(Request $request)
     {
-        $query = CashReconciliation::with(['branch:id,name,code', 'reconciler:id,name'])
+        $query = CashReconciliation::with(['branch:id,name,code', 'otherBranch:id,name,code', 'otherBranchChequeBranch:id,name,code', 'reconciler:id,name'])
             ->orderByDesc('as_at_date');
         if ($request->filled('branch_id')) {
             $query->where('branch_id', $request->integer('branch_id'));
@@ -35,7 +35,7 @@ class CashReconciliationController extends Controller
         ]);
 
         $accounts = CashAccount::where('branch_id', $data['branch_id'])->orderBy('name')->get(['id', 'name', 'current_balance']);
-        $existing = CashReconciliation::with('reconciler:id,name')
+        $existing = CashReconciliation::with(['otherBranch:id,name,code', 'otherBranchChequeBranch:id,name,code', 'reconciler:id,name'])
             ->where('branch_id', $data['branch_id'])
             ->where('as_at_date', $data['as_at_date'])
             ->first();
@@ -62,9 +62,9 @@ class CashReconciliationController extends Controller
             'cash_float' => 'nullable|numeric',
             'petty_cash' => 'nullable|numeric',
             'other_branch_cash' => 'nullable|numeric',
-            'other_branch_code' => 'nullable|string|max:16',
+            'other_branch_id' => 'nullable|exists:branches,id',
             'other_branch_cheque' => 'nullable|numeric',
-            'other_branch_cheque_code' => 'nullable|string|max:16',
+            'other_branch_cheque_branch_id' => 'nullable|exists:branches,id',
             'denominations' => 'nullable|array',
             'denominations.*' => 'nullable|integer|min:0',
             'coins_amount' => 'nullable|numeric',
@@ -109,9 +109,9 @@ class CashReconciliationController extends Controller
                 'cash_float' => $data['cash_float'] ?? 0,
                 'petty_cash' => $data['petty_cash'] ?? 0,
                 'other_branch_cash' => $data['other_branch_cash'] ?? 0,
-                'other_branch_code' => $data['other_branch_code'] ?? null,
+                'other_branch_id' => $data['other_branch_id'] ?? null,
                 'other_branch_cheque' => $data['other_branch_cheque'] ?? 0,
-                'other_branch_cheque_code' => $data['other_branch_cheque_code'] ?? null,
+                'other_branch_cheque_branch_id' => $data['other_branch_cheque_branch_id'] ?? null,
                 'total_cash' => $totalCash,
                 'total_cheque' => $totalCheque,
                 'denominations' => $denominations,
@@ -123,7 +123,7 @@ class CashReconciliationController extends Controller
             ]
         );
 
-        return response()->json($recon->load(['branch:id,name,code', 'reconciler:id,name']), 201);
+        return response()->json($recon->load(['branch:id,name,code', 'otherBranch:id,name,code', 'otherBranchChequeBranch:id,name,code', 'reconciler:id,name']), 201);
     }
 
     public function destroy(CashReconciliation $cashReconciliation)
@@ -140,7 +140,7 @@ class CashReconciliationController extends Controller
 
     private function chequeInHandTotal(int $branchId): string
     {
-        return (string) LoanPayment::where('branch_id', $branchId)
+        return (string) FacilityPayment::where('branch_id', $branchId)
             ->where('payment_method', 'Cheque')
             ->where('clearance_status', 'Pending')
             ->sum('amount');
@@ -148,7 +148,7 @@ class CashReconciliationController extends Controller
 
     private function postdatedChequeTotal(int $branchId): string
     {
-        return (string) LoanPostDatedCheque::where('branch_id', $branchId)
+        return (string) FacilityPostDatedCheque::where('branch_id', $branchId)
             ->whereIn('status', ['Pending', 'Handed'])
             ->sum('amount');
     }
@@ -156,7 +156,7 @@ class CashReconciliationController extends Controller
     /** Cash-method loan payments actually received on the given date (informational — not folded into total_cash; see the migration's comment on why). */
     private function todayCashReceipts(int $branchId, string $date): string
     {
-        return (string) LoanPayment::where('branch_id', $branchId)
+        return (string) FacilityPayment::where('branch_id', $branchId)
             ->where('payment_method', 'Cash')
             ->where('status', 'Active')
             ->whereDate('paid_at', $date)
@@ -166,7 +166,7 @@ class CashReconciliationController extends Controller
     /** Cheque-method loan payments received on the given date, any clearance status (informational). */
     private function todayChequeReceipts(int $branchId, string $date): string
     {
-        return (string) LoanPayment::where('branch_id', $branchId)
+        return (string) FacilityPayment::where('branch_id', $branchId)
             ->where('payment_method', 'Cheque')
             ->where('status', 'Active')
             ->whereDate('paid_at', $date)
@@ -176,7 +176,7 @@ class CashReconciliationController extends Controller
     /** Cheques that cleared (bank-realized) on the given date (informational). */
     private function chequeRealizedTotal(int $branchId, string $date): string
     {
-        return (string) LoanPayment::where('branch_id', $branchId)
+        return (string) FacilityPayment::where('branch_id', $branchId)
             ->where('payment_method', 'Cheque')
             ->where('clearance_status', 'Realized')
             ->where('status', 'Active')

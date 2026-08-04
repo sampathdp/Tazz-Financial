@@ -40,7 +40,7 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
   const filtered = rows.filter((l) => {
     if (statusFilter !== 'All' && l.status !== statusFilter) return false
     if (!q) return true
-    return [l.code, l.customer?.fullName, l.customer?.code, l.loanType?.name].some((v) => (v || '').toLowerCase().includes(q))
+    return [l.code, l.customer?.fullName, l.customer?.code, l.loanDetail?.loanType?.name].some((v) => (v || '').toLowerCase().includes(q))
   })
   const counts = useMemo(() => {
     const c: Record<string, number> = { All: rows.length }
@@ -52,7 +52,7 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
     return (
       <div>
         <PageHead crumbs="Loan Management / Active Loans" title={detailLoading || !loan ? 'Loading…' : `Loan ${loan.code}`} icon="coins"
-          sub={loan ? `${loan.customer?.fullName} — ${loan.loanType?.name}` : undefined}
+          sub={loan ? `${loan.customer?.fullName} — ${loan.loanDetail?.loanType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={back}>← Back to Active Loans</Btn>} />
         {detailLoading || !loan ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
           : <LoanDetail loan={loan} me={me} onChanged={reloadLoan} go={go} context="active" />}
@@ -88,7 +88,7 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
           render={(l) => <>
             <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
             <Td><div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div><div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div></Td>
-            <Td>{l.loanType?.name}</Td>
+            <Td>{l.loanDetail?.loanType?.name}</Td>
             <Td mono>{money(l.principalAmount)}</Td>
             <Td mono>{l.status === 'Approved' ? '—' : money(num(l.totalDueSum) - num(l.paidSum))}</Td>
             <Td align="center"><Badge tone={statusTone[l.status]} dot>{l.status}</Badge></Td>

@@ -33,7 +33,7 @@ const addMonths = (iso: string, months: number) => {
 const METHODS: { value: FdPaymentMethod; label: string }[] = [
   { value: 'Cash', label: 'Cash' },
   { value: 'Cheque', label: 'Cheque' },
-  { value: 'BankTransfer', label: 'Bank Transfer' },
+  { value: 'Bank', label: 'Bank Transfer' },
 ]
 
 /** Client-side preview only — mirrors App\Support\FdInterestCalculator. The server always computes the authoritative figures. */
@@ -274,14 +274,14 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')
   const [refNo, setRefNo] = useState('')
-  const [bankName, setBankName] = useState('')
+  const [bankId, setBankId] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     if (!open || !fd) return
     setTerm(fd.termMonths); setCustomTerm(''); setNotes(''); setEnhance(false)
-    setAmount(''); setMethod('Cash'); setRefNo(''); setBankName(''); setErr('')
+    setAmount(''); setMethod('Cash'); setRefNo(''); setBankId(undefined); setErr('')
   }, [open, fd])
 
   if (!fd) return null
@@ -293,12 +293,12 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
   const save = async () => {
     if (!effectiveTerm || effectiveTerm <= 0) { setErr('Select or enter a valid term.'); return }
     if (enhance && (!amount || Number(amount) <= 0)) { setErr('Enter the additional deposit amount.'); return }
-    if (enhance && method !== 'Cash' && !bankName) { setErr('Bank name is required for Cheque/Bank Transfer.'); return }
+    if (enhance && method !== 'Cash' && !bankId) { setErr('Bank name is required for Cheque/Bank Transfer.'); return }
     setBusy(true); setErr('')
     try {
       const result = await fixedDepositsApi.renew(fd.id, {
         termMonths: effectiveTerm, notes: notes || undefined,
-        enhancement: enhance ? { amount, paymentMethod: method, referenceNo: refNo || undefined, bankName: method !== 'Cash' ? bankName : undefined } : undefined,
+        enhancement: enhance ? { amount, paymentMethod: method, referenceNo: refNo || undefined, bankId: method !== 'Cash' ? bankId : undefined } : undefined,
       })
       onRenewed(result.fixedDeposit, result.enhancementDeposit)
       notify.success('Fixed Deposit renewed', result.fixedDeposit.fdNumber)
@@ -335,7 +335,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
               {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </Select></Field>
             <Field label="Reference No"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
-            {method !== 'Cash' && <Field label="Bank Name"><BankSelect value={bankName} onChange={setBankName} /></Field>}
+            {method !== 'Cash' && <Field label="Bank Name"><BankSelect value={bankId} onChange={setBankId} /></Field>}
           </div>
         )}
         <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>

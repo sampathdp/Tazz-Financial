@@ -27,7 +27,7 @@ class CashbookEntryController extends Controller
         $data = $request->validate([
             'cash_account_id' => 'required|exists:cash_accounts,id',
             'entry_date' => 'required|date',
-            'type' => ['required', Rule::in(CashbookEntry::TYPES)],
+            'direction' => ['required', Rule::in(CashbookEntry::DIRECTIONS)],
             'category' => ['required', Rule::in(CashbookEntry::CATEGORIES)],
             'description' => 'nullable|string|max:255',
             'amount' => 'required|numeric|min:0.01',
@@ -35,7 +35,7 @@ class CashbookEntryController extends Controller
 
         $entry = DB::transaction(function () use ($data, $request) {
             $account = CashAccount::lockForUpdate()->findOrFail($data['cash_account_id']);
-            $isIn = $data['type'] === 'In';
+            $isIn = $data['direction'] === 'In';
             $newBalance = bcadd((string) $account->current_balance, $isIn ? $data['amount'] : -$data['amount'], 2);
 
             $account->update(['current_balance' => $newBalance]);
@@ -54,7 +54,7 @@ class CashbookEntryController extends Controller
     {
         DB::transaction(function () use ($cashbookEntry) {
             $account = CashAccount::lockForUpdate()->findOrFail($cashbookEntry->cash_account_id);
-            $isIn = $cashbookEntry->type === 'In';
+            $isIn = $cashbookEntry->direction === 'In';
             // Reverse the original balance effect before removing the entry.
             $restored = bcadd((string) $account->current_balance, $isIn ? -$cashbookEntry->amount : $cashbookEntry->amount, 2);
             $account->update(['current_balance' => $restored]);

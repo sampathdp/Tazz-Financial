@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\FacilityWaiver;
 use App\Models\Loan;
-use App\Models\LoanWaiver;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -38,7 +38,7 @@ class LoanWaiverController extends Controller
         return response()->json($waiver->load(['approver:id,name', 'creator:id,name']), 201);
     }
 
-    public function destroy(LoanWaiver $waiver)
+    public function destroy(FacilityWaiver $waiver)
     {
         $waiver->delete();
 

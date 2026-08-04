@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\BankAccount;
+use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\JournalLine;
 use Carbon\Carbon;
@@ -10,15 +12,15 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Trial Balance, General Ledger, Profit & Loss and Balance Sheet — all
- * read-only views over journal_lines (see the Chart of Accounts guide,
- * Section 6 Schedules 6/7/8/10). None of them are stored; every figure is
- * computed live from ChartOfAccount::balancesAsOf() so they can never
+ * Trial Balance, General Ledger, Profit & Loss, Balance Sheet and Ledger
+ * Drift — all read-only views over journal_lines (see the Chart of Accounts
+ * guide, Section 6 Schedules 6/7/8/10). None of them are stored; every figure
+ * is computed live from ChartOfAccount::balancesAsOf() so they can never
  * disagree with each other or with the ledger itself.
  */
 class AccountingReportController extends Controller
 {
-    private const TYPES = ['trial-balance', 'general-ledger', 'profit-loss', 'balance-sheet'];
+    private const TYPES = ['trial-balance', 'general-ledger', 'profit-loss', 'balance-sheet', 'ledger-drift'];
 
     public function show(Request $request, string $type)
     {
@@ -31,6 +33,7 @@ class AccountingReportController extends Controller
             'general-ledger' => $this->generalLedger($request),
             'profit-loss' => $this->profitAndLoss($request),
             'balance-sheet' => $this->balanceSheet($request),
+            'ledger-drift' => $this->ledgerDrift($request),
         };
     }
 
@@ -46,7 +49,7 @@ class AccountingReportController extends Controller
                 'account_id' => $account->id,
                 'code' => $account->code,
                 'name' => $account->name,
-                'type' => $account->type,
+                'account_type' => $account->account_type,
                 'total_debit' => $b->total_debit ?? '0.00',
                 'total_credit' => $b->total_credit ?? '0.00',
                 'balance' => $b->balance ?? '0.00',
@@ -61,7 +64,7 @@ class AccountingReportController extends Controller
             throw ValidationException::withMessages(['account_id' => 'account_id is required for this report.']);
         }
 
-        $lines = JournalLine::with('entry:id,code,entry_date,description,reference_type,reference_id,status')
+        $lines = JournalLine::with('entry:id,code,entry_date,description,source_type,source_id,status')
             ->where('account_id', $accountId)
             ->whereHas('entry', function ($q) use ($request) {
                 $q->where('status', 'Posted')
@@ -88,15 +91,15 @@ class AccountingReportController extends Controller
                 'journal_entry_code' => $line->entry->code,
                 'entry_date' => $line->entry->entry_date->toDateString(),
                 'description' => $line->description ?? $line->entry->description,
-                'reference_type' => $line->entry->reference_type,
-                'reference_id' => $line->entry->reference_id,
+                'source_type' => $line->entry->source_type,
+                'source_id' => $line->entry->source_id,
                 'debit' => $line->debit,
                 'credit' => $line->credit,
                 'running_balance' => $running,
             ];
         });
 
-        return ['account' => $account->only(['id', 'code', 'name', 'type', 'normal_balance']), 'lines' => $rows];
+        return ['account' => $account->only(['id', 'code', 'name', 'account_type', 'normal_balance']), 'lines' => $rows];
     }
 
     private function profitAndLoss(Request $request)
@@ -117,7 +120,7 @@ class AccountingReportController extends Controller
     {
         $asOf = $request->query('as_of') ?? now()->toDateString();
         $balances = ChartOfAccount::balancesAsOf($asOf);
-        $accounts = ChartOfAccount::whereIn('type', ['Asset', 'Liability', 'Equity'])->orderBy('code')->get();
+        $accounts = ChartOfAccount::whereIn('account_type', ['Asset', 'Liability', 'Equity'])->orderBy('code')->get();
 
         $rows = ['Asset' => [], 'Liability' => [], 'Equity' => []];
         $totals = ['Asset' => '0.00', 'Liability' => '0.00', 'Equity' => '0.00'];
@@ -129,8 +132,8 @@ class AccountingReportController extends Controller
                 continue;
             }
             $balance = $balances->get($account->id)->balance ?? '0.00';
-            $rows[$account->type][] = ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => $balance];
-            $totals[$account->type] = bcadd($totals[$account->type], $balance, 2);
+            $rows[$account->account_type][] = ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => $balance];
+            $totals[$account->account_type] = bcadd($totals[$account->account_type], $balance, 2);
         }
 
         $yearStart = Carbon::parse($asOf)->startOfYear()->toDateString();
@@ -156,19 +159,71 @@ class AccountingReportController extends Controller
         ];
     }
 
+    /**
+     * cash_accounts.current_balance / bank_accounts.current_balance are a
+     * separate, independently-maintained balance for the same till/bank
+     * account that chart_of_accounts/journal_lines also tracks via each
+     * account's own chart_of_account_id (this dual-ledger shape is
+     * deliberate and transitional, not a bug — see that column's migration).
+     * But nothing enforces the two agree, so this surfaces any drift instead
+     * of assuming it can't happen: for every till/bank account with a linked
+     * GL leaf, the "book" balance (current_balance) against the GL's own
+     * derived balance for that leaf account. A nonzero variance means a
+     * posting updated one side without the other — investigate before
+     * trusting either figure for that account.
+     */
+    private function ledgerDrift(Request $request)
+    {
+        $asOf = $request->query('as_of');
+        $balances = ChartOfAccount::balancesAsOf($asOf);
+
+        $tillRows = CashAccount::whereNotNull('chart_of_account_id')->with('chartOfAccount')->get()
+            ->map(fn (CashAccount $till) => $this->driftRow('CashAccount', $till, $till->chartOfAccount, $balances));
+
+        $bankRows = BankAccount::whereNotNull('chart_of_account_id')->with('chartOfAccount')->get()
+            ->map(fn (BankAccount $bank) => $this->driftRow('BankAccount', $bank, $bank->chartOfAccount, $balances));
+
+        $rows = $tillRows->concat($bankRows)
+            ->sortByDesc(fn ($r) => abs((float) $r['variance']))
+            ->values();
+
+        return [
+            'as_of' => $asOf ?? now()->toDateString(),
+            'rows' => $rows,
+            'has_drift' => $rows->contains(fn ($r) => bccomp($r['variance'], '0.00', 2) !== 0),
+        ];
+    }
+
+    private function driftRow(string $kind, $ledgerAccount, ChartOfAccount $glAccount, \Illuminate\Support\Collection $balances): array
+    {
+        $book = (string) $ledgerAccount->current_balance;
+        $gl = $balances->get($glAccount->id)->balance ?? '0.00';
+
+        return [
+            'kind' => $kind,
+            'id' => $ledgerAccount->id,
+            'name' => $ledgerAccount->name,
+            'gl_account_id' => $glAccount->id,
+            'gl_account_code' => $glAccount->code,
+            'book_balance' => $book,
+            'gl_balance' => $gl,
+            'variance' => bcsub($book, $gl, 2),
+        ];
+    }
+
     /** Income/Expense account balances for a period, plus their totals — shared by P&L and Balance Sheet's 3030 figure so both can never disagree. */
     private function plFigures(?string $from, ?string $to): array
     {
         $balances = ChartOfAccount::balancesAsOf($to, $from);
-        $accounts = ChartOfAccount::whereIn('type', ['Income', 'Expense'])->orderBy('code')->get();
+        $accounts = ChartOfAccount::whereIn('account_type', ['Income', 'Expense'])->orderBy('code')->get();
 
         $rows = ['Income' => [], 'Expense' => []];
         $totalIncome = '0.00';
         $totalExpense = '0.00';
         foreach ($accounts as $account) {
             $balance = $balances->get($account->id)->balance ?? '0.00';
-            $rows[$account->type][] = ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => $balance];
-            if ($account->type === 'Income') {
+            $rows[$account->account_type][] = ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => $balance];
+            if ($account->account_type === 'Income') {
                 $totalIncome = bcadd($totalIncome, $balance, 2);
             } else {
                 $totalExpense = bcadd($totalExpense, $balance, 2);

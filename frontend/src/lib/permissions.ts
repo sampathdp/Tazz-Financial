@@ -37,6 +37,9 @@ export const ROUTE_MODULE: Record<string, string> = {
   'loan/commissions': 'Sales Executive Commissions',
   // 'loan/adjustments' is intentionally NOT mapped here — canAccessRoute() below
   // falls back to an admin-only check for any route id absent from this map.
+  'sd/types': 'Speed Draft Types',
+  'sd/drafts': 'Speed Drafts',
+  'sd/payments': 'Speed Draft Payments',
   'ad/branches': 'Branch Management',
   'ad/roles': 'Role Management',
   'ad/users': 'User Management',
@@ -56,6 +59,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'acc/tb': 'Accounting Reports',
   'acc/pl': 'Accounting Reports',
   'acc/bs': 'Accounting Reports',
+  'acc/drift': 'Accounting Reports',
   'exp/vendors': 'Vendors',
   'exp/expenses': 'Expenses',
   'fund/dashboard': 'Funding Reports',

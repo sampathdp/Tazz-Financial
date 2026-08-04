@@ -37,7 +37,7 @@ class ChartOfAccountController extends Controller
 
     public function update(Request $request, ChartOfAccount $chartOfAccount)
     {
-        // A system (seeded control/link) account's code, type and normal_balance
+        // A system (seeded control/link) account's code, account_type and normal_balance
         // are load-bearing — LedgerPoster and the report queries look them up by
         // code — so only its display name and active/inactive status can change.
         if ($chartOfAccount->is_system) {
@@ -61,7 +61,7 @@ class ChartOfAccountController extends Controller
         return $request->validate([
             'code' => ['required', 'string', 'max:16', Rule::unique('chart_of_accounts', 'code')->ignore($account?->id)],
             'name' => ['required', 'string', 'max:128'],
-            'type' => ['required', Rule::in(['Asset', 'Liability', 'Equity', 'Income', 'Expense'])],
+            'account_type' => ['required', Rule::in(['Asset', 'Liability', 'Equity', 'Income', 'Expense'])],
             'normal_balance' => ['required', Rule::in(['Debit', 'Credit'])],
             'parent_id' => 'nullable|exists:chart_of_accounts,id',
             'status' => [Rule::in(['Active', 'Inactive'])],

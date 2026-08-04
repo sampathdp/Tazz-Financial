@@ -42,7 +42,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
   const close = () => { setModal(false); setEditing(null); setErr('') }
 
   const save = async () => {
-    if (!form.name || !form.bankName || !form.accountNumber) { setErr('Account name, bank name and account number are required.'); return }
+    if (!form.name || !form.bankId || !form.accountNumber) { setErr('Account name, bank name and account number are required.'); return }
     setBusy(true); setErr('')
     try {
       if (editing) await bankAccountsApi.update(editing.id, form)
@@ -73,7 +73,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
           rows={rows}
           render={(a) => <>
             <Td c="var(--tx-0)"><div style={{ fontWeight: 600 }}>{a.name}</div><div className="t-2" style={{ fontSize: 11.5 }} >{a.accountNumber}</div></Td>
-            <Td>{a.bankName}{a.branchName && <div className="t-2" style={{ fontSize: 11 }}>{a.branchName}</div>}</Td>
+            <Td>{a.bank?.name || '—'}{a.bankBranchName && <div className="t-2" style={{ fontSize: 11 }}>{a.bankBranchName}</div>}</Td>
             <Td><Badge tone="neutral">{a.accountType || 'Savings'}</Badge></Td>
             <Td>{a.branch?.name || '—'}</Td>
             <Td align="right" mono>{a.currency || 'LKR'} {money(a.currentBalance)}</Td>
@@ -93,8 +93,8 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
         <ErrorBanner error={err} style={{ marginBottom: 14 }} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Account Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
-          <Field label="Bank Name"><BankSelect value={form.bankName || ''} onChange={(v) => setForm((s) => ({ ...s, bankName: v }))} /></Field>
-          <Field label="Bank Branch"><Input value={form.branchName || ''} onChange={(e) => setForm((s) => ({ ...s, branchName: e.target.value }))} /></Field>
+          <Field label="Bank Name"><BankSelect value={form.bankId} onChange={(v) => setForm((s) => ({ ...s, bankId: v }))} /></Field>
+          <Field label="Bank Branch"><Input value={form.bankBranchName || ''} onChange={(e) => setForm((s) => ({ ...s, bankBranchName: e.target.value }))} /></Field>
           <Field label="Account Number"><Input value={form.accountNumber || ''} onChange={(e) => setForm((s) => ({ ...s, accountNumber: e.target.value }))} disabled={!!editing} /></Field>
           <Field label="Account Type"><Select value={form.accountType || 'Savings'} onChange={(e) => setForm((s) => ({ ...s, accountType: e.target.value as any }))}>
             {types.map((t) => <option key={t}>{t}</option>)}
@@ -116,7 +116,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
 /* ========================== Bank Transactions =========================== */
 
 interface TxnForm extends Partial<BankTransaction> {}
-const blankTxnForm = (accountId?: number): TxnForm => ({ bankAccountId: accountId, type: 'Deposit', status: 'Cleared', txnDate: new Date().toISOString().slice(0, 10) })
+const blankTxnForm = (accountId?: number): TxnForm => ({ bankAccountId: accountId, transactionType: 'Deposit', status: 'Cleared', txnDate: new Date().toISOString().slice(0, 10) })
 
 export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -185,10 +185,10 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
           render={(t) => <>
             <Td>{t.txnDate}</Td>
             <Td>{t.bankAccount?.name || '—'}</Td>
-            <Td><Badge tone={isCredit(t.type) ? 'green' : 'red'}>{t.type}</Badge></Td>
+            <Td><Badge tone={isCredit(t.transactionType) ? 'green' : 'red'}>{t.transactionType}</Badge></Td>
             <Td mono style={{ fontSize: 12 }}>{t.referenceNo || '—'}</Td>
             <Td c="var(--tx-2)" style={{ fontSize: 12.5, whiteSpace: 'normal' }}>{t.description || '—'}</Td>
-            <Td align="right" mono c={isCredit(t.type) ? 'var(--ok)' : 'var(--bad)'}>{isCredit(t.type) ? '+' : '-'}{money(t.amount)}</Td>
+            <Td align="right" mono c={isCredit(t.transactionType) ? 'var(--ok)' : 'var(--bad)'}>{isCredit(t.transactionType) ? '+' : '-'}{money(t.amount)}</Td>
             <Td align="right" mono>{money(t.balanceAfter)}</Td>
             <Td align="center"><Badge tone={t.status === 'Pending' ? 'amber' : 'green'} dot>{t.status || 'Cleared'}</Badge></Td>
             <Td align="right"><Can user={me} module="Bank Transactions" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(t)}><Icon n="trash" s={15} /></button></Can></Td>
@@ -207,7 +207,7 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
           </Select></Field>
           <Field label="Date"><DateInput value={form.txnDate} onChange={(iso) => setForm((s) => ({ ...s, txnDate: iso }))} /></Field>
-          <Field label="Type"><Select value={form.type || 'Deposit'} onChange={(e) => setForm((s) => ({ ...s, type: e.target.value as any }))}>
+          <Field label="Type"><Select value={form.transactionType || 'Deposit'} onChange={(e) => setForm((s) => ({ ...s, transactionType: e.target.value as any }))}>
             {types.map((t) => <option key={t}>{t}</option>)}
           </Select></Field>
           <Field label="Amount"><Input type="number" step="0.01" value={form.amount ?? ''} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} /></Field>

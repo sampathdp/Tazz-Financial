@@ -30,13 +30,18 @@ use Illuminate\Support\Facades\Schema;
  * (number_sequences' branch_id/loan_type_id/funding_product_id are
  * deliberately unconstrained "0 = not part of this key" columns — see that
  * migration's docblock).
+ *
+ * generated_numbers is gone from the list — renamed to document_number_log
+ * with a materially different shape (no more branch_id/loan_type_id/
+ * funding_product_id columns to add foreign keys to), created directly as
+ * InnoDB with its own foreign keys already in place.
  */
 return new class extends Migration
 {
     private const TABLES = [
         'cash_accounts', 'cashbook_entries', 'cash_transfers', 'cash_reconciliations',
         'fixed_deposits', 'fd_deposits', 'fd_interest_payments', 'fd_renewals', 'fd_withdrawals',
-        'funding_products', 'number_sequences', 'generated_numbers',
+        'funding_products', 'number_sequences',
     ];
 
     public function up(): void
@@ -101,12 +106,6 @@ return new class extends Migration
             $table->foreign('created_by')->references('id')->on('users')->nullOnDelete();
         });
 
-        Schema::table('generated_numbers', function ($table) {
-            $table->foreign('branch_id')->references('id')->on('branches')->nullOnDelete();
-            $table->foreign('loan_type_id')->references('id')->on('loan_types')->nullOnDelete();
-            $table->foreign('funding_product_id')->references('id')->on('funding_products')->nullOnDelete();
-            $table->foreign('generated_by')->references('id')->on('users')->nullOnDelete();
-        });
     }
 
     public function down(): void

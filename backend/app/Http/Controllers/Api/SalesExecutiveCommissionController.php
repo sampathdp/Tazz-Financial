@@ -15,11 +15,11 @@ class SalesExecutiveCommissionController extends Controller
     private const PAYMENT_METHODS = ['Cash', 'Bank', 'Cheque'];
 
     private const RELATIONS = [
-        'loan:id,code,customer_id,principal_amount,status',
-        'loan.customer:id,full_name',
-        'loan.schedules:id,loan_id,installment_no,status,due_date',
-        'loan.schedules.allocations:id,loan_schedule_id,interest_applied',
-        'loan.schedules.allocations.payment:id,status,approval_status',
+        'facility:id,code,customer_id,principal_amount,status',
+        'facility.customer:id,full_name',
+        'facility.schedules:id,credit_facility_id,installment_no,status,due_date',
+        'facility.schedules.allocations:id,facility_schedule_id,interest_applied',
+        'facility.schedules.allocations.payment:id,status,approval_status',
         'loanType:id,name',
         'salesExecutive:id,name',
         'paidBy:id,name',
@@ -27,7 +27,7 @@ class SalesExecutiveCommissionController extends Controller
 
     public function index(Request $request)
     {
-        $query = SalesExecutiveCommission::with(self::RELATIONS)->orderBy('loan_id')->orderBy('cycle_no');
+        $query = SalesExecutiveCommission::with(self::RELATIONS)->orderBy('credit_facility_id')->orderBy('cycle_no');
         if ($request->filled('sales_executive_id')) {
             $query->where('sales_executive_id', $request->input('sales_executive_id'));
         }
@@ -49,7 +49,7 @@ class SalesExecutiveCommissionController extends Controller
         if ($commission->paid_at) {
             return response()->json(['message' => 'This commission has already been paid.'], 422);
         }
-        $commission->loadMissing('loan.schedules.allocations.payment');
+        $commission->loadMissing('facility.schedules.allocations.payment');
         if (self::paidInstallments($commission) < self::eligibleAt($commission)) {
             return response()->json(['message' => 'This commission is not yet eligible for payment.'], 422);
         }
@@ -83,7 +83,7 @@ class SalesExecutiveCommissionController extends Controller
 
     private static function paidInstallments(SalesExecutiveCommission $commission): int
     {
-        return $commission->loan->schedules->where('status', 'Paid')->count();
+        return $commission->facility->schedules->where('status', 'Paid')->count();
     }
 
     /** Total paid-installment count this cycle needs to reach before it's eligible. */
@@ -103,7 +103,7 @@ class SalesExecutiveCommissionController extends Controller
             return (float) $c->commission_amount;
         }
 
-        return round(LoanSummary::collectedInterest($c->loan, $c->from_installment) * (float) $c->commission_value / 100, 2);
+        return round(LoanSummary::collectedInterest($c->facility, $c->from_installment) * (float) $c->commission_value / 100, 2);
     }
 
     /** Once a percentage-type cycle is paid, starts the next one (baselined at
@@ -116,12 +116,12 @@ class SalesExecutiveCommissionController extends Controller
             return;
         }
         $paidInstallments = self::paidInstallments($c);
-        if ($paidInstallments >= $c->loan->schedules->count()) {
+        if ($paidInstallments >= $c->facility->schedules->count()) {
             return;
         }
 
         SalesExecutiveCommission::create([
-            'loan_id' => $c->loan_id,
+            'credit_facility_id' => $c->credit_facility_id,
             'sales_executive_id' => $c->sales_executive_id,
             'loan_type_id' => $c->loan_type_id,
             'cycle_no' => $c->cycle_no + 1,
@@ -135,7 +135,7 @@ class SalesExecutiveCommissionController extends Controller
 
     private static function present(SalesExecutiveCommission $c): array
     {
-        $loan = $c->loan;
+        $loan = $c->facility;
         $paidInstallments = self::paidInstallments($c);
         $today = Carbon::today();
 

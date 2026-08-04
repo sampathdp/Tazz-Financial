@@ -265,7 +265,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
           </Select></Field>
           <Field label="Expense Category"><Select value={createForm.expenseCategoryId} onChange={(e) => setCreateForm((s) => ({ ...s, expenseCategoryId: Number(e.target.value) || '' }))}>
             <option value="">Select category…</option>
-            {categories.map((c) => <option key={c.id} value={c.id} disabled={!c.accountId}>{c.name}{!c.accountId ? ' (not linked to GL)' : ''}</option>)}
+            {categories.map((c) => <option key={c.id} value={c.id} disabled={!c.chartOfAccountId}>{c.name}{!c.chartOfAccountId ? ' (not linked to GL)' : ''}</option>)}
           </Select></Field>
           <Field label="Vendor (optional)"><Select value={createForm.vendorId} onChange={(e) => setCreateForm((s) => ({ ...s, vendorId: Number(e.target.value) || '' }))}>
             <option value="">No vendor</option>
@@ -306,7 +306,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
             <>
               <Field label="Bank Account"><Select value={payForm.bankAccountId} onChange={(e) => setPayForm((s) => ({ ...s, bankAccountId: Number(e.target.value) || '' }))}>
                 <option value="">Select account…</option>
-                {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bankName}</option>)}
+                {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bank?.name || ''}</option>)}
               </Select></Field>
               {payForm.paymentMethod === 'Cheque' && <Field label="Cheque No."><Input value={payForm.chequeNo} onChange={(e) => setPayForm((s) => ({ ...s, chequeNo: e.target.value }))} /></Field>}
             </>

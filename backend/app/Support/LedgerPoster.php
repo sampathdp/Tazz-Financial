@@ -22,7 +22,7 @@ class LedgerPoster
 {
     /**
      * @param array<int, array{account_id:int, debit?:float|string, credit?:float|string, description?:?string}> $lines
-     * @param array{reference_type?:?string, reference_id?:?int, description?:?string, branch_id?:?int, posted_by?:?int} $meta
+     * @param array{source_type?:?string, source_id?:?int, description?:?string, branch_id?:?int, posted_by?:?int} $meta
      */
     public static function post(array $lines, string $entryDate, array $meta = []): JournalEntry
     {
@@ -45,8 +45,8 @@ class LedgerPoster
         $entry = JournalEntry::create([
             'code' => $code,
             'entry_date' => $entryDate,
-            'reference_type' => $meta['reference_type'] ?? null,
-            'reference_id' => $meta['reference_id'] ?? null,
+            'source_type' => $meta['source_type'] ?? null,
+            'source_id' => $meta['source_id'] ?? null,
             'description' => $meta['description'] ?? null,
             'branch_id' => $meta['branch_id'] ?? null,
             'posted_by' => $meta['posted_by'] ?? null,
@@ -59,6 +59,7 @@ class LedgerPoster
             JournalLine::create([
                 'journal_entry_id' => $entry->id,
                 'account_id' => $line['account_id'],
+                'entry_date' => $entryDate,
                 'debit' => $line['debit'] ?? 0,
                 'credit' => $line['credit'] ?? 0,
                 'description' => $line['description'] ?? null,
@@ -87,8 +88,8 @@ class LedgerPoster
         ])->all();
 
         $reversal = self::post($lines, now()->toDateString(), [
-            'reference_type' => $entry->reference_type,
-            'reference_id' => $entry->reference_id,
+            'source_type' => $entry->source_type,
+            'source_id' => $entry->source_id,
             'description' => $reason ?? "Reversal of {$entry->code}",
             'branch_id' => $entry->branch_id,
             'posted_by' => $userId,

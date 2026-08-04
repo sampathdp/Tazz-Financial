@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\FacilityDocument;
 use App\Models\Loan;
-use App\Models\LoanDocument;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -33,17 +33,17 @@ class LoanDocumentController extends Controller
         return response()->json($document, 201);
     }
 
-    public function show(Loan $loan, LoanDocument $document): StreamedResponse
+    public function show(Loan $loan, FacilityDocument $document): StreamedResponse
     {
-        abort_if($document->loan_id !== $loan->id, 404);
+        abort_if($document->credit_facility_id !== $loan->id, 404);
         abort_unless(Storage::disk('public')->exists($document->file_path), 404);
 
         return Storage::disk('public')->response($document->file_path, Str::afterLast($document->file_path, '/'));
     }
 
-    public function destroy(Loan $loan, LoanDocument $document)
+    public function destroy(Loan $loan, FacilityDocument $document)
     {
-        abort_if($document->loan_id !== $loan->id, 404);
+        abort_if($document->credit_facility_id !== $loan->id, 404);
 
         Storage::disk('public')->delete($document->file_path);
         $document->delete();
