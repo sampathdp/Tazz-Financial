@@ -15,7 +15,7 @@ class SpeedDraftFacilityDetail extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'credit_facility_id', 'speed_draft_type_id', 'payment_frequency', 'disbursement_method',
+        'credit_facility_id', 'speed_draft_type_id', 'vehicle_no', 'payment_frequency', 'disbursement_method',
     ];
 
     public function speedDraft()

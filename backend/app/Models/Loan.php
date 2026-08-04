@@ -76,7 +76,7 @@ class Loan extends Model
      *  Leasing/Mortgage category loans (see LoanType.category). */
     public function insurance()
     {
-        return $this->hasOne(LoanInsuranceDetail::class, 'credit_facility_id');
+        return $this->hasOne(FacilityInsuranceDetail::class, 'credit_facility_id');
     }
 
     public function applier()

@@ -7,7 +7,7 @@ import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, 
 import { Icon } from '../components/Icon'
 import {
   speedDraftsApi, speedDraftTypesApi, customersApi,
-  type SpeedDraft, type SpeedDraftStatus, type SpeedDraftType, type SpeedDraftCollateralInput, type Customer, type AuthUser,
+  type SpeedDraft, type SpeedDraftStatus, type SpeedDraftType, type SpeedDraftCollateralInput, type FacilityInsuranceDetail, type Customer, type AuthUser,
 } from '../api'
 import { SpeedDraftDetail } from './speedDraft/SpeedDraftDetail'
 import { Can } from '../lib/permissions'
@@ -31,9 +31,12 @@ interface FormState {
   interestRatePercent?: number | string
   ratePeriod?: 'monthly' | 'annual'
   termMonths?: number
+  vehicleNo?: string
+  insurance?: Partial<FacilityInsuranceDetail>
   collateral: SpeedDraftCollateralInput[]
 }
 const blankForm = (): FormState => ({ ratePeriod: 'monthly', collateral: [] })
+const blankInsurance = (): Partial<FacilityInsuranceDetail> => ({})
 
 export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -63,6 +66,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
   }, [])
 
   const selectedType = types.find((t) => t.id === form.speedDraftTypeId)
+  const needsInsurance = selectedType?.category === 'Lease' || selectedType?.category === 'Mortgage'
 
   const openCreate = () => { setEditing(null); setForm(blankForm()); setErr(''); setMode('form') }
   const openRow = async (row: SpeedDraft) => {
@@ -75,6 +79,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
         customerId: full.customerId, speedDraftTypeId: full.speedDraftDetail?.speedDraftTypeId,
         principalAmount: full.principalAmount, interestRatePercent: full.interestRatePercent,
         ratePeriod: full.ratePeriod || 'monthly', termMonths: full.termMonths,
+        vehicleNo: full.speedDraftDetail?.vehicleNo || '', insurance: full.insurance || blankInsurance(),
         collateral: full.collateral || [],
       })
       setErr(''); setMode('form')
@@ -107,6 +112,10 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
     if (!form.speedDraftTypeId) { setErr('Select a Speed Draft Type.'); return }
     if (!form.principalAmount || Number(form.principalAmount) <= 0) { setErr('Enter the capital amount.'); return }
     if (!form.termMonths || form.termMonths <= 0) { setErr('Enter the period in months.'); return }
+    if (selectedType?.category === 'Lease' && !form.vehicleNo) { setErr('Vehicle No is required for a Lease draft.'); return }
+    if (needsInsurance && (!form.insurance?.insuranceCompany || !form.insurance?.policyNo || !form.insurance?.amount || !form.insurance?.contactPerson || !form.insurance?.coverage)) {
+      setErr('Insurance details are required for a Lease or Mortgage draft.'); return
+    }
     const customer = customers.find((c) => c.id === form.customerId)
     const body = {
       customerId: form.customerId,
@@ -116,6 +125,8 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
       interestRatePercent: form.interestRatePercent,
       ratePeriod: form.ratePeriod,
       termMonths: form.termMonths,
+      vehicleNo: selectedType?.category === 'Lease' ? (form.vehicleNo || null) : null,
+      insurance: needsInsurance ? form.insurance : undefined,
       collateral: form.collateral.filter((c) => c.description),
     }
     setBusy(true); setErr('')
@@ -206,10 +217,27 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
               </Select></Field>
               <Field label="Period (Months)"><Input type="number" value={form.termMonths ?? ''} onChange={(e) => setForm((s) => ({ ...s, termMonths: Number(e.target.value) }))}
                 placeholder={selectedType ? `${selectedType.minPeriodMonths ?? 1}–${selectedType.maxPeriodMonths ?? ''}` : undefined} /></Field>
+              {selectedType?.category === 'Lease' && (
+                <Field label="Vehicle No"><Input value={form.vehicleNo || ''} onChange={(e) => setForm((s) => ({ ...s, vehicleNo: e.target.value }))} placeholder="e.g. ABC-1234" /></Field>
+              )}
             </div>
             <div className="t-2" style={{ fontSize: 11.5 }}>
               Interest is due monthly on the outstanding capital only — the full capital falls due at maturity, and can also be reduced early at any time via a capital payment.
             </div>
+
+            {needsInsurance && (
+              <div>
+                <div className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Insurance Policy</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <Field label="Insurance Company"><Input value={form.insurance?.insuranceCompany || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, insuranceCompany: e.target.value } }))} /></Field>
+                  <Field label="Policy No"><Input value={form.insurance?.policyNo || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, policyNo: e.target.value } }))} /></Field>
+                  <Field label="Amount"><Input type="number" value={form.insurance?.amount ?? ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, amount: e.target.value } }))} /></Field>
+                  <Field label="Contact Person"><Input value={form.insurance?.contactPerson || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, contactPerson: e.target.value } }))} /></Field>
+                  <Field label="Coverage"><Input value={form.insurance?.coverage || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, coverage: e.target.value } }))} placeholder="e.g. Comprehensive" /></Field>
+                  <Field label="Remark" full><Input value={form.insurance?.remarks || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, remarks: e.target.value } }))} /></Field>
+                </div>
+              </div>
+            )}
 
             {selectedType?.requiresCollateral && (
               <div>

@@ -626,7 +626,7 @@ class LoanController extends Controller
             'loan_officer_id' => $validated['loan_officer_id'] ?? null,
         ];
 
-        // Only meaningful for Leasing/Mortgage — see the loan_insurance_details
+        // Only meaningful for Leasing/Mortgage — see the facility_insurance_details
         // migration docblock. Null (not an empty array) for every other category,
         // which syncInsuranceDetail() below reads as "no insurance row for this loan".
         $insurance = in_array($loanType->category, ['Leasing', 'Mortgage'], true) ? [

@@ -5,7 +5,7 @@ import { Icon } from '../components/Icon'
 import {
   loansApi, customersApi, customerLoansApi, loanTypesApi, branchesApi, api, loanCollateralDocumentsApi,
   type Loan, type LoanStatus, type LoanType, type Customer, type LoanFrequency, type CustomerTitle,
-  type LoanGuarantorInput, type LoanCollateralInput, type LoanCollateralDocument, type LoanInsuranceDetail, type AuthUser,
+  type LoanGuarantorInput, type LoanCollateralInput, type LoanCollateralDocument, type FacilityInsuranceDetail, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -58,12 +58,12 @@ interface FormState {
   referenceAddress?: string
   loanOfficerId?: number
   vehicleNo?: string
-  insurance?: Partial<LoanInsuranceDetail>
+  insurance?: Partial<FacilityInsuranceDetail>
   guarantors: LoanGuarantorInput[]
   collateral: LoanCollateralInput[]
 }
 const blankForm = (): FormState => ({ installmentFrequency: 'monthly', applicationDate: todayIso(), guarantors: [], collateral: [] })
-const blankInsurance = (): Partial<LoanInsuranceDetail> => ({})
+const blankInsurance = (): Partial<FacilityInsuranceDetail> => ({})
 
 export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()

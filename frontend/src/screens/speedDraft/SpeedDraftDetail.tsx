@@ -126,7 +126,22 @@ function OverviewPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
         <div><span className="t-2">Period: </span><b>{d.termMonths} months</b></div>
         <div><span className="t-2">Start: </span><b>{dateOnly(d.startDate)}</b></div>
         <div><span className="t-2">Maturity: </span><b>{dateOnly(d.maturityDate)}</b></div>
+        {!!d.speedDraftDetail?.vehicleNo && <div><span className="t-2">Vehicle No: </span><b>{d.speedDraftDetail.vehicleNo}</b></div>}
       </div>
+
+      {d.insurance && (
+        <div style={{ marginBottom: 20 }}>
+          <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Insurance Policy</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px', fontSize: 12.5 }}>
+            <div><span className="t-2">Company: </span>{d.insurance.insuranceCompany || '—'}</div>
+            <div><span className="t-2">Policy No: </span>{d.insurance.policyNo || '—'}</div>
+            <div><span className="t-2">Amount: </span>{d.insurance.amount != null ? money(d.insurance.amount) : '—'}</div>
+            <div><span className="t-2">Contact Person: </span>{d.insurance.contactPerson || '—'}</div>
+            <div><span className="t-2">Coverage: </span>{d.insurance.coverage || '—'}</div>
+            {d.insurance.remarks && <div style={{ gridColumn: '1/-1' }}><span className="t-2">Remark: </span>{d.insurance.remarks}</div>}
+          </div>
+        </div>
+      )}
 
       {s ? (
         <KpiGrid>

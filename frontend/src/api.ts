@@ -302,10 +302,12 @@ export interface LoanFacilityDetail {
   confirmedDate?: string | null; confirmedBy?: { id: number; name: string } | null;
 }
 
-/** Insurance policy on the leased/mortgaged asset — required when the loan's
- *  loanType.category is 'Leasing' or 'Mortgage'; not applicable otherwise.
- *  Same key ("insurance") used for both write and read, like collateral/guarantors. */
-export interface LoanInsuranceDetail {
+/** Insurance policy on the leased/mortgaged asset — shared shape for both Loan
+ *  (required when loanType.category is 'Leasing' or 'Mortgage') and SpeedDraft
+ *  (required when speedDraftType.category is 'Lease' or 'Mortgage'); not
+ *  applicable to any other category. Same key ("insurance") used for both
+ *  write and read, like collateral/guarantors. */
+export interface FacilityInsuranceDetail {
   insuranceCompany?: string | null;
   policyNo?: string | null;
   amount?: number | string | null;
@@ -365,8 +367,8 @@ export interface Loan {
   vehicleNo?: string | null;
 
   /** Required when the selected loan type's category is 'Leasing' or 'Mortgage'.
-   *  Same key on both write and read (see LoanInsuranceDetail). */
-  insurance?: LoanInsuranceDetail | null;
+   *  Same key on both write and read (see FacilityInsuranceDetail). */
+  insurance?: FacilityInsuranceDetail | null;
 
   guarantors?: LoanGuarantorInput[];
   collateral?: LoanCollateralInput[];
@@ -1012,6 +1014,8 @@ export interface SpeedDraftSummary {
 export interface SpeedDraftFacilityDetail {
   speedDraftTypeId: number;
   speedDraftType?: SpeedDraftType | null;
+  /** Registration number of the leased vehicle — required when speedDraftType.category === 'Lease'. */
+  vehicleNo?: string | null;
   paymentFrequency?: string | null;
   /** Set once disbursed — see speedDraftsApi.disburse(). */
   disbursementMethod?: 'Cash' | 'Bank' | 'Cheque' | null;
@@ -1047,6 +1051,12 @@ export interface SpeedDraft {
    *  populated; read the same data from speedDraftDetail above instead. */
   speedDraftTypeId?: number;
   paymentFrequency?: string;
+  /** Required when the selected speed draft type's category is 'Lease'. Write-flat/read-nested, same rule as the fields above. */
+  vehicleNo?: string | null;
+
+  /** Required when the selected speed draft type's category is 'Lease' or 'Mortgage'.
+   *  Same key on both write and read (see FacilityInsuranceDetail). */
+  insurance?: FacilityInsuranceDetail | null;
 
   collateral?: SpeedDraftCollateralInput[];
   schedules?: SpeedDraftSchedule[];

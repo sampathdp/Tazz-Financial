@@ -4,8 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class LoanInsuranceDetail extends Model
+/** Shared between Loan (Leasing/Mortgage) and SpeedDraft (Lease/Mortgage) —
+ *  see the facility_insurance_details migration docblock. */
+class FacilityInsuranceDetail extends Model
 {
+    protected $table = 'facility_insurance_details';
+
     protected $primaryKey = 'credit_facility_id';
 
     public $incrementing = false;
@@ -20,7 +24,7 @@ class LoanInsuranceDetail extends Model
         'amount' => 'decimal:2',
     ];
 
-    public function loan()
+    public function facility()
     {
         return $this->belongsTo(Loan::class, 'credit_facility_id');
     }

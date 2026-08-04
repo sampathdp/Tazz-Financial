@@ -15,6 +15,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class SpeedDraftController extends Controller
 {
@@ -26,7 +27,7 @@ class SpeedDraftController extends Controller
     ];
     private const DETAIL_RELATIONS = [
         'branch:id,name,code', 'customer:id,full_name,code,nic_no,phone',
-        'speedDraftDetail.speedDraftType', 'applier:id,name', 'approver:id,name', 'creator:id,name',
+        'speedDraftDetail.speedDraftType', 'insurance', 'applier:id,name', 'approver:id,name', 'creator:id,name',
         'collateral.jewelryDetail', 'collateral.vehicleDetail', 'collateral.documents',
         'schedules.allocations', 'payments.receiver:id,name', 'payments.voider:id,name',
     ];
@@ -78,10 +79,10 @@ class SpeedDraftController extends Controller
 
     public function store(Request $request)
     {
-        [$facilityData, $detailData, $collateral] = $this->validated($request);
+        [$facilityData, $detailData, $collateral, $insurance] = $this->validated($request);
         $branch = Branch::findOrFail($facilityData['branch_id']);
 
-        $speedDraft = DB::transaction(function () use ($facilityData, $detailData, $collateral, $branch, $request) {
+        $speedDraft = DB::transaction(function () use ($facilityData, $detailData, $collateral, $insurance, $branch, $request) {
             // No {CODE} placeholder in this module's default format — number_sequences'
             // loan_type_id/funding_product_id key columns are reserved for Loan/FD
             // (generated_numbers.loan_type_id is a hard FK to loan_types), and Speed
@@ -100,6 +101,9 @@ class SpeedDraftController extends Controller
             ]));
             NumberGenerator::attach($code, $draft);
             $draft->speedDraftDetail()->create($detailData);
+            if ($insurance) {
+                $draft->insurance()->create($insurance);
+            }
 
             foreach ($collateral ?? [] as $item) {
                 $this->createCollateral($draft, $item);
@@ -116,11 +120,12 @@ class SpeedDraftController extends Controller
         if ($speedDraft->status !== 'Pending') {
             return response()->json(['message' => 'Only a Pending Speed Draft can be edited.'], 422);
         }
-        [$facilityData, $detailData, $collateral] = $this->validated($request, $speedDraft);
+        [$facilityData, $detailData, $collateral, $insurance] = $this->validated($request, $speedDraft);
 
-        DB::transaction(function () use ($speedDraft, $facilityData, $detailData, $collateral) {
+        DB::transaction(function () use ($speedDraft, $facilityData, $detailData, $collateral, $insurance) {
             $speedDraft->update(array_merge($facilityData, ['outstanding_balance_cache' => $facilityData['principal_amount']]));
             $speedDraft->speedDraftDetail()->update($detailData);
+            $this->syncInsuranceDetail($speedDraft, $insurance);
             if ($collateral !== null) {
                 // Cascades to any attached facility_collateral_documents too — editing
                 // collateral through this whole-array replace (rather than the dedicated
@@ -210,7 +215,7 @@ class SpeedDraftController extends Controller
         }
     }
 
-    /** @return array{0: array, 1: array, 2: ?array} [facility fields, speedDraftDetail fields, collateral or null if omitted] */
+    /** @return array{0: array, 1: array, 2: ?array, 3: ?array} [facility fields, speedDraftDetail fields, collateral or null if omitted, insurance] */
     private function validated(Request $request, ?SpeedDraft $speedDraft = null): array
     {
         $typeId = $request->input('speed_draft_type_id', $speedDraft?->speedDraftDetail?->speed_draft_type_id);
@@ -234,6 +239,14 @@ class SpeedDraftController extends Controller
             'rate_period' => ['nullable', Rule::in(['monthly', 'annual'])],
             'term_months' => $termRules,
             'payment_frequency' => 'nullable|string|max:16',
+            'vehicle_no' => 'nullable|string|max:20',
+            'insurance' => 'nullable|array',
+            'insurance.insurance_company' => 'nullable|string|max:150',
+            'insurance.policy_no' => 'nullable|string|max:64',
+            'insurance.amount' => 'nullable|numeric|min:0',
+            'insurance.contact_person' => 'nullable|string|max:150',
+            'insurance.coverage' => 'nullable|string|max:255',
+            'insurance.remarks' => 'nullable|string',
             'collateral' => 'nullable|array',
             'collateral.*.collateral_type' => ['nullable', Rule::in(self::COLLATERAL_TYPES)],
             'collateral.*.collateral_category' => 'nullable|string|max:64',
@@ -242,6 +255,21 @@ class SpeedDraftController extends Controller
             'collateral.*.purity' => 'nullable|string|max:16',
             'collateral.*.appraised_value' => 'nullable|numeric|min:0',
         ]);
+
+        // Lease drafts track the leased vehicle's registration number directly on
+        // the draft (separate from the optional facility_collateral list — see the
+        // speed_draft_facility_details.vehicle_no migration docblock).
+        if ($type?->category === 'Lease' && empty($validated['vehicle_no'])) {
+            throw ValidationException::withMessages(['vehicle_no' => 'Vehicle No is required for a Lease draft.']);
+        }
+        // Lease/Mortgage drafts require an insurance policy on the leased/mortgaged asset.
+        if (in_array($type?->category, ['Lease', 'Mortgage'], true)) {
+            foreach (['insurance_company', 'policy_no', 'amount', 'contact_person', 'coverage'] as $field) {
+                if (!isset($validated['insurance'][$field]) || $validated['insurance'][$field] === '') {
+                    throw ValidationException::withMessages(["insurance.$field" => 'Insurance details are required for a Lease or Mortgage draft.']);
+                }
+            }
+        }
 
         $facilityData = [
             'branch_id' => $validated['branch_id'],
@@ -254,8 +282,21 @@ class SpeedDraftController extends Controller
 
         $detailData = [
             'speed_draft_type_id' => $validated['speed_draft_type_id'],
+            'vehicle_no' => $type?->category === 'Lease' ? $validated['vehicle_no'] : null,
             'payment_frequency' => $validated['payment_frequency'] ?? 'monthly',
         ];
+
+        // Only meaningful for Lease/Mortgage — see the facility_insurance_details
+        // migration docblock. Null (not an empty array) for every other category,
+        // which syncInsuranceDetail() below reads as "no insurance row for this draft".
+        $insurance = in_array($type?->category, ['Lease', 'Mortgage'], true) ? [
+            'insurance_company' => $validated['insurance']['insurance_company'],
+            'policy_no' => $validated['insurance']['policy_no'],
+            'amount' => $validated['insurance']['amount'],
+            'contact_person' => $validated['insurance']['contact_person'],
+            'coverage' => $validated['insurance']['coverage'],
+            'remarks' => $validated['insurance']['remarks'] ?? null,
+        ] : null;
 
         $collateral = $request->has('collateral')
             ? array_map(fn ($c) => [
@@ -271,6 +312,19 @@ class SpeedDraftController extends Controller
             ], $validated['collateral'] ?? [])
             : null;
 
-        return [$facilityData, $detailData, $collateral];
+        return [$facilityData, $detailData, $collateral, $insurance];
+    }
+
+    /** Creates/updates/clears the draft's insurance row to match $insurance — null
+     *  means the current speed draft type's category doesn't require one (see
+     *  validated()), so any existing row (e.g. left over from before an edit
+     *  changed speed_draft_type_id away from Lease/Mortgage) is removed. */
+    private function syncInsuranceDetail(SpeedDraft $speedDraft, ?array $insurance): void
+    {
+        if ($insurance) {
+            $speedDraft->insurance()->updateOrCreate([], $insurance);
+        } else {
+            $speedDraft->insurance()->delete();
+        }
     }
 }

@@ -69,6 +69,13 @@ class SpeedDraft extends Model
         return $this->hasOne(SpeedDraftFacilityDetail::class, 'credit_facility_id');
     }
 
+    /** Insurance policy on the leased/mortgaged asset — only present for
+     *  Lease/Mortgage category drafts (see SpeedDraftType.category). */
+    public function insurance()
+    {
+        return $this->hasOne(FacilityInsuranceDetail::class, 'credit_facility_id');
+    }
+
     public function applier()
     {
         return $this->belongsTo(User::class, 'applied_by');
