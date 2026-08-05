@@ -145,6 +145,7 @@ function KpiGrid({ items }: { items: KpiItem[] }) {
 function ContractSummary({ loan }: { loan: Loan }) {
   const schedules = loan.schedules || []
   const expiry = schedules.length ? schedules[schedules.length - 1].dueDate : null
+  const installmentAmount = schedules.length ? schedules[0].totalDue : null
   return (
     <>
       <div className="eyebrow" style={{ marginBottom: 10 }}>Contract Summary</div>
@@ -155,6 +156,7 @@ function ContractSummary({ loan }: { loan: Loan }) {
         { label: 'Product', value: loan.loanDetail?.loanType?.name || '—', icon: 'tag', tone: 'blue' },
         { label: 'Contract Amount', value: money(loan.principalAmount), icon: 'coins', tone: 'green' },
         { label: 'Down Payment', value: money(loan.loanDetail?.downPayment), icon: 'wallet', tone: 'neutral' },
+        { label: 'Installment Amount', value: installmentAmount ? money(installmentAmount) : '—', icon: 'wallet', tone: 'green' },
         { label: 'Period', value: `${loan.termMonths} mo`, icon: 'calendar', tone: 'neutral' },
         { label: 'Interest Rate', value: `${loan.interestRatePercent}%`, icon: 'chart', tone: 'amber' },
         { label: 'Activated', value: dateOnly(loan.disbursedAt), icon: 'calendar', tone: 'green' },

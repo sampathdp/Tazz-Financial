@@ -24,10 +24,7 @@ const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const outstandingOf = (loan: Loan) => {
-  const schedules = loan.schedules || []
-  const totalDue = schedules.reduce((s, r) => s + num(r.totalDue), 0)
-  const totalPaid = schedules.reduce((s, r) => s + num(r.paidAmount), 0)
-  return Math.max(0, totalDue - totalPaid)
+  return Math.max(0, num(loan.summary?.arrears?.amountToBeCollected ?? loan.outstandingBalanceCache))
 }
 const balanceOf = (r: LoanSchedule) => Math.max(0, num(r.totalDue) - num(r.paidAmount))
 const isCashier = (me?: AuthUser | null) => me?.role === 'cashier' || me?.role === 'admin'
