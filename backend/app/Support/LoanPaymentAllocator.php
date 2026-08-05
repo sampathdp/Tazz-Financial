@@ -107,41 +107,12 @@ class LoanPaymentAllocator
         };
 
         $remaining = $amount;
+        $charges = $loan->charges()->orderBy('charged_at')->get();
 
-        // 1) Interest — oldest installment first.
-        foreach ($schedules as $row) {
+        $payCharges = function () use (&$remaining, $charges, $payment) {
             if ($remaining <= 0) {
-                break;
+                return;
             }
-            $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2));
-            if ($due <= 0) {
-                continue;
-            }
-            $pay = min($remaining, $due);
-            $touch($row->id, 'interest', $pay);
-            $remaining = round($remaining - $pay, 2);
-        }
-
-        // 2) OD / penalty — live estimate as of $asOf per installment, oldest first.
-        if ($remaining > 0 && $chargeRate > 0) {
-            foreach ($schedules as $row) {
-                if ($remaining <= 0) {
-                    break;
-                }
-                $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf);
-                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied'), 2));
-                if ($due <= 0) {
-                    continue;
-                }
-                $pay = min($remaining, $due);
-                $touch($row->id, 'penalty', $pay);
-                $remaining = round($remaining - $pay, 2);
-            }
-        }
-
-        // 3) Other charges (Document/Legal/Valuation/Other) — oldest first.
-        if ($remaining > 0) {
-            $charges = $loan->charges()->orderBy('charged_at')->get();
             foreach ($charges as $charge) {
                 if ($remaining <= 0) {
                     break;
@@ -155,21 +126,49 @@ class LoanPaymentAllocator
                 FacilityChargeAllocation::create(['facility_payment_id' => $payment->id, 'facility_charge_id' => $charge->id, 'amount_applied' => $pay]);
                 $remaining = round($remaining - $pay, 2);
             }
-        }
+        };
 
-        // 4) Principal — oldest installment first, whatever's left.
+        // Apply to oldest installment first, fully settling each before moving to the next.
         foreach ($schedules as $row) {
             if ($remaining <= 0) {
                 break;
             }
-            $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2));
-            if ($due <= 0) {
-                continue;
+            
+            // 1) Interest
+            $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2));
+            if ($due > 0) {
+                $pay = min($remaining, $due);
+                $touch($row->id, 'interest', $pay);
+                $remaining = round($remaining - $pay, 2);
             }
-            $pay = min($remaining, $due);
-            $touch($row->id, 'principal', $pay);
-            $remaining = round($remaining - $pay, 2);
+
+            // 2) OD / penalty
+            if ($remaining > 0 && $chargeRate > 0) {
+                $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf);
+                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied'), 2));
+                if ($due > 0) {
+                    $pay = min($remaining, $due);
+                    $touch($row->id, 'penalty', $pay);
+                    $remaining = round($remaining - $pay, 2);
+                }
+            }
+
+            // 3) Other charges (Document/Legal/Valuation/Other)
+            $payCharges();
+
+            // 4) Principal
+            if ($remaining > 0) {
+                $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2));
+                if ($due > 0) {
+                    $pay = min($remaining, $due);
+                    $touch($row->id, 'principal', $pay);
+                    $remaining = round($remaining - $pay, 2);
+                }
+            }
         }
+
+        // Pay any remaining charges if there were no schedules or schedules were fully paid
+        $payCharges();
 
         foreach ($applied as $scheduleId => $buckets) {
             FacilityPaymentAllocation::create([
