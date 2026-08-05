@@ -10,7 +10,7 @@ class FacilityCharge extends Model
     use BelongsToBranch;
 
     protected $fillable = [
-        'credit_facility_id', 'branch_id', 'charge_type', 'due_amount', 'paid_amount',
+        'credit_facility_id', 'branch_id', 'charge_category_id', 'due_amount', 'paid_amount',
         'charged_at', 'notes', 'created_by',
     ];
 
@@ -23,6 +23,11 @@ class FacilityCharge extends Model
     public function facility()
     {
         return $this->belongsTo(Loan::class, 'credit_facility_id');
+    }
+
+    public function category()
+    {
+        return $this->belongsTo(ChargeCategory::class, 'charge_category_id');
     }
 
     public function creator()

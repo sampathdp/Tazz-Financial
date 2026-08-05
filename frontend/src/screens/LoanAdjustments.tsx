@@ -8,8 +8,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td } from '../components/ui'
 import {
-  loansApi, loanSchedulesApi, loanWaiversApi, loanChargesApi, loanTypesApi,
-  type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type LoanChargeType,
+  loansApi, loanSchedulesApi, loanWaiversApi, loanChargesApi, loanTypesApi, chargeCategoriesApi,
+  type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type ChargeCategory,
   type AuthUser, type LoanType, type SkipDateOption,
 } from '../api'
 import { Icon } from '../components/Icon'
@@ -24,7 +24,6 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = { Paid: 'green', Partial: 'amber', Overdue: 'red', Pending: 'neutral' }
 const balanceOf = (r: LoanSchedule) => Math.max(0, num(r.totalDue) - num(r.paidAmount))
 const WAIVER_TYPES: WaiverType[] = ['Interest', 'Penalty', 'Charge', 'Principal']
-const CHARGE_TYPES: LoanChargeType[] = ['Document', 'Legal', 'Valuation', 'Other']
 
 /* ============================ Installment Skip =========================== */
 function SkipSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
@@ -340,16 +339,19 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Loan | null>(null)
   const [loadingLoan, setLoadingLoan] = useState(false)
+  const [categories, setCategories] = useState<ChargeCategory[]>([])
+
   // Only the amount owed is entered here — it's paid down automatically when the
   // customer pays (Payment Receipt), same as interest/principal, never typed in directly.
-  const [form, setForm] = useState<{ chargeType: LoanChargeType; dueAmount: string; chargedAt: string; notes: string }>(
-    { chargeType: 'Document', dueAmount: '', chargedAt: todayIso(), notes: '' },
+  const [form, setForm] = useState<{ chargeCategoryId: number | ''; dueAmount: string; chargedAt: string; notes: string }>(
+    { chargeCategoryId: '', dueAmount: '', chargedAt: todayIso(), notes: '' },
   )
   const [busy, setBusy] = useState(false)
   const [charges, setCharges] = useState<LoanCharge[]>([])
   const [chargesLoading, setChargesLoading] = useState(false)
 
   useEffect(() => { loansApi.list().then(setLoans).catch(() => setLoans([])).finally(() => setLoading(false)) }, [])
+  useEffect(() => { chargeCategoriesApi.list().then((res) => setCategories(res.filter(c => c.status === 'Active'))) }, [])
 
   const loadCharges = (loanId: number) => {
     setChargesLoading(true)
@@ -364,14 +366,14 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   }
 
   const add = async () => {
-    if (!selected || !form.dueAmount) return
+    if (!selected || !form.dueAmount || !form.chargeCategoryId) return
     setBusy(true)
     try {
       await loanChargesApi.create(selected.id, {
-        chargeType: form.chargeType, dueAmount: form.dueAmount,
+        chargeCategoryId: form.chargeCategoryId as number, dueAmount: form.dueAmount,
         chargedAt: form.chargedAt || undefined, notes: form.notes || undefined,
       })
-      setForm({ chargeType: 'Document', dueAmount: '', chargedAt: todayIso(), notes: '' })
+      setForm({ chargeCategoryId: '', dueAmount: '', chargedAt: todayIso(), notes: '' })
       notify.success('Charge recorded')
       loadCharges(selected.id)
     } catch (ex: any) {
@@ -379,7 +381,8 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
     } finally { setBusy(false) }
   }
   const remove = async (c: LoanCharge) => {
-    const ok = await notify.confirm({ title: `Delete this ${c.chargeType.toLowerCase()} charge?`, danger: true, okText: 'Delete' })
+    const categoryName = c.category?.name || 'unknown'
+    const ok = await notify.confirm({ title: `Delete this ${categoryName.toLowerCase()} charge?`, danger: true, okText: 'Delete' })
     if (!ok || !selected) return
     try { await loanChargesApi.remove(c.id); notify.success('Charge deleted'); loadCharges(selected.id) }
     catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
@@ -404,15 +407,16 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
 
       {selected && !loadingLoan && (
         <Card>
-          <div className="eyebrow" style={{ marginBottom: 12 }}>Charges (Document / Legal / Valuation / Other) — {selected.code}</div>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Charges ({categories.map(c => c.name).join(' / ')}) — {selected.code}</div>
           <div className="row gap-2 wrap" style={{ marginBottom: 14 }}>
-            <Select value={form.chargeType} onChange={(e) => setForm((s) => ({ ...s, chargeType: e.target.value as LoanChargeType }))} style={{ maxWidth: 140 }}>
-              {CHARGE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            <Select value={form.chargeCategoryId} onChange={(e) => setForm((s) => ({ ...s, chargeCategoryId: e.target.value ? Number(e.target.value) : '' }))} style={{ maxWidth: 140 }}>
+              <option value="" disabled>Select Type...</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
             <Input type="number" placeholder="Amount" value={form.dueAmount} onChange={(e) => setForm((s) => ({ ...s, dueAmount: e.target.value }))} style={{ maxWidth: 130 }} />
             <Input type="date" value={form.chargedAt} onChange={(e) => setForm((s) => ({ ...s, chargedAt: e.target.value }))} style={{ maxWidth: 160 }} />
             <Input placeholder="Notes" value={form.notes} onChange={(e) => setForm((s) => ({ ...s, notes: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
-            <Btn variant="primary" size="sm" icon="plus" onClick={add} disabled={busy}>Add</Btn>
+            <Btn variant="primary" size="sm" icon="plus" onClick={add} disabled={busy || !form.chargeCategoryId}>Add</Btn>
           </div>
           {chargesLoading ? <div className="t-2" style={{ fontSize: 12.5 }}>Loading…</div> :
           charges.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No charges recorded.</div> :
@@ -420,7 +424,7 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
               {charges.map((c) => (
                 <div key={c.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
                   <div>
-                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>{c.chargeType}</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>{c.category?.name || `Category #${c.chargeCategoryId}`}</span>
                     <span className="t-2" style={{ fontSize: 12 }}> — {c.notes || 'no notes'} · {dateOnly(c.chargedAt)} · by {c.creator?.name}</span>
                   </div>
                   <div className="row gap-2" style={{ alignItems: 'center' }}>

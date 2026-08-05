@@ -13,19 +13,17 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class LoanDocumentController extends Controller
 {
-    private const DOC_TYPES = ['ContractImage', 'Agreement', 'IdCopy', 'Other'];
-
     public function store(Request $request, Loan $loan)
     {
         $data = $request->validate([
-            'doc_type' => ['required', Rule::in(self::DOC_TYPES)],
+            'document_category_id' => ['required', 'exists:document_categories,id'],
             'file' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
         ]);
 
         $path = $request->file('file')->store("loans/{$loan->id}/documents", 'public');
 
         $document = $loan->documents()->create([
-            'doc_type' => $data['doc_type'],
+            'document_category_id' => $data['document_category_id'],
             'file_path' => $path,
             'uploaded_by' => $request->user()->id,
         ]);

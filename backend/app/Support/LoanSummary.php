@@ -84,7 +84,7 @@ class LoanSummary
             self::breakdownRow('Rental', $rentalDue, $rentalPaid),
             self::breakdownRow('Default Charges', $penaltyDue, $penaltyPaid),
         ];
-        foreach ($charges->groupBy('charge_type') as $type => $group) {
+        foreach ($charges->groupBy(fn($c) => $c->category?->name ?? 'Unknown') as $type => $group) {
             $dueBreakdown[] = self::breakdownRow($type, round((float) $group->sum('due_amount'), 2), round((float) $group->sum('paid_amount'), 2));
         }
 

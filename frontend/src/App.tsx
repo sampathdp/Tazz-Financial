@@ -48,6 +48,8 @@ const BankReconciliationScreen = named(() => import('./screens/Bank'), 'BankReco
 
 const ExpenseCategoriesScreen = named(() => import('./screens/Masters'), 'ExpenseCategoriesScreen')
 const BanksScreen = named(() => import('./screens/Masters'), 'BanksScreen')
+const DocumentCategoriesScreen = named(() => import('./screens/Masters'), 'DocumentCategoriesScreen')
+const ChargeCategoriesScreen = named(() => import('./screens/Masters'), 'ChargeCategoriesScreen')
 
 const ChartOfAccountsScreen = named(() => import('./screens/Accounting'), 'ChartOfAccountsScreen')
 const JournalEntriesScreen = named(() => import('./screens/Accounting'), 'JournalEntriesScreen')
@@ -114,6 +116,8 @@ const SCREENS: Record<string, ScreenComp> = {
   'bank/recon': BankReconciliationScreen,
   'masters/expense-categories': ExpenseCategoriesScreen,
   'masters/banks': BanksScreen,
+  'masters/document-categories': DocumentCategoriesScreen,
+  'masters/charge-categories': ChargeCategoriesScreen,
   'acc/coa': ChartOfAccountsScreen,
   'acc/journal': JournalEntriesScreen,
   'acc/gl': GeneralLedgerScreen,

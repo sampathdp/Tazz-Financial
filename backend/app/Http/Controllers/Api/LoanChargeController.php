@@ -10,17 +10,15 @@ use Illuminate\Validation\Rule;
 
 class LoanChargeController extends Controller
 {
-    private const CHARGE_TYPES = ['Document', 'Legal', 'Valuation', 'Other'];
-
     public function index(Loan $loan)
     {
-        return $loan->charges()->with('creator:id,name')->orderByDesc('charged_at')->get();
+        return $loan->charges()->with(['creator:id,name', 'category:id,name'])->orderByDesc('charged_at')->get();
     }
 
     public function store(Request $request, Loan $loan)
     {
         $data = $request->validate([
-            'charge_type' => ['required', Rule::in(self::CHARGE_TYPES)],
+            'charge_category_id' => ['required', 'exists:charge_categories,id'],
             'due_amount' => 'required|numeric|min:0',
             'paid_amount' => 'nullable|numeric|min:0',
             'charged_at' => 'nullable|date',
@@ -29,7 +27,7 @@ class LoanChargeController extends Controller
 
         $charge = $loan->charges()->create([
             'branch_id' => $loan->branch_id,
-            'charge_type' => $data['charge_type'],
+            'charge_category_id' => $data['charge_category_id'],
             'due_amount' => $data['due_amount'],
             'paid_amount' => $data['paid_amount'] ?? 0,
             'charged_at' => $data['charged_at'] ?? now(),
@@ -37,13 +35,13 @@ class LoanChargeController extends Controller
             'created_by' => $request->user()->id,
         ]);
 
-        return response()->json($charge->load('creator:id,name'), 201);
+        return response()->json($charge->load(['creator:id,name', 'category:id,name']), 201);
     }
 
     public function update(Request $request, FacilityCharge $charge)
     {
         $data = $request->validate([
-            'charge_type' => ['sometimes', Rule::in(self::CHARGE_TYPES)],
+            'charge_category_id' => ['sometimes', 'exists:charge_categories,id'],
             'due_amount' => 'sometimes|numeric|min:0',
             'paid_amount' => 'sometimes|numeric|min:0',
             'charged_at' => 'sometimes|date',
@@ -52,7 +50,7 @@ class LoanChargeController extends Controller
 
         $charge->update($data);
 
-        return $charge->load('creator:id,name');
+        return $charge->load(['creator:id,name', 'category:id,name']);
     }
 
     public function destroy(FacilityCharge $charge)

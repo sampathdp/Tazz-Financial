@@ -53,7 +53,7 @@ class LoanController extends Controller
         'payments.receiver:id,name',
         'payments.voider:id,name',
         'payments.bank:id,name',
-        'charges.creator:id,name',
+        'charges.creator:id,name', 'charges.category:id,name',
         'postDatedCheques.creator:id,name',
         'postDatedCheques.bank:id,name',
         'documents.uploader:id,name',
@@ -325,7 +325,7 @@ class LoanController extends Controller
         }
         $detail = $loan->loanDetail()->with('loanType')->firstOrFail();
         $loanType = $detail->loanType;
-        $documentCharges = $loan->charges()->where('charge_type', 'Document')->get();
+        $documentCharges = $loan->charges()->whereHas('category', fn($q) => $q->where('name', 'Document'))->get();
         if ($loanType && (float) $loanType->processing_fee_percent > 0 && $documentCharges->isEmpty()) {
             return response()->json(['message' => 'Add the document charge before disbursing this loan.'], 422);
         }

@@ -286,6 +286,17 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::put('banks/{bank}', [BankController::class, 'update'])->middleware('perm:Masters,Edit');
     Route::delete('banks/{bank}', [BankController::class, 'destroy'])->middleware('perm:Masters,Delete');
 
+    // --- Masters: Document Categories — used by Loan Contract Images ---
+    Route::get('document-categories', [\App\Http\Controllers\Api\DocumentCategoryController::class, 'index'])->middleware('perm:Masters,View');
+    Route::post('document-categories', [\App\Http\Controllers\Api\DocumentCategoryController::class, 'store'])->middleware('perm:Masters,Create');
+    Route::put('document-categories/{documentCategory}', [\App\Http\Controllers\Api\DocumentCategoryController::class, 'update'])->middleware('perm:Masters,Edit');
+    Route::delete('document-categories/{documentCategory}', [\App\Http\Controllers\Api\DocumentCategoryController::class, 'destroy'])->middleware('perm:Masters,Delete');
+
+    Route::get('charge-categories', [\App\Http\Controllers\Api\ChargeCategoryController::class, 'index'])->middleware('perm:Masters,View');
+    Route::post('charge-categories', [\App\Http\Controllers\Api\ChargeCategoryController::class, 'store'])->middleware('perm:Masters,Create');
+    Route::put('charge-categories/{chargeCategory}', [\App\Http\Controllers\Api\ChargeCategoryController::class, 'update'])->middleware('perm:Masters,Edit');
+    Route::delete('charge-categories/{chargeCategory}', [\App\Http\Controllers\Api\ChargeCategoryController::class, 'destroy'])->middleware('perm:Masters,Delete');
+
     // --- Funding Management: Funding Products ---
     Route::get('funding-products', [FundingProductController::class, 'index'])->middleware('perm:Funding Products,View');
     Route::post('funding-products', [FundingProductController::class, 'store'])->middleware('perm:Funding Products,Create');

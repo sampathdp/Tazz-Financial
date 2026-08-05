@@ -472,12 +472,11 @@ export interface LoanPayment {
   createdAt?: string;
 }
 
-export type LoanChargeType = 'Document' | 'Legal' | 'Valuation' | 'Other'
-
 export interface LoanCharge {
-  id: number; creditFacilityId: number; chargeType: LoanChargeType;
+  id: number; creditFacilityId: number; chargeCategoryId: number;
   dueAmount: number | string; paidAmount: number | string; chargedAt: string;
   notes?: string | null; creator?: { id: number; name: string } | null;
+  category?: ChargeCategory;
 }
 
 export type ChequeStatus = 'Pending' | 'Handed' | 'Realized' | 'Bounced' | 'Returned'
@@ -502,10 +501,18 @@ export interface LoanPostDatedCheque {
   source?: 'PostDated' | 'Payment';
 }
 
-export type LoanDocType = 'ContractImage' | 'Agreement' | 'IdCopy' | 'Other'
+export interface DocumentCategory {
+  id: number; name: string; status: string; sortOrder: number;
+}
+
+export interface ChargeCategory {
+  id: number; name: string; status: string; sortOrder: number;
+}
+
 
 export interface LoanDocument {
-  id: number; creditFacilityId: number; docType: LoanDocType; filePath: string; createdAt?: string;
+  id: number; creditFacilityId: number; documentCategoryId: number; filePath: string; createdAt?: string;
+  category?: DocumentCategory;
 }
 
 export interface LoanDiaryNote {
@@ -753,6 +760,8 @@ export interface ExpenseCategory {
 }
 export const expenseCategoriesApi = resource<ExpenseCategory>('expense-categories')
 
+export const documentCategoriesApi = resource<DocumentCategory>('document-categories')
+
 export interface GeneratedNumber {
   id: number; module: string; number: string;
   branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
@@ -827,11 +836,13 @@ export const loanPaymentsApi = {
 
 export const loanChargesApi = {
   list: (loanId: number) => http.get(`/loans/${loanId}/charges`).then((r) => camelize(r.data) as LoanCharge[]),
-  create: (loanId: number, body: { chargeType: LoanChargeType; dueAmount: number | string; paidAmount?: number | string; chargedAt?: string; notes?: string }) =>
+  create: (loanId: number, body: { chargeCategoryId: number; dueAmount: number | string; paidAmount?: number | string; chargedAt?: string; notes?: string }) =>
     http.post(`/loans/${loanId}/charges`, snakeize(body)).then((r) => camelize(r.data) as LoanCharge),
   update: (chargeId: number, body: Partial<LoanCharge>) => http.put(`/loan-charges/${chargeId}`, snakeize(body)).then((r) => camelize(r.data) as LoanCharge),
   remove: (chargeId: number) => http.delete(`/loan-charges/${chargeId}`).then((r) => r.data),
 }
+
+export const chargeCategoriesApi = resource<ChargeCategory>('charge-categories')
 
 export const loanPostDatedChequesApi = {
   list: (loanId: number) => http.get(`/loans/${loanId}/post-dated-cheques`).then((r) => camelize(r.data) as LoanPostDatedCheque[]),
@@ -852,10 +863,10 @@ export const loanPostDatedChequesApi = {
 
 export const loanDocumentsApi = {
   list: (loanId: number) => http.get(`/loans/${loanId}`).then((r) => (camelize(r.data).documents || []) as LoanDocument[]),
-  upload: (loanId: number, file: File, docType: LoanDocType) => {
+  upload: (loanId: number, file: File, documentCategoryId: number) => {
     const form = new FormData()
     form.append('file', file)
-    form.append('doc_type', docType)
+    form.append('document_category_id', String(documentCategoryId))
     return http.post(`/loans/${loanId}/documents`, form).then((r) => camelize(r.data) as LoanDocument)
   },
   remove: (loanId: number, documentId: number) => http.delete(`/loans/${loanId}/documents/${documentId}`).then((r) => r.data),

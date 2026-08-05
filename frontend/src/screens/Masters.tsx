@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { expenseCategoriesApi, banksApi, chartOfAccountsApi, type ExpenseCategory, type Bank, type ChartOfAccount, type AuthUser } from '../api'
+import { expenseCategoriesApi, banksApi, documentCategoriesApi, chargeCategoriesApi, chartOfAccountsApi, type ExpenseCategory, type Bank, type DocumentCategory, type ChargeCategory, type ChartOfAccount, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -180,6 +180,159 @@ export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
           <Field label="Code"><Input value={form.shortCode || ''} onChange={(e) => setForm((s) => ({ ...s, shortCode: e.target.value }))} /></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
           <Field label="Description" full><textarea value={form.description || ''} onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+const blankDocumentCategoryForm = (): Partial<DocumentCategory> => ({ status: 'Active', sortOrder: 0 })
+
+export function DocumentCategoriesScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [rows, setRows] = useState<DocumentCategory[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [modal, setModal] = useState(false)
+  const [editing, setEditing] = useState<DocumentCategory | null>(null)
+  const [form, setForm] = useState<Partial<DocumentCategory>>(blankDocumentCategoryForm())
+
+  const refresh = () => {
+    setLoading(true)
+    documentCategoriesApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [])
+
+  const openCreate = () => { setEditing(null); setForm(blankDocumentCategoryForm()); setErr(''); setModal(true) }
+  const openEdit = (r: DocumentCategory) => { setEditing(r); setForm({ ...r }); setErr(''); setModal(true) }
+  const close = () => { setModal(false); setEditing(null); setErr('') }
+
+  const save = async () => {
+    if (!form.name) { setErr('Name is required.'); return }
+    setBusy(true); setErr('')
+    try {
+      if (editing) await documentCategoriesApi.update(editing.id, form)
+      else await documentCategoriesApi.create(form)
+      close(); refresh()
+      notify.success(editing ? 'Category updated' : 'Category created', form.name)
+    } catch (ex: any) {
+      setErr(getErrorText(ex, 'Save failed'))
+    } finally { setBusy(false) }
+  }
+
+  const remove = async (r: DocumentCategory) => {
+    const ok = await notify.confirm({ title: `Delete "${r.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
+    if (!ok) return
+    try { await documentCategoriesApi.remove(r.id); refresh(); notify.success('Category deleted', r.name) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
+  }
+
+  return (
+    <div>
+      <PageHead crumbs="Masters" title="Document Categories" icon="file-text" sub={`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`}
+        actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Category</Btn></Can>} />
+      <Card pad={0}>
+        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        <Table cols={[{ label: 'Name' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+          empty="No document categories yet"
+          rows={rows}
+          render={(r) => <>
+            <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}</Td>
+            <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
+            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+              <Can user={me} module="Masters" action="Edit"><button className="mms-act" title="Edit" onClick={() => openEdit(r)}><Icon n="edit" s={15} /></button></Can>
+              <Can user={me} module="Masters" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(r)}><Icon n="trash" s={15} /></button></Can>
+            </div></Td>
+          </>} />}
+      </Card>
+
+      <Modal open={modal} onClose={close} width={400} title={editing ? 'Edit Category' : 'Add Category'}
+        footer={<>
+          <Btn variant="plain" onClick={close}>Cancel</Btn>
+          <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create')}</Btn>
+        </>}>
+        <ErrorBanner error={err} />
+        <div className="col gap-3">
+          <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
+          <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+const blankChargeCategoryForm = (): Partial<ChargeCategory> => ({ status: 'Active', sortOrder: 0 })
+
+export function ChargeCategoriesScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [rows, setRows] = useState<ChargeCategory[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [modal, setModal] = useState(false)
+  const [editing, setEditing] = useState<ChargeCategory | null>(null)
+  const [form, setForm] = useState<Partial<ChargeCategory>>(blankChargeCategoryForm())
+
+  const refresh = () => {
+    setLoading(true)
+    chargeCategoriesApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [])
+
+  const openCreate = () => { setEditing(null); setForm(blankChargeCategoryForm()); setErr(''); setModal(true) }
+  const openEdit = (r: ChargeCategory) => { setEditing(r); setForm({ ...r }); setErr(''); setModal(true) }
+  const close = () => { setModal(false); setEditing(null); setErr('') }
+
+  const save = async () => {
+    if (!form.name) { setErr('Name is required.'); return }
+    setBusy(true); setErr('')
+    try {
+      if (editing) await chargeCategoriesApi.update(editing.id, form)
+      else await chargeCategoriesApi.create(form)
+      close(); refresh()
+      notify.success(editing ? 'Category updated' : 'Category created', form.name)
+    } catch (ex: any) {
+      setErr(getErrorText(ex, 'Save failed'))
+    } finally { setBusy(false) }
+  }
+
+  const remove = async (r: ChargeCategory) => {
+    const ok = await notify.confirm({ title: `Delete "${r.name}"?`, msg: 'This action cannot be undone.', danger: true, okText: 'Delete' })
+    if (!ok) return
+    try { await chargeCategoriesApi.remove(r.id); refresh(); notify.success('Category deleted', r.name) }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
+  }
+
+  return (
+    <div>
+      <PageHead crumbs="Masters / Charge Categories" title="Charge Categories" sub={`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`}
+        actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Category</Btn></Can>} />
+      <Card pad={0}>
+        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        <Table cols={[{ label: 'Category Name' }, { label: 'Status', align: 'center' }, { label: 'Sort Order', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+          empty="No charge categories found."
+          rows={rows}
+          render={(r) => <>
+            <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}</Td>
+            <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
+            <Td align="center">{r.sortOrder}</Td>
+            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+              <Can user={me} module="Masters" action="Edit"><button className="mms-act" title="Edit" onClick={() => openEdit(r)}><Icon n="edit" s={15} /></button></Can>
+              <Can user={me} module="Masters" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(r)}><Icon n="trash" s={15} /></button></Can>
+            </div></Td>
+          </>} />}
+      </Card>
+      
+      <Modal open={modal} onClose={close} width={400} title={editing ? 'Edit Category' : 'Add Category'}
+        footer={<>
+          <Btn variant="plain" onClick={close}>Cancel</Btn>
+          <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create')}</Btn>
+        </>}>
+        <ErrorBanner error={err} />
+        <div className="col gap-3">
+          <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
+          <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
         </div>
       </Modal>
     </div>

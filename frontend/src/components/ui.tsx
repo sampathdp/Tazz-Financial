@@ -353,7 +353,7 @@ export function Modal({ open, onClose, title, sub, children, width = 560, footer
 
 /* ---------- Table ---------- */
 export interface Col { label: ReactNode; align?: 'left' | 'right' | 'center'; w?: number | string }
-export function Table<T = any>({ cols, rows, render, empty = 'No records', onRow }: { cols: Col[]; rows: T[]; render: (r: T, i: number) => ReactNode; empty?: string; onRow?: (r: T) => void }) {
+export function Table<T = any>({ cols, rows, render, empty = 'No records', onRow, footer }: { cols: Col[]; rows: T[]; render: (r: T, i: number) => ReactNode; empty?: string; onRow?: (r: T) => void; footer?: ReactNode }) {
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -374,6 +374,7 @@ export function Table<T = any>({ cols, rows, render, empty = 'No records', onRow
             </tr>
           ))}
         </tbody>
+        {footer && <tfoot>{footer}</tfoot>}
       </table>
     </div>
   )

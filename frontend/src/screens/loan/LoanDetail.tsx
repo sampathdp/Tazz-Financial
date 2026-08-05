@@ -6,10 +6,10 @@ import { useEffect, useRef, useState } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, BankSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import {
-  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, api,
+  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, api,
   type Loan, type LoanStatus, type LoanSchedule,
   type LoanPostDatedCheque, type ChequeStatus,
-  type LoanDocument, type LoanDocType, type LoanDiaryNote,
+  type LoanDocument, type DocumentCategory, type LoanDiaryNote,
   type LoanCharge, type PaymentMethod, type LoanCollateralDocument,
   type FacilityStatusEventType, type AuthUser,
 } from '../../api'
@@ -33,12 +33,7 @@ const chequeTone: Record<ChequeStatus, 'green' | 'red' | 'amber' | 'neutral' | '
   Pending: 'neutral', Handed: 'blue', Realized: 'green', Bounced: 'red', Returned: 'amber',
 }
 
-const DOC_TYPES: { value: LoanDocType; label: string }[] = [
-  { value: 'ContractImage', label: 'Contract Image' },
-  { value: 'Agreement', label: 'Agreement' },
-  { value: 'IdCopy', label: 'ID Copy' },
-  { value: 'Other', label: 'Other' },
-]
+
 const ACTIVE_STAGE_STATUSES: LoanStatus[] = ['Active', 'Closed', 'WrittenOff', 'Restructured']
 
 const SECTIONS = [
@@ -184,17 +179,17 @@ function DueTypeBreakdown({ loan }: { loan: Loan }) {
           <Td mono align="right" c="var(--ok)">{money(r.paid)}</Td>
           <Td mono align="right" c={r.balance > 0 ? 'var(--bad)' : 'var(--tx-1)'}>{money(r.balance)}</Td>
           <Td align="center"><Badge tone={r.recoveryPct >= 100 ? 'green' : r.recoveryPct > 0 ? 'amber' : 'red'} dot>{r.recoveryPct.toFixed(2)}%</Badge></Td>
-        </>} />
-      {rows.length > 0 && (
-        <div className="row between" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)', fontWeight: 700, fontSize: 13 }}>
-          <span>Totals</span>
-          <span className="row gap-4">
-            <span style={{ fontFamily: 'JetBrains Mono' }}>{money(totals.due)}</span>
-            <span style={{ fontFamily: 'JetBrains Mono' }}>{money(totals.paid)}</span>
-            <span style={{ fontFamily: 'JetBrains Mono' }}>{money(totals.balance)}</span>
-          </span>
-        </div>
-      )}
+        </>}
+        footer={rows.length > 0 ? (
+          <tr style={{ fontWeight: 700, borderTop: '2px solid var(--line)' }}>
+            <Td>Totals</Td>
+            <Td mono align="right">{money(totals.due)}</Td>
+            <Td mono align="right">{money(totals.paid)}</Td>
+            <Td mono align="right">{money(totals.balance)}</Td>
+            <Td></Td>
+          </tr>
+        ) : undefined}
+      />
     </Card>
   )
 }
@@ -517,21 +512,33 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
 
 /* ---------- Ledger Card (computed, client-side) ---------- */
 function LedgerCard({ loan }: { loan: Loan }) {
-  type Row = { date: string; particulars: string; debit: number; credit: number }
+  type Row = { date: string; particulars: string; debit: number; credit: number; typeOrder: number }
   const rows: Row[] = []
-  for (const s of loan.schedules || []) rows.push({ date: s.dueDate, particulars: `Installment #${s.installmentNo} due`, debit: num(s.totalDue), credit: 0 })
-  for (const p of loan.payments || []) {
-    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval') continue
-    rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount) })
-  }
+  
+  // 1. Charges (Debits)
   // Only the due side is logged here — a charge's paid_amount always comes from
   // a real LoanPayment (see LoanPaymentAllocator::applyAllocation), which is
-  // already its own Receipt row above. Adding a second "charge paid" row here
+  // already its own Receipt row below. Adding a second "charge paid" row here
   // would credit that same money twice and understate the running balance.
-  for (const c of loan.charges || []) rows.push({ date: c.chargedAt, particulars: `${c.chargeType} charge`, debit: num(c.dueAmount), credit: 0 })
-  for (const w of loan.waivers || []) rows.push({ date: w.waivedAt, particulars: `${w.waiverType} waived${w.reason ? ` — ${w.reason}` : ''}`, debit: 0, credit: num(w.amount) })
+  for (const c of loan.charges || []) rows.push({ date: c.chargedAt, particulars: `${c.category?.name || 'Category'} charge`, debit: num(c.dueAmount), credit: 0, typeOrder: 1 })
+  
+  // 2. Schedules (Debits)
+  for (const s of loan.schedules || []) rows.push({ date: s.dueDate, particulars: `Installment #${s.installmentNo} due`, debit: num(s.totalDue), credit: 0, typeOrder: 2 })
+  
+  // 3. Waivers (Credits)
+  for (const w of loan.waivers || []) rows.push({ date: w.waivedAt, particulars: `${w.waiverType} waived${w.reason ? ` — ${w.reason}` : ''}`, debit: 0, credit: num(w.amount), typeOrder: 3 })
+  
+  // 4. Payments (Credits)
+  for (const p of loan.payments || []) {
+    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval') continue
+    rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4 })
+  }
 
-  rows.sort((a, b) => a.date.localeCompare(b.date))
+  rows.sort((a, b) => {
+    const dCmp = a.date.substring(0, 10).localeCompare(b.date.substring(0, 10))
+    if (dCmp !== 0) return dCmp
+    return a.typeOrder - b.typeOrder
+  })
   let balance = 0
   const withBalance = rows.map((r) => { balance += r.debit - r.credit; return { ...r, balance } })
 
@@ -629,20 +636,23 @@ function WaiversPanel({ loan }: { loan: Loan }) {
 function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
   const notify = useNotify()
   const [docs, setDocs] = useState<LoanDocument[]>(loan.documents || [])
-  const [docType, setDocType] = useState<LoanDocType>('ContractImage')
+  const [categories, setCategories] = useState<DocumentCategory[]>([])
+  const [docCategoryId, setDocCategoryId] = useState<number | ''>('')
   const [uploading, setUploading] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => setDocs(loan.documents || []), [loan])
+  useEffect(() => { documentCategoriesApi.list().then((res) => setCategories(res.filter(c => c.status === 'Active'))) }, [])
 
   const refresh = () => loanDocumentsApi.list(loan.id).then(setDocs).catch(() => {})
 
   const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!docCategoryId) { notify.error('Please select a document category'); e.target.value = ''; return }
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
     setUploading(true)
-    try { await loanDocumentsApi.upload(loan.id, file, docType); refresh(); notify.success('Image uploaded') }
+    try { await loanDocumentsApi.upload(loan.id, file, docCategoryId); refresh(); notify.success('Image uploaded') }
     catch (ex: any) { notify.error('Upload failed', getErrorText(ex)) }
     finally { setUploading(false) }
   }
@@ -666,11 +676,12 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
       <div className="eyebrow" style={{ marginBottom: 12 }}>Contract Images</div>
       <Can user={me} module="Active Loans" action="Create">
         <div className="row gap-2" style={{ marginBottom: 12 }}>
-          <Select value={docType} onChange={(e) => setDocType(e.target.value as LoanDocType)} style={{ maxWidth: 180 }}>
-            {DOC_TYPES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          <Select value={docCategoryId} onChange={(e) => setDocCategoryId(Number(e.target.value) || '')} style={{ maxWidth: 180 }}>
+            <option value="" disabled>Select category...</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
           <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" onChange={pick} style={{ display: 'none' }} />
-          <Btn variant="solid" icon="upload" size="sm" onClick={() => fileInput.current?.click()} disabled={uploading}>{uploading ? 'Uploading…' : 'Upload'}</Btn>
+          <Btn variant="solid" icon="upload" size="sm" onClick={() => fileInput.current?.click()} disabled={uploading || !docCategoryId}>{uploading ? 'Uploading…' : 'Upload'}</Btn>
         </div>
       </Can>
       {docs.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No images uploaded yet.</div> :
@@ -679,7 +690,7 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
             <div key={d.id} className="row between" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
               <div className="row gap-2" style={{ alignItems: 'center' }}>
                 <Icon n="doc" s={16} />
-                <span style={{ fontSize: 12.5 }}>{DOC_TYPES.find((o) => o.value === d.docType)?.label || d.docType}</span>
+                <span style={{ fontSize: 12.5 }}>{d.category?.name || 'Document'}</span>
               </div>
               <div className="row gap-1">
                 <button className="mms-act" title="View" onClick={() => view(d)}><Icon n="eye" s={15} /></button>
@@ -772,7 +783,7 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
 
   const feePercent = num(loan.loanDetail?.loanType?.processingFeePercent)
   const computedDocCharge = Math.round(num(amount) * feePercent) / 100
-  const docCharge = loan.charges?.find((c) => c.chargeType === 'Document')
+  const docCharge = loan.charges?.find((c) => c.category?.name === 'Document')
   const docBalance = docCharge ? Math.max(0, num(docCharge.dueAmount) - num(docCharge.paidAmount)) : 0
   const chargeRequired = feePercent > 0
   const chargeBlocking = chargeRequired && (!docCharge || docBalance > 0)
@@ -830,6 +841,13 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
   const [notes, setNotes] = useState('')
   const [addBusy, setAddBusy] = useState(false)
   const [addErr, setAddErr] = useState('')
+  const [docCategoryId, setDocCategoryId] = useState<number | undefined>(undefined)
+
+  useEffect(() => {
+    chargeCategoriesApi.list().then((res) => {
+      setDocCategoryId(res.find(c => c.name === 'Document')?.id)
+    }).catch(() => {})
+  }, [])
 
   const [method, setMethod] = useState<PaymentMethod>('Cash')
   const [paidAt, setPaidAt] = useState(todayIso())
@@ -853,7 +871,8 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
     if (computedAmount <= 0) { setAddErr('Enter the disbursed amount first.'); return }
     setAddBusy(true); setAddErr('')
     try {
-      await loanChargesApi.create(loan.id, { chargeType: 'Document', dueAmount: computedAmount, notes: notes || undefined })
+      if (!docCategoryId) throw new Error('Document charge category not found.')
+      await loanChargesApi.create(loan.id, { chargeCategoryId: docCategoryId, dueAmount: computedAmount, notes: notes || undefined })
       setNotes('')
       notify.success('Document charge added')
       onChanged()
