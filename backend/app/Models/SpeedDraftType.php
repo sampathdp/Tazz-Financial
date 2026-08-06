@@ -25,8 +25,10 @@ class SpeedDraftType extends Model
         'sort_order' => 'integer',
     ];
 
-    public function speedDrafts()
+    /** speed_draft_type_id lives on speed_draft_facility_details, not
+     *  credit_facilities — see SpeedDraft's docblock. */
+    public function facilityDetails()
     {
-        return $this->hasMany(SpeedDraft::class);
+        return $this->hasMany(SpeedDraftFacilityDetail::class);
     }
 }

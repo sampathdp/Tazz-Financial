@@ -1,5 +1,6 @@
 /* Tazz Investment & Credit — Loan Applications (intake → approve/reject workflow) */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
@@ -64,9 +65,13 @@ interface FormState {
 }
 const blankForm = (): FormState => ({ installmentFrequency: 'monthly', applicationDate: todayIso(), guarantors: [], collateral: [] })
 const blankInsurance = (): Partial<FacilityInsuranceDetail> => ({})
+const ROUTE_BASE = '/loan/apps'
 
 export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
+  const navigate = useNavigate()
+  const params = useParams<{ id?: string }>()
+  const location = useLocation()
   const [rows, setRows] = useState<Loan[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [branches, setBranches] = useState<{ id: number; name: string; code: string }[]>([])
@@ -130,36 +135,54 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const selectedCustomer = customers.find((c) => c.id === form.customerId)
   const needsInsurance = selectedType?.category === 'Leasing' || selectedType?.category === 'Mortgage'
 
-  const openCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setCollateralFiles([]); setBackDated(false); setErr(''); setMode('form') }
-  const openRow = async (row: Loan) => {
+  // Clicking "New"/a row only changes the URL — the effect below (keyed on the
+  // URL) does the actual state setup, so a hard refresh on a form/view URL
+  // reconstructs the same screen instead of bouncing back to the list.
+  const openCreate = () => navigate(`${ROUTE_BASE}/new`)
+  const openRow = (row: Loan) => navigate(`${ROUTE_BASE}/${row.id}`)
+  const back = () => navigate(ROUTE_BASE)
+
+  const loadCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setCollateralFiles([]); setBackDated(false); setErr(''); setMode('form') }
+  const loadRow = async (id: number) => {
     // The list only loads summary relations — fetch full detail (guarantors,
     // collateral, officer/applier/approver names) before showing the form or view.
-    const loan = await loansApi.get(row.id).catch(() => row)
-    if (loan.status === 'Pending') {
-      setEditing(loan); setViewing(null)
-      const applicationDate = loan.loanDetail?.applicationDate || (loan.createdAt || '').slice(0, 10) || todayIso()
-      setForm({
-        customerId: loan.customerId, loanTypeId: loan.loanDetail?.loanTypeId, branchId: loan.branchId,
-        principalAmount: loan.principalAmount, downPayment: loan.loanDetail?.downPayment ?? undefined,
-        interestRatePercent: loan.interestRatePercent, termMonths: loan.termMonths,
-        installmentFrequency: loan.loanDetail?.installmentFrequency, purpose: loan.loanDetail?.purpose || '',
-        applicationDate,
-        referenceName: loan.loanDetail?.referenceName || '', referenceIdNo: loan.loanDetail?.referenceIdNo || '', referenceAddress: loan.loanDetail?.referenceAddress || '',
-        loanOfficerId: loan.loanDetail?.loanOfficerId || undefined,
-        vehicleNo: loan.loanDetail?.vehicleNo || '',
-        insurance: loan.insurance || blankInsurance(),
-        // vehicleDetail is a read-only nested relation — flatten it back onto
-        // the row's flat write fields, which is what the collateral form edits.
-        guarantors: loan.guarantors || [], collateral: (loan.collateral || []).map((c) => ({ ...c, ...(c.vehicleDetail || {}) })),
-      })
-      setCollateralFiles((loan.collateral || []).map(() => []))
-      setBackDated(applicationDate !== todayIso())
-      setErr(''); setMode('form')
-    } else {
-      setViewing(loan); setEditing(null); setMode('view')
+    try {
+      const loan = await loansApi.get(id)
+      if (loan.status === 'Pending') {
+        setEditing(loan); setViewing(null)
+        const applicationDate = loan.loanDetail?.applicationDate || (loan.createdAt || '').slice(0, 10) || todayIso()
+        setForm({
+          customerId: loan.customerId, loanTypeId: loan.loanDetail?.loanTypeId, branchId: loan.branchId,
+          principalAmount: loan.principalAmount, downPayment: loan.loanDetail?.downPayment ?? undefined,
+          interestRatePercent: loan.interestRatePercent, termMonths: loan.termMonths,
+          installmentFrequency: loan.loanDetail?.installmentFrequency, purpose: loan.loanDetail?.purpose || '',
+          applicationDate,
+          referenceName: loan.loanDetail?.referenceName || '', referenceIdNo: loan.loanDetail?.referenceIdNo || '', referenceAddress: loan.loanDetail?.referenceAddress || '',
+          loanOfficerId: loan.loanDetail?.loanOfficerId || undefined,
+          vehicleNo: loan.loanDetail?.vehicleNo || '',
+          insurance: loan.insurance || blankInsurance(),
+          // vehicleDetail is a read-only nested relation — flatten it back onto
+          // the row's flat write fields, which is what the collateral form edits.
+          guarantors: loan.guarantors || [], collateral: (loan.collateral || []).map((c) => ({ ...c, ...(c.vehicleDetail || {}) })),
+        })
+        setCollateralFiles((loan.collateral || []).map(() => []))
+        setBackDated(applicationDate !== todayIso())
+        setErr(''); setMode('form')
+      } else {
+        setViewing(loan); setEditing(null); setMode('view')
+      }
+    } catch {
+      notify.error('Loan not found')
+      navigate(ROUTE_BASE, { replace: true })
     }
   }
-  const back = () => { setMode('list'); setEditing(null); setViewing(null) }
+
+  useEffect(() => {
+    if (location.pathname === `${ROUTE_BASE}/new`) { loadCreate(); return }
+    if (params.id) { loadRow(Number(params.id)); return }
+    setMode('list'); setEditing(null); setViewing(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, params.id])
 
   const save = async () => {
     if (!form.customerId) { setErr('Select a customer.'); return }

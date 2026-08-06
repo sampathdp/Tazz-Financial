@@ -1,16 +1,22 @@
 /* Tazz Investment & Credit — Overdue Loans (Active loans with a past-due, unpaid installment) */
 import { useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Input, Table, Td } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loansApi, type Loan, type OverdueLoan, type AuthUser } from '../api'
 import { LoanDetail } from './loan/LoanDetail'
+import { useNotify } from '../components/Notify'
 import type { Go } from './types'
 
+const ROUTE_BASE = '/loan/overdue'
 const num = (v: unknown) => Number(v ?? 0)
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const daysTone = (d: number) => (d >= 30 ? 'red' : d >= 15 ? 'amber' : 'neutral') as 'red' | 'amber' | 'neutral'
 
 export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const navigate = useNavigate()
+  const params = useParams<{ id?: string }>()
   const [rows, setRows] = useState<OverdueLoan[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -23,14 +29,23 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
     setLoading(true)
     loansApi.overdue().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
   }
-  useEffect(refresh, [])
 
-  const openRow = async (row: OverdueLoan) => {
-    setMode('detail'); setDetailLoading(true)
-    try { setLoan(await loansApi.get(row.id)) } catch { setLoan(row) } finally { setDetailLoading(false) }
-  }
-  const back = () => { setMode('list'); setLoan(null); refresh() }
+  // Which loan (if any) is open lives in the URL — see the effect below —
+  // so a hard refresh on a detail URL reopens the same loan instead of
+  // bouncing back to the list.
+  const openRow = (row: OverdueLoan) => navigate(`${ROUTE_BASE}/${row.id}`)
+  const back = () => navigate(ROUTE_BASE)
   const reloadLoan = async () => { if (loan) setLoan(await loansApi.get(loan.id)) }
+
+  useEffect(() => {
+    if (!params.id) { setMode('list'); setLoan(null); refresh(); return }
+    setMode('detail'); setDetailLoading(true)
+    loansApi.get(Number(params.id))
+      .then(setLoan)
+      .catch(() => { notify.error('Loan not found'); navigate(ROUTE_BASE, { replace: true }) })
+      .finally(() => setDetailLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id])
 
   const q = search.trim().toLowerCase()
   const filtered = rows.filter((l) => {

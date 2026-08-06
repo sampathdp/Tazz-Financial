@@ -7,8 +7,10 @@ use App\Models\Customer;
 use App\Models\LoanType;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\NumberGenerator;
 use App\Support\Permissions;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
@@ -254,10 +256,19 @@ class DatabaseSeeder extends Seeder
             ['nic' => '910011223V', 'name' => 'S.A.D.C. Silva', 'phone' => '0776789012', 'occ' => 'Employed', 'employer' => 'Ceylon Textiles Ltd', 'job' => 'Accountant', 'income' => 95000, 'guarantor' => true],
         ];
 
-        foreach ($people as $i => $p) {
+        foreach ($people as $p) {
+            // Reuse the existing code on re-run instead of hardcoding one —
+            // a hardcoded 'CUS-000001' never touches number_sequences, so the
+            // real NumberGenerator::next('customer') call later collides with
+            // it (SQLSTATE 23000 duplicate 'CUS-000001').
+            $existing = Customer::where('nic_no', $p['nic'])->first();
+            $code = $existing->code ?? DB::transaction(
+                fn () => NumberGenerator::next('customer', ['user_id' => $admin->id])
+            );
+
             $customer = Customer::updateOrCreate(['nic_no' => $p['nic']], [
                 'branch_id' => $headOffice->id,
-                'code' => 'CUS-' . str_pad((string) ($i + 1), 6, '0', STR_PAD_LEFT),
+                'code' => $code,
                 'full_name' => $p['name'],
                 'phone' => $p['phone'],
                 'occupation_type' => $p['occ'],

@@ -1,6 +1,7 @@
 /* NMS-Auto — app shell (sidebar, topbar), ported from shell.jsx */
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Icon } from './Icon'
 import { NotificationBell, useNotify } from './Notify'
 import DB from '../data'
@@ -144,7 +145,12 @@ function NavItem({ item, active, sub, onClick }: { item: NavLeaf; active: boolea
   )
 }
 
-export function Sidebar({ route, go, open, setOpen, company, user }: { route: string; go: (r: string) => void; open: boolean; setOpen: (b: boolean) => void; company: { name: string, tagline: string }; user?: AuthUser | null }) {
+export function Sidebar({ go, open, setOpen, company, user }: { go: (r: string) => void; open: boolean; setOpen: (b: boolean) => void; company: { name: string, tagline: string }; user?: AuthUser | null }) {
+  const location = useLocation()
+  // A nav id is "active" if it's the exact current path, or an ancestor of it
+  // (e.g. id 'loan/apps' stays active on '/loan/apps/new' or '/loan/apps/12').
+  const isActive = (id: string) => location.pathname === '/' + id || location.pathname.startsWith('/' + id + '/')
+  const route = location.pathname.slice(1)
   // Filter NAV by permission: drop hidden leaves and collapse empty sections.
   const visibleNav: NavNode[] = NAV
     .map((n) => {
@@ -177,7 +183,7 @@ export function Sidebar({ route, go, open, setOpen, company, user }: { route: st
         </div>
         <nav style={{ padding: '10px 10px 24px', overflowY: 'auto', flex: 1 }}>
           {visibleNav.map((n, i) => {
-            if (!('section' in n)) return <NavItem key={n.id} item={n} active={route === n.id} onClick={() => { go(n.id); setOpen(false) }} />
+            if (!('section' in n)) return <NavItem key={n.id} item={n} active={isActive(n.id)} onClick={() => { go(n.id); setOpen(false) }} />
             const open2 = exp[n.section]
             return (
               <div key={n.section} style={{ marginTop: i ? 8 : 0 }}>
@@ -186,7 +192,7 @@ export function Sidebar({ route, go, open, setOpen, company, user }: { route: st
                   <Icon n="chevd" s={13} style={{ transform: open2 ? 'none' : 'rotate(-90deg)', transition: 'transform .2s' }} />
                 </button>
                 <div style={{ maxHeight: open2 ? n.items.length * 40 + 'px' : 0, overflow: 'hidden', transition: 'max-height .3s var(--ease)' }}>
-                  {n.items.map((it) => <NavItem key={it.id} item={it} active={route === it.id} sub onClick={() => { go(it.id); setOpen(false) }} />)}
+                  {n.items.map((it) => <NavItem key={it.id} item={it} active={isActive(it.id)} sub onClick={() => { go(it.id); setOpen(false) }} />)}
                 </div>
               </div>
             )
@@ -219,7 +225,7 @@ export function ThemeToggle() {
   )
 }
 
-export function Topbar({ setOpen, go }: { setOpen: (fn: (o: boolean) => boolean) => void; route: string; go: (r: string) => void }) {
+export function Topbar({ setOpen, go }: { setOpen: (fn: (o: boolean) => boolean) => void; go: (r: string) => void }) {
   const notify = useNotify()
   // Let notification-center clicks navigate via the app router.
   useEffect(() => { notify.setRouter(go) }, [notify, go])
@@ -245,7 +251,6 @@ export function Topbar({ setOpen, go }: { setOpen: (fn: (o: boolean) => boolean)
             onClick={async () => {
               try { await auth.logout() } catch {}
               auth.setToken(null)
-              localStorage.removeItem('mms-route')
               window.location.reload()
             }}
             style={{ background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 8, padding: 8, color: 'var(--tx-1)', marginLeft: 6 }}
