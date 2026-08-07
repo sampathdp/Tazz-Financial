@@ -29,7 +29,6 @@ export default function Login({ onAuth }: { onAuth: (user: AuthUser) => void }) 
     try {
       const { token, user } = await auth.login(email.trim(), password)
       auth.setToken(token)
-      localStorage.setItem('mms-route', 'dash')
       onAuth(user)
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Login failed. Check credentials and try again.'))

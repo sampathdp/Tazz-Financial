@@ -3,6 +3,7 @@
    reject, disburse, and ongoing view — status filter chips replace separate
    Applications/Active screens since the volume here doesn't need them split out yet. */
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
@@ -37,9 +38,13 @@ interface FormState {
 }
 const blankForm = (): FormState => ({ ratePeriod: 'monthly', collateral: [] })
 const blankInsurance = (): Partial<FacilityInsuranceDetail> => ({})
+const ROUTE_BASE = '/sd/drafts'
 
 export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
+  const navigate = useNavigate()
+  const params = useParams<{ id?: string }>()
+  const location = useLocation()
   const [rows, setRows] = useState<SpeedDraft[]>([])
   const [types, setTypes] = useState<SpeedDraftType[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -60,7 +65,6 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
     speedDraftsApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
   }
   useEffect(() => {
-    refresh()
     speedDraftTypesApi.list().then((all) => setTypes(all.filter((t) => (t.status || 'Active') === 'Active'))).catch(() => setTypes([]))
     customersApi.list().then(setCustomers).catch(() => setCustomers([]))
   }, [])
@@ -68,28 +72,43 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
   const selectedType = types.find((t) => t.id === form.speedDraftTypeId)
   const needsInsurance = selectedType?.category === 'Lease' || selectedType?.category === 'Mortgage'
 
-  const openCreate = () => { setEditing(null); setForm(blankForm()); setErr(''); setMode('form') }
-  const openRow = async (row: SpeedDraft) => {
-    if (row.status === 'Pending') {
-      // Awaited fully before switching modes (no loading state needed here) so the
-      // form never flashes blank/stale content — mirrors LoanApplications' openRow.
-      const full = await speedDraftsApi.get(row.id).catch(() => row)
-      setEditing(full)
-      setForm({
-        customerId: full.customerId, speedDraftTypeId: full.speedDraftDetail?.speedDraftTypeId,
-        principalAmount: full.principalAmount, interestRatePercent: full.interestRatePercent,
-        ratePeriod: full.ratePeriod || 'monthly', termMonths: full.termMonths,
-        vehicleNo: full.speedDraftDetail?.vehicleNo || '', insurance: full.insurance || blankInsurance(),
-        collateral: full.collateral || [],
-      })
-      setErr(''); setMode('form')
-      return
-    }
-    setMode('detail'); setDetailLoading(true)
-    try { setDetail(await speedDraftsApi.get(row.id)) } catch { setDetail(row) } finally { setDetailLoading(false) }
-  }
-  const back = () => { setMode('list'); setEditing(null); setDetail(null); refresh() }
+  // Which draft/mode is open lives in the URL — see the effect below — so a
+  // hard refresh on a form/detail URL reopens the same screen instead of
+  // bouncing back to the list.
+  const openCreate = () => navigate(`${ROUTE_BASE}/new`)
+  const openRow = (row: SpeedDraft) => navigate(`${ROUTE_BASE}/${row.id}`)
+  const back = () => navigate(ROUTE_BASE)
   const reloadDetail = async () => { if (detail) setDetail(await speedDraftsApi.get(detail.id)) }
+
+  const loadCreate = () => { setEditing(null); setForm(blankForm()); setErr(''); setMode('form') }
+  const loadRow = async (id: number) => {
+    try {
+      const full = await speedDraftsApi.get(id)
+      if (full.status === 'Pending') {
+        setEditing(full)
+        setForm({
+          customerId: full.customerId, speedDraftTypeId: full.speedDraftDetail?.speedDraftTypeId,
+          principalAmount: full.principalAmount, interestRatePercent: full.interestRatePercent,
+          ratePeriod: full.ratePeriod || 'monthly', termMonths: full.termMonths,
+          vehicleNo: full.speedDraftDetail?.vehicleNo || '', insurance: full.insurance || blankInsurance(),
+          collateral: full.collateral || [],
+        })
+        setErr(''); setMode('form')
+      } else {
+        setDetail(full); setMode('detail')
+      }
+    } catch {
+      notify.error('Speed Draft not found')
+      navigate(ROUTE_BASE, { replace: true })
+    }
+  }
+
+  useEffect(() => {
+    if (location.pathname === `${ROUTE_BASE}/new`) { loadCreate(); return }
+    if (params.id) { setDetailLoading(true); loadRow(Number(params.id)).finally(() => setDetailLoading(false)); return }
+    setMode('list'); setEditing(null); setDetail(null); refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, params.id])
 
   const pickType = (typeId: number) => {
     const t = types.find((x) => x.id === typeId)

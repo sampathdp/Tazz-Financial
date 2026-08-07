@@ -1,5 +1,6 @@
 /* Tazz Investment & Credit — Customer Management (API-backed) */
 import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type FdDeposit, type FixedDeposit, type AuthUser } from '../api'
@@ -283,8 +284,13 @@ function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer
   )
 }
 
+const ROUTE_BASE = '/customers'
+
 export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
+  const navigate = useNavigate()
+  const params = useParams<{ id?: string; loanId?: string }>()
+  const location = useLocation()
   const [rows, setRows] = useState<Customer[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [search, setSearch] = useState('')
@@ -305,29 +311,54 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     customersApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
   }
   useEffect(() => {
-    refresh()
     branchesApi.list().then(setBranches).catch(() => setBranches([]))
   }, [])
 
-  const openCreate = () => { setEditing(null); setForm(blankForm()); setErr(''); setMode('form') }
-  const openEdit = (c: Customer) => {
-    setEditing(c)
-    // employmentDetail/businessDetail are read-only nested relations — flatten
-    // them back onto the form's flat fields, which is what the save API accepts.
-    setForm({ ...c, ...(c.employmentDetail || {}), ...(c.businessDetail || {}) })
-    setErr(''); setMode('form')
-  }
-  const openView = async (c: Customer) => {
-    setMode('view'); setViewLoading(true)
-    try { setViewing(await customersApi.get(c.id)) } catch { setViewing(c) } finally { setViewLoading(false) }
-  }
-  const back = () => { setMode('list'); setEditing(null); setViewing(null); setViewingLoan(null); setErr('') }
+  // Which customer/sub-view is open lives in the URL — see the effect below —
+  // so a hard refresh on a view/edit/loan URL reopens the same screen instead
+  // of bouncing back to the list.
+  const openCreate = () => navigate(`${ROUTE_BASE}/new`)
+  const openEdit = (c: Customer) => navigate(`${ROUTE_BASE}/${c.id}/edit`)
+  const openView = (c: Customer) => navigate(`${ROUTE_BASE}/${c.id}`)
+  const back = () => navigate(ROUTE_BASE)
 
-  const openLoan = async (loanId: number) => {
-    setMode('loan'); setLoanLoading(true)
-    try { setViewingLoan(await loansApi.get(loanId)) } catch { setViewingLoan(null) } finally { setLoanLoading(false) }
-  }
-  const backToCustomer = () => { setMode('view'); setViewingLoan(null) }
+  const openLoan = (loanId: number) => navigate(`${ROUTE_BASE}/${params.id}/loan/${loanId}`)
+  const backToCustomer = () => navigate(`${ROUTE_BASE}/${params.id}`)
+  const reloadLoan = async () => { if (viewingLoan) setViewingLoan(await loansApi.get(viewingLoan.id)) }
+
+  const isNew = location.pathname === `${ROUTE_BASE}/new`
+  const isEdit = !!params.id && location.pathname === `${ROUTE_BASE}/${params.id}/edit`
+  const isLoan = !!params.loanId
+
+  useEffect(() => {
+    if (isNew) { setEditing(null); setForm(blankForm()); setErr(''); setMode('form'); return }
+    if (!params.id) { refresh(); setMode('list'); setEditing(null); setViewing(null); setViewingLoan(null); return }
+
+    let cancelled = false
+    setViewLoading(true)
+    customersApi.get(Number(params.id)).then((c) => {
+      if (cancelled) return
+      setViewing(c)
+      if (isEdit) {
+        setEditing(c)
+        // employmentDetail/businessDetail are read-only nested relations — flatten
+        // them back onto the form's flat fields, which is what the save API accepts.
+        setForm({ ...c, ...(c.employmentDetail || {}), ...(c.businessDetail || {}) })
+        setErr(''); setMode('form')
+      } else if (isLoan) {
+        setMode('loan'); setLoanLoading(true)
+        loansApi.get(Number(params.loanId)).then((l) => { if (!cancelled) setViewingLoan(l) }).catch(() => { if (!cancelled) setViewingLoan(null) }).finally(() => { if (!cancelled) setLoanLoading(false) })
+      } else {
+        setMode('view')
+      }
+    }).catch(() => {
+      if (cancelled) return
+      notify.error('Customer not found')
+      navigate(ROUTE_BASE, { replace: true })
+    }).finally(() => { if (!cancelled) setViewLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id, params.loanId, isNew, isEdit])
 
   const save = async () => {
     if (!form.title || !form.surname || !form.initials) { setErr('Title, Surname and Initial are required.'); return }
@@ -378,7 +409,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
           sub={viewingLoan ? `${viewingLoan.customer?.fullName} — ${viewingLoan.loanDetail?.loanType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={backToCustomer}>← Back to Customer</Btn>} />
         {loanLoading || !viewingLoan ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
-          : <LoanDetail loan={viewingLoan} me={me} onChanged={() => openLoan(viewingLoan.id)} go={go} context="active" />}
+          : <LoanDetail loan={viewingLoan} me={me} onChanged={reloadLoan} go={go} context="active" />}
       </div>
     )
   }
@@ -488,7 +519,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
         <Table cols={[{ label: 'Customer' }, { label: 'NIC / ID' }, { label: 'Phone' }, { label: 'Branch' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           rows={filtered}
           empty={q ? 'No customers match your search' : 'No records'}
-          onRow={(c) => openView(c)}
+          onRow={openView}
           render={(c) => <>
             <Td c="var(--tx-0)"><div className="row gap-2" style={{ alignItems: 'center' }}><span style={{ fontWeight: 600 }}>{c.fullName}</span>{c.isGuarantor && <Badge tone="blue">Guarantor</Badge>}</div><div className="t-2" style={{ fontSize: 11.5 }}>{c.code}</div></Td>
             <Td mono style={{ fontSize: 12 }}>{c.nicNo || c.passportNo || c.drivingLicenseNo || '—'}</Td>

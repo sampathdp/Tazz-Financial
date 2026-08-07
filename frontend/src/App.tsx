@@ -1,6 +1,7 @@
 /* NMS-Auto — app router + screen registry (replaces window.SCREENS) */
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { ComponentType } from 'react'
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar, Topbar, flatNav } from './components/Shell'
 import { Icon } from './components/Icon'
 import DB from './data'
@@ -75,6 +76,12 @@ function ScreenLoader() {
   )
 }
 
+// Full-page loader shown only while the token is being (re)validated on boot —
+// avoids flashing Login or the wrong screen before we know who's signed in.
+function BootLoader() {
+  return <div style={{ minHeight: '100vh' }} />
+}
+
 // Shown for nav items on the roadmap but not built yet (admin-only preview — see canAccessRoute).
 function ComingSoon({ route }: { route: string }) {
   const item = flatNav[route]
@@ -136,13 +143,33 @@ const SCREENS: Record<string, ScreenComp> = {
   'fund/reports': FundingReportsScreen,
 }
 
-export default function App() {
-  const [route, setRoute] = useState<string>(() => localStorage.getItem('mms-route') || 'dash')
+// Every nav entry (built screens + "soon" placeholders) gets a real route, so
+// every screen in the system has its own URL and its own browser-history
+// entry — that's what makes Back/Forward and refresh behave correctly.
+const ROUTE_IDS = Object.keys(flatNav)
+
+// Screens with a list + create/edit/detail flow also get /new and /:id
+// sibling routes, so which record/form is open lives in the URL — that's
+// what makes a hard refresh land back on the same form instead of the list.
+const FORM_ROUTE_IDS = new Set([
+  'loan/apps', 'loan/active', 'loan/overdue', 'customers', 'sd/drafts',
+])
+
+// One-off deeper sub-paths (a screen nested inside another screen's record
+// view) that don't fit the flat /new + /:id shape above.
+const EXTRA_ROUTES: { path: string; forId: string }[] = [
+  { path: 'customers/:id/edit', forId: 'customers' },
+  { path: 'customers/:id/loan/:loanId', forId: 'customers' },
+]
+
+function AppShell() {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [open, setOpen] = useState(false)
   const [brand, setBrand] = useState({ name: DB.company.name, tagline: DB.company.tagline })
   const [user, setUser] = useState<AuthUser | null>(null)
   const [authReady, setAuthReady] = useState(false)
-  const go: Go = (r) => { setRoute(r); localStorage.setItem('mms-route', r); window.scrollTo(0, 0) }
+  const go: Go = (r) => { navigate('/' + r); window.scrollTo(0, 0) }
   useEffect(() => { document.title = brand.name + ' — Admin Panel' }, [brand.name])
 
   useEffect(() => {
@@ -157,27 +184,65 @@ export default function App() {
       .finally(() => setAuthReady(true))
   }, [])
 
-  if (!authReady) return null
-  if (!user) return <Login onAuth={setUser} />
+  if (!authReady) return <BootLoader />
 
-  // Permission gate: silently downgrade to dashboard if user lacks access to the
-  // saved route (e.g. after a permission change). The Sidebar already hides the
-  // entries they can't reach, but the route may be persisted in localStorage.
-  const effectiveRoute = canAccessRoute(user, route) ? route : 'dash'
-  const Screen = SCREENS[effectiveRoute] || (() => <ComingSoon route={effectiveRoute} />)
-  const denied = !canAccessRoute(user, route)
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <WhatsNewModal user={user} />
-      <Sidebar route={effectiveRoute} go={go} open={open} setOpen={setOpen} company={brand} user={user} />
-      <div className="mms-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <Topbar setOpen={setOpen} route={effectiveRoute} go={go} />
-        <main key={effectiveRoute} className="fade-in" style={{ padding: '24px clamp(16px,3vw,32px) 60px', flex: 1 }}>
-          {denied
-            ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)' }}>You do not have permission to view this screen.</div>
-            : <Suspense fallback={<ScreenLoader />}><Screen go={go} setBrand={setBrand} user={user} /></Suspense>}
-        </main>
-      </div>
-    </div>
+    <Routes>
+      <Route
+        path="/login"
+        element={user ? <Navigate to={(location.state as any)?.from?.pathname || '/dash'} replace /> : <Login onAuth={setUser} />}
+      />
+      <Route
+        element={
+          user ? (
+            <div style={{ display: 'flex', minHeight: '100vh' }}>
+              <WhatsNewModal user={user} />
+              <Sidebar go={go} open={open} setOpen={setOpen} company={brand} user={user} />
+              <div className="mms-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                <Topbar setOpen={setOpen} go={go} />
+                <main className="fade-in" style={{ padding: '24px clamp(16px,3vw,32px) 60px', flex: 1 }}>
+                  <Outlet />
+                </main>
+              </div>
+            </div>
+          ) : (
+            <Navigate to="/login" state={{ from: location }} replace />
+          )
+        }
+      >
+        {user && ROUTE_IDS.map((id) => {
+          const Screen = SCREENS[id]
+          const allowed = canAccessRoute(user, id)
+          const element = !allowed ? (
+            <Navigate to="/dash" replace />
+          ) : Screen ? (
+            <Suspense fallback={<ScreenLoader />}><Screen go={go} setBrand={setBrand} user={user} /></Suspense>
+          ) : (
+            <ComingSoon route={id} />
+          )
+          if (!FORM_ROUTE_IDS.has(id)) return <Route key={id} path={id} element={element} />
+          return [
+            <Route key={id} path={id} element={element} />,
+            <Route key={id + '/new'} path={id + '/new'} element={element} />,
+            <Route key={id + '/:id'} path={id + '/:id'} element={element} />,
+          ]
+        })}
+        {user && EXTRA_ROUTES.map(({ path, forId }) => {
+          const Screen = SCREENS[forId]
+          if (!Screen || !canAccessRoute(user, forId)) return null
+          return <Route key={path} path={path} element={<Suspense fallback={<ScreenLoader />}><Screen go={go} setBrand={setBrand} user={user} /></Suspense>} />
+        })}
+        <Route index element={<Navigate to="/dash" replace />} />
+        <Route path="*" element={<Navigate to="/dash" replace />} />
+      </Route>
+    </Routes>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppShell />
+    </BrowserRouter>
   )
 }

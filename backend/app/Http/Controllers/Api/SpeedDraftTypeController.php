@@ -36,7 +36,7 @@ class SpeedDraftTypeController extends Controller
 
     public function destroy(SpeedDraftType $speedDraftType)
     {
-        if ($speedDraftType->speedDrafts()->exists()) {
+        if ($speedDraftType->facilityDetails()->exists()) {
             return response()->json(['message' => 'This Speed Draft Type has drafts issued against it and cannot be deleted.'], 422);
         }
         $speedDraftType->delete();
