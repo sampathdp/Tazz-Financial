@@ -135,25 +135,6 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const selectedCustomer = customers.find((c) => c.id === form.customerId)
   const needsInsurance = selectedType?.category === 'Leasing' || selectedType?.category === 'Mortgage'
 
-<<<<<<< HEAD
-  const openCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setCollateralFiles([]); setBackDated(false); setErr(''); setMode('form') }
-
-  // Handoff from the Leasing/Loan Calculator's "Create Loan" button — the calculator
-  // already folded down payment + financed charges into a single finance amount, so
-  // principalAmount here is that finance amount with downPayment reset to 0, which
-  // makes the eventual disbursed schedule match the calculator's quote exactly.
-  useEffect(() => {
-    const raw = sessionStorage.getItem('mms-loan-calc-prefill')
-    if (!raw) return
-    sessionStorage.removeItem('mms-loan-calc-prefill')
-    try {
-      const prefill = JSON.parse(raw)
-      openCreate()
-      setForm((f) => ({ ...f, ...prefill }))
-    } catch {}
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const openRow = async (row: Loan) => {
-=======
   // Clicking "New"/a row only changes the URL — the effect below (keyed on the
   // URL) does the actual state setup, so a hard refresh on a form/view URL
   // reconstructs the same screen instead of bouncing back to the list.
@@ -163,7 +144,6 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
 
   const loadCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setCollateralFiles([]); setBackDated(false); setErr(''); setMode('form') }
   const loadRow = async (id: number) => {
->>>>>>> 27c8ebb921c7dd65e0dab83854cd0120015ecd97
     // The list only loads summary relations — fetch full detail (guarantors,
     // collateral, officer/applier/approver names) before showing the form or view.
     try {
@@ -198,8 +178,25 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   }
 
   useEffect(() => {
-    if (location.pathname === `${ROUTE_BASE}/new`) { loadCreate(); return }
+    if (location.pathname === `${ROUTE_BASE}/new`) {
+      loadCreate()
+      // Handoff from the Leasing/Loan Calculator's "Create Loan" button — the calculator
+      // already folded down payment + financed charges into a single finance amount, so
+      // principalAmount here is that finance amount with downPayment reset to 0, which
+      // makes the eventual disbursed schedule match the calculator's quote exactly.
+      // Merged in the same effect run as loadCreate() so its blankForm() reset can't
+      // stomp the prefill on a later render.
+      const raw = sessionStorage.getItem('mms-loan-calc-prefill')
+      if (raw) {
+        sessionStorage.removeItem('mms-loan-calc-prefill')
+        try { setForm((f) => ({ ...f, ...JSON.parse(raw) })) } catch {}
+      }
+      return
+    }
     if (params.id) { loadRow(Number(params.id)); return }
+    // The calculator hands off via go('loan/apps'), which lands on the list route —
+    // redirect to /new so the branch above picks up the prefill.
+    if (sessionStorage.getItem('mms-loan-calc-prefill')) { navigate(`${ROUTE_BASE}/new`, { replace: true }); return }
     setMode('list'); setEditing(null); setViewing(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, params.id])
