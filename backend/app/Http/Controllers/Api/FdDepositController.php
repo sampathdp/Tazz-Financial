@@ -36,6 +36,20 @@ class FdDepositController extends Controller
         return $fdDeposit->load(self::RELATIONS);
     }
 
+    /** Preview-only: the deposit number the next deposit at this branch would get,
+     *  for display in the form before it's submitted — see NumberGenerator::peek(). */
+    public function nextDepositNo(Request $request)
+    {
+        $data = $request->validate(['branch_id' => 'required|exists:branches,id']);
+        $branch = Branch::find($data['branch_id']);
+        $code = NumberGenerator::peek('fd_deposit', [
+            'branch_id' => $branch->id,
+            'branch_code' => $branch->code,
+        ]);
+
+        return response()->json(['code' => $code]);
+    }
+
     public function store(Request $request)
     {
         $data = $this->validated($request);

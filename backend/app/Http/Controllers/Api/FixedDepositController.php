@@ -22,6 +22,8 @@ class FixedDepositController extends Controller
 {
     private const PAYMENT_METHODS = ['Cash', 'Bank', 'Cheque'];
 
+    private const INTEREST_METHODS = ['monthly', 'maturity'];
+
     private const SUMMARY_RELATIONS = ['customer:id,full_name,code,nic_no,phone', 'branch:id,name,code', 'fundingProduct:id,name,code,interest_method'];
 
     private const DETAIL_RELATIONS = [
@@ -69,6 +71,7 @@ class FixedDepositController extends Controller
             'funding_product_id' => 'required|exists:funding_products,id',
             'term_months' => 'required|integer|min:1',
             'start_date' => 'required|date',
+            'interest_payment_method' => ['nullable', Rule::in(self::INTEREST_METHODS)],
         ]);
 
         $deposit = FdDeposit::findOrFail($data['deposit_id']);
@@ -82,8 +85,9 @@ class FixedDepositController extends Controller
         }
         $this->assertAmountWithinProduct((float) $deposit->amount, $product);
         $this->assertTermAllowed((int) $data['term_months'], $product);
+        $interestMethod = $this->resolveInterestMethod($data['interest_payment_method'] ?? null, $product);
 
-        $fd = DB::transaction(function () use ($data, $deposit, $product, $request) {
+        $fd = DB::transaction(function () use ($data, $deposit, $product, $interestMethod, $request) {
             $startDate = Carbon::parse($data['start_date']);
             $fd = $this->createFixedDeposit(
                 branchId: $deposit->branch_id,
@@ -93,6 +97,7 @@ class FixedDepositController extends Controller
                 termMonths: (int) $data['term_months'],
                 startDate: $startDate,
                 userId: $request->user()->id,
+                interestMethod: $interestMethod,
             );
 
             // The deposit's cash was already posted to the cashbook/ledger when it
@@ -142,6 +147,9 @@ class FixedDepositController extends Controller
                 termMonths: (int) $data['term_months'],
                 startDate: $newStart,
                 userId: $request->user()->id,
+                // Carries the method the customer originally chose forward, even
+                // if the product's own default has since been changed.
+                interestMethod: $fixedDeposit->interest_payment_method,
                 renewedFromId: $fixedDeposit->id,
             );
 
@@ -261,11 +269,24 @@ class FixedDepositController extends Controller
         return response()->json($withdrawal->load(['fixedDeposit' => fn ($q) => $q->with(self::DETAIL_RELATIONS)]), 201);
     }
 
+    /** Value the customer chose (only allowed if the product permits a choice) or the product's fixed default. */
+    private function resolveInterestMethod(?string $requested, FundingProduct $product): string
+    {
+        if ($requested === null) {
+            return $product->interest_method;
+        }
+        if ($requested !== $product->interest_method && !$product->allow_method_choice) {
+            throw ValidationException::withMessages(['interest_payment_method' => "This funding product does not allow choosing the interest method."]);
+        }
+
+        return $requested;
+    }
+
     /** Shared FD-row creation for both a fresh issue (store) and a renewal (renew). */
-    private function createFixedDeposit(int $branchId, int $customerId, FundingProduct $product, float $principal, int $termMonths, Carbon $startDate, int $userId, ?int $renewedFromId = null): FixedDeposit
+    private function createFixedDeposit(int $branchId, int $customerId, FundingProduct $product, float $principal, int $termMonths, Carbon $startDate, int $userId, string $interestMethod, ?int $renewedFromId = null): FixedDeposit
     {
         $maturityDate = $startDate->copy()->addMonthsNoOverflow($termMonths);
-        $calc = FdInterestCalculator::calculate($principal, (float) $product->annual_rate_percent, $termMonths, $product->interest_method);
+        $calc = FdInterestCalculator::calculate($principal, (float) $product->annual_rate_percent, $termMonths, $interestMethod);
 
         $branch = \App\Models\Branch::find($branchId);
         $fdNumber = NumberGenerator::next('fixed_deposit', [
@@ -283,7 +304,7 @@ class FixedDepositController extends Controller
             'funding_product_id' => $product->id,
             'principal_amount' => $principal,
             'interest_rate_percent' => $product->annual_rate_percent,
-            'interest_payment_method' => $product->interest_method,
+            'interest_payment_method' => $interestMethod,
             'term_months' => $termMonths,
             'start_date' => $startDate->format('Y-m-d'),
             'maturity_date' => $maturityDate->format('Y-m-d'),
@@ -296,7 +317,7 @@ class FixedDepositController extends Controller
         ]);
         NumberGenerator::attach($fdNumber, $fd);
 
-        if ($product->interest_method === 'monthly') {
+        if ($interestMethod === 'monthly') {
             $rows = FdInterestCalculator::generateSchedule($fd);
             $fd->interestPayments()->insert($rows);
             $fd->update(['next_interest_date' => $rows[0]['due_date'] ?? null]);

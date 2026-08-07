@@ -9,7 +9,7 @@ import { Icon } from '../components/Icon'
 import {
   fixedDepositsApi, fdDepositsApi, fundingProductsApi, fdInterestPaymentsApi, company,
   type FixedDeposit, type FdDeposit, type FundingProduct, type FdInterestPayment, type FdWithdrawal,
-  type FdPaymentMethod, type FixedDepositStatus, type AuthUser,
+  type FdPaymentMethod, type FixedDepositStatus, type FdInterestMethod, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -174,6 +174,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   const [term, setTerm] = useState<number | '' | 'custom'>('')
   const [customTerm, setCustomTerm] = useState('')
   const [startDate, setStartDate] = useState(todayIso())
+  const [interestMethod, setInterestMethod] = useState<FdInterestMethod | ''>('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -181,14 +182,17 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
     if (!open) return
     fdDepositsApi.list({ status: 'Available' }).then(setDeposits).catch(() => setDeposits([]))
     fundingProductsApi.list().then((d) => setProducts(d.filter((p) => (p.status || 'Active') === 'Active'))).catch(() => setProducts([]))
-    setDepositLabel(''); setDepositId(undefined); setProductId(undefined); setTerm(''); setCustomTerm(''); setStartDate(todayIso()); setErr('')
+    setDepositLabel(''); setDepositId(undefined); setProductId(undefined); setTerm(''); setCustomTerm(''); setStartDate(todayIso()); setInterestMethod(''); setErr('')
   }, [open])
 
   const deposit = deposits.find((d) => d.id === depositId)
   const product = products.find((p) => p.id === productId)
+  // Reset to the product's default whenever the selected product changes.
+  useEffect(() => { setInterestMethod(product?.interestMethod || '') }, [product?.id])
+  const effectiveInterestMethod = interestMethod || product?.interestMethod
   const effectiveTerm = term === 'custom' ? parseInt(customTerm, 10) : (term || undefined)
-  const preview = deposit && product && effectiveTerm
-    ? previewInterest(Number(deposit.amount), Number(product.annualRatePercent), effectiveTerm, product.interestMethod)
+  const preview = deposit && product && effectiveTerm && effectiveInterestMethod
+    ? previewInterest(Number(deposit.amount), Number(product.annualRatePercent), effectiveTerm, effectiveInterestMethod)
     : null
   const maturityPreview = startDate && effectiveTerm ? addMonths(startDate, effectiveTerm) : null
 
@@ -198,7 +202,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
     if (!effectiveTerm || effectiveTerm <= 0) { setErr('Select or enter a valid term.'); return }
     setBusy(true); setErr('')
     try {
-      const fd = await fixedDepositsApi.create({ depositId, fundingProductId: productId, termMonths: effectiveTerm, startDate })
+      const fd = await fixedDepositsApi.create({ depositId, fundingProductId: productId, termMonths: effectiveTerm, startDate, interestPaymentMethod: interestMethod || undefined })
       onCreated(fd)
       notify.success('Fixed Deposit created', fd.fdNumber)
     } catch (ex: any) {
@@ -240,6 +244,14 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
               {product.allowCustomTerm && <Btn size="sm" variant={term === 'custom' ? 'primary' : 'ghost'} onClick={() => setTerm('custom')}>Custom</Btn>}
             </div>
             {term === 'custom' && <Input type="number" style={{ marginTop: 8 }} value={customTerm} onChange={(e) => setCustomTerm(e.target.value)} placeholder="Months" />}
+          </Field>
+        )}
+        {product && product.allowMethodChoice && (
+          <Field label="Interest Method">
+            <div className="row gap-2 wrap">
+              <Btn size="sm" variant={effectiveInterestMethod === 'monthly' ? 'primary' : 'ghost'} onClick={() => setInterestMethod('monthly')}>Monthly Interest</Btn>
+              <Btn size="sm" variant={effectiveInterestMethod === 'maturity' ? 'primary' : 'ghost'} onClick={() => setInterestMethod('maturity')}>Interest at Maturity</Btn>
+            </div>
           </Field>
         )}
         {deposit && product && (

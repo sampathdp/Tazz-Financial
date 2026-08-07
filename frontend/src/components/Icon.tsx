@@ -75,6 +75,7 @@ export function Icon({ n, s = 18, c = 'currentColor', sw = 1.75, style }: IconPr
     cheque: <><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="3" /><path d="M6 9h.01M18 15h.01" /></>,
     flag: <><path d="M5 3v18" /><path d="M5 4h11l-2 4 2 4H5" /></>,
     ledger: <><path d="M6 3h11a3 3 0 0 1 3 3v15H9a3 3 0 0 1-3-3z" /><path d="M6 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3" /><path d="M9.5 8h7M9.5 12h7" /></>,
+    calc: <><rect x="4" y="2" width="16" height="20" rx="2" /><path d="M7 6h10" /><path d="M7.5 11h.01M12 11h.01M16.5 11h.01M7.5 15h.01M12 15h.01M16.5 15h.01M7.5 19h.01M12 19h.01M16.5 19h.01" /></>,
   }
   return <svg {...P}>{paths[n] || paths.box}</svg>
 }

@@ -14,7 +14,7 @@ interface ProductForm extends Partial<FundingProduct> {
   allowedTermsMonthsText?: string
 }
 const blankForm = (): ProductForm => ({
-  interestMethod: 'monthly', allowedTermsMonths: [3, 6, 12], allowedTermsMonthsText: '3, 6, 12',
+  interestMethod: 'monthly', allowMethodChoice: false, allowedTermsMonths: [3, 6, 12], allowedTermsMonthsText: '3, 6, 12',
   allowCustomTerm: false, rateIsManual: false, status: 'Active', sortOrder: 0,
 })
 
@@ -86,7 +86,7 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
           rows={rows}
           render={(p) => <>
             <Td c="var(--tx-0)"><div style={{ fontWeight: 600 }}>{p.name}</div><div className="t-2" style={{ fontSize: 11.5 }}>{p.code}</div></Td>
-            <Td><Badge tone="blue">{p.interestMethod === 'monthly' ? 'Monthly Interest' : 'Interest at Maturity'}</Badge></Td>
+            <Td><Badge tone="blue">{p.interestMethod === 'monthly' ? 'Monthly Interest' : 'Interest at Maturity'}</Badge>{p.allowMethodChoice && <span className="t-2" style={{ fontSize: 11, marginLeft: 6 }}>(customer's choice)</span>}</Td>
             <Td align="right" mono>{Number(p.annualRatePercent).toFixed(2)}%</Td>
             <Td>{(p.allowedTermsMonths || []).join(', ')} mo{p.allowCustomTerm ? ' (+custom)' : ''}</Td>
             <Td align="right" mono>{Number(p.minDepositAmount).toLocaleString()} – {p.maxDepositAmount ? Number(p.maxDepositAmount).toLocaleString() : '∞'}</Td>
@@ -110,6 +110,11 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
           <Field label="Interest Calculation Method"><Select value={form.interestMethod || 'monthly'} onChange={(e) => set({ interestMethod: e.target.value as FdInterestMethod })}>
             {methods.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select></Field>
+          <Field label="">
+            <label className="row gap-2" style={{ fontSize: 12.5, marginTop: 22 }}>
+              <input type="checkbox" checked={!!form.allowMethodChoice} onChange={(e) => set({ allowMethodChoice: e.target.checked })} /> Let the customer choose the interest method at FD creation
+            </label>
+          </Field>
           <Field label="Annual Rate (%)"><Input type="number" step="0.01" value={form.annualRatePercent ?? ''} onChange={(e) => set({ annualRatePercent: e.target.value })} /></Field>
           <Field label="Monthly Rate (%)">
             <Input type="number" step="0.001" value={form.rateIsManual ? (form.monthlyRatePercent ?? '') : (form.annualRatePercent ? (Number(form.annualRatePercent) / 12).toFixed(3) : '')}

@@ -131,6 +131,21 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const needsInsurance = selectedType?.category === 'Leasing' || selectedType?.category === 'Mortgage'
 
   const openCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setCollateralFiles([]); setBackDated(false); setErr(''); setMode('form') }
+
+  // Handoff from the Leasing/Loan Calculator's "Create Loan" button — the calculator
+  // already folded down payment + financed charges into a single finance amount, so
+  // principalAmount here is that finance amount with downPayment reset to 0, which
+  // makes the eventual disbursed schedule match the calculator's quote exactly.
+  useEffect(() => {
+    const raw = sessionStorage.getItem('mms-loan-calc-prefill')
+    if (!raw) return
+    sessionStorage.removeItem('mms-loan-calc-prefill')
+    try {
+      const prefill = JSON.parse(raw)
+      openCreate()
+      setForm((f) => ({ ...f, ...prefill }))
+    } catch {}
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const openRow = async (row: Loan) => {
     // The list only loads summary relations — fetch full detail (guarantors,
     // collateral, officer/applier/approver names) before showing the form or view.

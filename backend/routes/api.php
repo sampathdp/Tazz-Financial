@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\CustomerDocumentController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ExpenseCategoryController;
 use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\FdDepositController;
 use App\Http\Controllers\Api\FdInterestPaymentController;
@@ -119,6 +120,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Document Tracking: generated reference numbers ---
     Route::get('generated-numbers', [GeneratedNumberController::class, 'index'])->middleware('perm:Document Tracking,View');
+
+    // --- Leasing / Loan Calculator: standalone quote, never persists ---
+    Route::post('finance-calculator/calculate', [FinanceCalculatorController::class, 'calculate'])->middleware('perm:Loan Calculator,View');
 
     // --- Loan Management: Loan Applications ---
     Route::get('loans', [LoanController::class, 'index'])->middleware('perm:Loan Applications,View');
@@ -305,6 +309,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Funding Management: Deposits (cash-in, before an FD exists) ---
     Route::get('fd-deposits', [FdDepositController::class, 'index'])->middleware('perm:Deposits,View');
+    Route::get('fd-deposits/next-number', [FdDepositController::class, 'nextDepositNo'])->middleware('perm:Deposits,Create');
     Route::get('fd-deposits/{fdDeposit}', [FdDepositController::class, 'show'])->middleware('perm:Deposits,View');
     Route::post('fd-deposits', [FdDepositController::class, 'store'])->middleware('perm:Deposits,Create');
     Route::delete('fd-deposits/{fdDeposit}', [FdDepositController::class, 'destroy'])->middleware('perm:Deposits,Delete');

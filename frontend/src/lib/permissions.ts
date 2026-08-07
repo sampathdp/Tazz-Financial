@@ -29,6 +29,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   dash: 'Dashboard',
   customers: 'Customer Management',
   'loan/types': 'Loan Types',
+  'finance/calculator': 'Loan Calculator',
   'loan/apps': 'Loan Applications',
   'loan/active': 'Active Loans',
   'loan/overdue': 'Overdue Loans',

@@ -49,6 +49,7 @@ class FundingProductController extends Controller
             'name' => 'required|string|max:128',
             'code' => ['required', 'string', 'max:24', Rule::unique('funding_products', 'code')->ignore($product?->id)],
             'interest_method' => ['required', Rule::in(self::INTEREST_METHODS)],
+            'allow_method_choice' => 'boolean',
             'annual_rate_percent' => 'required|numeric|min:0|max:999',
             'monthly_rate_percent' => 'nullable|numeric|min:0|max:999',
             'rate_is_manual' => 'boolean',

@@ -64,6 +64,7 @@ class DatabaseSeeder extends Seeder
             'Customer Management' => ['View' => true, 'Create' => true, 'Edit' => true, 'Delete' => true],
             // Loan product catalog is HQ-configured; branches only need to see it when issuing loans.
             'Loan Types' => ['View' => true],
+            'Loan Calculator' => ['View' => true],
             'Loan Applications' => ['View' => true, 'Create' => true, 'Edit' => true, 'Delete' => true, 'Approve' => true],
             'Active Loans' => ['View' => true, 'Approve' => true],
             // Approves/rejects the Cashier's full-settlement requests so a loan can close.
@@ -91,6 +92,7 @@ class DatabaseSeeder extends Seeder
             'Dashboard' => ['View' => true],
             'Customer Management' => ['View' => true, 'Create' => true, 'Edit' => true],
             'Loan Types' => ['View' => true],
+            'Loan Calculator' => ['View' => true],
             'Loan Applications' => ['View' => true, 'Create' => true, 'Edit' => true],
             'Active Loans' => ['View' => true],
             'Loan Payments' => ['View' => true, 'Create' => true, 'Edit' => true],
@@ -132,6 +134,7 @@ class DatabaseSeeder extends Seeder
             'Dashboard' => ['View' => true],
             'Customer Management' => ['View' => true, 'Create' => true, 'Edit' => true],
             'Loan Types' => ['View' => true],
+            'Loan Calculator' => ['View' => true],
             'Loan Applications' => ['View' => true, 'Create' => true],
             'Active Loans' => ['View' => true],
         ]);

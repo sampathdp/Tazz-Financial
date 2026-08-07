@@ -23,7 +23,7 @@ const METHODS: { value: FdPaymentMethod; label: string }[] = [
   { value: 'Cheque', label: 'Cheque' },
   { value: 'Bank', label: 'Bank Transfer' },
 ]
-const REF_LABEL: Record<FdPaymentMethod, string> = { Cash: 'Receipt No. (optional)', Cheque: 'Cheque No.', Bank: 'Transfer Reference' }
+const REF_LABEL: Record<FdPaymentMethod, string> = { Cash: 'Receipt No.', Cheque: 'Cheque No.', Bank: 'Transfer Reference' }
 
 interface DepositForm {
   branchId?: number; customerId?: number; customerLabel?: string
@@ -47,6 +47,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
   const [err, setErr] = useState('')
   const [slip, setSlip] = useState<FdDeposit | null>(null)
   const [brand, setBrand] = useState({ name: '', tagline: '' })
+  const [nextReceipt, setNextReceipt] = useState('')
 
   const refresh = () => {
     setLoading(true)
@@ -58,6 +59,15 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
     customersApi.list().then(setCustomers).catch(() => setCustomers([]))
     company.branding().then((b) => setBrand({ name: b.name, tagline: b.tagline })).catch(() => {})
   }, [])
+
+  // Only Cash shows a receipt-number preview (Cheque/Bank use a manually-entered
+  // external reference instead — see REF_LABEL), so skip the fetch otherwise.
+  useEffect(() => {
+    if (!modal || form.paymentMethod !== 'Cash' || !form.branchId) { setNextReceipt(''); return }
+    let cancelled = false
+    fdDepositsApi.nextDepositNo(form.branchId).then((code) => { if (!cancelled) setNextReceipt(code) }).catch(() => { if (!cancelled) setNextReceipt('') })
+    return () => { cancelled = true }
+  }, [modal, form.paymentMethod, form.branchId])
 
   const openCreate = () => { setForm(blankForm(branches[0]?.id)); setErr(''); setModal(true) }
   const close = () => { setModal(false); setErr('') }
@@ -71,7 +81,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
     try {
       const deposit = await fdDepositsApi.create({
         branchId: form.branchId, customerId: form.customerId, depositDate: form.depositDate, amount: form.amount,
-        paymentMethod: form.paymentMethod, referenceNo: form.referenceNo || undefined,
+        paymentMethod: form.paymentMethod, referenceNo: form.paymentMethod !== 'Cash' ? (form.referenceNo || undefined) : undefined,
         bankId: form.paymentMethod !== 'Cash' ? form.bankId : undefined, notes: form.notes || undefined,
       })
       close(); refresh()
@@ -190,7 +200,11 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           <Field label="Payment Method"><Select value={form.paymentMethod} onChange={(e) => setForm((s) => ({ ...s, paymentMethod: e.target.value as FdPaymentMethod }))}>
             {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select></Field>
-          <Field label={REF_LABEL[form.paymentMethod]}><Input value={form.referenceNo} onChange={(e) => setForm((s) => ({ ...s, referenceNo: e.target.value }))} /></Field>
+          <Field label={REF_LABEL[form.paymentMethod]}>
+            {form.paymentMethod === 'Cash'
+              ? <Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} />
+              : <Input value={form.referenceNo} onChange={(e) => setForm((s) => ({ ...s, referenceNo: e.target.value }))} />}
+          </Field>
           {form.paymentMethod !== 'Cash' && (
             <Field label="Bank Name"><BankSelect value={form.bankId} onChange={(v) => setForm((s) => ({ ...s, bankId: v }))} /></Field>
           )}

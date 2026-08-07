@@ -11,11 +11,13 @@ use App\Models\LoanFacilityDetail;
 use App\Models\LoanType;
 use App\Models\SalesExecutiveCommission;
 use App\Services\NumberGenerator;
+use App\Support\AerCalculator;
 use App\Support\LoanAmortizer;
 use App\Support\LoanSummary;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -348,11 +350,44 @@ class LoanController extends Controller
                 'status' => 'Active',
             ]);
             $detail->update(['first_installment_date' => $data['first_installment_date']]);
-            $loan->schedules()->insert(LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $data['first_installment_date']));
+            $rows = LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $data['first_installment_date']);
+            $loan->schedules()->insert($rows);
+            $this->applyEffectiveRate($detail->fresh(), $rows);
             $this->generateSalesExecutiveCommission($loan->fresh(), $detail);
         });
 
         return $loan->load(self::DETAIL_RELATIONS);
+    }
+
+    /** Flat Rate loans only: back-solves the equivalent reducing-balance rate implied
+     *  by the generated schedule's EMI and stores it as a monthly/annual effective
+     *  rate (AerCalculator) — informational only, never affects the schedule itself.
+     *  Deliberately swallows any failure (invalid inputs, non-convergence, an AER
+     *  large enough to overflow the decimal(10,8) columns) so it can never turn a
+     *  successful disbursement into a failed one. */
+    private function applyEffectiveRate(LoanFacilityDetail $detail, array $rows): void
+    {
+        if ($detail->interest_method !== 'flat' || empty($rows)) {
+            return;
+        }
+        try {
+            $principal = (float) $detail->loan->principal_amount - (float) $detail->down_payment;
+            $rental = (float) $rows[0]['total_due'];
+            $periodsPerMonth = match ($detail->installment_frequency) {
+                'daily' => 30.0,
+                'weekly' => 4.0,
+                default => 1.0,
+            };
+            $result = AerCalculator::calculate($principal, $rental, count($rows), $periodsPerMonth);
+            if ($result) {
+                $detail->update([
+                    'effective_monthly_rate' => round($result['monthly'], 8),
+                    'effective_annual_rate' => round($result['annual'], 8),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('AER calculation skipped for loan '.$detail->credit_facility_id.': '.$e->getMessage());
+        }
     }
 
     /** Creates the first commission cycle for the loan's sales executive, if its

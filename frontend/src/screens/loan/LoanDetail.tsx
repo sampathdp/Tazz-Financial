@@ -20,6 +20,7 @@ import type { Go } from '../types'
 
 const num = (v: unknown) => Number(v ?? 0)
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const pct = (v: unknown) => num(v).toFixed(2)
 const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
@@ -146,6 +147,9 @@ function ContractSummary({ loan }: { loan: Loan }) {
   const schedules = loan.schedules || []
   const expiry = schedules.length ? schedules[schedules.length - 1].dueDate : null
   const installmentAmount = schedules.length ? schedules[0].totalDue : null
+  const isFlat = loan.loanDetail?.interestMethod === 'flat'
+  const aer = loan.loanDetail?.effectiveAnnualRate
+  const emr = loan.loanDetail?.effectiveMonthlyRate
   return (
     <>
       <div className="eyebrow" style={{ marginBottom: 10 }}>Contract Summary</div>
@@ -158,7 +162,12 @@ function ContractSummary({ loan }: { loan: Loan }) {
         { label: 'Down Payment', value: money(loan.loanDetail?.downPayment), icon: 'wallet', tone: 'neutral' },
         { label: 'Installment Amount', value: installmentAmount ? money(installmentAmount) : '—', icon: 'wallet', tone: 'green' },
         { label: 'Period', value: `${loan.termMonths} mo`, icon: 'calendar', tone: 'neutral' },
-        { label: 'Interest Rate', value: `${loan.interestRatePercent}%`, icon: 'chart', tone: 'amber' },
+        { label: 'Interest Type', value: isFlat ? 'Flat' : 'Reducing Rate', icon: 'chart', tone: 'amber' },
+        { label: isFlat ? 'Entered Rate' : 'Annual Rate', value: isFlat ? `${loan.interestRatePercent}% Flat` : `${loan.interestRatePercent}%`, icon: 'chart', tone: 'amber' },
+        ...(isFlat && aer != null ? [
+          { label: 'Equivalent Annual Effective Rate (AER)', value: `${pct(aer)}%`, icon: 'chart', tone: 'amber' as const },
+          { label: 'Equivalent Monthly Effective Rate', value: `${pct(emr)}%`, icon: 'chart', tone: 'amber' as const },
+        ] : []),
         { label: 'Activated', value: dateOnly(loan.disbursedAt), icon: 'calendar', tone: 'green' },
         { label: 'Expiry', value: expiry ? dateOnly(expiry) : '—', icon: 'clock', tone: 'red' },
       ]} />

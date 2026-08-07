@@ -21,6 +21,7 @@ class Permissions
         'Company Profile',
         'Customer Management',
         'Loan Types',
+        'Loan Calculator',
         'Loan Applications',
         'Active Loans',
         'Loan Payments',

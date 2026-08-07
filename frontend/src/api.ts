@@ -287,6 +287,9 @@ export interface LoanFacilityDetail {
   /** Paid upfront; the schedule amortizes principalAmount - downPayment. */
   downPayment?: number | string | null;
   interestMethod?: InterestMethod | null;
+  /** Flat Rate loans only: equivalent reducing-balance rate implied by the generated EMI, as a percentage. Null until disbursed, and always null for Reducing Rate loans (their entered rate already IS the effective rate — see interestRatePercent on Loan). */
+  effectiveMonthlyRate?: number | string | null;
+  effectiveAnnualRate?: number | string | null;
   installmentFrequency: LoanFrequency;
   purpose?: string | null;
   /** Back-datable application date shown/printed as the loan's date — distinct from createdAt (the real save timestamp). */
@@ -1142,6 +1145,8 @@ export interface FundingProduct {
   id: number;
   name: string; code: string;
   interestMethod: FdInterestMethod;
+  /** When true, the FD create form lets the customer pick monthly vs maturity instead of locking to interestMethod. */
+  allowMethodChoice?: boolean;
   annualRatePercent: number | string;
   /** Auto = annualRatePercent/12 unless rateIsManual. */
   monthlyRatePercent?: number | string | null;
@@ -1228,6 +1233,11 @@ export const fdDepositsApi = {
   list: (params?: { status?: FdDepositStatus; customerId?: number }) =>
     http.get('/fd-deposits', { params }).then((r) => camelize(r.data) as FdDeposit[]),
   get: (id: number) => http.get(`/fd-deposits/${id}`).then((r) => camelize(r.data) as FdDeposit),
+  /** Preview-only: the deposit number the next deposit at this branch would get — for
+   *  display in the form before it's submitted. Not reserved until the deposit is
+   *  actually created, so it can shift if another deposit lands first. */
+  nextDepositNo: (branchId: number) =>
+    http.get('/fd-deposits/next-number', { params: { branch_id: branchId } }).then((r) => r.data.code as string),
   create: (body: { branchId: number; customerId: number; depositDate: string; amount: number | string; paymentMethod: FdPaymentMethod; referenceNo?: string; bankId?: number; notes?: string }) =>
     http.post('/fd-deposits', snakeize(body)).then((r) => camelize(r.data) as FdDeposit),
   remove: (id: number) => http.delete(`/fd-deposits/${id}`).then((r) => r.data),
@@ -1242,12 +1252,40 @@ export const fixedDepositsApi = {
   list: (params?: { status?: FixedDepositStatus; customerId?: number; matured?: boolean; maturingWithinDays?: number }) =>
     http.get('/fixed-deposits', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as FixedDeposit[]),
   get: (id: number) => http.get(`/fixed-deposits/${id}`).then((r) => camelize(r.data) as FixedDeposit),
-  create: (body: { depositId: number; fundingProductId: number; termMonths: number; startDate: string }) =>
+  create: (body: { depositId: number; fundingProductId: number; termMonths: number; startDate: string; interestPaymentMethod?: FdInterestMethod }) =>
     http.post('/fixed-deposits', snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
   renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput }) =>
     http.post(`/fixed-deposits/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { fixedDeposit: FixedDeposit; enhancementDeposit: FdDeposit | null }),
   withdraw: (id: number, body: { paymentMethod: FdPaymentMethod; referenceNo?: string; notes?: string; closedAt?: string }) =>
     http.post(`/fixed-deposits/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
+}
+
+export interface FinanceCalcCharge { label?: string; amount: number | string; financed?: boolean }
+export interface FinanceCalcInput {
+  loanAmount: number | string; downPayment?: number | string; termMonths: number;
+  interestMethod: InterestMethod; interestRatePercent: number | string;
+  ratePeriod?: 'monthly' | 'annual'; installmentFrequency?: LoanFrequency;
+  firstInstallmentDate?: string; charges?: FinanceCalcCharge[];
+}
+export interface FinanceCalcScheduleRow {
+  installmentNo: number; dueDate: string; principalDue: number; interestDue: number; totalDue: number; balance: number;
+}
+export interface FinanceCalcResult {
+  loanAmount: number; downPayment: number; financedChargesTotal: number; separateChargesTotal: number;
+  financeAmount: number; customerUpfrontPayment: number;
+  interestMethod: InterestMethod; ratePeriod: 'monthly' | 'annual'; enteredRate: number;
+  effectiveMonthlyRate: number | null; effectiveAnnualRate: number | null;
+  termMonths: number; installmentFrequency: LoanFrequency;
+  monthlyRental: number; totalInterest: number; totalPayable: number;
+  schedule: FinanceCalcScheduleRow[];
+}
+
+/** Calls the same LoanAmortizer/AerCalculator LoanController::disburse() uses (via
+ *  FinanceCalculationService) — never persists anything. No client-side amortization
+ *  math exists in this app; every recalculation goes through this endpoint. */
+export const financeCalculatorApi = {
+  calculate: (body: FinanceCalcInput) =>
+    http.post('/finance-calculator/calculate', snakeize(body)).then((r) => camelize(r.data) as FinanceCalcResult),
 }
 
 export const fdInterestPaymentsApi = {

@@ -13,6 +13,7 @@ import { WhatsNewModal } from './components/WhatsNewModal'
 const DashScreen = lazy(() => import('./screens/Dashboard'))
 const CustomersScreen = lazy(() => import('./screens/Customers').then((m) => ({ default: m.CustomersScreen })))
 const LoanTypesScreen = lazy(() => import('./screens/LoanTypes').then((m) => ({ default: m.LoanTypesScreen })))
+const LoanCalculatorScreen = lazy(() => import('./screens/LoanCalculator').then((m) => ({ default: m.LoanCalculatorScreen })))
 const LoanApplicationsScreen = lazy(() => import('./screens/LoanApplications').then((m) => ({ default: m.LoanApplicationsScreen })))
 const ActiveLoansScreen = lazy(() => import('./screens/ActiveLoans').then((m) => ({ default: m.ActiveLoansScreen })))
 const OverdueLoansScreen = lazy(() => import('./screens/OverdueLoans').then((m) => ({ default: m.OverdueLoansScreen })))
@@ -92,6 +93,7 @@ const SCREENS: Record<string, ScreenComp> = {
   dash: DashScreen,
   customers: CustomersScreen,
   'loan/types': LoanTypesScreen,
+  'finance/calculator': LoanCalculatorScreen,
   'loan/apps': LoanApplicationsScreen,
   'loan/active': ActiveLoansScreen,
   'loan/overdue': OverdueLoansScreen,

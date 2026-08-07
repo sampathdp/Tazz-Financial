@@ -19,6 +19,10 @@ export const NAV: NavNode[] = [
   { id: 'dash', label: 'Dashboard', icon: 'dash' },
   { id: 'customers', label: 'Customer Management', icon: 'users' },
 
+  { section: 'Finance', icon: 'calc', items: [
+    { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
+  ] },
+
   { section: 'Loan Management', icon: 'coins', items: [
     { id: 'loan/types', label: 'Loan Types', icon: 'layers' },
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
