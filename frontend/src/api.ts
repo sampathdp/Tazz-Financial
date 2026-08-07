@@ -1262,7 +1262,7 @@ export const fixedDepositsApi = {
 
 export interface FinanceCalcCharge { label?: string; amount: number | string; financed?: boolean }
 export interface FinanceCalcInput {
-  loanAmount: number | string; downPayment?: number | string; termMonths: number;
+  loanTypeId?: number; loanAmount: number | string; downPayment?: number | string; termMonths: number;
   interestMethod: InterestMethod; interestRatePercent: number | string;
   ratePeriod?: 'monthly' | 'annual'; installmentFrequency?: LoanFrequency;
   firstInstallmentDate?: string; charges?: FinanceCalcCharge[];

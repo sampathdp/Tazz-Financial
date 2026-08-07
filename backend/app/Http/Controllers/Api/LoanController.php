@@ -373,11 +373,8 @@ class LoanController extends Controller
         try {
             $principal = (float) $detail->loan->principal_amount - (float) $detail->down_payment;
             $rental = (float) $rows[0]['total_due'];
-            $periodsPerMonth = match ($detail->installment_frequency) {
-                'daily' => 30.0,
-                'weekly' => 4.0,
-                default => 1.0,
-            };
+            $weekdaysOnly = $detail->installment_frequency === 'daily' && $detail->loanType?->collection_days === 'week_days';
+            $periodsPerMonth = LoanAmortizer::periodsPerMonth($detail->installment_frequency, $weekdaysOnly);
             $result = AerCalculator::calculate($principal, $rental, count($rows), $periodsPerMonth);
             if ($result) {
                 $detail->update([

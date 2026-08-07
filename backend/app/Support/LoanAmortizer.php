@@ -22,11 +22,11 @@ class LoanAmortizer
     {
         $detail->loadMissing('loanType');
         $frequency = $detail->installment_frequency;
-        // Daily products can be set to collect Mon-Fri only — installment count
-        // is unchanged, due dates just skip weekends (the loan runs longer in
-        // calendar time as a result).
+        // Daily products can be set to collect Mon-Fri only — 5 installments/week,
+        // ~20/month rather than 30, so periodsPerMonth (and therefore both the
+        // installment count and the per-period rate/amount) reflects business days.
         $weekdaysOnly = $frequency === 'daily' && $detail->loanType?->collection_days === 'week_days';
-        $periodsPerMonth = self::periodsPerMonth($frequency);
+        $periodsPerMonth = self::periodsPerMonth($frequency, $weekdaysOnly);
         $n = max(1, (int) round($loan->term_months * $periodsPerMonth));
 
         $monthlyRate = $loan->rate_period === 'annual'
@@ -78,10 +78,13 @@ class LoanAmortizer
         return $date;
     }
 
-    private static function periodsPerMonth(string $frequency): float
+    /** Public so LoanController::applyEffectiveRate() and FinanceCalculationService
+     *  can convert a period rate/count to a monthly basis using the exact same
+     *  business-days assumption this class amortizes with — one source of truth. */
+    public static function periodsPerMonth(string $frequency, bool $weekdaysOnly = false): float
     {
         return match ($frequency) {
-            'daily' => 30.0,
+            'daily' => $weekdaysOnly ? 20.0 : 30.0,
             'weekly' => 4.0,
             default => 1.0,
         };

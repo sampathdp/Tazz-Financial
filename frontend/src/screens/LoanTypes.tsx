@@ -27,6 +27,16 @@ const CATEGORY_OPTIONS: { value: LoanTypeCategory; label: string }[] = [
 ]
 const categoryLabel = (c?: LoanTypeCategory | null) => CATEGORY_OPTIONS.find((o) => o.value === c)?.label || c
 
+/** Reducing Balance loans amortize on a MONTHLY rate (see LoanAmortizer.php:
+ *  annual entries are divided by 12 first) — so even a Reducing Balance product's
+ *  own "annual" nominal rate isn't its true annual cost once monthly compounding
+ *  is applied. This mirrors that exact derivation to preview the real AER as the
+ *  admin fills in the rate, so the two never disagree. */
+function reducingBalanceAer(ratePercent: number, ratePeriod: 'monthly' | 'annual' | null | undefined): number {
+  const monthlyRate = ratePeriod === 'annual' ? ratePercent / 12 : ratePercent
+  return (Math.pow(1 + monthlyRate / 100, 12) - 1) * 100
+}
+
 const blankForm = (parentId: number | null): Partial<LoanType> => ({
   parentId: parentId ?? undefined,
   isProduct: true,
@@ -241,6 +251,11 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
                 <Input type="number" min={0} value={form.minPaidInstallments ?? 0} onChange={(e) => set('minPaidInstallments', Number(e.target.value) as any)} />
               </Field>
             </div>
+            {form.interestMethod === 'reducing_balance' && Number(form.interestRatePercent ?? 0) > 0 && (
+              <div className="t-2" style={{ fontSize: 11.5, marginTop: 8 }}>
+                Equivalent Annual Effective Rate (AER): <strong>{reducingBalanceAer(Number(form.interestRatePercent), form.ratePeriod).toFixed(2)}%</strong> — the true annual cost of the {form.ratePeriod === 'annual' ? 'nominal annual' : 'monthly'} rate entered above, once monthly compounding is applied.
+              </div>
+            )}
             <div className="t-2" style={{ fontSize: 11.5, marginTop: 8 }}>
               Default Charges = an overdue installment's unpaid balance × (Default Charges Rate% ÷ 30) × days late, starting once it's past the Grace Period. The rate is monthly, prorated to a daily rate.
             </div>

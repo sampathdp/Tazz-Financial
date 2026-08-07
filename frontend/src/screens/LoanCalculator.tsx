@@ -147,7 +147,7 @@ export function LoanCalculatorScreen({ go, user: me }: { go: Go; user?: AuthUser
       setCalcBusy(true); setErr('')
       try {
         const r = await financeCalculatorApi.calculate({
-          loanAmount: la, downPayment: dp, termMonths, interestMethod, interestRatePercent: rate,
+          loanTypeId, loanAmount: la, downPayment: dp, termMonths, interestMethod, interestRatePercent: rate,
           ratePeriod, installmentFrequency,
           charges: charges.filter((c) => Number(c.amount) > 0).map((c) => ({ label: c.label || undefined, amount: Number(c.amount), financed: c.financed })),
         })
@@ -158,7 +158,7 @@ export function LoanCalculatorScreen({ go, user: me }: { go: Go; user?: AuthUser
     }, 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loanAmount, downPayment, termMonths, interestMethod, ratePeriod, interestRatePercent, installmentFrequency, charges])
+  }, [loanTypeId, loanAmount, downPayment, termMonths, interestMethod, ratePeriod, interestRatePercent, installmentFrequency, charges])
 
   const addCharge = () => setCharges((cs) => [...cs, blankCharge()])
   const updateCharge = (id: number, patch: Partial<ChargeRow>) => setCharges((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)))

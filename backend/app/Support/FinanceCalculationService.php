@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\Loan;
 use App\Models\LoanFacilityDetail;
+use App\Models\LoanType;
 
 /**
  * Single reusable finance-quote engine — used by the standalone Leasing/Loan
@@ -55,6 +56,11 @@ class FinanceCalculationService
             'term_months' => $termMonths,
         ]);
         $detail = new LoanFacilityDetail([
+            // Set even though $detail is never saved: LoanAmortizer::generate() does
+            // $detail->loadMissing('loanType') to read collection_days (Mon-Fri-only
+            // due dates for Daily products) — that only resolves if loan_type_id is
+            // present, since Eloquent relations key off the attribute, not persistence.
+            'loan_type_id' => $data['loan_type_id'] ?? null,
             'down_payment' => 0,
             'interest_method' => $interestMethod,
             'installment_frequency' => $installmentFrequency,
@@ -83,11 +89,10 @@ class FinanceCalculationService
         $effectiveMonthlyRate = null;
         $effectiveAnnualRate = null;
         if ($interestMethod === 'flat') {
-            $periodsPerMonth = match ($installmentFrequency) {
-                'daily' => 30.0,
-                'weekly' => 4.0,
-                default => 1.0,
-            };
+            $weekdaysOnly = $installmentFrequency === 'daily'
+                && ($data['loan_type_id'] ?? null)
+                && LoanType::whereKey($data['loan_type_id'])->value('collection_days') === 'week_days';
+            $periodsPerMonth = LoanAmortizer::periodsPerMonth($installmentFrequency, $weekdaysOnly);
             $aer = AerCalculator::calculate($financeAmount, $monthlyRental, count($rows), $periodsPerMonth);
             if ($aer) {
                 $effectiveMonthlyRate = round($aer['monthly'], 4);
