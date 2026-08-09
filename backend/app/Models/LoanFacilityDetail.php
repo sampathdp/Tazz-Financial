@@ -26,10 +26,10 @@ class LoanFacilityDetail extends Model
         'down_payment' => 'decimal:2',
         'effective_monthly_rate' => 'decimal:8',
         'effective_annual_rate' => 'decimal:8',
-        'application_date' => 'date',
-        'first_installment_date' => 'date',
-        'freeze_date' => 'date',
-        'confirmed_date' => 'date',
+        'application_date' => 'date:Y-m-d',
+        'first_installment_date' => 'date:Y-m-d',
+        'freeze_date' => 'date:Y-m-d',
+        'confirmed_date' => 'date:Y-m-d',
     ];
 
     public function loan()

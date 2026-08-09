@@ -6,7 +6,7 @@ import { Icon } from '../components/Icon'
 import {
   loansApi, customersApi, customerLoansApi, loanTypesApi, branchesApi, api, loanCollateralDocumentsApi,
   type Loan, type LoanStatus, type LoanType, type Customer, type LoanFrequency, type CustomerTitle,
-  type LoanGuarantorInput, type LoanCollateralInput, type LoanCollateralDocument, type FacilityInsuranceDetail, type AuthUser,
+  type LoanGuarantorInput, type LoanCoApplicantInput, type LoanCollateralInput, type LoanCollateralDocument, type FacilityInsuranceDetail, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -61,9 +61,10 @@ interface FormState {
   vehicleNo?: string
   insurance?: Partial<FacilityInsuranceDetail>
   guarantors: LoanGuarantorInput[]
+  coApplicants: LoanCoApplicantInput[]
   collateral: LoanCollateralInput[]
 }
-const blankForm = (): FormState => ({ installmentFrequency: 'monthly', applicationDate: todayIso(), guarantors: [], collateral: [] })
+const blankForm = (): FormState => ({ installmentFrequency: 'monthly', applicationDate: todayIso(), guarantors: [], coApplicants: [], collateral: [] })
 const blankInsurance = (): Partial<FacilityInsuranceDetail> => ({})
 const ROUTE_BASE = '/loan/apps'
 
@@ -163,7 +164,8 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           insurance: loan.insurance || blankInsurance(),
           // vehicleDetail is a read-only nested relation — flatten it back onto
           // the row's flat write fields, which is what the collateral form edits.
-          guarantors: loan.guarantors || [], collateral: (loan.collateral || []).map((c) => ({ ...c, ...(c.vehicleDetail || {}) })),
+          guarantors: loan.guarantors || [], coApplicants: loan.coApplicants || [],
+          collateral: (loan.collateral || []).map((c) => ({ ...c, ...(c.vehicleDetail || {}) })),
         })
         setCollateralFiles((loan.collateral || []).map(() => []))
         setBackDated(applicationDate !== todayIso())
@@ -230,6 +232,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
       vehicleNo: selectedType?.category === 'Leasing' ? (form.vehicleNo || null) : null,
       insurance: needsInsurance ? form.insurance : undefined,
       guarantors: form.guarantors.map((g) => ({ guarantorCustomerId: g.guarantorCustomerId, guaranteedAmount: g.guaranteedAmount })),
+      coApplicants: form.coApplicants.map((ca) => ({ coApplicantCustomerId: ca.coApplicantCustomerId, sharePercent: ca.sharePercent || null })),
       collateral: form.collateral,
     }
     setBusy(true); setErr('')
@@ -282,6 +285,11 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const setGuarantor = (i: number, patch: Partial<LoanGuarantorInput>) =>
     setForm((s) => ({ ...s, guarantors: s.guarantors.map((g, gi) => (gi === i ? { ...g, ...patch } : g)) }))
   const removeGuarantor = (i: number) => setForm((s) => ({ ...s, guarantors: s.guarantors.filter((_, gi) => gi !== i) }))
+
+  const addCoApplicant = () => setForm((s) => ({ ...s, coApplicants: [...s.coApplicants, { coApplicantCustomerId: 0, sharePercent: '' }] }))
+  const setCoApplicant = (i: number, patch: Partial<LoanCoApplicantInput>) =>
+    setForm((s) => ({ ...s, coApplicants: s.coApplicants.map((ca, cai) => (cai === i ? { ...ca, ...patch } : ca)) }))
+  const removeCoApplicant = (i: number) => setForm((s) => ({ ...s, coApplicants: s.coApplicants.filter((_, cai) => cai !== i) }))
 
   const addCollateral = () => {
     setForm((s) => ({ ...s, collateral: [...s.collateral, { collateralType: 'Vehicle', description: '', estimatedValue: '' }] }))
@@ -497,6 +505,30 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
 
         <Card style={{ marginBottom: 16 }}>
           <div className="row between" style={{ marginBottom: 10 }}>
+            <div className="eyebrow">Co-Applicants <span className="t-2" style={{ fontWeight: 400, textTransform: 'none' }}>— joint borrowers, optional</span></div>
+            <Btn size="sm" variant="solid" icon="plus" onClick={addCoApplicant}>Add Co-Applicant</Btn>
+          </div>
+          {form.coApplicants.length === 0 && <div className="t-2" style={{ fontSize: 12.5 }}>No co-applicants added.</div>}
+          {form.coApplicants.map((ca, i) => (
+            <div key={i} className="row gap-2" style={{ marginBottom: 10, alignItems: 'flex-start' }}>
+              <div style={{ flex: 2 }}>
+                <SearchSelect
+                  value={ca.coApplicantCustomerId ? `${customers.find((c) => c.id === ca.coApplicantCustomerId)?.fullName || ''}` : ''}
+                  onChange={(_n, opt) => setCoApplicant(i, { coApplicantCustomerId: opt?.id })}
+                  options={customers.filter((c) => c.id !== form.customerId && !form.coApplicants.some((o, oi) => oi !== i && o.coApplicantCustomerId === c.id))}
+                  getLabel={(c) => `${c.fullName} (${c.code})`}
+                  getSub={(c) => c.nicNo || c.phone || ''}
+                  placeholder="Search customer…"
+                />
+              </div>
+              <div style={{ flex: 1 }}><Input type="number" placeholder="Share % (optional)" value={ca.sharePercent ?? ''} onChange={(e) => setCoApplicant(i, { sharePercent: e.target.value as any })} /></div>
+              <button className="mms-act" title="Remove" onClick={() => removeCoApplicant(i)} style={{ marginTop: 6 }}><Icon n="trash" s={15} /></button>
+            </div>
+          ))}
+        </Card>
+
+        <Card style={{ marginBottom: 16 }}>
+          <div className="row between" style={{ marginBottom: 10 }}>
             <div className="eyebrow">Guarantors <span className="t-2" style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></div>
             <Btn size="sm" variant="solid" icon="plus" onClick={addGuarantor}>Add Guarantor</Btn>
           </div>
@@ -606,7 +638,11 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           onRow={openRow}
           render={(l) => <>
             <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
-            <Td><div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div><div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div></Td>
+            <Td>
+              <div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div>
+              <div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div>
+              {!!l.coApplicants?.length && <div className="t-2" style={{ fontSize: 11 }}>+{l.coApplicants.length} co-applicant{l.coApplicants.length > 1 ? 's' : ''}</div>}
+            </Td>
             <Td>{l.loanDetail?.loanType?.name}</Td>
             <Td mono>{Number(l.principalAmount).toLocaleString()}</Td>
             <Td>{l.termMonths}mo</Td>

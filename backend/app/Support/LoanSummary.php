@@ -75,14 +75,22 @@ class LoanSummary
         $waivedCharge = (float) ($waivedByType->get('Charge')?->sum('amount') ?? 0);
 
         // --- Due-type breakdown ---
-        $rentalDue = max(0, round((float) $schedules->sum('total_due') - $waivedPrincipal - $waivedInterest, 2));
+        // Principal and Interest are split into their own rows (rather than a
+        // single combined "Rental" figure) so a cashier can see the interest
+        // portion on its own — $rentalPaid (combined) is still needed below for
+        // the overpayment calc, so it stays alongside the two split figures.
+        $principalDue = max(0, round((float) $schedules->sum('principal_due') - $waivedPrincipal, 2));
+        $principalPaid = round((float) $rows->sum('paidPrincipal'), 2);
+        $interestDue = max(0, round((float) $schedules->sum('interest_due') - $waivedInterest, 2));
+        $interestPaid = round((float) $rows->sum('paidInterest'), 2);
         $rentalPaid = round((float) $schedules->sum('paid_amount'), 2);
         $penaltyDue = max(0, round((float) $rows->sum('penaltyDue') - $waivedPenalty, 2));
         $penaltyPaid = round((float) $rows->sum('paidPenalty'), 2);
 
         $dueBreakdown = [
-            self::breakdownRow('Rental', $rentalDue, $rentalPaid),
-            self::breakdownRow('Default Charges', $penaltyDue, $penaltyPaid),
+            self::breakdownRow('Principal', $principalDue, $principalPaid),
+            self::breakdownRow('Interest', $interestDue, $interestPaid),
+            self::breakdownRow('Default Charges (OD)', $penaltyDue, $penaltyPaid),
         ];
         foreach ($charges->groupBy(fn($c) => $c->category?->name ?? 'Unknown') as $type => $group) {
             $dueBreakdown[] = self::breakdownRow($type, round((float) $group->sum('due_amount'), 2), round((float) $group->sum('paid_amount'), 2));

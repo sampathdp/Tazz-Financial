@@ -29,6 +29,7 @@ class LoanController extends Controller
 
     private const SUMMARY_RELATIONS = [
         'customer:id,full_name,code,nic_no,phone',
+        'coApplicants.coApplicant:id,full_name,code,nic_no,phone',
         'branch:id,name,code',
         'loanDetail.loanType:id,name,code',
         'loanDetail.loanOfficer:id,name',
@@ -47,6 +48,7 @@ class LoanController extends Controller
         'insurance',
         'applier:id,name',
         'approver:id,name',
+        'coApplicants.coApplicant:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
         'guarantors.guarantor:id,full_name,code,nic_no,phone',
         'collateral.vehicleDetail',
         'collateral.jewelryDetail',
@@ -79,20 +81,33 @@ class LoanController extends Controller
      * this is computed live, the same way app\Support\LoanSummary does for a
      * single loan's arrears — penaltyDueForRow() is reused directly so the OD
      * figure here can never disagree with what Loan Detail shows.
+     *
+     * `to` is the as-of date (days-overdue/penalty are computed as of it,
+     * defaulting to today); `from` optionally narrows the window to
+     * installments due on/after that date.
      */
-    public function overdue()
+    public function overdue(Request $request)
     {
-        $today = now()->startOfDay();
+        $today = $request->filled('to') ? Carbon::parse($request->to)->startOfDay() : now()->startOfDay();
+        $from = $request->filled('from') ? Carbon::parse($request->from)->startOfDay() : null;
+
+        $scheduleFilter = function ($q) use ($today, $from) {
+            $q->where('due_date', '<', $today)->where('status', '!=', 'Paid');
+            if ($from) {
+                $q->where('due_date', '>=', $from);
+            }
+        };
 
         $loans = Loan::where('status', 'Active')
-            ->whereHas('schedules', fn ($q) => $q->where('due_date', '<', $today)->where('status', '!=', 'Paid'))
+            ->whereHas('schedules', $scheduleFilter)
             ->with([
                 'customer:id,full_name,code,nic_no,phone',
+                'coApplicants.coApplicant:id,full_name,code,nic_no,phone',
                 'branch:id,name,code',
                 'loanDetail.loanType:id,name,code,default_charge_rate_percent,grace_period_days',
                 'loanDetail.loanOfficer:id,name',
                 'loanDetail.recoveryOfficer:id,name',
-                'schedules' => fn ($q) => $q->where('due_date', '<', $today)->where('status', '!=', 'Paid')->orderBy('due_date'),
+                'schedules' => function ($q) use ($scheduleFilter) { $scheduleFilter($q); $q->orderBy('due_date'); },
             ])
             ->withSum('schedules as total_due_sum', 'total_due')
             ->withSum('schedules as paid_sum', 'paid_amount')
@@ -195,13 +210,13 @@ class LoanController extends Controller
 
     public function store(Request $request)
     {
-        [$facilityData, $detailData, $guarantors, $collateral, $insurance] = $this->validated($request);
+        [$facilityData, $detailData, $guarantors, $collateral, $insurance, $coApplicants] = $this->validated($request);
         $facilityData['applied_by'] = $request->user()->id;
         $facilityData['created_by'] = $request->user()->id;
         $facilityData['status'] = 'Pending';
         $detailData['application_date'] = $detailData['application_date'] ?? now()->toDateString();
 
-        $loan = DB::transaction(function () use ($facilityData, $detailData, $guarantors, $collateral, $insurance, $request) {
+        $loan = DB::transaction(function () use ($facilityData, $detailData, $guarantors, $collateral, $insurance, $coApplicants, $request) {
             $branch = Branch::find($facilityData['branch_id']);
             $loanType = LoanType::find($detailData['loan_type_id']);
             $facilityData['code'] = NumberGenerator::next('loan', [
@@ -221,6 +236,9 @@ class LoanController extends Controller
             foreach ($guarantors as $g) {
                 $loan->guarantors()->create($g);
             }
+            foreach ($coApplicants as $ca) {
+                $loan->coApplicants()->create($ca);
+            }
             foreach ($collateral as $c) {
                 $this->createCollateral($loan, $c);
             }
@@ -236,15 +254,19 @@ class LoanController extends Controller
         if ($loan->status !== 'Pending') {
             return response()->json(['message' => 'Only pending applications can be edited.'], 422);
         }
-        [$facilityData, $detailData, $guarantors, $collateral, $insurance] = $this->validated($request, $loan);
+        [$facilityData, $detailData, $guarantors, $collateral, $insurance, $coApplicants] = $this->validated($request, $loan);
 
-        DB::transaction(function () use ($loan, $facilityData, $detailData, $guarantors, $collateral, $insurance) {
+        DB::transaction(function () use ($loan, $facilityData, $detailData, $guarantors, $collateral, $insurance, $coApplicants) {
             $loan->update($facilityData);
             $loan->loanDetail()->update($detailData);
             $this->syncInsuranceDetail($loan, $insurance);
             $loan->guarantors()->delete();
             foreach ($guarantors as $g) {
                 $loan->guarantors()->create($g);
+            }
+            $loan->coApplicants()->delete();
+            foreach ($coApplicants as $ca) {
+                $loan->coApplicants()->create($ca);
             }
             // Update-in-place / create-new keyed by id, rather than delete-all-recreate,
             // so previously uploaded collateral documents (which cascade-delete with
@@ -554,7 +576,7 @@ class LoanController extends Controller
         }
     }
 
-    /** @return array{0: array, 1: array, 2: array, 3: array, 4: ?array} [facility fields, loanDetail fields, guarantors, collateral, insurance] */
+    /** @return array{0: array, 1: array, 2: array, 3: array, 4: ?array, 5: array} [facility fields, loanDetail fields, guarantors, collateral, insurance, coApplicants] */
     private function validated(Request $request, ?Loan $loan = null): array
     {
         $validated = $request->validate([
@@ -583,6 +605,9 @@ class LoanController extends Controller
             'guarantors' => 'array',
             'guarantors.*.guarantor_customer_id' => 'required|exists:customers,id',
             'guarantors.*.guaranteed_amount' => 'required|numeric|min:0',
+            'co_applicants' => 'array',
+            'co_applicants.*.co_applicant_customer_id' => 'required|exists:customers,id',
+            'co_applicants.*.share_percent' => 'nullable|numeric|min:0|max:100',
             'collateral' => 'array',
             'collateral.*.id' => 'nullable|integer|exists:facility_collateral,id',
             'collateral.*.collateral_type' => ['nullable', Rule::in(self::COLLATERAL_TYPES)],
@@ -632,6 +657,15 @@ class LoanController extends Controller
             if ((int) $g['guarantor_customer_id'] === (int) $validated['customer_id']) {
                 throw ValidationException::withMessages(['guarantors' => 'A customer cannot guarantee their own loan.']);
             }
+        }
+
+        $coApplicantsInput = $validated['co_applicants'] ?? [];
+        $coApplicantIds = array_column($coApplicantsInput, 'co_applicant_customer_id');
+        if (in_array((int) $validated['customer_id'], array_map('intval', $coApplicantIds), true)) {
+            throw ValidationException::withMessages(['co_applicants' => 'The primary applicant cannot also be listed as a co-applicant.']);
+        }
+        if (count($coApplicantIds) !== count(array_unique($coApplicantIds))) {
+            throw ValidationException::withMessages(['co_applicants' => 'The same co-applicant is listed more than once.']);
         }
 
         $facilityData = [
@@ -695,7 +729,12 @@ class LoanController extends Controller
             'guaranteed_amount' => $g['guaranteed_amount'],
         ], $guarantors);
 
-        return [$facilityData, $detailData, $guarantors, $collateral, $insurance];
+        $coApplicants = array_map(fn ($ca) => [
+            'co_applicant_customer_id' => $ca['co_applicant_customer_id'],
+            'share_percent' => $ca['share_percent'] ?? null,
+        ], $coApplicantsInput);
+
+        return [$facilityData, $detailData, $guarantors, $collateral, $insurance, $coApplicants];
     }
 
     /** Creates/updates/clears the loan's insurance row to match $insurance — null

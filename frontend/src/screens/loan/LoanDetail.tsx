@@ -155,7 +155,11 @@ function ContractSummary({ loan }: { loan: Loan }) {
       <div className="eyebrow" style={{ marginBottom: 10 }}>Contract Summary</div>
       <KpiGrid items={[
         { label: 'Contract No', value: loan.code, icon: 'doc', tone: 'blue' },
-        { label: 'Member', value: <>{loan.customer?.fullName}<div className="t-2" style={{ fontSize: 11, fontWeight: 400 }}>{loan.customer?.code}</div></>, icon: 'users', tone: 'blue' },
+        {
+          label: 'Member', icon: 'users', tone: 'blue',
+          value: <>{loan.customer?.fullName}<div className="t-2" style={{ fontSize: 11, fontWeight: 400 }}>{loan.customer?.code}</div>
+            {!!loan.coApplicants?.length && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ac-bright)', marginTop: 2 }}>+{loan.coApplicants.length} Co-Applicant{loan.coApplicants.length > 1 ? 's' : ''}: {loan.coApplicants.map((ca) => ca.coApplicant?.fullName).filter(Boolean).join(', ')}</div>}</>,
+        },
         { label: 'Branch', value: loan.branch?.name || '—', icon: 'building', tone: 'neutral' },
         { label: 'Product', value: loan.loanDetail?.loanType?.name || '—', icon: 'tag', tone: 'blue' },
         { label: 'Contract Amount', value: money(loan.principalAmount), icon: 'coins', tone: 'green' },
@@ -412,7 +416,15 @@ function SecurityPanel({ loan }: { loan: Loan }) {
   return (
     <Card>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Security, Collateral & Equipment Details</div>
-      {!loan.guarantors?.length && !loan.collateral?.length && !hasReference && !loan.loanDetail?.vehicleNo && !insurance && <div className="t-2" style={{ fontSize: 12.5 }}>No guarantors, collateral or reference person recorded.</div>}
+      {!loan.coApplicants?.length && !loan.guarantors?.length && !loan.collateral?.length && !hasReference && !loan.loanDetail?.vehicleNo && !insurance && <div className="t-2" style={{ fontSize: 12.5 }}>No co-applicants, guarantors, collateral or reference person recorded.</div>}
+      {!!loan.coApplicants?.length && (<>
+        <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Co-Applicants</div>
+        {loan.coApplicants.map((ca, i) => (
+          <div key={i} className="row between" style={{ padding: '6px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 12.5 }}>
+            <span>{ca.coApplicant?.fullName}</span><span className="t-2">{ca.sharePercent != null ? `${ca.sharePercent}%` : '—'}</span>
+          </div>
+        ))}
+      </>)}
       {!!loan.loanDetail?.vehicleNo && (
         <div style={{ marginBottom: 14 }}>
           <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Vehicle</div>

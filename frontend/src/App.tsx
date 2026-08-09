@@ -25,7 +25,7 @@ const ChequeClearanceScreen = lazy(() => import('./screens/ChequeClearance').the
 const SalesExecutiveCommissionsScreen = lazy(() => import('./screens/SalesExecutiveCommissions').then((m) => ({ default: m.SalesExecutiveCommissionsScreen })))
 const SpeedDraftTypesScreen = lazy(() => import('./screens/SpeedDraftTypes').then((m) => ({ default: m.SpeedDraftTypesScreen })))
 const SpeedDraftsScreen = lazy(() => import('./screens/SpeedDrafts').then((m) => ({ default: m.SpeedDraftsScreen })))
-const SpeedDraftPaymentReceiptScreen = lazy(() => import('./screens/SpeedDraftPaymentReceipt').then((m) => ({ default: m.SpeedDraftPaymentReceiptScreen })))
+const SpeedDraftPaymentReceiptScreen = lazy(() => import('./screens/PaymentReceipt').then((m) => ({ default: m.SpeedDraftPaymentReceiptScreen })))
 const FundingDashboardScreen = lazy(() => import('./screens/FundingDashboard').then((m) => ({ default: m.FundingDashboardScreen })))
 const FundingProductsScreen = lazy(() => import('./screens/FundingProducts').then((m) => ({ default: m.FundingProductsScreen })))
 const DepositsScreen = lazy(() => import('./screens/Deposits').then((m) => ({ default: m.DepositsScreen })))

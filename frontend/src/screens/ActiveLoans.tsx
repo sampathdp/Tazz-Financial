@@ -103,7 +103,11 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
           onRow={openRow}
           render={(l) => <>
             <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
-            <Td><div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div><div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div></Td>
+            <Td>
+              <div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div>
+              <div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div>
+              {!!l.coApplicants?.length && <div className="t-2" style={{ fontSize: 11 }}>+{l.coApplicants.length} co-applicant{l.coApplicants.length > 1 ? 's' : ''}</div>}
+            </Td>
             <Td>{l.loanDetail?.loanType?.name}</Td>
             <Td mono>{money(l.principalAmount)}</Td>
             <Td mono>{l.status === 'Approved' ? '—' : money(num(l.totalDueSum) - num(l.paidSum))}</Td>

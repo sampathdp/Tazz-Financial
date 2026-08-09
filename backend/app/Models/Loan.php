@@ -130,6 +130,12 @@ class Loan extends Model
         return $this->hasMany(FacilityGuarantor::class, 'credit_facility_id');
     }
 
+    /** Joint applicants/co-borrowers on this loan — customer_id above stays the primary applicant. */
+    public function coApplicants()
+    {
+        return $this->hasMany(FacilityCoApplicant::class, 'credit_facility_id');
+    }
+
     public function collateral()
     {
         return $this->hasMany(FacilityCollateral::class, 'credit_facility_id');

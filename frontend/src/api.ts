@@ -22,7 +22,7 @@ http.interceptors.request.use((cfg) => {
   return cfg
 })
 
-/* ---------- list cache (stale-while-fresh) ----------
+/* ---------- list cache (stale-while-fresh) -----
    GET list endpoints are cached for a short window so re-visiting a screen is
    instant instead of round-tripping the server every time. Any successful write
    (POST/PUT/DELETE) clears the whole cache, so lists never go stale after a
@@ -242,6 +242,14 @@ export interface LoanGuarantorInput {
   guarantor?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null };
 }
 
+/** A joint applicant/co-borrower on the loan — customerId on Loan stays the primary applicant. */
+export interface LoanCoApplicantInput {
+  id?: number;
+  coApplicantCustomerId: number;
+  sharePercent?: number | string | null;
+  coApplicant?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null };
+}
+
 export interface LoanCollateralDocument {
   id: number; facilityCollateralId: number; filePath: string;
   uploadedBy?: number | null; uploader?: { id: number; name: string } | null;
@@ -384,6 +392,7 @@ export interface Loan {
   insurance?: FacilityInsuranceDetail | null;
 
   guarantors?: LoanGuarantorInput[];
+  coApplicants?: LoanCoApplicantInput[];
   collateral?: LoanCollateralInput[];
   schedules?: LoanSchedule[];
   payments?: LoanPayment[];
@@ -800,7 +809,8 @@ export const loansApi = {
     http.patch(`/loans/${id}/status-flags`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateOfficers: (id: number, body: { loanOfficerId?: number | null; recoveryOfficerId?: number | null }) =>
     http.patch(`/loans/${id}/officers`, snakeize(body)).then((r) => camelize(r.data) as Loan),
-  overdue: () => http.get('/loans-overdue').then((r) => camelize(r.data) as OverdueLoan[]),
+  overdue: (params?: { from?: string; to?: string }) =>
+    http.get('/loans-overdue', { params }).then((r) => camelize(r.data) as OverdueLoan[]),
 }
 
 /** One due date shared by unpaid installments across a loan type's active loans —

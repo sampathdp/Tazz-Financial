@@ -1,7 +1,7 @@
 /* Tazz Investment & Credit — Overdue Loans (Active loans with a past-due, unpaid installment) */
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Card, PageHead, Btn, Badge, Input, Table, Td } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Input, Table, Td, Field } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loansApi, type Loan, type OverdueLoan, type AuthUser } from '../api'
 import { LoanDetail } from './loan/LoanDetail'
@@ -12,6 +12,7 @@ const ROUTE_BASE = '/loan/overdue'
 const num = (v: unknown) => Number(v ?? 0)
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const daysTone = (d: number) => (d >= 30 ? 'red' : d >= 15 ? 'amber' : 'neutral') as 'red' | 'amber' | 'neutral'
+const todayIso = () => new Date().toISOString().slice(0, 10)
 
 export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -20,6 +21,8 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
   const [rows, setRows] = useState<OverdueLoan[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState(todayIso())
 
   const [mode, setMode] = useState<'list' | 'detail'>('list')
   const [loan, setLoan] = useState<Loan | null>(null)
@@ -27,7 +30,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
 
   const refresh = () => {
     setLoading(true)
-    loansApi.overdue().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+    loansApi.overdue({ from: from || undefined, to: to || undefined }).then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
   }
 
   // Which loan (if any) is open lives in the URL — see the effect below —
@@ -45,7 +48,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
       .catch(() => { notify.error('Loan not found'); navigate(ROUTE_BASE, { replace: true }) })
       .finally(() => setDetailLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id])
+  }, [params.id, from, to])
 
   const q = search.trim().toLowerCase()
   const filtered = rows.filter((l) => {
@@ -77,6 +80,10 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx-2)' }}><Icon n="search" s={15} /></span>
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search code, customer, product…" style={{ paddingLeft: 32 }} />
           </div>
+          <Field label="From"><Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} /></Field>
+          <Field label="To (as of)"><Input type="date" value={to} onChange={(e) => setTo(e.target.value || todayIso())} /></Field>
+          {(from || to !== todayIso()) &&
+            <Btn variant="ghost" onClick={() => { setFrom(''); setTo(todayIso()) }}>Reset</Btn>}
           {q && <span className="t-2" style={{ fontSize: 12 }}>{filtered.length} of {rows.length}</span>}
         </div>
         {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
@@ -89,7 +96,11 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
           onRow={openRow}
           render={(l) => <>
             <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
-            <Td><div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div><div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div></Td>
+            <Td>
+              <div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div>
+              <div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div>
+              {!!l.coApplicants?.length && <div className="t-2" style={{ fontSize: 11 }}>+{l.coApplicants.length} co-applicant{l.coApplicants.length > 1 ? 's' : ''}</div>}
+            </Td>
             <Td>{l.loanDetail?.loanType?.name}</Td>
             <Td align="center"><Badge tone={daysTone(l.daysOverdue)} dot>{l.daysOverdue}d</Badge></Td>
             <Td align="center">{l.overdueInstallments}</Td>
