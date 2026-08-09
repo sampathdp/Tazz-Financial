@@ -334,7 +334,17 @@ export interface FacilityStatusEvent {
 export interface Loan {
   id: number; code: string;
   branchId: number; branch?: { id: number; name: string; code: string };
-  customerId: number; customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null };
+  customerId: number;
+  /** On loansApi.get()'s detail load, the server sends the wider column set below
+   *  (see LoanController::DETAIL_RELATIONS); list/create responses only populate
+   *  the narrower id/fullName/code/nicNo/phone subset. */
+  customer?: {
+    id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null;
+    passportNo?: string | null; drivingLicenseNo?: string | null; email?: string | null; address?: string | null;
+    occupationType?: OccupationType | null; monthlyIncome?: number | string | null;
+    status?: 'Active' | 'Blacklisted' | 'Inactive'; isGuarantor?: boolean;
+    branch?: { id: number; name: string; code: string } | null;
+  };
   principalAmount: number | string;
   interestRatePercent?: number | string;
   ratePeriod?: 'monthly' | 'annual';

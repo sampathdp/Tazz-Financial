@@ -92,6 +92,180 @@ function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBac
   )
 }
 
+const infoGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5 }
+const sectionLabelStyle: React.CSSProperties = { fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }
+
+/** Read-only "everything about this loan" tab — a compact version of LoanDetail's
+ *  Contract Summary + Security/Collateral panels, scoped for a cashier looking up
+ *  a loan mid-payment rather than the full loan management workspace. */
+function LoanDetailsPanel({ loan }: { loan: Loan }) {
+  const d = loan.loanDetail
+  const c = loan.customer
+  const insurance = loan.insurance
+  const hasReference = !!(d?.referenceName || d?.referenceIdNo || d?.referenceAddress)
+  const statusEvents = (loan.statusEvents || []).slice().sort((a, b) => new Date(b.eventDate || 0).getTime() - new Date(a.eventDate || 0).getTime())
+
+  return (
+    <div className="col gap-3">
+      <Card>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Customer Information</div>
+        <div style={infoGridStyle}>
+          <div><span className="t-2">Full Name: </span><b>{c?.fullName || '—'}</b></div>
+          <div><span className="t-2">Customer Code: </span><b>{c?.code || '—'}</b></div>
+          <div><span className="t-2">NIC No: </span><b>{c?.nicNo || '—'}</b></div>
+          <div><span className="t-2">Passport No: </span><b>{c?.passportNo || '—'}</b></div>
+          <div><span className="t-2">Driving License: </span><b>{c?.drivingLicenseNo || '—'}</b></div>
+          <div><span className="t-2">Phone: </span><b>{c?.phone || '—'}</b></div>
+          <div><span className="t-2">Email: </span><b>{c?.email || '—'}</b></div>
+          <div><span className="t-2">Address: </span><b>{c?.address || '—'}</b></div>
+          <div><span className="t-2">Occupation: </span><b>{c?.occupationType || '—'}</b></div>
+          <div><span className="t-2">Monthly Income: </span><b>{c?.monthlyIncome != null ? money(c.monthlyIncome) : '—'}</b></div>
+          <div><span className="t-2">Branch: </span><b>{loan.branch?.name || c?.branch?.name || '—'}</b></div>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Loan / Facility Details</div>
+        <div style={infoGridStyle}>
+          <div><span className="t-2">Loan Code: </span><b>{loan.code}</b></div>
+          <div><span className="t-2">Status: </span><Badge tone="green" dot>{loan.status}</Badge></div>
+          <div><span className="t-2">Product: </span><b>{d?.loanType?.name || '—'}</b></div>
+          <div><span className="t-2">Principal Amount: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(loan.principalAmount)}</b></div>
+          <div><span className="t-2">Down Payment: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(d?.downPayment)}</b></div>
+          <div><span className="t-2">Term: </span><b>{loan.termMonths} months</b></div>
+          <div><span className="t-2">Frequency: </span><b style={{ textTransform: 'capitalize' }}>{d?.installmentFrequency || '—'}</b></div>
+          <div><span className="t-2">Interest Method: </span><b>{d?.interestMethod === 'flat' ? 'Flat' : d?.interestMethod === 'reducing_balance' ? 'Reducing Balance' : '—'}</b></div>
+          <div><span className="t-2">Interest Rate: </span><b>{loan.interestRatePercent != null ? `${loan.interestRatePercent}% ${loan.ratePeriod || ''}` : '—'}</b></div>
+          <div><span className="t-2">Purpose: </span><b>{d?.purpose || '—'}</b></div>
+          <div><span className="t-2">Application Date: </span><b>{dateOnly(d?.applicationDate)}</b></div>
+          <div><span className="t-2">First Installment Date: </span><b>{dateOnly(d?.firstInstallmentDate)}</b></div>
+          <div><span className="t-2">Disbursed At: </span><b>{dateOnly(loan.disbursedAt)}</b></div>
+          <div><span className="t-2">Disbursed Amount: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{loan.disbursedAmount != null ? money(loan.disbursedAmount) : '—'}</b></div>
+          <div><span className="t-2">Marketing Executive: </span><b>{d?.loanOfficer?.name || '—'}</b></div>
+          <div><span className="t-2">Follow Up Officer: </span><b>{d?.recoveryOfficer?.name || '—'}</b></div>
+          {d?.vehicleNo && <div><span className="t-2">Vehicle No: </span><b>{d.vehicleNo}</b></div>}
+        </div>
+      </Card>
+
+      {!!insurance && (
+        <Card>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Insurance Policy</div>
+          <div style={infoGridStyle}>
+            <div><span className="t-2">Company: </span><b>{insurance.insuranceCompany || '—'}</b></div>
+            <div><span className="t-2">Policy No: </span><b>{insurance.policyNo || '—'}</b></div>
+            <div><span className="t-2">Amount: </span><b>{insurance.amount != null ? money(insurance.amount) : '—'}</b></div>
+            <div><span className="t-2">Contact Person: </span><b>{insurance.contactPerson || '—'}</b></div>
+            <div><span className="t-2">Coverage: </span><b>{insurance.coverage || '—'}</b></div>
+            {insurance.remarks && <div style={{ gridColumn: '1/-1' }}><span className="t-2">Remark: </span><b>{insurance.remarks}</b></div>}
+          </div>
+        </Card>
+      )}
+
+      {(hasReference || !!loan.guarantors?.length || !!loan.collateral?.length) && (
+        <Card>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Security, Collateral & Guarantors</div>
+          {hasReference && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="t-2" style={sectionLabelStyle}>Reference Person</div>
+              <div style={infoGridStyle}>
+                <div><span className="t-2">Name: </span><b>{d?.referenceName || '—'}</b></div>
+                <div><span className="t-2">NIC / Other ID No: </span><b>{d?.referenceIdNo || '—'}</b></div>
+                <div><span className="t-2">Address: </span><b>{d?.referenceAddress || '—'}</b></div>
+              </div>
+            </div>
+          )}
+          {!!loan.guarantors?.length && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="t-2" style={sectionLabelStyle}>Guarantors</div>
+              {loan.guarantors.map((g, i) => (
+                <div key={i} className="row between" style={{ padding: '6px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 12.5 }}>
+                  <span>{g.guarantor?.fullName}{g.guarantor?.nicNo ? ` (${g.guarantor.nicNo})` : ''}</span>
+                  <span className="t-2" style={{ fontFamily: 'JetBrains Mono' }}>{money(g.guaranteedAmount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {!!loan.collateral?.length && (
+            <div>
+              <div className="t-2" style={sectionLabelStyle}>Collateral / Equipment</div>
+              {loan.collateral.map((col, i) => {
+                const v = col.vehicleDetail
+                const vehicleBits = [
+                  v?.vehicleType, v?.makeModel,
+                  v?.registrationNo && `Reg: ${v.registrationNo}`,
+                  v?.chassisNo && `Chassis: ${v.chassisNo}`,
+                  v?.engineNo && `Engine: ${v.engineNo}`,
+                  v?.yearOfManufacture && `Yr: ${v.yearOfManufacture}`,
+                ].filter(Boolean)
+                return (
+                  <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 12.5 }}>
+                    <div className="row between"><b>{col.collateralCategory || col.collateralType || 'Collateral'}</b><span className="t-2" style={{ fontFamily: 'JetBrains Mono' }}>{col.estimatedValue != null ? money(col.estimatedValue) : '—'}</span></div>
+                    <div className="t-2">{col.description}</div>
+                    {vehicleBits.length > 0 && <div className="t-2">{vehicleBits.join(' · ')}</div>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {!!statusEvents.length && (
+        <Card>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Status Events</div>
+          {statusEvents.map((e) => (
+            <div key={e.id} className="row between" style={{ padding: '6px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 12.5 }}>
+              <span><Badge tone="amber" dot>{e.eventType}</Badge> {e.notes && <span className="t-2">— {e.notes}</span>}</span>
+              <span className="t-2">{dateOnly(e.eventDate)}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  )
+}
+
+/* ---------- Ledger Card (computed, client-side) — mirrors LoanDetail's LedgerCard. ---------- */
+function LedgerCard({ loan }: { loan: Loan }) {
+  type Row = { date: string; particulars: string; debit: number; credit: number; typeOrder: number }
+  const rows: Row[] = []
+
+  // Only the due side is logged here — a charge's paid_amount always comes from a
+  // real LoanPayment (see LoanPaymentAllocator::applyAllocation), which is already
+  // its own Receipt row below. Adding a second "charge paid" row here would credit
+  // that same money twice and understate the running balance.
+  for (const c of loan.charges || []) rows.push({ date: c.chargedAt, particulars: `${c.category?.name || 'Category'} charge`, debit: num(c.dueAmount), credit: 0, typeOrder: 1 })
+  for (const s of loan.schedules || []) rows.push({ date: s.dueDate, particulars: `Installment #${s.installmentNo} due`, debit: num(s.totalDue), credit: 0, typeOrder: 2 })
+  for (const w of loan.waivers || []) rows.push({ date: w.waivedAt, particulars: `${w.waiverType} waived${w.reason ? ` — ${w.reason}` : ''}`, debit: 0, credit: num(w.amount), typeOrder: 3 })
+  for (const p of loan.payments || []) {
+    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval') continue
+    rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4 })
+  }
+
+  rows.sort((a, b) => {
+    const dCmp = a.date.substring(0, 10).localeCompare(b.date.substring(0, 10))
+    if (dCmp !== 0) return dCmp
+    return a.typeOrder - b.typeOrder
+  })
+  let balance = 0
+  const withBalance = rows.map((r) => { balance += r.debit - r.credit; return { ...r, balance } })
+
+  return (
+    <Card pad={0}>
+      <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Ledger Card</div>
+      <Table cols={[{ label: 'Date' }, { label: 'Particulars' }, { label: 'Debit', align: 'right' }, { label: 'Credit', align: 'right' }, { label: 'Balance', align: 'right' }]}
+        rows={withBalance} empty="No ledger entries yet"
+        render={(r) => <>
+          <Td>{dateOnly(r.date)}</Td>
+          <Td>{r.particulars}</Td>
+          <Td mono align="right">{r.debit ? money(r.debit) : '—'}</Td>
+          <Td mono align="right">{r.credit ? money(r.credit) : '—'}</Td>
+          <Td mono align="right">{money(r.balance)}</Td>
+        </>} />
+    </Card>
+  )
+}
+
 export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
   const [loans, setLoans] = useState<Loan[]>([])
@@ -141,7 +315,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [nextReceipt, setNextReceipt] = useState('')
 
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
-  const [panelTab, setPanelTab] = useState<'history' | 'schedule'>('history')
+  const [panelTab, setPanelTab] = useState<'history' | 'schedule' | 'details' | 'ledger'>('history')
   const [scheduleTab, setScheduleTab] = useState<'all' | 'paid' | 'unpaid'>('unpaid')
   const [viewPayment, setViewPayment] = useState<LoanPayment | null>(null)
 
@@ -421,6 +595,8 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <div className="row gap-2" style={{ marginBottom: 16, borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
             <Btn size="sm" variant="ghost" icon="receipt" active={panelTab === 'history'} onClick={() => setPanelTab('history')}>Payment History</Btn>
             <Btn size="sm" variant="ghost" icon="calendar" active={panelTab === 'schedule'} onClick={() => setPanelTab('schedule')}>Payment Schedule</Btn>
+            <Btn size="sm" variant="ghost" icon="doc" active={panelTab === 'details'} onClick={() => setPanelTab('details')}>Loan Details</Btn>
+            <Btn size="sm" variant="ghost" icon="doc" active={panelTab === 'ledger'} onClick={() => setPanelTab('ledger')}>Ledger Card</Btn>
           </div>
 
           {panelTab === 'history' && (
@@ -462,6 +638,9 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 </>} />
             </Card>
           )}
+
+          {panelTab === 'details' && <LoanDetailsPanel loan={selected} />}
+          {panelTab === 'ledger' && <LedgerCard loan={selected} />}
         </>
       )}
 
