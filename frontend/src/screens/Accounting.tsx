@@ -276,22 +276,34 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
 export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [basis, setBasis] = useState<'cash' | 'accrual'>('cash')
   const [report, setReport] = useState<ProfitLossReport | null>(null)
   const [loading, setLoading] = useState(true)
 
   const refresh = () => {
     setLoading(true)
-    accountingReportsApi.profitLoss({ from: fromDate || undefined, to: toDate || undefined }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+    accountingReportsApi.profitLoss({ from: fromDate || undefined, to: toDate || undefined, basis }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
   }
-  useEffect(refresh, [fromDate, toDate]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(refresh, [fromDate, toDate, basis]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
       <PageHead crumbs="Accounting" title="Profit & Loss" icon="pie" />
       <Card style={{ marginBottom: 16 }}>
-        <div className="row gap-3 wrap">
+        <div className="row gap-3 wrap" style={{ alignItems: 'flex-end' }}>
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <Field label="Basis">
+            <div className="row gap-1">
+              <Btn size="sm" variant="ghost" active={basis === 'cash'} onClick={() => setBasis('cash')}>Cash Basis</Btn>
+              <Btn size="sm" variant="ghost" active={basis === 'accrual'} onClick={() => setBasis('accrual')}>Accrual Basis</Btn>
+            </div>
+          </Field>
+        </div>
+        <div className="t-2" style={{ fontSize: 11.5, marginTop: 10 }}>
+          {basis === 'cash'
+            ? 'Cash Basis: income counted when actually collected — today\'s figures.'
+            : 'Accrual Basis: interest income counted as it\'s scheduled to be earned, not when collected. Only Interest Income changes below — everything else (charges, penalty, expenses) stays the same either way.'}
         </div>
       </Card>
       {loading ? <Card><div style={{ padding: 20, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div></Card> : report && (

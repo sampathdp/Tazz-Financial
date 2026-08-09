@@ -7,6 +7,7 @@ use App\Models\BankAccount;
 use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\JournalLine;
+use App\Support\AccrualInterestCalculator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -106,10 +107,11 @@ class AccountingReportController extends Controller
     {
         $from = $request->query('from');
         $to = $request->query('to');
-        [$income, $expense, $totalIncome, $totalExpense] = $this->plFigures($from, $to);
+        $basis = $request->query('basis') === 'accrual' ? 'accrual' : 'cash';
+        [$income, $expense, $totalIncome, $totalExpense] = $this->plFigures($from, $to, $basis);
 
         return [
-            'from' => $from, 'to' => $to,
+            'from' => $from, 'to' => $to, 'basis' => $basis,
             'income' => $income, 'expense' => $expense,
             'total_income' => $totalIncome, 'total_expense' => $totalExpense,
             'net_profit' => bcsub($totalIncome, $totalExpense, 2),
@@ -211,8 +213,17 @@ class AccountingReportController extends Controller
         ];
     }
 
-    /** Income/Expense account balances for a period, plus their totals — shared by P&L and Balance Sheet's 3030 figure so both can never disagree. */
-    private function plFigures(?string $from, ?string $to): array
+    /** Accrual Basis only ever touches these two — see AccrualInterestCalculator's docblock for why interest income is the one figure with an equivalent "supposed to earn" computation; other income/expense have no such schedule to compute from. */
+    private const ACCRUAL_INCOME_ACCOUNTS = ['4010' => 'Loan', '4015' => 'SpeedDraft'];
+
+    /**
+     * Income/Expense account balances for a period, plus their totals — shared
+     * by P&L and Balance Sheet's 3030 figure so both can never disagree (the
+     * Balance Sheet always calls this with the default 'cash' basis, since its
+     * asset/liability figures are ledger-based and its "balanced" invariant
+     * only holds against a ledger-based profit figure).
+     */
+    private function plFigures(?string $from, ?string $to, string $basis = 'cash'): array
     {
         $balances = ChartOfAccount::balancesAsOf($to, $from);
         $accounts = ChartOfAccount::whereIn('account_type', ['Income', 'Expense'])->orderBy('code')->get();
@@ -222,6 +233,9 @@ class AccountingReportController extends Controller
         $totalExpense = '0.00';
         foreach ($accounts as $account) {
             $balance = $balances->get($account->id)->balance ?? '0.00';
+            if ($basis === 'accrual' && isset(self::ACCRUAL_INCOME_ACCOUNTS[$account->code])) {
+                $balance = AccrualInterestCalculator::incomeForPeriod(self::ACCRUAL_INCOME_ACCOUNTS[$account->code], $from, $to);
+            }
             $rows[$account->account_type][] = ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => $balance];
             if ($account->account_type === 'Income') {
                 $totalIncome = bcadd($totalIncome, $balance, 2);

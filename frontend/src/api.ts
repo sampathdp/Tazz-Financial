@@ -1378,7 +1378,7 @@ export interface GeneralLedgerReport {
 }
 export interface TrialBalanceRow { accountId: number; code: string; name: string; accountType: AccountType; totalDebit: string; totalCredit: string; balance: string }
 export interface PLRow { accountId: number; code: string; name: string; balance: string }
-export interface ProfitLossReport { from?: string | null; to?: string | null; income: PLRow[]; expense: PLRow[]; totalIncome: string; totalExpense: string; netProfit: string }
+export interface ProfitLossReport { from?: string | null; to?: string | null; basis?: 'cash' | 'accrual'; income: PLRow[]; expense: PLRow[]; totalIncome: string; totalExpense: string; netProfit: string }
 export interface BalanceSheetRow { accountId: number; code: string; name: string; balance: string }
 export interface BalanceSheetReport {
   asOf: string; assets: BalanceSheetRow[]; liabilities: BalanceSheetRow[]; equity: BalanceSheetRow[];
@@ -1394,7 +1394,7 @@ export const accountingReportsApi = {
   trialBalance: (asOf?: string) => http.get('/accounting-reports/trial-balance', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as TrialBalanceRow[]),
   generalLedger: (accountId: number, params?: { from?: string; to?: string }) =>
     http.get('/accounting-reports/general-ledger', { params: snakeize({ accountId, ...params }) }).then((r) => camelize(r.data) as GeneralLedgerReport),
-  profitLoss: (params?: { from?: string; to?: string }) =>
+  profitLoss: (params?: { from?: string; to?: string; basis?: 'cash' | 'accrual' }) =>
     http.get('/accounting-reports/profit-loss', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as ProfitLossReport),
   balanceSheet: (asOf?: string) => http.get('/accounting-reports/balance-sheet', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as BalanceSheetReport),
   ledgerDrift: (asOf?: string) => http.get('/accounting-reports/ledger-drift', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as LedgerDriftReport),
