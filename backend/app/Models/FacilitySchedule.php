@@ -9,7 +9,7 @@ class FacilitySchedule extends Model
     protected $fillable = [
         'credit_facility_id', 'installment_no', 'due_date',
         'principal_due', 'interest_due', 'penalty_due', 'total_due',
-        'paid_amount', 'paid_at', 'status',
+        'paid_amount', 'paid_at', 'status', 'waived_interest',
     ];
 
     protected $casts = [
@@ -20,6 +20,7 @@ class FacilitySchedule extends Model
         'total_due' => 'decimal:2',
         'paid_amount' => 'decimal:2',
         'paid_at' => 'datetime',
+        'waived_interest' => 'decimal:2',
     ];
 
     public function facility()

@@ -67,6 +67,94 @@ class LoanPaymentAllocator
     }
 
     /**
+     * Same shape as outstandingBalance(), but for an early full settlement:
+     * each unpaid installment's interest is capped at what's actually
+     * accrued by $asOf (see InterestAccrualSchedule::accruedThrough()) —
+     * the rest is waived rather than collected, matching the client's early-
+     * settlement rule (accrued-to-date interest only, remaining future
+     * interest forgiven). Read-only; see applySettlementWaiver() for the
+     * write side, applied only once the settlement is actually approved.
+     *
+     * @return array{outstanding: float, waivedInterest: array<int, float>} waivedInterest is keyed by facility_schedules.id
+     */
+    public static function settlementQuote(Loan $loan, ?Carbon $asOf = null): array
+    {
+        $asOf ??= Carbon::today();
+        $schedules = $loan->schedules()->orderBy('installment_no')
+            ->with('allocations.payment:id,status,approval_status')->get();
+
+        $activeInterestPaid = fn ($row) => (float) $row->allocations
+            ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
+            ->sum('interest_applied');
+
+        $periodStart = $loan->disbursed_at ? Carbon::parse($loan->disbursed_at) : null;
+        $waivedInterest = [];
+        $scheduleBalance = 0.0;
+        foreach ($schedules as $row) {
+            $dueDate = $row->due_date instanceof Carbon ? $row->due_date : Carbon::parse($row->due_date);
+            $start = $periodStart ?? $dueDate->copy();
+            $periodStart = $dueDate;
+
+            if ($row->status === 'Paid') {
+                continue;
+            }
+
+            $interestDue = (float) $row->interest_due;
+            $accrued = InterestAccrualSchedule::accruedThrough($start, $dueDate, $interestDue, $asOf);
+            // Never waive interest that's already been collected on this row.
+            $floor = max($accrued, $activeInterestPaid($row));
+            $waive = max(0, round($interestDue - $floor, 2));
+            if ($waive > 0) {
+                $waivedInterest[$row->id] = $waive;
+            }
+
+            $scheduleBalance += (float) $row->total_due - $waive - (float) $row->paid_amount;
+        }
+
+        [$graceDays, $chargeRate] = self::penaltyTerms($loan);
+        $penaltyBalance = $chargeRate > 0
+            ? $schedules->sum(function ($s) use ($graceDays, $chargeRate, $asOf) {
+                $due = LoanSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $asOf);
+                $paid = LoanSummary::activePenaltyPaid($s);
+
+                return max(0, round($due - $paid, 2));
+            })
+            : 0.0;
+
+        $chargesBalance = (float) $loan->charges()->get()->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
+        $waived = (float) $loan->waivers()->sum('amount');
+
+        $outstanding = max(0, round($scheduleBalance + $penaltyBalance + $chargesBalance - $waived, 2));
+
+        return ['outstanding' => $outstanding, 'waivedInterest' => $waivedInterest];
+    }
+
+    /**
+     * Writes the waiver settlementQuote() only quoted — reduces each affected
+     * row's interest_due/total_due by its waived amount and records it in
+     * waived_interest (audit trail + what LoanPaymentController::destroy()
+     * adds back if an approved settlement is later voided). Called once,
+     * inside approveSettlement()'s transaction, immediately before
+     * applyAllocation() — never against a still-pending request, so a
+     * rejected settlement never needed to touch the schedule at all.
+     */
+    public static function applySettlementWaiver(Loan $loan, array $waivedInterest): void
+    {
+        if (empty($waivedInterest)) {
+            return;
+        }
+        $rows = $loan->schedules()->whereIn('id', array_keys($waivedInterest))->get();
+        foreach ($rows as $row) {
+            $waive = $waivedInterest[$row->id];
+            $row->update([
+                'interest_due' => round((float) $row->interest_due - $waive, 2),
+                'total_due' => round((float) $row->total_due - $waive, 2),
+                'waived_interest' => round($waive, 2),
+            ]);
+        }
+    }
+
+    /**
      * Applies `$amount` in standard loan-servicing order: Interest, then OD
      * (penalty), then other charges (Document/Legal/Valuation/Other), then
      * Principal — each bucket oldest-first across the loan's unpaid

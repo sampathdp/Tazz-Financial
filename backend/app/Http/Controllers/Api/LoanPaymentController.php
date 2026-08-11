@@ -83,8 +83,12 @@ class LoanPaymentController extends Controller
         }
         // Full settlement always targets the current outstanding balance —
         // computed server-side so a stale client value can't under/overstate it.
+        // It's quoted as of the payment's own date, not the full remaining
+        // schedule: interest not yet accrued by then is waived, not collected
+        // (see LoanPaymentAllocator::settlementQuote()).
         if ($isSettlement) {
-            $data['amount'] = $outstanding;
+            $asOf = Carbon::parse($data['paid_at'] ?? now());
+            $data['amount'] = LoanPaymentAllocator::settlementQuote($loan, $asOf)['outstanding'];
         } elseif ($data['amount'] > $outstanding) {
             return response()->json(['message' => "Amount exceeds the outstanding balance ({$outstanding})."], 422);
         }
@@ -144,12 +148,17 @@ class LoanPaymentController extends Controller
             return response()->json(['message' => 'This payment is not a pending settlement request.'], 422);
         }
         $loan = Loan::findOrFail($payment->credit_facility_id);
-        $outstanding = LoanPaymentAllocator::outstandingBalance($loan);
-        if ((float) $payment->amount > $outstanding) {
-            return response()->json(['message' => "The outstanding balance has changed since this request was made (now {$outstanding}). Reject it and ask the cashier to resubmit."], 422);
+        // Re-quote as of the same date the settlement was originally
+        // requested for — the request's amount was already computed against
+        // this (see store()), so this only catches genuine drift (a new
+        // charge, an existing installment paid off some other way) since then.
+        $quote = LoanPaymentAllocator::settlementQuote($loan, $payment->paid_at);
+        if ((float) $payment->amount > $quote['outstanding']) {
+            return response()->json(['message' => "The outstanding balance has changed since this request was made (now {$quote['outstanding']}). Reject it and ask the cashier to resubmit."], 422);
         }
 
-        DB::transaction(function () use ($loan, $payment, $request) {
+        DB::transaction(function () use ($loan, $payment, $quote, $request) {
+            LoanPaymentAllocator::applySettlementWaiver($loan, $quote['waivedInterest']);
             LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $payment->amount);
             LoanLedgerPoster::postSettlementApplied($payment);
             $payment->update([
@@ -243,6 +252,16 @@ class LoanPaymentController extends Controller
         DB::transaction(function () use ($payment, $data, $request) {
             foreach ($payment->allocations as $alloc) {
                 $row = $alloc->schedule;
+                // Undo the accrued-to-date interest waiver this settlement applied
+                // (see LoanPaymentAllocator::applySettlementWaiver()) before
+                // recomputing status below — voiding the settlement means the
+                // loan carries on, so the full future interest is owed again.
+                if ($payment->payment_type === 'Settlement' && (float) $row->waived_interest > 0) {
+                    $restore = (float) $row->waived_interest;
+                    $row->interest_due = round((float) $row->interest_due + $restore, 2);
+                    $row->total_due = round((float) $row->total_due + $restore, 2);
+                    $row->waived_interest = 0;
+                }
                 // paid_amount tracks principal+interest only (an installment's total_due
                 // never includes penalty — see LoanAmortizer), so only reverse those two;
                 // penalty_applied is netted off separately via LoanSummary's live estimate.
