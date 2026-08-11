@@ -10,6 +10,7 @@ use App\Models\JournalLine;
 use App\Support\AccrualInterestCalculator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -21,7 +22,14 @@ use Illuminate\Validation\ValidationException;
  */
 class AccountingReportController extends Controller
 {
-    private const TYPES = ['trial-balance', 'general-ledger', 'profit-loss', 'balance-sheet', 'ledger-drift'];
+    private const TYPES = ['trial-balance', 'general-ledger', 'profit-loss', 'balance-sheet', 'cash-flow', 'ledger-drift'];
+
+    /** "Cash and cash equivalents" for the cash flow statement — till + bank, not undeposited cheques (1030), which aren't cash yet. */
+    private const CASH_ACCOUNT_CODES = ['1010', '1020'];
+
+    /** Everything else touching cash is Operating for a deposit-taking lender (loan disbursement/collection and customer deposits are the core business — see IAS 7 §15 treatment for financial institutions), so only these two get carved out. */
+    private const INVESTING_ACCOUNT_CODES = ['1300'];
+    private const FINANCING_ACCOUNT_CODES = ['3010'];
 
     public function show(Request $request, string $type)
     {
@@ -34,6 +42,7 @@ class AccountingReportController extends Controller
             'general-ledger' => $this->generalLedger($request),
             'profit-loss' => $this->profitAndLoss($request),
             'balance-sheet' => $this->balanceSheet($request),
+            'cash-flow' => $this->cashFlow($request),
             'ledger-drift' => $this->ledgerDrift($request),
         };
     }
@@ -158,6 +167,81 @@ class AccountingReportController extends Controller
             // false here would mean the chart of accounts itself is misconfigured
             // (e.g. an account with the wrong normal_balance), not a data error.
             'balanced' => bccomp($totals['Asset'], $totalLiabAndEquity, 2) === 0,
+        ];
+    }
+
+    /**
+     * Direct-method cash flow statement over journal_lines: for every Posted
+     * entry in the period that touches Cash in Hand (1010) or Bank Accounts
+     * (1020), attribute the *other* line(s) on that same entry — grouped by
+     * account and bucketed Operating/Investing/Financing — to a category.
+     * Splitting on the non-cash sibling lines (rather than the cash line
+     * itself) means a single blended payment entry (e.g. principal + interest
+     * + penalty in one loan-payment journal entry) is attributed correctly
+     * across accounts without any arbitrary proportional guess: since every
+     * entry balances (debits = credits), the sum of the non-cash lines'
+     * (credit - debit) always equals exactly the cash side's net movement.
+     * Entries with no non-cash sibling (a till<->bank transfer) contribute
+     * nothing, which is correct — transfers between cash and cash
+     * equivalents are excluded from a cash flow statement.
+     */
+    private function cashFlow(Request $request): array
+    {
+        $from = $request->query('from') ?? now()->startOfMonth()->toDateString();
+        $to = $request->query('to') ?? now()->toDateString();
+
+        $cashAccountIds = ChartOfAccount::whereIn('code', self::CASH_ACCOUNT_CODES)->pluck('id');
+
+        $entryIds = DB::table('journal_lines')
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->where('journal_entries.status', 'Posted')
+            ->whereBetween(DB::raw('DATE(journal_entries.entry_date)'), [$from, $to])
+            ->whereIn('journal_lines.account_id', $cashAccountIds)
+            ->distinct()->pluck('journal_entries.id');
+
+        $lines = DB::table('journal_lines')
+            ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'journal_lines.account_id')
+            ->whereIn('journal_lines.journal_entry_id', $entryIds)
+            ->whereNotIn('journal_lines.account_id', $cashAccountIds)
+            ->selectRaw('chart_of_accounts.code, chart_of_accounts.name, SUM(journal_lines.credit - journal_lines.debit) as net_amount')
+            ->groupBy('chart_of_accounts.code', 'chart_of_accounts.name')
+            ->orderBy('chart_of_accounts.code')
+            ->get();
+
+        $buckets = ['operating' => [], 'investing' => [], 'financing' => []];
+        $totals = ['operating' => '0.00', 'investing' => '0.00', 'financing' => '0.00'];
+        foreach ($lines as $line) {
+            $amount = round((float) $line->net_amount, 2);
+            $key = in_array($line->code, self::INVESTING_ACCOUNT_CODES, true) ? 'investing'
+                : (in_array($line->code, self::FINANCING_ACCOUNT_CODES, true) ? 'financing' : 'operating');
+            $buckets[$key][] = ['code' => $line->code, 'name' => $line->name, 'amount' => $amount];
+            $totals[$key] = bcadd($totals[$key], (string) $amount, 2);
+        }
+
+        $netChangeInCash = bcadd(bcadd($totals['operating'], $totals['investing'], 2), $totals['financing'], 2);
+
+        $openingBalances = ChartOfAccount::balancesAsOf(Carbon::parse($from)->subDay()->toDateString());
+        $closingBalances = ChartOfAccount::balancesAsOf($to);
+        $openingCash = $cashAccountIds->reduce(fn ($sum, $id) => bcadd($sum, $openingBalances->get($id)->balance ?? '0.00', 2), '0.00');
+        $closingCash = $cashAccountIds->reduce(fn ($sum, $id) => bcadd($sum, $closingBalances->get($id)->balance ?? '0.00', 2), '0.00');
+
+        return [
+            'from' => $from, 'to' => $to,
+            'operating_activities' => $buckets['operating'],
+            'investing_activities' => $buckets['investing'],
+            'financing_activities' => $buckets['financing'],
+            'net_cash_from_operating' => $totals['operating'],
+            'net_cash_from_investing' => $totals['investing'],
+            'net_cash_from_financing' => $totals['financing'],
+            'net_change_in_cash' => $netChangeInCash,
+            'opening_cash' => $openingCash,
+            'closing_cash' => $closingCash,
+            // Sanity check, same idea as Balance Sheet's 'balanced' flag: the sum of
+            // the three activity totals must exactly equal the actual change in the
+            // cash accounts' own GL balance. A mismatch would mean an entry touched
+            // a cash account without a matching non-cash counter-line, which the
+            // LedgerPoster's own balance check should never allow.
+            'reconciled' => bccomp(bcsub($closingCash, $openingCash, 2), $netChangeInCash, 2) === 0,
         ];
     }
 

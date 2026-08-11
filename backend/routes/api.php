@@ -8,15 +8,19 @@ use App\Http\Controllers\Api\BankReconciliationController;
 use App\Http\Controllers\Api\BankTransactionController;
 use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\CashAccountController;
+use App\Http\Controllers\Api\CashBankReportController;
 use App\Http\Controllers\Api\CashbookEntryController;
 use App\Http\Controllers\Api\CashReconciliationController;
 use App\Http\Controllers\Api\CashTransferController;
 use App\Http\Controllers\Api\ChartOfAccountController;
+use App\Http\Controllers\Api\CollectionReportController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerDocumentController;
+use App\Http\Controllers\Api\CustomerReportController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ExpenseCategoryController;
 use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\FdDepositController;
@@ -26,6 +30,7 @@ use App\Http\Controllers\Api\FundingDashboardController;
 use App\Http\Controllers\Api\FundingProductController;
 use App\Http\Controllers\Api\FundingReportController;
 use App\Http\Controllers\Api\GeneratedNumberController;
+use App\Http\Controllers\Api\InvestorReportController;
 use App\Http\Controllers\Api\LoanChargeController;
 use App\Http\Controllers\Api\LoanCollateralDocumentController;
 use App\Http\Controllers\Api\LoanController;
@@ -33,6 +38,7 @@ use App\Http\Controllers\Api\LoanDiaryNoteController;
 use App\Http\Controllers\Api\LoanDocumentController;
 use App\Http\Controllers\Api\LoanPaymentController;
 use App\Http\Controllers\Api\LoanPostDatedChequeController;
+use App\Http\Controllers\Api\LoanReportController;
 use App\Http\Controllers\Api\LoanTypeController;
 use App\Http\Controllers\Api\LoanWaiverController;
 use App\Http\Controllers\Api\PermissionController;
@@ -67,7 +73,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('me', [AuthController::class, 'me']);
     Route::post('logout', [AuthController::class, 'logout']);
 
-    Route::get('dashboard', [DashboardController::class, 'index']);
+    Route::get('dashboard', [DashboardController::class, 'index'])->middleware('perm:Dashboard,View');
 
     // --- Branch Management ---
     Route::get('branches', [BranchController::class, 'index'])->middleware('perm:Branch Management,View');
@@ -128,6 +134,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('loans', [LoanController::class, 'index'])->middleware('perm:Loan Applications,View');
     // Flat path (not loans/overdue) so it can never collide with the loans/{loan} route below.
     Route::get('loans-overdue', [LoanController::class, 'overdue'])->middleware('perm:Overdue Loans,View');
+    Route::get('loan-reports/{type}', [LoanReportController::class, 'show'])->middleware('perm:Loan Reports,View');
     Route::get('loans/{loan}', [LoanController::class, 'show'])->middleware('perm:Loan Applications,View');
     Route::post('loans', [LoanController::class, 'store'])->middleware('perm:Loan Applications,Create');
     Route::put('loans/{loan}', [LoanController::class, 'update'])->middleware('perm:Loan Applications,Edit');
@@ -155,6 +162,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement'])->middleware('perm:Loan Payments,Approve');
     // Admin-only — realizing/bouncing a cheque is a Loan Adjustments action, not a regular Loan Payments one.
     Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('admin');
+
+    Route::get('collection-reports/{type}', [CollectionReportController::class, 'show'])->middleware('perm:Collection Reports,View');
 
     // --- Loan Management: Sales Executive Commissions ---
     Route::get('sales-executive-commissions', [SalesExecutiveCommissionController::class, 'index'])->middleware('perm:Sales Executive Commissions,View');
@@ -328,6 +337,12 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Funding Management: Reports & Dashboard ---
     Route::get('funding-reports/{type}', [FundingReportController::class, 'show'])->middleware('perm:Funding Reports,View');
     Route::get('funding-dashboard', [FundingDashboardController::class, 'index'])->middleware('perm:Funding Reports,View');
+
+    // --- Reports: Customer / Investor / Cash & Bank / Expense ---
+    Route::get('customer-reports/{type}', [CustomerReportController::class, 'show'])->middleware('perm:Customer Reports,View');
+    Route::get('investor-reports/{type}', [InvestorReportController::class, 'show'])->middleware('perm:Investor Reports,View');
+    Route::get('cash-bank-reports/{type}', [CashBankReportController::class, 'show'])->middleware('perm:Cash & Bank Reports,View');
+    Route::get('expense-reports/{type}', [ExpenseReportController::class, 'show'])->middleware('perm:Expense Reports,View');
 
     // --- Accounting: Chart of Accounts + Trial Balance / General Ledger ---
     Route::get('chart-of-accounts', [ChartOfAccountController::class, 'index'])->middleware('perm:Chart of Accounts,View');

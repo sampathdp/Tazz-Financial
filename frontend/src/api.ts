@@ -1323,6 +1323,48 @@ export const fundingReportsApi = {
     http.get(`/funding-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
 }
 
+export type LoanReportType = 'portfolio-summary' | 'arrears' | 'par-aging' | 'disbursement' | 'closed-loans'
+
+export const loanReportsApi = {
+  get: (type: LoanReportType, params?: Record<string, any>) =>
+    http.get(`/loan-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+}
+
+export type CollectionReportType = 'daily-cash' | 'collection-summary' | 'officer-performance' | 'trend'
+
+export const collectionReportsApi = {
+  get: (type: CollectionReportType, params?: Record<string, any>) =>
+    http.get(`/collection-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+}
+
+export type CustomerReportType = 'summary' | 'activity'
+
+export const customerReportsApi = {
+  get: (type: CustomerReportType, params?: Record<string, any>) =>
+    http.get(`/customer-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+}
+
+export type InvestorReportType = 'summary' | 'directory'
+
+export const investorReportsApi = {
+  get: (type: InvestorReportType, params?: Record<string, any>) =>
+    http.get(`/investor-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+}
+
+export type CashBankReportType = 'position' | 'cashbook-activity' | 'bank-activity'
+
+export const cashBankReportsApi = {
+  get: (type: CashBankReportType, params?: Record<string, any>) =>
+    http.get(`/cash-bank-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+}
+
+export type ExpenseReportType = 'summary' | 'list' | 'by-vendor'
+
+export const expenseReportsApi = {
+  get: (type: ExpenseReportType, params?: Record<string, any>) =>
+    http.get(`/expense-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+}
+
 export interface FundingDashboardSummary {
   totalFundingPortfolio: number; activeFds: number; monthlyInterestPayable: number;
   maturingThisMonth: number; newDepositsToday: number; renewalsThisMonth: number;
@@ -1400,6 +1442,13 @@ export interface LedgerDriftRow {
   glAccountId: number; glAccountCode: string; bookBalance: string; glBalance: string; variance: string;
 }
 export interface LedgerDriftReport { asOf: string; rows: LedgerDriftRow[]; hasDrift: boolean }
+export interface CashFlowRow { code: string; name: string; amount: number }
+export interface CashFlowReport {
+  from: string; to: string;
+  operatingActivities: CashFlowRow[]; investingActivities: CashFlowRow[]; financingActivities: CashFlowRow[];
+  netCashFromOperating: string; netCashFromInvesting: string; netCashFromFinancing: string;
+  netChangeInCash: string; openingCash: string; closingCash: string; reconciled: boolean;
+}
 export const accountingReportsApi = {
   trialBalance: (asOf?: string) => http.get('/accounting-reports/trial-balance', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as TrialBalanceRow[]),
   generalLedger: (accountId: number, params?: { from?: string; to?: string }) =>
@@ -1407,6 +1456,8 @@ export const accountingReportsApi = {
   profitLoss: (params?: { from?: string; to?: string; basis?: 'cash' | 'accrual' }) =>
     http.get('/accounting-reports/profit-loss', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as ProfitLossReport),
   balanceSheet: (asOf?: string) => http.get('/accounting-reports/balance-sheet', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as BalanceSheetReport),
+  cashFlow: (params?: { from?: string; to?: string }) =>
+    http.get('/accounting-reports/cash-flow', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as CashFlowReport),
   ledgerDrift: (asOf?: string) => http.get('/accounting-reports/ledger-drift', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as LedgerDriftReport),
 }
 
@@ -1485,6 +1536,14 @@ export const company = {
   logoUrl: `${API_BASE}/company-profile/logo`,
 }
 
+export interface DashboardSummary {
+  totalAssets: number; totalLiabilities: number; totalDeposits: number;
+  totalLoanPortfolio: number; outstandingLoanBalance: number; todaysCollections: number;
+  monthIncome: number; monthExpense: number; netProfit: number;
+  arrearsAmount: number; defaultLoans: number; activeCustomers: number; activeLoanOfficers: number;
+  bankBalances: number; cashInHand: number;
+}
+
 export const api = {
   users: {
     ...resource('users'),
@@ -1493,7 +1552,7 @@ export const api = {
     marketingExecutives: () =>
       http.get('/users/marketing-executives').then((r) => camelize(r.data) as { id: number; name: string }[]),
   },
-  dashboard: () => http.get('/dashboard').then((r) => camelize(r.data)),
+  dashboard: () => http.get('/dashboard').then((r) => camelize(r.data) as DashboardSummary),
 }
 
 export default api

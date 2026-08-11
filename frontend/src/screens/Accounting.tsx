@@ -9,7 +9,7 @@ import { Icon } from '../components/Icon'
 import {
   chartOfAccountsApi, journalEntriesApi, accountingReportsApi,
   type ChartOfAccount, type AccountType, type JournalEntry, type GeneralLedgerReport,
-  type TrialBalanceRow, type ProfitLossReport, type BalanceSheetReport, type LedgerDriftReport, type AuthUser,
+  type TrialBalanceRow, type ProfitLossReport, type BalanceSheetReport, type CashFlowReport, type LedgerDriftReport, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -376,6 +376,73 @@ export function BalanceSheetScreen({ user: _me }: { go: Go; user?: AuthUser | nu
             <div className="row between" style={{ fontSize: 16, fontWeight: 700 }}>
               <span>Total Liabilities + Equity</span>
               <span style={{ fontFamily: 'monospace' }}>{money(report.totalLiabilitiesAndEquity)}</span>
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ---------------------------- Cash Flow Statement ---------------------------- */
+/* Direct method: for every posted entry touching Cash in Hand/Bank Accounts
+   in the period, groups the *other* side of that entry by account and
+   buckets Operating/Investing/Financing (see AccountingReportController::
+   cashFlow's docblock). Nothing here is persisted or configurable — the
+   Investing/Financing account list is a fixed backend const (Fixed Assets,
+   Share Capital); everything else nets into Operating. */
+
+function CfSection({ title, rows, total, tone }: { title: string; rows: { code: string; name: string; amount: number }[]; total: string; tone?: 'good' | 'bad' }) {
+  return (
+    <Card pad={0}>
+      <div className="eyebrow" style={{ padding: '14px 20px 0' }}>{title}</div>
+      <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Amount', align: 'right' }]} rows={rows} empty="No cash movement in this range"
+        render={(r) => <><Td mono>{r.code}</Td><Td>{r.name}</Td><Td align="right" mono>{money(r.amount)}</Td></>} />
+      <div className="row between" style={{ padding: '10px 20px', borderTop: '1px solid var(--line)', fontWeight: 700 }}>
+        <span>Net Cash from {title}</span>
+        <span style={{ fontFamily: 'monospace', color: tone === 'good' ? 'var(--good)' : tone === 'bad' ? 'var(--bad)' : undefined }}>{money(total)}</span>
+      </div>
+    </Card>
+  )
+}
+
+export function CashFlowScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [report, setReport] = useState<CashFlowReport | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const refresh = () => {
+    setLoading(true)
+    accountingReportsApi.cashFlow({ from: fromDate || undefined, to: toDate || undefined }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [fromDate, toDate]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div>
+      <PageHead crumbs="Accounting" title="Cash Flow Statement" icon="swap"
+        actions={report && <Badge tone={report.reconciled ? 'green' : 'red'} dot>{report.reconciled ? 'Reconciled' : 'Out of balance'}</Badge>} />
+      <Card style={{ marginBottom: 16 }}>
+        <div className="row gap-3 wrap">
+          <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
+          <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+        </div>
+      </Card>
+      {loading ? <Card><div style={{ padding: 20, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div></Card> : report && (
+        <div className="col gap-4">
+          <CfSection title="Operating Activities" rows={report.operatingActivities} total={report.netCashFromOperating} />
+          <CfSection title="Investing Activities" rows={report.investingActivities} total={report.netCashFromInvesting} />
+          <CfSection title="Financing Activities" rows={report.financingActivities} total={report.netCashFromFinancing} />
+          <Card>
+            <div className="col gap-2">
+              <div className="row between"><span>Opening Cash</span><span style={{ fontFamily: 'monospace' }}>{money(report.openingCash)}</span></div>
+              <div className="row between" style={{ fontSize: 16, fontWeight: 700 }}>
+                <span>Net Change in Cash</span>
+                <span style={{ fontFamily: 'monospace', color: Number(report.netChangeInCash) >= 0 ? 'var(--good)' : 'var(--bad)' }}>{money(report.netChangeInCash)}</span>
+              </div>
+              <div className="row between" style={{ borderTop: '1px solid var(--line)', paddingTop: 8, fontWeight: 700 }}>
+                <span>Closing Cash</span><span style={{ fontFamily: 'monospace' }}>{money(report.closingCash)}</span>
+              </div>
             </div>
           </Card>
         </div>

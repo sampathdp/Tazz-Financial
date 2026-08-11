@@ -59,10 +59,36 @@ const GeneralLedgerScreen = named(() => import('./screens/Accounting'), 'General
 const TrialBalanceScreen = named(() => import('./screens/Accounting'), 'TrialBalanceScreen')
 const ProfitLossScreen = named(() => import('./screens/Accounting'), 'ProfitLossScreen')
 const BalanceSheetScreen = named(() => import('./screens/Accounting'), 'BalanceSheetScreen')
+const CashFlowScreen = named(() => import('./screens/Accounting'), 'CashFlowScreen')
 const LedgerDriftScreen = named(() => import('./screens/Accounting'), 'LedgerDriftScreen')
 
 const VendorsScreen = named(() => import('./screens/Expenses'), 'VendorsScreen')
 const ExpensesScreen = named(() => import('./screens/Expenses'), 'ExpensesScreen')
+
+const LoanPortfolioSummaryScreen = named(() => import('./screens/LoanReports'), 'LoanPortfolioSummaryScreen')
+const LoanParAgingScreen = named(() => import('./screens/LoanReports'), 'LoanParAgingScreen')
+const LoanArrearsScreen = named(() => import('./screens/LoanReports'), 'LoanArrearsScreen')
+const LoanDisbursementScreen = named(() => import('./screens/LoanReports'), 'LoanDisbursementScreen')
+const LoanClosedLoansScreen = named(() => import('./screens/LoanReports'), 'LoanClosedLoansScreen')
+
+const CollectionDailyCashScreen = named(() => import('./screens/CollectionReports'), 'CollectionDailyCashScreen')
+const CollectionSummaryScreen = named(() => import('./screens/CollectionReports'), 'CollectionSummaryScreen')
+const CollectionOfficerPerformanceScreen = named(() => import('./screens/CollectionReports'), 'CollectionOfficerPerformanceScreen')
+const CollectionTrendScreen = named(() => import('./screens/CollectionReports'), 'CollectionTrendScreen')
+
+const CustomerSummaryScreen = named(() => import('./screens/CustomerReports'), 'CustomerSummaryScreen')
+const CustomerActivityScreen = named(() => import('./screens/CustomerReports'), 'CustomerActivityScreen')
+
+const InvestorSummaryScreen = named(() => import('./screens/InvestorReports'), 'InvestorSummaryScreen')
+const InvestorDirectoryScreen = named(() => import('./screens/InvestorReports'), 'InvestorDirectoryScreen')
+
+const CashBankPositionScreen = named(() => import('./screens/CashBankReports'), 'CashBankPositionScreen')
+const CashbookActivityScreen = named(() => import('./screens/CashBankReports'), 'CashbookActivityScreen')
+const BankActivityScreen = named(() => import('./screens/CashBankReports'), 'BankActivityScreen')
+
+const ExpenseSummaryScreen = named(() => import('./screens/ExpenseReports'), 'ExpenseSummaryScreen')
+const ExpenseListScreen = named(() => import('./screens/ExpenseReports'), 'ExpenseListScreen')
+const ExpenseByVendorScreen = named(() => import('./screens/ExpenseReports'), 'ExpenseByVendorScreen')
 
 type ScreenComp = ComponentType<ScreenProps & { setBrand?: (v: { name: string, tagline: string }) => void }>
 
@@ -133,6 +159,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'acc/tb': TrialBalanceScreen,
   'acc/pl': ProfitLossScreen,
   'acc/bs': BalanceSheetScreen,
+  'acc/cf': CashFlowScreen,
   'acc/drift': LedgerDriftScreen,
   'exp/vendors': VendorsScreen,
   'exp/expenses': ExpensesScreen,
@@ -141,6 +168,25 @@ const SCREENS: Record<string, ScreenComp> = {
   'fund/deposits': DepositsScreen,
   'fund/fds': FixedDepositsScreen,
   'fund/reports': FundingReportsScreen,
+  'rep/loans-summary': LoanPortfolioSummaryScreen,
+  'rep/loans-par': LoanParAgingScreen,
+  'rep/loans-arrears': LoanArrearsScreen,
+  'rep/loans-disbursement': LoanDisbursementScreen,
+  'rep/loans-closed': LoanClosedLoansScreen,
+  'rep/coll-daily': CollectionDailyCashScreen,
+  'rep/coll-summary': CollectionSummaryScreen,
+  'rep/coll-officers': CollectionOfficerPerformanceScreen,
+  'rep/coll-trend': CollectionTrendScreen,
+  'rep/cust-summary': CustomerSummaryScreen,
+  'rep/cust-activity': CustomerActivityScreen,
+  'rep/inv-summary': InvestorSummaryScreen,
+  'rep/inv-directory': InvestorDirectoryScreen,
+  'rep/cb-position': CashBankPositionScreen,
+  'rep/cb-cashbook': CashbookActivityScreen,
+  'rep/cb-bank': BankActivityScreen,
+  'rep/exp-summary': ExpenseSummaryScreen,
+  'rep/exp-list': ExpenseListScreen,
+  'rep/exp-vendor': ExpenseByVendorScreen,
 }
 
 // Every nav entry (built screens + "soon" placeholders) gets a real route, so
