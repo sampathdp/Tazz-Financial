@@ -83,6 +83,8 @@ export const ROUTE_MODULE: Record<string, string> = {
   'acc/drift': 'Accounting Reports',
   'exp/vendors': 'Vendors',
   'exp/expenses': 'Expenses',
+  'exp/vouchers': 'Payment Vouchers',
+  'exp/petty-cash': 'Petty Cash',
   'fund/dashboard': 'Funding Reports',
   'fund/products': 'Funding Products',
   'fund/deposits': 'Deposits',

@@ -1472,11 +1472,16 @@ export interface Vendor {
 export const vendorsApi = resource<Vendor>('vendors')
 
 export type ExpenseStatus = 'Pending' | 'Approved' | 'Rejected' | 'Paid'
+export type VoucherStatus = 'Issued' | 'Voided'
 export interface PaymentVoucher {
   id: number; code: string; expenseId?: number | null; vendorId?: number | null; amount: string | number;
   paymentMethod: PaymentMethod; paidAt: string; paidBy?: number | null;
   cashAccountId?: number | null; bankAccountId?: number | null; chequeNo?: string | null;
-  status: string; journalEntryId?: number | null; journalEntry?: JournalEntry | null;
+  status: VoucherStatus; journalEntryId?: number | null; journalEntry?: JournalEntry | null;
+  voidReason?: string | null; voidedBy?: number | null; voidedAt?: string | null; voider?: { id: number; name: string } | null;
+  expense?: { id: number; code: string; branchId: number; description?: string | null; branch?: { id: number; name: string; code: string } | null } | null;
+  vendor?: { id: number; name: string } | null; payer?: { id: number; name: string } | null;
+  cashAccount?: { id: number; name: string } | null; bankAccount?: { id: number; name: string } | null;
 }
 export interface Expense {
   id: number; code: string; branchId: number; branch?: { id: number; name: string; code: string } | null;
@@ -1497,6 +1502,67 @@ export const expensesApi = {
   reject: (id: number) => http.put(`/expenses/${id}/reject`).then((r) => camelize(r.data) as Expense),
   pay: (id: number, body: { paymentMethod: PaymentMethod; cashAccountId?: number; bankAccountId?: number; chequeNo?: string; paidAt?: string }) =>
     http.post(`/expenses/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as PaymentVoucher),
+}
+
+export const paymentVouchersApi = {
+  list: (params?: { status?: VoucherStatus; branchId?: number }) =>
+    http.get('/payment-vouchers', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as PaymentVoucher[]),
+  void: (id: number, voidReason?: string) =>
+    http.delete(`/payment-vouchers/${id}`, { data: { void_reason: voidReason } }).then((r) => camelize(r.data) as PaymentVoucher),
+}
+
+/* ============================================================
+   Petty Cash: Funds (imprest float) / Replenishments (top-up) / Vouchers (spend)
+   ============================================================ */
+export interface PettyCashFund {
+  id: number; code: string; branchId: number; branch?: { id: number; name: string; code: string } | null;
+  custodianId?: number | null; custodian?: { id: number; name: string } | null;
+  chartOfAccountId?: number | null; name: string;
+  floatLimit: string | number; currentBalance: string | number; status: 'Active' | 'Inactive';
+}
+export const pettyCashFundsApi = {
+  list: (branchId?: number) => http.get('/petty-cash-funds', { params: branchId ? { branch_id: branchId } : {} }).then((r) => camelize(r.data) as PettyCashFund[]),
+  create: (body: { branchId: number; custodianId?: number; name: string; floatLimit: number | string; status?: 'Active' | 'Inactive' }) =>
+    http.post('/petty-cash-funds', snakeize(body)).then((r) => camelize(r.data) as PettyCashFund),
+  update: (id: number, body: Partial<{ branchId: number; custodianId?: number; name: string; floatLimit: number | string; status: 'Active' | 'Inactive' }>) =>
+    http.put(`/petty-cash-funds/${id}`, snakeize(body)).then((r) => camelize(r.data) as PettyCashFund),
+  remove: (id: number) => http.delete(`/petty-cash-funds/${id}`).then((r) => r.data),
+}
+
+export interface PettyCashReplenishment {
+  id: number; code: string; pettyCashFundId: number; fund?: { id: number; code: string; name: string; branchId: number; branch?: { id: number; name: string; code: string } | null } | null;
+  amount: string | number; fundingMethod: 'Cash' | 'Bank';
+  cashAccountId?: number | null; bankAccountId?: number | null;
+  cashAccount?: { id: number; name: string } | null; bankAccount?: { id: number; name: string } | null;
+  paidAt: string; paidBy?: number | null; payer?: { id: number; name: string } | null;
+  status: VoucherStatus; voidReason?: string | null; voidedBy?: number | null; voidedAt?: string | null; voider?: { id: number; name: string } | null;
+  journalEntryId?: number | null; journalEntry?: JournalEntry | null;
+}
+export const pettyCashReplenishmentsApi = {
+  list: (params?: { pettyCashFundId?: number; status?: VoucherStatus }) =>
+    http.get('/petty-cash-replenishments', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as PettyCashReplenishment[]),
+  create: (body: { pettyCashFundId: number; amount: number | string; fundingMethod: 'Cash' | 'Bank'; cashAccountId?: number; bankAccountId?: number; paidAt?: string }) =>
+    http.post('/petty-cash-replenishments', snakeize(body)).then((r) => camelize(r.data) as PettyCashReplenishment),
+  void: (id: number, voidReason?: string) =>
+    http.delete(`/petty-cash-replenishments/${id}`, { data: { void_reason: voidReason } }).then((r) => camelize(r.data) as PettyCashReplenishment),
+}
+
+export interface PettyCashVoucher {
+  id: number; code: string; pettyCashFundId: number; fund?: { id: number; code: string; name: string; branchId: number; branch?: { id: number; name: string; code: string } | null } | null;
+  expenseCategoryId: number; category?: { id: number; name: string } | null;
+  vendorId?: number | null; vendor?: { id: number; name: string } | null;
+  amount: string | number; description?: string | null; spentAt: string;
+  paidBy?: number | null; payer?: { id: number; name: string } | null;
+  status: VoucherStatus; voidReason?: string | null; voidedBy?: number | null; voidedAt?: string | null; voider?: { id: number; name: string } | null;
+  journalEntryId?: number | null; journalEntry?: JournalEntry | null;
+}
+export const pettyCashVouchersApi = {
+  list: (params?: { pettyCashFundId?: number; status?: VoucherStatus }) =>
+    http.get('/petty-cash-vouchers', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as PettyCashVoucher[]),
+  create: (body: { pettyCashFundId: number; expenseCategoryId: number; vendorId?: number; amount: number | string; description?: string; spentAt?: string }) =>
+    http.post('/petty-cash-vouchers', snakeize(body)).then((r) => camelize(r.data) as PettyCashVoucher),
+  void: (id: number, voidReason?: string) =>
+    http.delete(`/petty-cash-vouchers/${id}`, { data: { void_reason: voidReason } }).then((r) => camelize(r.data) as PettyCashVoucher),
 }
 
 export const rolesApi = {
@@ -1551,6 +1617,9 @@ export const api = {
      *  the Loan Officer dropdown on Loan Applications / Loan Detail. */
     marketingExecutives: () =>
       http.get('/users/marketing-executives').then((r) => camelize(r.data) as { id: number; name: string }[]),
+    /** Every active user — the custodian picklist used by Petty Cash Funds. */
+    active: () =>
+      http.get('/users/active').then((r) => camelize(r.data) as { id: number; name: string }[]),
   },
   dashboard: () => http.get('/dashboard').then((r) => camelize(r.data) as DashboardSummary),
 }

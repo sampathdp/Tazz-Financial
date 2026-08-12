@@ -1,14 +1,14 @@
-/* Tazz Investment & Credit — Expense Management: Vendors, Expenses.
-   Payment Vouchers has no screen of its own — a voucher only ever exists as
-   the result of paying one Expense (see ExpenseController::pay on the
-   backend), so its detail is shown inline on the Expenses list rather than
-   as a second, separately-browsable resource. */
+/* Tazz Investment & Credit — Expense Management: Vendors, Expenses, Payment Vouchers.
+   A voucher only ever exists as the result of paying one Expense (see
+   ExpenseController::pay on the backend) — PaymentVouchersScreen below is a
+   view/void screen over that auto-created record, not a place to raise a
+   new one from scratch. */
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
 import {
-  vendorsApi, expensesApi, expenseCategoriesApi, branchesApi, cashAccountsApi, bankAccountsApi,
+  vendorsApi, expensesApi, expenseCategoriesApi, branchesApi, cashAccountsApi, bankAccountsApi, paymentVouchersApi,
   type Vendor, type Expense, type ExpenseStatus, type ExpenseCategory, type Branch, type CashAccount, type BankAccount,
-  type PaymentMethod, type AuthUser,
+  type PaymentMethod, type PaymentVoucher, type VoucherStatus, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -313,6 +313,69 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
           )}
         </div>
       </Modal>
+    </div>
+  )
+}
+
+/* ---------------------------- Payment Vouchers ---------------------------- */
+
+const voucherTone = (s: VoucherStatus) => s === 'Voided' ? 'red' : 'green'
+
+export function PaymentVouchersScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [rows, setRows] = useState<PaymentVoucher[]>([])
+  const [loading, setLoading] = useState(true)
+  const [status, setStatus] = useState<VoucherStatus | ''>('')
+
+  const refresh = () => {
+    setLoading(true)
+    paymentVouchersApi.list({ status: status || undefined }).then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [status]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const voidVoucher = async (v: PaymentVoucher) => {
+    const reason = await notify.prompt({
+      title: `Void voucher ${v.code}?`,
+      msg: `This reverses its GL posting, restores ${money(v.amount)} to the ${v.paymentMethod === 'Cash' ? 'till' : 'bank account'} it was paid from, and reopens the expense for payment again.`,
+      placeholder: 'Reason for voiding', danger: true, okText: 'Void',
+    })
+    if (reason === null) return
+    try { await paymentVouchersApi.void(v.id, reason || undefined); refresh(); notify.success('Voucher voided', v.code) }
+    catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
+  }
+
+  return (
+    <div>
+      <PageHead crumbs="Expense Management" title="Payment Vouchers" icon="doc" sub={`${rows.length} ${rows.length === 1 ? 'voucher' : 'vouchers'}`} />
+
+      <Card style={{ marginBottom: 16 }}>
+        <Field label="Status"><Select value={status} onChange={(e) => setStatus(e.target.value as any)} style={{ maxWidth: 200 }}>
+          <option value="">All statuses</option>
+          <option value="Issued">Issued</option><option value="Voided">Voided</option>
+        </Select></Field>
+      </Card>
+
+      <Card pad={0}>
+        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        <Table
+          cols={[{ label: 'Code' }, { label: 'Expense' }, { label: 'Vendor' }, { label: 'Method' }, { label: 'Paid At' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+          empty="No payment vouchers yet" rows={rows}
+          render={(v) => <>
+            <Td mono>{v.code}</Td>
+            <Td>{v.expense?.code || '—'}</Td>
+            <Td>{v.vendor?.name || '—'}</Td>
+            <Td>{v.paymentMethod}{v.paymentMethod === 'Cheque' && v.chequeNo ? ` · ${v.chequeNo}` : ''}</Td>
+            <Td>{dateOnly(v.paidAt)}</Td>
+            <Td align="right" mono>{money(v.amount)}</Td>
+            <Td align="center"><Badge tone={voucherTone(v.status)} dot>{v.status}</Badge></Td>
+            <Td align="right">
+              {v.status === 'Issued' && <Can user={me} module="Payment Vouchers" action="Delete">
+                <Btn variant="ghost" size="sm" onClick={() => voidVoucher(v)}>Void</Btn>
+              </Can>}
+              {v.status === 'Voided' && v.voidReason && <span className="t-2" style={{ fontSize: 12 }} title={v.voidReason}>{v.voider?.name}</span>}
+            </Td>
+          </>} />}
+      </Card>
     </div>
   )
 }

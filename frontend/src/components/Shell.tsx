@@ -90,10 +90,10 @@ export const NAV: NavNode[] = [
   { section: 'Expense Management', icon: 'wallet', items: [
     { id: 'exp/vendors', label: 'Vendors', icon: 'store' },
     { id: 'exp/expenses', label: 'Expenses', icon: 'wallet' },
-    /** No dedicated screen — a voucher is only ever the result of paying an
-     *  Expense (see Expenses.tsx), shown inline there rather than as a
-     *  second, separately-browsable resource. */
-    { id: 'exp/vouchers', label: 'Payment Vouchers', icon: 'doc', soon: true },
+    /** View/void only — a voucher is only ever created as the result of
+     *  paying an Expense (see ExpenseController::pay on the backend). */
+    { id: 'exp/vouchers', label: 'Payment Vouchers', icon: 'doc' },
+    { id: 'exp/petty-cash', label: 'Petty Cash', icon: 'coins' },
   ] },
 
   { section: 'Masters', icon: 'layers', items: [

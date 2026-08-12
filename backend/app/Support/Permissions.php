@@ -52,6 +52,8 @@ class Permissions
         'Accounting Reports',
         'Vendors',
         'Expenses',
+        'Payment Vouchers',
+        'Petty Cash',
     ];
 
     public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve', 'Export'];

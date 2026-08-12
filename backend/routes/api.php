@@ -20,6 +20,10 @@ use App\Http\Controllers\Api\CustomerReportController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ExpenseCategoryController;
 use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\PaymentVoucherController;
+use App\Http\Controllers\Api\PettyCashFundController;
+use App\Http\Controllers\Api\PettyCashReplenishmentController;
+use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\JournalEntryController;
@@ -95,6 +99,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // Sales-executive picklist for Loan/Pawning "assign officer" dropdowns —
     // open to any authenticated user (see UserController::marketingExecutives()).
     Route::get('users/marketing-executives', [UserController::class, 'marketingExecutives']);
+    Route::get('users/active', [UserController::class, 'active']);
     Route::get('users', [UserController::class, 'index'])->middleware('perm:User Management,View');
     Route::post('users', [UserController::class, 'store'])->middleware('perm:User Management,Create');
     Route::put('users/{user}', [UserController::class, 'update'])->middleware('perm:User Management,Edit');
@@ -363,4 +368,24 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve'])->middleware('perm:Expenses,Approve');
     Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject'])->middleware('perm:Expenses,Approve');
     Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware('perm:Expenses,Edit');
+
+    // --- Expense Management: Payment Vouchers (auto-created by ExpenseController::pay — view/void only, see PaymentVoucherController) ---
+    Route::get('payment-vouchers', [PaymentVoucherController::class, 'index'])->middleware('perm:Payment Vouchers,View');
+    Route::delete('payment-vouchers/{paymentVoucher}', [PaymentVoucherController::class, 'destroy'])->middleware('perm:Payment Vouchers,Delete');
+
+    // --- Petty Cash: Funds (imprest float per branch, custodian, ceiling) ---
+    Route::get('petty-cash-funds', [PettyCashFundController::class, 'index'])->middleware('perm:Petty Cash,View');
+    Route::post('petty-cash-funds', [PettyCashFundController::class, 'store'])->middleware('perm:Petty Cash,Create');
+    Route::put('petty-cash-funds/{pettyCashFund}', [PettyCashFundController::class, 'update'])->middleware('perm:Petty Cash,Edit');
+    Route::delete('petty-cash-funds/{pettyCashFund}', [PettyCashFundController::class, 'destroy'])->middleware('perm:Petty Cash,Delete');
+
+    // --- Petty Cash: Replenishments (top the float back up from a cash/bank account) ---
+    Route::get('petty-cash-replenishments', [PettyCashReplenishmentController::class, 'index'])->middleware('perm:Petty Cash,View');
+    Route::post('petty-cash-replenishments', [PettyCashReplenishmentController::class, 'store'])->middleware('perm:Petty Cash,Create');
+    Route::delete('petty-cash-replenishments/{pettyCashReplenishment}', [PettyCashReplenishmentController::class, 'destroy'])->middleware('perm:Petty Cash,Delete');
+
+    // --- Petty Cash: Vouchers (small receipt-level spend against the float) ---
+    Route::get('petty-cash-vouchers', [PettyCashVoucherController::class, 'index'])->middleware('perm:Petty Cash,View');
+    Route::post('petty-cash-vouchers', [PettyCashVoucherController::class, 'store'])->middleware('perm:Petty Cash,Create');
+    Route::delete('petty-cash-vouchers/{pettyCashVoucher}', [PettyCashVoucherController::class, 'destroy'])->middleware('perm:Petty Cash,Delete');
 });

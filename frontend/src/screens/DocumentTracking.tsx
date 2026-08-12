@@ -10,12 +10,14 @@ const MODULE_LABELS: Record<string, string> = {
   speed_draft: 'Speed Draft', speed_draft_payment: 'Speed Draft Payment',
   fd_deposit: 'FD Deposit', fixed_deposit: 'Fixed Deposit', fd_withdrawal: 'FD Withdrawal',
   journal: 'Journal Entry', expense: 'Expense', payment_voucher: 'Payment Voucher',
+  petty_cash_fund: 'Petty Cash Fund', petty_cash_replenishment: 'Petty Cash Top-up', petty_cash_voucher: 'Petty Cash Voucher',
 }
 const moduleTone: Record<string, 'blue' | 'green' | 'amber' | 'neutral'> = {
   loan: 'blue', customer: 'green', payment: 'amber',
   speed_draft: 'blue', speed_draft_payment: 'amber',
   fd_deposit: 'green', fixed_deposit: 'blue', fd_withdrawal: 'amber',
   journal: 'neutral', expense: 'amber', payment_voucher: 'amber',
+  petty_cash_fund: 'green', petty_cash_replenishment: 'blue', petty_cash_voucher: 'amber',
 }
 
 export function DocumentTrackingScreen(_props: ScreenProps) {

@@ -50,6 +50,11 @@ class NumberGenerator
         'journal' => 'JV-{YEAR:2}-{SEQ:6}',
         'expense' => '{BRANCH}-EXP-{YEAR:2}-{SEQ:5}',
         'payment_voucher' => '{BRANCH}-PV-{YEAR:2}-{SEQ:5}',
+        // No {YEAR} — a fund is opened once and kept for years, not reissued
+        // annually like a receipt/voucher book.
+        'petty_cash_fund' => '{BRANCH}-PCF-{SEQ:4}',
+        'petty_cash_replenishment' => '{BRANCH}-PCR-{YEAR:2}-{SEQ:5}',
+        'petty_cash_voucher' => '{BRANCH}-PCV-{YEAR:2}-{SEQ:5}',
         // No {CODE} — Speed Draft Types aren't wired into the loan_type_id/
         // funding_product_id key columns (see SpeedDraftController::store()),
         // so numbering is one company-wide series per year across all types.

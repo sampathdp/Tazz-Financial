@@ -95,6 +95,27 @@ class ChartOfAccount extends Model
         return $account;
     }
 
+    /** Petty cash equivalent of forCashTill() — see its docblock. Parent is 1015 "Petty Cash Floats", kept apart from 1010 so a float's balance never mixes with the main tills. */
+    public static function forPettyCashFund(PettyCashFund $fund): self
+    {
+        if ($fund->chart_of_account_id) {
+            return $fund->chartOfAccount;
+        }
+        $parent = static::system('1015');
+        $account = static::create([
+            'code' => "1015-{$fund->id}",
+            'name' => "Petty Cash - {$fund->name}",
+            'account_type' => 'Asset',
+            'normal_balance' => 'Debit',
+            'parent_id' => $parent->id,
+            'is_system' => false,
+            'status' => $fund->status,
+        ]);
+        $fund->update(['chart_of_account_id' => $account->id]);
+
+        return $account;
+    }
+
     /**
      * Every account's {total_debit, total_credit, balance} as of a date (all
      * time if null), from Posted journal_lines only — there is no cached

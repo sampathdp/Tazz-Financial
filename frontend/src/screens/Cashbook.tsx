@@ -468,7 +468,7 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
             <Field label="Receipts to be Cancelled"><Input type="number" step="0.01" value={form.receiptsToBeCancelled} onChange={(e) => setForm((s) => ({ ...s, receiptsToBeCancelled: e.target.value }))} /></Field>
             <Field label="Encashment"><Input type="number" step="0.01" value={form.encashment} onChange={(e) => setForm((s) => ({ ...s, encashment: e.target.value }))} /></Field>
             <Field label="Cash Float"><Input type="number" step="0.01" value={form.cashFloat} onChange={(e) => setForm((s) => ({ ...s, cashFloat: e.target.value }))} /></Field>
-            <Field label="Petty Cash"><Input value="0.00" disabled title="Expense Management isn't built yet — this will pull live petty-cash spend once it ships." /></Field>
+            <Field label="Petty Cash"><Input type="number" step="0.01" value={form.pettyCash} onChange={(e) => setForm((s) => ({ ...s, pettyCash: e.target.value }))} /></Field>
             <div className="row gap-2">
               <Field label="Other Branch (Cash)" style={{ flex: 1 }}><Input type="number" step="0.01" value={form.otherBranchCash} onChange={(e) => setForm((s) => ({ ...s, otherBranchCash: e.target.value }))} /></Field>
               <Field label="Branch" style={{ width: 160 }}>

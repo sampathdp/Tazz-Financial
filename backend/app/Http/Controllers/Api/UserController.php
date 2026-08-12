@@ -33,6 +33,17 @@ class UserController extends Controller
             ->get(['id', 'name']);
     }
 
+    /**
+     * Lightweight roster of every active user — the "custodian" picklist
+     * used by Petty Cash Funds. Same reasoning as marketingExecutives():
+     * a role that can open a petty cash float may not have `perm:User
+     * Management,View`, but still needs to pick who's accountable for it.
+     */
+    public function active()
+    {
+        return User::where('status', 'Active')->orderBy('name')->get(['id', 'name']);
+    }
+
     public function store(Request $request)
     {
         $data = $this->validated($request);

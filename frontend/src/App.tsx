@@ -64,6 +64,8 @@ const LedgerDriftScreen = named(() => import('./screens/Accounting'), 'LedgerDri
 
 const VendorsScreen = named(() => import('./screens/Expenses'), 'VendorsScreen')
 const ExpensesScreen = named(() => import('./screens/Expenses'), 'ExpensesScreen')
+const PaymentVouchersScreen = named(() => import('./screens/Expenses'), 'PaymentVouchersScreen')
+const PettyCashScreen = named(() => import('./screens/PettyCash'), 'PettyCashScreen')
 
 const LoanPortfolioSummaryScreen = named(() => import('./screens/LoanReports'), 'LoanPortfolioSummaryScreen')
 const LoanParAgingScreen = named(() => import('./screens/LoanReports'), 'LoanParAgingScreen')
@@ -163,6 +165,8 @@ const SCREENS: Record<string, ScreenComp> = {
   'acc/drift': LedgerDriftScreen,
   'exp/vendors': VendorsScreen,
   'exp/expenses': ExpensesScreen,
+  'exp/vouchers': PaymentVouchersScreen,
+  'exp/petty-cash': PettyCashScreen,
   'fund/dashboard': FundingDashboardScreen,
   'fund/products': FundingProductsScreen,
   'fund/deposits': DepositsScreen,

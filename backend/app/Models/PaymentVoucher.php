@@ -9,11 +9,13 @@ class PaymentVoucher extends Model
     protected $fillable = [
         'code', 'expense_id', 'vendor_id', 'amount', 'payment_method', 'paid_at', 'paid_by',
         'cash_account_id', 'bank_account_id', 'cheque_no', 'status', 'journal_entry_id',
+        'void_reason', 'voided_by', 'voided_at',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
         'paid_at' => 'datetime',
+        'voided_at' => 'datetime',
     ];
 
     public function expense()
@@ -44,5 +46,10 @@ class PaymentVoucher extends Model
     public function journalEntry()
     {
         return $this->belongsTo(JournalEntry::class);
+    }
+
+    public function voider()
+    {
+        return $this->belongsTo(User::class, 'voided_by');
     }
 }
