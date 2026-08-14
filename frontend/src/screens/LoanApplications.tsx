@@ -25,7 +25,7 @@ const VEHICLE_TYPES = ['Car', 'Motorbike', 'Three-Wheeler', 'Van', 'Lorry', 'Bus
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
-  Pending: 'amber', Approved: 'blue', Rejected: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
+  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
 const custStatusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'red', Blacklisted: 'amber' }
 const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.']
@@ -279,6 +279,13 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     if (!reason) return
     try { await loansApi.reject(loan.id, reason); refresh(); notify.success('Loan rejected', loan.code) }
     catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
+  }
+
+  const cancel = async (loan: Loan) => {
+    const reason = await notify.prompt({ title: `Cancel loan ${loan.code}?`, msg: 'Already approved but not yet disbursed — give a reason.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Cancel Loan' })
+    if (!reason) return
+    try { await loansApi.cancel(loan.id, reason); refresh(); notify.success('Loan cancelled', loan.code) }
+    catch (ex: any) { notify.error('Cancel failed', getErrorText(ex)) }
   }
 
   const addGuarantor = () => setForm((s) => ({ ...s, guarantors: [...s.guarantors, { guarantorCustomerId: 0, guaranteedAmount: '' }] }))
@@ -616,7 +623,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
         actions={<Can user={me} module="Loan Applications" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>New Application</Btn></Can>} />
 
       <div className="row gap-2 wrap" style={{ marginBottom: 14 }}>
-        {(['All', 'Pending', 'Approved', 'Rejected', 'Active', 'Closed'] as const).map((s) => (
+        {(['All', 'Pending', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Closed'] as const).map((s) => (
           <Btn key={s} size="sm" variant={statusFilter === s ? 'primary' : 'solid'} onClick={() => setStatusFilter(s)}>
             {s} {counts[s] ? <span style={{ opacity: 0.7 }}>({counts[s]})</span> : ''}
           </Btn>
@@ -658,6 +665,11 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
                 {l.status === 'Pending' && (
                   <Can user={me} module="Loan Applications" action="Delete">
                     <button className="mms-act" title="Withdraw" onClick={() => remove(l)}><Icon n="trash" s={15} /></button>
+                  </Can>
+                )}
+                {l.status === 'Approved' && (
+                  <Can user={me} module="Loan Applications" action="Approve">
+                    <button className="mms-act" title="Cancel" onClick={() => cancel(l)}><Icon n="x" s={15} c="var(--bad)" /></button>
                   </Can>
                 )}
               </div>

@@ -14,6 +14,7 @@ import {
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
+import { downloadBlob, exportSheetsToExcel } from '../lib/export'
 import type { Go } from './types'
 
 const money = (v: number | string | null | undefined) =>
@@ -274,46 +275,79 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
 /* ---------------------------- Profit & Loss ---------------------------- */
 
 export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  const [basis, setBasis] = useState<'cash' | 'accrual'>('cash')
   const [report, setReport] = useState<ProfitLossReport | null>(null)
   const [loading, setLoading] = useState(true)
+  const [exportingPdf, setExportingPdf] = useState(false)
 
   const refresh = () => {
     setLoading(true)
-    accountingReportsApi.profitLoss({ from: fromDate || undefined, to: toDate || undefined, basis }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+    accountingReportsApi.profitLoss({ from: fromDate || undefined, to: toDate || undefined }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
   }
-  useEffect(refresh, [fromDate, toDate, basis]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(refresh, [fromDate, toDate]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const exportExcel = () => {
+    if (!report) return
+    const rows: (string | number)[][] = [
+      ['Profit & Loss', 'Cash and Accrual Basis'],
+      ['From', fromDate || 'Inception', 'To', toDate || 'Today'],
+      [],
+      ['Income'],
+      ['Code', 'Name', 'Cash Basis', 'Accrual Basis'],
+      ...report.income.map((r) => [r.code, r.name, Number(r.cashBalance), Number(r.accrualBalance)]),
+      ['', 'Total Income', Number(report.totalIncomeCash), Number(report.totalIncomeAccrual)],
+      [],
+      ['Expense'],
+      ['Code', 'Name', 'Amount'],
+      ...report.expense.map((r) => [r.code, r.name, Number(r.balance)]),
+      ['', 'Total Expense', Number(report.totalExpense)],
+      [],
+      ['', 'Net Profit (Cash Basis)', Number(report.netProfitCash)],
+      ['', 'Net Profit (Accrual Basis)', Number(report.netProfitAccrual)],
+    ]
+    void exportSheetsToExcel([{ name: 'Profit & Loss', rows }], `profit-loss-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  const exportPdf = async () => {
+    setExportingPdf(true)
+    try {
+      const blob = await accountingReportsApi.profitLossPdf({ from: fromDate || undefined, to: toDate || undefined })
+      downloadBlob(blob, `profit-loss-${new Date().toISOString().slice(0, 10)}.pdf`)
+    } catch (ex: any) {
+      notify.error('Export failed', getErrorText(ex, 'Could not generate PDF'))
+    } finally { setExportingPdf(false) }
+  }
 
   return (
     <div>
-      <PageHead crumbs="Accounting" title="Profit & Loss" icon="pie" />
+      <PageHead crumbs="Accounting" title="Profit & Loss" icon="pie"
+        actions={report && <div className="row gap-2">
+          <Btn variant="solid" size="sm" icon="download" onClick={exportExcel}>Export Excel</Btn>
+          <Btn variant="solid" size="sm" icon="download" onClick={exportPdf} disabled={exportingPdf}>{exportingPdf ? 'Exporting…' : 'Export PDF'}</Btn>
+        </div>} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap" style={{ alignItems: 'flex-end' }}>
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
-          <Field label="Basis">
-            <div className="row gap-1">
-              <Btn size="sm" variant="ghost" active={basis === 'cash'} onClick={() => setBasis('cash')}>Cash Basis</Btn>
-              <Btn size="sm" variant="ghost" active={basis === 'accrual'} onClick={() => setBasis('accrual')}>Accrual Basis</Btn>
-            </div>
-          </Field>
         </div>
         <div className="t-2" style={{ fontSize: 11.5, marginTop: 10 }}>
-          {basis === 'cash'
-            ? 'Cash Basis: income counted when actually collected — today\'s figures.'
-            : 'Accrual Basis: interest income counted as it\'s scheduled to be earned, not when collected. Only Interest Income changes below — everything else (charges, penalty, expenses) stays the same either way.'}
+          Cash Basis: income counted when actually collected. Accrual Basis: interest income counted as it's scheduled to be earned, not when collected. Only Interest Income differs between the two — expenses stay the same either way.
         </div>
       </Card>
       {loading ? <Card><div style={{ padding: 20, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div></Card> : report && (
         <div className="col gap-4">
           <Card pad={0}>
             <div className="eyebrow" style={{ padding: '14px 20px 0' }}>Income</div>
-            <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Amount', align: 'right' }]} rows={report.income} empty="No income posted in this range"
-              render={(r) => <><Td mono>{r.code}</Td><Td>{r.name}</Td><Td align="right" mono>{money(r.balance)}</Td></>} />
+            <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Cash Basis', align: 'right' }, { label: 'Accrual Basis', align: 'right' }]} rows={report.income} empty="No income posted in this range"
+              render={(r) => <><Td mono>{r.code}</Td><Td>{r.name}</Td><Td align="right" mono>{money(r.cashBalance)}</Td><Td align="right" mono>{money(r.accrualBalance)}</Td></>} />
             <div className="row between" style={{ padding: '10px 20px', borderTop: '1px solid var(--line)', fontWeight: 700 }}>
-              <span>Total Income</span><span style={{ fontFamily: 'monospace' }}>{money(report.totalIncome)}</span>
+              <span>Total Income</span>
+              <span className="row gap-4">
+                <span style={{ fontFamily: 'monospace' }} title="Cash Basis">{money(report.totalIncomeCash)}</span>
+                <span style={{ fontFamily: 'monospace' }} title="Accrual Basis">{money(report.totalIncomeAccrual)}</span>
+              </span>
             </div>
           </Card>
           <Card pad={0}>
@@ -325,9 +359,15 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
             </div>
           </Card>
           <Card>
-            <div className="row between" style={{ fontSize: 16, fontWeight: 700 }}>
-              <span>Net Profit</span>
-              <span style={{ fontFamily: 'monospace', color: Number(report.netProfit) >= 0 ? 'var(--good)' : 'var(--bad)' }}>{money(report.netProfit)}</span>
+            <div className="col gap-2">
+              <div className="row between" style={{ fontSize: 16, fontWeight: 700 }}>
+                <span>Net Profit (Cash Basis)</span>
+                <span style={{ fontFamily: 'monospace', color: Number(report.netProfitCash) >= 0 ? 'var(--good)' : 'var(--bad)' }}>{money(report.netProfitCash)}</span>
+              </div>
+              <div className="row between" style={{ fontSize: 16, fontWeight: 700 }}>
+                <span>Net Profit (Accrual Basis)</span>
+                <span style={{ fontFamily: 'monospace', color: Number(report.netProfitAccrual) >= 0 ? 'var(--good)' : 'var(--bad)' }}>{money(report.netProfitAccrual)}</span>
+              </div>
             </div>
           </Card>
         </div>

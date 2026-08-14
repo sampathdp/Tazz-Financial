@@ -48,6 +48,7 @@ class LoanController extends Controller
         'insurance',
         'applier:id,name',
         'approver:id,name',
+        'canceller:id,name',
         'coApplicants.coApplicant:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
         'guarantors.guarantor:id,full_name,code,nic_no,phone',
         'collateral.vehicleDetail',
@@ -295,6 +296,25 @@ class LoanController extends Controller
             'approved_by' => $request->user()->id,
             'approved_at' => now(),
             'rejected_reason' => $data['rejected_reason'],
+        ]);
+
+        return $loan->load(self::DETAIL_RELATIONS);
+    }
+
+    /** Cancels an Approved-but-not-yet-disbursed loan — distinct from reject(),
+     *  which only applies to Pending applications. No schedule/ledger/cashbook
+     *  postings exist yet at this stage, so this is a plain status flip. */
+    public function cancel(Request $request, Loan $loan)
+    {
+        if ($loan->status !== 'Approved') {
+            return response()->json(['message' => 'Only approved (not yet disbursed) loans can be cancelled.'], 422);
+        }
+        $data = $request->validate(['cancelled_reason' => 'required|string|max:255']);
+        $loan->update([
+            'status' => 'Cancelled',
+            'cancelled_by' => $request->user()->id,
+            'cancelled_at' => now(),
+            'cancelled_reason' => $data['cancelled_reason'],
         ]);
 
         return $loan->load(self::DETAIL_RELATIONS);

@@ -8,6 +8,7 @@ use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\JournalLine;
 use App\Support\AccrualInterestCalculator;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -116,15 +117,46 @@ class AccountingReportController extends Controller
     {
         $from = $request->query('from');
         $to = $request->query('to');
-        $basis = $request->query('basis') === 'accrual' ? 'accrual' : 'cash';
-        [$income, $expense, $totalIncome, $totalExpense] = $this->plFigures($from, $to, $basis);
+        [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpense] = $this->plFiguresBothBases($from, $to);
 
         return [
-            'from' => $from, 'to' => $to, 'basis' => $basis,
+            'from' => $from, 'to' => $to,
             'income' => $income, 'expense' => $expense,
-            'total_income' => $totalIncome, 'total_expense' => $totalExpense,
-            'net_profit' => bcsub($totalIncome, $totalExpense, 2),
+            'total_income_cash' => $totalIncomeCash, 'total_income_accrual' => $totalIncomeAccrual,
+            'total_expense' => $totalExpense,
+            'net_profit_cash' => bcsub($totalIncomeCash, $totalExpense, 2),
+            'net_profit_accrual' => bcsub($totalIncomeAccrual, $totalExpense, 2),
         ];
+    }
+
+    /**
+     * PDF export, one report type at a time (profit-loss is the first;
+     * add a `resources/views/reports/{type}.blade.php` and a case below to
+     * extend to the others). Reuses plFigures() so the PDF can never disagree
+     * with the on-screen report.
+     */
+    public function exportPdf(Request $request, string $type)
+    {
+        if ($type !== 'profit-loss') {
+            abort(404);
+        }
+
+        $from = $request->query('from');
+        $to = $request->query('to');
+        [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpense] = $this->plFiguresBothBases($from, $to);
+
+        $pdf = Pdf::loadView('reports.profit-loss', [
+            'companyName' => config('app.name'),
+            'from' => $from, 'to' => $to,
+            'income' => $income, 'expense' => $expense,
+            'totalIncomeCash' => $totalIncomeCash, 'totalIncomeAccrual' => $totalIncomeAccrual,
+            'totalExpense' => $totalExpense,
+            'netProfitCash' => bcsub($totalIncomeCash, $totalExpense, 2),
+            'netProfitAccrual' => bcsub($totalIncomeAccrual, $totalExpense, 2),
+            'generatedAt' => now(),
+        ])->setPaper('a4');
+
+        return $pdf->download('profit-loss-' . now()->format('Y-m-d-His') . '.pdf');
     }
 
     private function balanceSheet(Request $request)
@@ -329,5 +361,28 @@ class AccountingReportController extends Controller
         }
 
         return [$rows['Income'], $rows['Expense'], $totalIncome, $totalExpense];
+    }
+
+    /**
+     * Cash and Accrual side by side, for the single combined P&L view (no
+     * more basis toggle — both figures shown together). Expense never
+     * differs by basis (see ACCRUAL_INCOME_ACCOUNTS), so it's computed once
+     * and shared; only Income needs a cash_balance/accrual_balance per row.
+     */
+    private function plFiguresBothBases(?string $from, ?string $to): array
+    {
+        [$cashIncome, $expense, $totalIncomeCash, $totalExpense] = $this->plFigures($from, $to, 'cash');
+        [$accrualIncome, , $totalIncomeAccrual] = $this->plFigures($from, $to, 'accrual');
+
+        $accrualByCode = collect($accrualIncome)->keyBy('code');
+        $income = collect($cashIncome)->map(fn (array $row) => [
+            'account_id' => $row['account_id'],
+            'code' => $row['code'],
+            'name' => $row['name'],
+            'cash_balance' => $row['balance'],
+            'accrual_balance' => $accrualByCode->get($row['code'])['balance'] ?? $row['balance'],
+        ])->values();
+
+        return [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpense];
     }
 }

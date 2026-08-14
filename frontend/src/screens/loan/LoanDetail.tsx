@@ -25,7 +25,7 @@ const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
-  Pending: 'amber', Approved: 'blue', Rejected: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
+  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
 const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = {
   Paid: 'green', Partial: 'amber', Overdue: 'red', Pending: 'neutral',
@@ -78,6 +78,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           <Badge tone={statusTone[loan.status]} dot>{loan.status}</Badge>
           {flags.map((f) => <Badge key={f.label} tone="red">{f.label}{f.at ? ` · ${dateOnly(f.at)}` : ''}</Badge>)}
           {loan.status === 'Rejected' && loan.rejectedReason && <span className="t-2" style={{ fontSize: 12 }}>Reason: {loan.rejectedReason}</span>}
+          {loan.status === 'Cancelled' && loan.cancelledReason && <span className="t-2" style={{ fontSize: 12 }}>Reason: {loan.cancelledReason}</span>}
         </div>
         <div className="row gap-2 wrap">
           <Can user={me} module="Active Loans" action="Edit">

@@ -233,7 +233,7 @@ export interface LoanType {
   status?: 'Active' | 'Inactive';
 }
 
-export type LoanStatus = 'Pending' | 'Approved' | 'Rejected' | 'Active' | 'Closed' | 'WrittenOff' | 'Restructured'
+export type LoanStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled' | 'Active' | 'Closed' | 'WrittenOff' | 'Restructured'
 
 export interface LoanGuarantorInput {
   id?: number;
@@ -362,6 +362,9 @@ export interface Loan {
   approver?: { id: number; name: string } | null;
   approvedAt?: string | null;
   rejectedReason?: string | null;
+  canceller?: { id: number; name: string } | null;
+  cancelledAt?: string | null;
+  cancelledReason?: string | null;
   disbursedAmount?: number | string | null;
   disbursedAt?: string | null;
   outstandingBalanceCache?: number | string | null;
@@ -803,6 +806,7 @@ export const loansApi = {
   remove: (id: number) => http.delete(`/loans/${id}`).then((r) => r.data),
   approve: (id: number) => http.post(`/loans/${id}/approve`).then((r) => camelize(r.data) as Loan),
   reject: (id: number, reason: string) => http.post(`/loans/${id}/reject`, { rejected_reason: reason }).then((r) => camelize(r.data) as Loan),
+  cancel: (id: number, reason: string) => http.post(`/loans/${id}/cancel`, { cancelled_reason: reason }).then((r) => camelize(r.data) as Loan),
   disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>
@@ -1430,7 +1434,12 @@ export interface GeneralLedgerReport {
 }
 export interface TrialBalanceRow { accountId: number; code: string; name: string; accountType: AccountType; totalDebit: string; totalCredit: string; balance: string }
 export interface PLRow { accountId: number; code: string; name: string; balance: string }
-export interface ProfitLossReport { from?: string | null; to?: string | null; basis?: 'cash' | 'accrual'; income: PLRow[]; expense: PLRow[]; totalIncome: string; totalExpense: string; netProfit: string }
+export interface PLIncomeRow { accountId: number; code: string; name: string; cashBalance: string; accrualBalance: string }
+export interface ProfitLossReport {
+  from?: string | null; to?: string | null; income: PLIncomeRow[]; expense: PLRow[];
+  totalIncomeCash: string; totalIncomeAccrual: string; totalExpense: string;
+  netProfitCash: string; netProfitAccrual: string;
+}
 export interface BalanceSheetRow { accountId: number; code: string; name: string; balance: string }
 export interface BalanceSheetReport {
   asOf: string; assets: BalanceSheetRow[]; liabilities: BalanceSheetRow[]; equity: BalanceSheetRow[];
@@ -1453,12 +1462,14 @@ export const accountingReportsApi = {
   trialBalance: (asOf?: string) => http.get('/accounting-reports/trial-balance', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as TrialBalanceRow[]),
   generalLedger: (accountId: number, params?: { from?: string; to?: string }) =>
     http.get('/accounting-reports/general-ledger', { params: snakeize({ accountId, ...params }) }).then((r) => camelize(r.data) as GeneralLedgerReport),
-  profitLoss: (params?: { from?: string; to?: string; basis?: 'cash' | 'accrual' }) =>
+  profitLoss: (params?: { from?: string; to?: string }) =>
     http.get('/accounting-reports/profit-loss', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as ProfitLossReport),
   balanceSheet: (asOf?: string) => http.get('/accounting-reports/balance-sheet', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as BalanceSheetReport),
   cashFlow: (params?: { from?: string; to?: string }) =>
     http.get('/accounting-reports/cash-flow', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as CashFlowReport),
   ledgerDrift: (asOf?: string) => http.get('/accounting-reports/ledger-drift', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as LedgerDriftReport),
+  profitLossPdf: (params?: { from?: string; to?: string }) =>
+    http.get('/accounting-reports/profit-loss/pdf', { params: snakeize(params || {}), responseType: 'blob' }).then((r) => r.data as Blob),
 }
 
 /* ============================================================

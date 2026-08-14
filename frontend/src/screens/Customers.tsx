@@ -109,7 +109,7 @@ const num = (v: unknown) => Number(v ?? 0)
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
 const loanStatusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
-  Pending: 'amber', Approved: 'blue', Rejected: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
+  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
 
 /** Read-only profile — Personal Details, Occupation, Documents, and the customer's loans.

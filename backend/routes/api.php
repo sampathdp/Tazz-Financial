@@ -146,6 +146,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('loans/{loan}', [LoanController::class, 'destroy'])->middleware('perm:Loan Applications,Delete');
     Route::post('loans/{loan}/approve', [LoanController::class, 'approve'])->middleware('perm:Loan Applications,Approve');
     Route::post('loans/{loan}/reject', [LoanController::class, 'reject'])->middleware('perm:Loan Applications,Approve');
+    Route::post('loans/{loan}/cancel', [LoanController::class, 'cancel'])->middleware('perm:Loan Applications,Approve');
 
     // --- Loan Management: Active Loans ---
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
@@ -354,6 +355,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('chart-of-accounts', [ChartOfAccountController::class, 'store'])->middleware('perm:Chart of Accounts,Create');
     Route::put('chart-of-accounts/{chartOfAccount}', [ChartOfAccountController::class, 'update'])->middleware('perm:Chart of Accounts,Edit');
     Route::get('accounting-reports/{type}', [AccountingReportController::class, 'show'])->middleware('perm:Accounting Reports,View');
+    Route::get('accounting-reports/{type}/pdf', [AccountingReportController::class, 'exportPdf'])->middleware('perm:Accounting Reports,View');
     Route::get('journal-entries', [JournalEntryController::class, 'index'])->middleware('perm:Accounting Reports,View');
 
     // --- Expense Management: Vendors ---

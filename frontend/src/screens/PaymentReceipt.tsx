@@ -475,6 +475,18 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     } catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
+  const voidPayment = async (payment: LoanPayment) => {
+    const reason = await notify.prompt({ title: `Cancel receipt ${payment.code}?`, msg: 'Reverses this payment from the schedule, ledger, and cashbook. This action cannot be undone.', placeholder: 'Reason for cancelling', danger: true, okText: 'Cancel Receipt' })
+    if (reason === null) return
+    try {
+      await loanPaymentsApi.remove(payment.id, reason || undefined)
+      notify.success('Receipt cancelled', payment.code)
+      setViewPayment(null)
+      await reloadSelected()
+      refresh()
+    } catch (ex: any) { notify.error('Cancel failed', getErrorText(ex)) }
+  }
+
   const startOver = () => {
     setReceipt(null); setSelected(null)
     resetPayForm(); resetSettleForm(); resetChequeForm()
@@ -723,7 +735,14 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       </Modal>
 
       <Modal open={!!viewPayment} onClose={() => setViewPayment(null)} title={viewPayment ? `Payment ${viewPayment.code}` : ''} sub={selected ? `${selected.code} — ${selected.customer?.fullName}` : undefined}
-        footer={<Btn variant="solid" onClick={() => setViewPayment(null)}>Close</Btn>}>
+        footer={<>
+          {viewPayment && viewPayment.status !== 'Voided' && viewPayment.approvalStatus !== 'PendingApproval' && (
+            <Can user={me} module="Loan Payments" action="Delete">
+              <Btn variant="danger" icon="x" onClick={() => voidPayment(viewPayment)}>Cancel Receipt</Btn>
+            </Can>
+          )}
+          <Btn variant="solid" onClick={() => setViewPayment(null)}>Close</Btn>
+        </>}>
         {viewPayment && (() => {
           const p = viewPayment
           const pendingClearance = p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending'

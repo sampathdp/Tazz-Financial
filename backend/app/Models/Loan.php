@@ -30,6 +30,7 @@ class Loan extends Model
         'start_date', 'maturity_date',
         'disbursed_amount', 'disbursed_at', 'outstanding_balance_cache',
         'status', 'applied_by', 'approved_by', 'approved_at', 'rejected_reason', 'closed_at', 'created_by',
+        'cancelled_reason', 'cancelled_by', 'cancelled_at',
     ];
 
     protected $casts = [
@@ -43,6 +44,7 @@ class Loan extends Model
         'outstanding_balance_cache' => 'decimal:2',
         'approved_at' => 'datetime',
         'closed_at' => 'datetime',
+        'cancelled_at' => 'datetime',
     ];
 
     protected static function booted(): void
@@ -87,6 +89,11 @@ class Loan extends Model
     public function approver()
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function canceller()
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 
     public function creator()
