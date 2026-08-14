@@ -1,5 +1,6 @@
 /* Axios client for the Laravel API. Base URL is proxied to http://localhost:8000 in dev (see vite.config.ts). */
 import axios from 'axios'
+import { beginDownload, endDownload } from './lib/downloadProgress'
 
 export const http = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -19,6 +20,7 @@ http.interceptors.request.use((cfg) => {
   const t = localStorage.getItem('mms-token')
   if (t) cfg.headers.Authorization = `Bearer ${t}`
   cfg.headers['X-Request-Id'] = genReqId()
+  if (cfg.responseType === 'blob') beginDownload()
   return cfg
 })
 
@@ -36,9 +38,11 @@ http.interceptors.response.use(
   (r) => {
     const m = r.config.method?.toLowerCase()
     if (m && m !== 'get') listCache.clear()
+    if (r.config.responseType === 'blob') endDownload()
     return r
   },
   (err) => {
+    if (err?.config?.responseType === 'blob') endDownload()
     const status = err?.response?.status
     if (status === 401 && localStorage.getItem('mms-token') && !unauthorizedHandled) {
       unauthorizedHandled = true

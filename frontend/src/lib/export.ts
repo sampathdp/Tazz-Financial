@@ -3,6 +3,8 @@
    dompdf; see AccountingReportController::exportPdf and its Blade views).
    xlsx is ~900KB raw, so it's loaded on demand (see src/excel.ts for the
    same convention on the import side) instead of bundled into every screen. */
+import { beginDownload, endDownload } from './downloadProgress'
+
 let _xlsx: typeof import('xlsx') | null = null
 const loadXlsx = async (): Promise<typeof import('xlsx')> => (_xlsx ??= await import('xlsx'))
 
@@ -20,11 +22,16 @@ export function downloadBlob(blob: Blob, filename: string) {
 export type ExcelSheet = { name: string; rows: (string | number | null | undefined)[][] }
 
 export async function exportSheetsToExcel(sheets: ExcelSheet[], filename: string) {
-  const XLSX = await loadXlsx()
-  const wb = XLSX.utils.book_new()
-  for (const s of sheets) {
-    const ws = XLSX.utils.aoa_to_sheet(s.rows)
-    XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 31))
+  beginDownload()
+  try {
+    const XLSX = await loadXlsx()
+    const wb = XLSX.utils.book_new()
+    for (const s of sheets) {
+      const ws = XLSX.utils.aoa_to_sheet(s.rows)
+      XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 31))
+    }
+    XLSX.writeFile(wb, filename)
+  } finally {
+    endDownload()
   }
-  XLSX.writeFile(wb, filename)
 }
