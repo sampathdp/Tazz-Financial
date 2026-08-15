@@ -41,4 +41,30 @@ class CurrentBranch
 
         return $user->branch_id;
     }
+
+    /**
+     * Same isolation rule as BelongsToBranch's global scope, but callable
+     * directly on any query builder (Eloquent or DB::table) — for report
+     * queries whose models don't carry that trait (Expense, CashbookEntry,
+     * FixedDeposit, ...) or that go through DB::table()/joins entirely,
+     * where a global scope can't reach. $column may be table-qualified
+     * (e.g. 'cf.branch_id') for joined queries.
+     */
+    public static function applyScope($query, string $column = 'branch_id')
+    {
+        $user = Auth::user();
+        if (!$user) {
+            return $query;
+        }
+        if ($user->role && $user->role->can_view_all_branches) {
+            $filter = self::filterId();
+            if ($filter) {
+                $query->where($column, $filter);
+            }
+
+            return $query;
+        }
+
+        return $query->where($column, $user->branch_id);
+    }
 }

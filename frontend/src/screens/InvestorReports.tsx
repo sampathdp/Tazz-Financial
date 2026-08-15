@@ -5,10 +5,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Card, PageHead, Table, Td } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { ExportButtons } from '../components/ExportButtons'
+import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
 import { ProgressRow } from '../components/charts'
 import { investorReportsApi, type AuthUser } from '../api'
 import { getErrorText } from '../lib/apiError'
+import { downloadBlob, exportFlatTableToExcel } from '../lib/export'
 import type { Go } from './types'
+
+const today = () => new Date().toISOString().slice(0, 10)
 
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -38,18 +43,36 @@ function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, te
 
 /* ---------------------------- Summary ---------------------------- */
 
-export function InvestorSummaryScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function InvestorSummaryScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
-    investorReportsApi.get('summary').then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [])
+    setLoading(true)
+    investorReportsApi.get('summary', { branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [branchId])
+
+  const exportExcel = () => {
+    if (!data) return
+    void exportFlatTableToExcel({
+      reportTitle: 'Investor Summary', meta: `As of ${data.asOf}`,
+      columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right' }],
+      rows: [
+        { metric: 'Investor Count', value: data.investorCount }, { metric: 'Active Investor Count', value: data.activeInvestorCount },
+        { metric: 'Total Invested', value: money(data.totalInvested) }, { metric: 'Average Investment', value: money(data.avgInvestment) },
+        { metric: 'New Investors This Month', value: data.newInvestorsThisMonth },
+      ],
+    }, `investor-summary-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await investorReportsApi.pdf('summary', { branchId }), `investor-summary-${today()}.pdf`)
 
   return (
     <div>
-      <PageHead crumbs="Funding / Investment / Reports" title="Investor Summary" icon="pie" />
+      <PageHead crumbs="Funding / Investment / Reports" title="Investor Summary" icon="pie"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
         <TileGrid>
           <Tile icon="users" label="Investors" value={String(data.investorCount ?? 0)} />
@@ -65,22 +88,44 @@ export function InvestorSummaryScreen({ go: _go, user: _me }: { go: Go; user?: A
 
 /* ---------------------------- Directory ---------------------------- */
 
-export function InvestorDirectoryScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function InvestorDirectoryScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [rows, setRows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
-    investorReportsApi.get('directory').then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [])
+    setLoading(true)
+    investorReportsApi.get('directory', { branchId }).then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [branchId])
 
   const topInvestors = useMemo(() =>
     [...rows].sort((a, b) => Number(b.totalPrincipal) - Number(a.totalPrincipal)).slice(0, 8), [rows])
   const maxPrincipal = Math.max(1, ...topInvestors.map((c) => Number(c.totalPrincipal || 0)))
 
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Investor Directory',
+      columns: [
+        { label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Branch', key: 'branch' }, { label: 'Phone', key: 'phone' },
+        { label: 'FDs', key: 'fds', align: 'right', format: 'number' }, { label: 'Active FDs', key: 'activeFds', align: 'right', format: 'number' },
+        { label: 'Total Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Interest Paid', key: 'interestPaid', align: 'right', format: 'money' }, { label: 'Last Deposit', key: 'lastDeposit' },
+      ],
+      rows: rows.map((c) => ({
+        code: c.code, name: c.fullName, branch: c.branch?.name || '—', phone: c.phone || '—', fds: c.fdCount, activeFds: c.activeFdCount,
+        principal: Number(c.totalPrincipal || 0), interestPaid: Number(c.totalInterestPaid || 0), lastDeposit: dateOnly(c.lastDepositAt),
+      })),
+      totalRow: { name: 'Total', principal: rows.reduce((a, c) => a + Number(c.totalPrincipal || 0), 0), interestPaid: rows.reduce((a, c) => a + Number(c.totalInterestPaid || 0), 0) },
+      emptyText: 'No investors',
+    }, `investor-directory-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await investorReportsApi.pdf('directory', { branchId }), `investor-directory-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Funding / Investment / Reports" title="Investor Directory" icon="list" />
+      <PageHead crumbs="Funding / Investment / Reports" title="Investor Directory" icon="list"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (
         <>
           {topInvestors.length > 0 && (

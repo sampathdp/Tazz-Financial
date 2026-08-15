@@ -7,10 +7,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Card, PageHead, Badge, Field, Input, Table, Td } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { ExportButtons } from '../components/ExportButtons'
+import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
 import { BarChart, Donut, ProgressRow, AreaChart } from '../components/charts'
 import { loanReportsApi, type Loan, type OverdueLoan, type AuthUser } from '../api'
 import { getErrorText } from '../lib/apiError'
+import { downloadBlob, exportFlatTableToExcel, exportReportToExcel, type ExcelColumn } from '../lib/export'
 import type { Go } from './types'
+
+const today = () => new Date().toISOString().slice(0, 10)
 
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -43,14 +48,16 @@ function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, te
 
 /* ---------------------------- Portfolio Summary ---------------------------- */
 
-export function LoanPortfolioSummaryScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function LoanPortfolioSummaryScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
-    loanReportsApi.get('portfolio-summary').then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [])
+    setLoading(true)
+    loanReportsApi.get('portfolio-summary', { branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [branchId])
 
   const statusData = data ? [
     { label: 'Active', value: data.activeLoans, color: PALETTE[1] },
@@ -59,9 +66,28 @@ export function LoanPortfolioSummaryScreen({ go: _go, user: _me }: { go: Go; use
     { label: 'Written Off', value: data.writtenOffLoans, color: PALETTE[3] },
   ].filter((d) => d.value > 0) : []
 
+  const exportExcel = () => {
+    if (!data) return
+    void exportFlatTableToExcel({
+      reportTitle: 'Loan Portfolio Summary', meta: `As of ${data.asOf}`,
+      columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right' }],
+      rows: [
+        { metric: 'Total Loans', value: data.totalLoans }, { metric: 'Active Loans', value: data.activeLoans },
+        { metric: 'Closed Loans', value: data.closedLoans }, { metric: 'Pending Loans', value: data.pendingLoans },
+        { metric: 'Written Off Loans', value: data.writtenOffLoans }, { metric: 'Total Outstanding Balance', value: money(data.totalOutstandingBalance) },
+        { metric: 'Average Loan Size', value: money(data.avgLoanSize) }, { metric: 'Disbursed This Month (count)', value: data.disbursedThisMonthCount },
+        { metric: 'Disbursed This Month (amount)', value: money(data.disbursedThisMonthAmount) }, { metric: 'Disbursed Last Month (amount)', value: money(data.disbursedLastMonthAmount) },
+        { metric: 'Loan Growth %', value: pct(data.loanGrowthPct) },
+      ],
+    }, `loan-portfolio-summary-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await loanReportsApi.pdf('portfolio-summary', { branchId }), `loan-portfolio-summary-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Loan Management / Reports" title="Loan Portfolio Summary" icon="coins" />
+      <PageHead crumbs="Loan Management / Reports" title="Loan Portfolio Summary" icon="coins"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
         <>
           <TileGrid>
@@ -87,19 +113,48 @@ export function LoanPortfolioSummaryScreen({ go: _go, user: _me }: { go: Go; use
 
 /* ---------------------------- PAR / NPL Aging ---------------------------- */
 
-export function LoanParAgingScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function LoanParAgingScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
-    loanReportsApi.get('par-aging').then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [])
+    setLoading(true)
+    loanReportsApi.get('par-aging', { branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [branchId])
+
+  const exportExcel = () => {
+    if (!data) return
+    void exportReportToExcel({
+      sheetName: 'PAR Aging', reportTitle: 'Loan PAR / NPL Aging', meta: `As of ${data.asOf}`,
+      sections: [
+        {
+          title: 'Summary',
+          columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right' }],
+          rows: [
+            { metric: 'Total Active Portfolio', value: money(data.totalPortfolio) }, { metric: 'PAR 30 %', value: pct(data.par30Pct) },
+            { metric: 'PAR 60 %', value: pct(data.par60Pct) }, { metric: 'NPL % (90+)', value: pct(data.nplPct) },
+          ],
+        },
+        {
+          title: 'Aging Buckets',
+          columns: [{ label: 'Bucket', key: 'label' }, { label: 'Loans', key: 'count', align: 'right', format: 'number' }, { label: 'Outstanding', key: 'amount', align: 'right', format: 'money' }, { label: '% of Portfolio', key: 'pct', align: 'right', format: 'percent' }],
+          rows: data.buckets || [],
+        },
+      ],
+    }, `loan-par-aging-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await loanReportsApi.pdf('par-aging', { branchId }), `loan-par-aging-${today()}.pdf`)
 
   return (
     <div>
       <PageHead crumbs="Loan Management / Reports" title="Loan PAR / NPL Aging" icon="target"
-        actions={data && <Badge tone={data.nplPct > 5 ? 'red' : 'green'} dot>NPL {pct(data.nplPct)}</Badge>} />
+        actions={data && <div className="row gap-3" style={{ alignItems: 'center' }}>
+          <Badge tone={data.nplPct > 5 ? 'red' : 'green'} dot>NPL {pct(data.nplPct)}</Badge>
+          <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />
+        </div>} />
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
         <>
           <TileGrid>
@@ -127,18 +182,19 @@ export function LoanParAgingScreen({ go: _go, user: _me }: { go: Go; user?: Auth
 
 /* ---------------------------- Arrears ---------------------------- */
 
-export function LoanArrearsScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [rows, setRows] = useState<OverdueLoan[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    loanReportsApi.get('arrears', { from: fromDate || undefined, to: toDate || undefined })
+    loanReportsApi.get('arrears', { from: fromDate || undefined, to: toDate || undefined, branchId })
       .then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [fromDate, toDate])
+  }, [fromDate, toDate, branchId])
 
   const totalOverdue = rows.reduce((a, r) => a + Number(r.overdueAmount || 0), 0)
   const totalPenalty = rows.reduce((a, r) => a + Number(r.penaltyDue || 0), 0)
@@ -153,13 +209,35 @@ export function LoanArrearsScreen({ go: _go, user: _me }: { go: Go; user?: AuthU
   }, [rows])
   const maxOfficer = Math.max(1, ...byOfficer.map(([, v]) => v))
 
+  const arrearsColumns: ExcelColumn[] = [
+    { label: 'Loan Code', key: 'code' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' }, { label: 'Officer', key: 'officer' },
+    { label: 'Days Overdue', key: 'daysOverdue', align: 'right', format: 'number' }, { label: 'Installments', key: 'installments', align: 'right', format: 'number' },
+    { label: 'Overdue Amount', key: 'overdueAmount', align: 'right', format: 'money' }, { label: 'Penalty Due', key: 'penaltyDue', align: 'right', format: 'money' },
+  ]
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Loan Arrears', meta: `Period: ${fromDate || '—'} to ${toDate || today()}`,
+      columns: arrearsColumns,
+      rows: rows.map((l) => ({
+        code: l.code, customer: l.customer?.fullName || '—', branch: l.branch?.name || '—',
+        officer: l.loanDetail?.recoveryOfficer?.name || l.loanDetail?.loanOfficer?.name || '—',
+        daysOverdue: l.daysOverdue, installments: l.overdueInstallments, overdueAmount: Number(l.overdueAmount || 0), penaltyDue: Number(l.penaltyDue || 0),
+      })),
+      totalRow: { customer: 'Total', overdueAmount: totalOverdue, penaltyDue: totalPenalty },
+      emptyText: 'No overdue loans',
+    }, `loan-arrears-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await loanReportsApi.pdf('arrears', { from: fromDate || undefined, to: toDate || undefined, branchId }), `loan-arrears-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Loan Management / Reports" title="Loan Arrears" icon="alert" />
+      <PageHead crumbs="Loan Management / Reports" title="Loan Arrears" icon="alert"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (
@@ -199,18 +277,19 @@ export function LoanArrearsScreen({ go: _go, user: _me }: { go: Go; user?: AuthU
 
 /* ---------------------------- Disbursement ---------------------------- */
 
-export function LoanDisbursementScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [rows, setRows] = useState<Loan[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    loanReportsApi.get('disbursement', { from: fromDate || undefined, to: toDate || undefined })
+    loanReportsApi.get('disbursement', { from: fromDate || undefined, to: toDate || undefined, branchId })
       .then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [fromDate, toDate])
+  }, [fromDate, toDate, branchId])
 
   const total = rows.reduce((a, r) => a + Number(r.principalAmount || 0), 0)
 
@@ -224,13 +303,32 @@ export function LoanDisbursementScreen({ go: _go, user: _me }: { go: Go; user?: 
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [rows])
 
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Loan Disbursement', meta: `Period: ${fromDate || '—'} to ${toDate || today()}`,
+      columns: [
+        { label: 'Loan Code', key: 'code' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' }, { label: 'Loan Type', key: 'loanType' },
+        { label: 'Officer', key: 'officer' }, { label: 'Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Disbursed', key: 'disbursed' }, { label: 'Status', key: 'status', align: 'center' },
+      ],
+      rows: rows.map((l) => ({
+        code: l.code, customer: l.customer?.fullName || '—', branch: l.branch?.name || '—', loanType: l.loanDetail?.loanType?.name || '—',
+        officer: l.loanDetail?.loanOfficer?.name || '—', principal: Number(l.principalAmount || 0), disbursed: dateOnly(l.disbursedAt), status: l.status,
+      })),
+      totalRow: { customer: 'Total', principal: total },
+      emptyText: 'No disbursements in this range',
+    }, `loan-disbursement-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await loanReportsApi.pdf('disbursement', { from: fromDate || undefined, to: toDate || undefined, branchId }), `loan-disbursement-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Loan Management / Reports" title="Loan Disbursement" icon="upload" />
+      <PageHead crumbs="Loan Management / Reports" title="Loan Disbursement" icon="upload"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (
@@ -268,18 +366,19 @@ export function LoanDisbursementScreen({ go: _go, user: _me }: { go: Go; user?: 
 
 /* ---------------------------- Closed Loans ---------------------------- */
 
-export function LoanClosedLoansScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [rows, setRows] = useState<Loan[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    loanReportsApi.get('closed-loans', { from: fromDate || undefined, to: toDate || undefined })
+    loanReportsApi.get('closed-loans', { from: fromDate || undefined, to: toDate || undefined, branchId })
       .then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [fromDate, toDate])
+  }, [fromDate, toDate, branchId])
 
   const total = rows.reduce((a, r) => a + Number(r.principalAmount || 0), 0)
 
@@ -289,13 +388,32 @@ export function LoanClosedLoansScreen({ go: _go, user: _me }: { go: Go; user?: A
     return [...m.entries()].map(([label, value], i) => ({ label, value, color: PALETTE[i % PALETTE.length] }))
   }, [rows])
 
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Closed Loans', meta: `Period: ${fromDate || '—'} to ${toDate || today()}`,
+      columns: [
+        { label: 'Loan Code', key: 'code' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' },
+        { label: 'Loan Type', key: 'loanType' }, { label: 'Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Closed', key: 'closed' },
+      ],
+      rows: rows.map((l) => ({
+        code: l.code, customer: l.customer?.fullName || '—', branch: l.branch?.name || '—', loanType: l.loanDetail?.loanType?.name || '—',
+        principal: Number(l.principalAmount || 0), closed: dateOnly(l.closedAt),
+      })),
+      totalRow: { customer: 'Total', principal: total },
+      emptyText: 'No closed loans in this range',
+    }, `loan-closed-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await loanReportsApi.pdf('closed-loans', { from: fromDate || undefined, to: toDate || undefined, branchId }), `loan-closed-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Loan Management / Reports" title="Closed Loans" icon="check" />
+      <PageHead crumbs="Loan Management / Reports" title="Closed Loans" icon="check"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (

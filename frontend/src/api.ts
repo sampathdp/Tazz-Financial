@@ -166,6 +166,8 @@ export interface AuthUser {
   roleId?: number;
   branch?: { id: number; name: string; code: string } | null;
   status?: 'Active' | 'Inactive';
+  /** True for roles not confined to one branch (admin, head office, auditor, ...) — see Role.can_view_all_branches / BelongsToBranch. Gates the branch filter on report screens. */
+  canViewAllBranches?: boolean;
   /** Flat list of "Module:Action" strings the role is allowed to perform. */
   permissions?: string[];
 }
@@ -1322,6 +1324,10 @@ export const fdInterestPaymentsApi = {
     http.post(`/fd-interest-payments/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as FdInterestPayment),
 }
 
+/** Shared by every *ReportsApi below — same `{prefix}-reports/{type}[/pdf]` shape as the backend's *ReportController classes. */
+const reportPdf = (prefix: string, type: string, params?: Record<string, any>) =>
+  http.get(`/${prefix}-reports/${type}/pdf`, { params: snakeize(params || {}), responseType: 'blob' }).then((r) => r.data as Blob)
+
 export type FundingReportType =
   | 'active' | 'maturing-soon' | 'matured' | 'monthly-interest' | 'interest-paid'
   | 'deposit-history' | 'customer-funding-history' | 'renewal-history' | 'capital-enhancements'
@@ -1329,6 +1335,7 @@ export type FundingReportType =
 export const fundingReportsApi = {
   get: (type: FundingReportType, params?: Record<string, any>) =>
     http.get(`/funding-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: FundingReportType, params?: Record<string, any>) => reportPdf('funding', type, params),
 }
 
 export type LoanReportType = 'portfolio-summary' | 'arrears' | 'par-aging' | 'disbursement' | 'closed-loans'
@@ -1336,6 +1343,7 @@ export type LoanReportType = 'portfolio-summary' | 'arrears' | 'par-aging' | 'di
 export const loanReportsApi = {
   get: (type: LoanReportType, params?: Record<string, any>) =>
     http.get(`/loan-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: LoanReportType, params?: Record<string, any>) => reportPdf('loan', type, params),
 }
 
 export type CollectionReportType = 'daily-cash' | 'collection-summary' | 'officer-performance' | 'trend'
@@ -1343,6 +1351,7 @@ export type CollectionReportType = 'daily-cash' | 'collection-summary' | 'office
 export const collectionReportsApi = {
   get: (type: CollectionReportType, params?: Record<string, any>) =>
     http.get(`/collection-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: CollectionReportType, params?: Record<string, any>) => reportPdf('collection', type, params),
 }
 
 export type CustomerReportType = 'summary' | 'activity'
@@ -1350,6 +1359,7 @@ export type CustomerReportType = 'summary' | 'activity'
 export const customerReportsApi = {
   get: (type: CustomerReportType, params?: Record<string, any>) =>
     http.get(`/customer-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: CustomerReportType, params?: Record<string, any>) => reportPdf('customer', type, params),
 }
 
 export type InvestorReportType = 'summary' | 'directory'
@@ -1357,6 +1367,7 @@ export type InvestorReportType = 'summary' | 'directory'
 export const investorReportsApi = {
   get: (type: InvestorReportType, params?: Record<string, any>) =>
     http.get(`/investor-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: InvestorReportType, params?: Record<string, any>) => reportPdf('investor', type, params),
 }
 
 export type CashBankReportType = 'position' | 'cashbook-activity' | 'bank-activity'
@@ -1364,6 +1375,7 @@ export type CashBankReportType = 'position' | 'cashbook-activity' | 'bank-activi
 export const cashBankReportsApi = {
   get: (type: CashBankReportType, params?: Record<string, any>) =>
     http.get(`/cash-bank-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: CashBankReportType, params?: Record<string, any>) => reportPdf('cash-bank', type, params),
 }
 
 export type ExpenseReportType = 'summary' | 'list' | 'by-vendor'
@@ -1371,6 +1383,7 @@ export type ExpenseReportType = 'summary' | 'list' | 'by-vendor'
 export const expenseReportsApi = {
   get: (type: ExpenseReportType, params?: Record<string, any>) =>
     http.get(`/expense-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: ExpenseReportType, params?: Record<string, any>) => reportPdf('expense', type, params),
 }
 
 export interface FundingDashboardSummary {
@@ -1472,8 +1485,8 @@ export const accountingReportsApi = {
   cashFlow: (params?: { from?: string; to?: string }) =>
     http.get('/accounting-reports/cash-flow', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as CashFlowReport),
   ledgerDrift: (asOf?: string) => http.get('/accounting-reports/ledger-drift', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as LedgerDriftReport),
-  profitLossPdf: (params?: { from?: string; to?: string }) =>
-    http.get('/accounting-reports/profit-loss/pdf', { params: snakeize(params || {}), responseType: 'blob' }).then((r) => r.data as Blob),
+  pdf: (type: 'trial-balance' | 'general-ledger' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ledger-drift', params?: Record<string, any>) =>
+    http.get(`/accounting-reports/${type}/pdf`, { params: snakeize(params || {}), responseType: 'blob' }).then((r) => r.data as Blob),
 }
 
 /* ============================================================

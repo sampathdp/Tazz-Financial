@@ -140,6 +140,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // Flat path (not loans/overdue) so it can never collide with the loans/{loan} route below.
     Route::get('loans-overdue', [LoanController::class, 'overdue'])->middleware('perm:Overdue Loans,View');
     Route::get('loan-reports/{type}', [LoanReportController::class, 'show'])->middleware('perm:Loan Reports,View');
+    Route::get('loan-reports/{type}/pdf', [LoanReportController::class, 'exportPdf'])->middleware('perm:Loan Reports,View');
     Route::get('loans/{loan}', [LoanController::class, 'show'])->middleware('perm:Loan Applications,View');
     Route::post('loans', [LoanController::class, 'store'])->middleware('perm:Loan Applications,Create');
     Route::put('loans/{loan}', [LoanController::class, 'update'])->middleware('perm:Loan Applications,Edit');
@@ -170,6 +171,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('admin');
 
     Route::get('collection-reports/{type}', [CollectionReportController::class, 'show'])->middleware('perm:Collection Reports,View');
+    Route::get('collection-reports/{type}/pdf', [CollectionReportController::class, 'exportPdf'])->middleware('perm:Collection Reports,View');
 
     // --- Loan Management: Sales Executive Commissions ---
     Route::get('sales-executive-commissions', [SalesExecutiveCommissionController::class, 'index'])->middleware('perm:Sales Executive Commissions,View');
@@ -342,13 +344,18 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Funding Management: Reports & Dashboard ---
     Route::get('funding-reports/{type}', [FundingReportController::class, 'show'])->middleware('perm:Funding Reports,View');
+    Route::get('funding-reports/{type}/pdf', [FundingReportController::class, 'exportPdf'])->middleware('perm:Funding Reports,View');
     Route::get('funding-dashboard', [FundingDashboardController::class, 'index'])->middleware('perm:Funding Reports,View');
 
     // --- Reports: Customer / Investor / Cash & Bank / Expense ---
     Route::get('customer-reports/{type}', [CustomerReportController::class, 'show'])->middleware('perm:Customer Reports,View');
+    Route::get('customer-reports/{type}/pdf', [CustomerReportController::class, 'exportPdf'])->middleware('perm:Customer Reports,View');
     Route::get('investor-reports/{type}', [InvestorReportController::class, 'show'])->middleware('perm:Investor Reports,View');
+    Route::get('investor-reports/{type}/pdf', [InvestorReportController::class, 'exportPdf'])->middleware('perm:Investor Reports,View');
     Route::get('cash-bank-reports/{type}', [CashBankReportController::class, 'show'])->middleware('perm:Cash & Bank Reports,View');
+    Route::get('cash-bank-reports/{type}/pdf', [CashBankReportController::class, 'exportPdf'])->middleware('perm:Cash & Bank Reports,View');
     Route::get('expense-reports/{type}', [ExpenseReportController::class, 'show'])->middleware('perm:Expense Reports,View');
+    Route::get('expense-reports/{type}/pdf', [ExpenseReportController::class, 'exportPdf'])->middleware('perm:Expense Reports,View');
 
     // --- Accounting: Chart of Accounts + Trial Balance / General Ledger ---
     Route::get('chart-of-accounts', [ChartOfAccountController::class, 'index'])->middleware('perm:Chart of Accounts,View');

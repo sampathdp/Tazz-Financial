@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\FixedDeposit;
 use App\Models\Loan;
+use App\Support\CurrentBranch;
+use App\Support\ReportExport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -28,6 +30,60 @@ class CustomerReportController extends Controller
             'summary' => $this->summary(),
             'activity' => $this->activity($request),
         };
+    }
+
+    public function exportPdf(Request $request, string $type)
+    {
+        if (!in_array($type, self::TYPES, true)) {
+            abort(404);
+        }
+
+        [$title, $sections, $meta] = match ($type) {
+            'summary' => $this->summaryPdf(),
+            'activity' => $this->activityPdf($request),
+        };
+
+        return ReportExport::pdf($title, $sections, null, $meta)->download(ReportExport::filename($type));
+    }
+
+    private function summaryPdf(): array
+    {
+        $d = $this->summary();
+        $rows = [
+            ['metric' => 'Total Customers', 'value' => $d['totalCustomers']],
+            ['metric' => 'Active Customers', 'value' => $d['activeCustomers']],
+            ['metric' => 'Inactive Customers', 'value' => $d['inactiveCustomers']],
+            ['metric' => 'Blacklisted Customers', 'value' => $d['blacklistedCustomers']],
+            ['metric' => 'New This Month', 'value' => $d['newThisMonth']],
+            ['metric' => 'New Last Month', 'value' => $d['newLastMonth']],
+            ['metric' => 'Growth %', 'value' => $d['growthPct'] === null ? '—' : number_format($d['growthPct'], 2) . '%'],
+            ['metric' => 'Borrower Count', 'value' => $d['borrowerCount']],
+            ['metric' => 'Repeat Customer Count', 'value' => $d['repeatCustomerCount']],
+            ['metric' => 'Repeat Customer %', 'value' => number_format($d['repeatCustomerPct'], 2) . '%'],
+        ];
+        $sections = [['columns' => [['key' => 'metric', 'label' => 'Metric'], ['key' => 'value', 'label' => 'Value', 'align' => 'right']], 'rows' => $rows]];
+
+        return ['Customer Summary', $sections, 'As of ' . $d['asOf']];
+    }
+
+    private function activityPdf(Request $request): array
+    {
+        $rows = $this->activity($request);
+        $columns = [
+            ['key' => 'code', 'label' => 'Code'], ['key' => 'fullName', 'label' => 'Name'], ['key' => 'branch', 'label' => 'Branch'], ['key' => 'status', 'label' => 'Status'],
+            ['key' => 'loanCount', 'label' => 'Loans', 'align' => 'right', 'format' => 'number'], ['key' => 'totalBorrowed', 'label' => 'Total Borrowed', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'totalOutstanding', 'label' => 'Outstanding', 'align' => 'right', 'format' => 'money'], ['key' => 'fdCount', 'label' => 'FDs', 'align' => 'right', 'format' => 'number'],
+            ['key' => 'totalDeposited', 'label' => 'Total Deposited', 'align' => 'right', 'format' => 'money'],
+        ];
+        $mapped = $rows->map(fn ($r) => [
+            'code' => $r['code'], 'fullName' => $r['fullName'], 'branch' => $r['branch']['name'] ?? '—', 'status' => $r['status'],
+            'loanCount' => $r['loanCount'], 'totalBorrowed' => $r['totalBorrowed'], 'totalOutstanding' => $r['totalOutstanding'],
+            'fdCount' => $r['fdCount'], 'totalDeposited' => $r['totalDeposited'],
+        ]);
+        $totalRow = ['fullName' => 'Total', 'totalBorrowed' => $mapped->sum('totalBorrowed'), 'totalOutstanding' => $mapped->sum('totalOutstanding'), 'totalDeposited' => $mapped->sum('totalDeposited')];
+        $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No customers found']];
+
+        return ['Customer Activity', $sections, null];
     }
 
     /** Total/active/new-this-month + a "repeat customer" figure (2+ loans across their lifetime). */
@@ -72,13 +128,16 @@ class CustomerReportController extends Controller
             ->selectRaw("sum(case when status = 'Active' then outstanding_balance_cache else 0 end) as total_outstanding")
             ->groupBy('customer_id')->get()->keyBy('customer_id');
 
-        $fdAgg = FixedDeposit::select('customer_id')
+        $fdQuery = FixedDeposit::select('customer_id')
             ->selectRaw('count(*) as fd_count')
             ->selectRaw("sum(case when status = 'Active' then principal_amount else 0 end) as total_deposited")
-            ->groupBy('customer_id')->get()->keyBy('customer_id');
+            ->groupBy('customer_id');
+        $fdAgg = CurrentBranch::applyScope($fdQuery)->get()->keyBy('customer_id');
 
+        // Customer already carries BelongsToBranch — its own global scope handles both
+        // the forced own-branch restriction and the optional ?branch_id= filter for
+        // all-branch roles, so no manual branch filter is needed here.
         return Customer::query()
-            ->when($request->query('branchId'), fn ($q, $b) => $q->where('branch_id', $b))
             ->when($request->query('status'), fn ($q, $s) => $q->where('status', $s))
             ->with('branch:id,name,code')
             ->orderBy('full_name')

@@ -4,10 +4,15 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Card, PageHead, Field, Input, Select, Table, Td } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { ExportButtons } from '../components/ExportButtons'
+import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
 import { Donut, Gauge, ProgressRow, AreaChart } from '../components/charts'
 import { collectionReportsApi, type AuthUser } from '../api'
 import { getErrorText } from '../lib/apiError'
+import { downloadBlob, exportFlatTableToExcel } from '../lib/export'
 import type { Go } from './types'
+
+const today = () => new Date().toISOString().slice(0, 10)
 
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -39,23 +44,48 @@ function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, te
 
 /* ---------------------------- Daily Cash ---------------------------- */
 
-export function CollectionDailyCashScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function CollectionDailyCashScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    collectionReportsApi.get('daily-cash', { date }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [date])
+    collectionReportsApi.get('daily-cash', { date, branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [date, branchId])
 
   const methods = data ? Object.entries(data.byMethod || {}).map(([label, value], i) => ({ label, value: Number(value), color: PALETTE[i % PALETTE.length] })) : []
 
+  const exportExcel = () => {
+    if (!data) return
+    void exportFlatTableToExcel({
+      reportTitle: 'Daily Cash Collection', meta: `Date: ${data.date}  •  ${data.count ?? 0} payment(s)`,
+      columns: [
+        { label: 'Receipt', key: 'receipt' }, { label: 'Loan', key: 'loan' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' },
+        { label: 'Method', key: 'method' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'Received By', key: 'receiver' }, { label: 'Time', key: 'time' },
+      ],
+      rows: (data.payments || []).map((p: any) => ({
+        receipt: p.receiptNo || p.code, loan: p.facility?.code || '—', customer: p.facility?.customer?.fullName || '—', branch: p.branch?.name || '—',
+        method: p.paymentMethod, amount: Number(p.amount || 0), receiver: p.receiver?.name || '—', time: typeof p.paidAt === 'string' ? p.paidAt.slice(11, 16) : '—',
+      })),
+      totalRow: { customer: 'Total', amount: Number(data.totalAmount || 0) },
+      emptyText: 'No collections recorded',
+    }, `daily-cash-${data.date}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await collectionReportsApi.pdf('daily-cash', { date, branchId }), `daily-cash-${date}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Loan Management / Collection Reports" title="Daily Cash Collection" icon="wallet" />
-      <Card style={{ marginBottom: 16 }}><Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
+      <PageHead crumbs="Loan Management / Collection Reports" title="Daily Cash Collection" icon="wallet"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}>
+        <div className="row gap-3 wrap">
+          <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ maxWidth: 200 }} /></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
+        </div>
+      </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
         <>
           <TileGrid>
@@ -91,26 +121,42 @@ export function CollectionDailyCashScreen({ go: _go, user: _me }: { go: Go; user
 
 /* ---------------------------- Collection Summary ---------------------------- */
 
-export function CollectionSummaryScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function CollectionSummaryScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    collectionReportsApi.get('collection-summary', { from: fromDate || undefined, to: toDate || undefined })
+    collectionReportsApi.get('collection-summary', { from: fromDate || undefined, to: toDate || undefined, branchId })
       .then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [fromDate, toDate])
+  }, [fromDate, toDate, branchId])
+
+  const exportExcel = () => {
+    if (!data) return
+    void exportFlatTableToExcel({
+      reportTitle: 'Collection Summary', meta: `Period: ${data.from} to ${data.to}`,
+      columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right' }],
+      rows: [
+        { metric: 'Due Amount', value: money(data.dueAmount) }, { metric: 'Collected Amount', value: money(data.collectedAmount) },
+        { metric: 'Outstanding Amount', value: money(data.outstandingAmount) }, { metric: 'Collection Rate %', value: pct(data.collectionRatePct) },
+      ],
+    }, `collection-summary-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await collectionReportsApi.pdf('collection-summary', { from: fromDate || undefined, to: toDate || undefined, branchId }), `collection-summary-${today()}.pdf`)
 
   return (
     <div>
-      <PageHead crumbs="Loan Management / Collection Reports" title="Collection Summary" icon="chart" />
+      <PageHead crumbs="Loan Management / Collection Reports" title="Collection Summary" icon="chart"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
@@ -133,28 +179,45 @@ export function CollectionSummaryScreen({ go: _go, user: _me }: { go: Go; user?:
 
 /* ---------------------------- Officer Performance ---------------------------- */
 
-export function CollectionOfficerPerformanceScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function CollectionOfficerPerformanceScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [rows, setRows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    collectionReportsApi.get('officer-performance', { from: fromDate || undefined, to: toDate || undefined })
+    collectionReportsApi.get('officer-performance', { from: fromDate || undefined, to: toDate || undefined, branchId })
       .then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [fromDate, toDate])
+  }, [fromDate, toDate, branchId])
 
   const maxDue = Math.max(1, ...rows.map((r) => Number(r.dueAmount || 0)))
 
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Officer Performance', meta: `Period: ${fromDate || '—'} to ${toDate || today()}`,
+      columns: [
+        { label: 'Officer', key: 'officer' }, { label: 'Loans', key: 'loans', align: 'right', format: 'number' }, { label: 'Due', key: 'due', align: 'right', format: 'money' },
+        { label: 'Collected', key: 'collected', align: 'right', format: 'money' }, { label: 'Collection Rate %', key: 'rate', align: 'right', format: 'percent' },
+      ],
+      rows: rows.map((r) => ({ officer: r.officerName, loans: r.loanCount, due: Number(r.dueAmount || 0), collected: Number(r.collectedAmount || 0), rate: r.collectionRatePct })),
+      totalRow: { officer: 'Total', due: rows.reduce((a, r) => a + Number(r.dueAmount || 0), 0), collected: rows.reduce((a, r) => a + Number(r.collectedAmount || 0), 0) },
+      emptyText: 'No data for this period',
+    }, `officer-performance-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await collectionReportsApi.pdf('officer-performance', { from: fromDate || undefined, to: toDate || undefined, branchId }), `officer-performance-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Loan Management / Collection Reports" title="Officer Performance" icon="users" />
+      <PageHead crumbs="Loan Management / Collection Reports" title="Officer Performance" icon="users"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (
@@ -189,26 +252,47 @@ export function CollectionOfficerPerformanceScreen({ go: _go, user: _me }: { go:
 
 /* ---------------------------- Trend ---------------------------- */
 
-export function CollectionTrendScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function CollectionTrendScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [bucket, setBucket] = useState<'daily' | 'weekly' | 'monthly'>('daily')
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    collectionReportsApi.get('trend', { bucket }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [bucket])
+    collectionReportsApi.get('trend', { bucket, branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [bucket, branchId])
 
   const rows = data?.rows || []
   const total = rows.reduce((a: number, r: any) => a + Number(r.collectedAmount || 0), 0)
 
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: `Collection Trend (${bucket[0].toUpperCase()}${bucket.slice(1)})`, meta: data?.since ? `Since: ${data.since}` : undefined,
+      columns: [
+        { label: bucket === 'daily' ? 'Date' : bucket === 'weekly' ? 'Week' : 'Month', key: 'period' },
+        { label: 'Collected', key: 'collected', align: 'right', format: 'money' }, { label: 'Payments', key: 'payments', align: 'right', format: 'number' },
+      ],
+      rows: rows.map((r: any) => ({ period: r.bucketKey, collected: Number(r.collectedAmount || 0), payments: r.paymentCount })),
+      totalRow: { period: 'Total', collected: total, payments: rows.reduce((a: number, r: any) => a + Number(r.paymentCount || 0), 0) },
+      emptyText: 'No data',
+    }, `collection-trend-${bucket}-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await collectionReportsApi.pdf('trend', { bucket, branchId }), `collection-trend-${bucket}-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Loan Management / Collection Reports" title="Collection Trend" icon="arrowUp" />
-      <Card style={{ marginBottom: 16 }}><Field label="Bucket"><Select value={bucket} onChange={(e) => setBucket(e.target.value as any)} style={{ maxWidth: 200 }}>
-        <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
-      </Select></Field></Card>
+      <PageHead crumbs="Loan Management / Collection Reports" title="Collection Trend" icon="arrowUp"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}>
+        <div className="row gap-3 wrap">
+          <Field label="Bucket"><Select value={bucket} onChange={(e) => setBucket(e.target.value as any)} style={{ maxWidth: 200 }}>
+            <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+          </Select></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
+        </div>
+      </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (
         <>
           <TileGrid>

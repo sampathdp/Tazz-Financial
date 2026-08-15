@@ -4,10 +4,15 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Card, PageHead, Field, Input, Table, Td } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { ExportButtons } from '../components/ExportButtons'
+import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
 import { Donut } from '../components/charts'
 import { cashBankReportsApi, type AuthUser } from '../api'
 import { getErrorText } from '../lib/apiError'
+import { downloadBlob, exportReportToExcel } from '../lib/export'
 import type { Go } from './types'
+
+const today = () => new Date().toISOString().slice(0, 10)
 
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -37,23 +42,53 @@ function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, te
 
 /* ---------------------------- Position ---------------------------- */
 
-export function CashBankPositionScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function CashBankPositionScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
-    cashBankReportsApi.get('position').then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [])
+    setLoading(true)
+    cashBankReportsApi.get('position', { branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [branchId])
 
   const split = data ? [
     { label: 'Cash', value: data.totalCash, color: PALETTE[0] },
     { label: 'Bank', value: data.totalBank, color: PALETTE[1] },
   ].filter((d) => d.value > 0) : []
 
+  const exportExcel = () => {
+    if (!data) return
+    void exportReportToExcel({
+      sheetName: 'Cash & Bank Position', reportTitle: 'Cash & Bank Position',
+      sections: [
+        {
+          title: 'Cash Accounts',
+          columns: [{ label: 'Name', key: 'name' }, { label: 'Branch', key: 'branch' }, { label: 'Balance', key: 'balance', align: 'right', format: 'money' }, { label: 'Status', key: 'status', align: 'center' }],
+          rows: (data.cashAccounts || []).map((a: any) => ({ name: a.name, branch: a.branch?.name || '—', balance: Number(a.currentBalance || 0), status: a.status })),
+          totalRow: { name: 'Total Cash', balance: Number(data.totalCash || 0) }, emptyText: 'No cash accounts',
+        },
+        {
+          title: 'Bank Accounts',
+          columns: [{ label: 'Name', key: 'name' }, { label: 'Bank', key: 'bank' }, { label: 'Balance', key: 'balance', align: 'right', format: 'money' }, { label: 'Status', key: 'status', align: 'center' }],
+          rows: (data.bankAccounts || []).map((a: any) => ({ name: a.name, bank: a.bank?.name || '—', balance: Number(a.currentBalance || 0), status: a.status })),
+          totalRow: { name: 'Total Bank', balance: Number(data.totalBank || 0) }, emptyText: 'No bank accounts',
+        },
+        {
+          columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right', format: 'money' }],
+          rows: [{ metric: 'Grand Total Liquidity', value: Number(data.grandTotal || 0) }],
+        },
+      ],
+    }, `cash-bank-position-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await cashBankReportsApi.pdf('position', { branchId }), `cash-bank-position-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Cash & Bank / Reports" title="Cash & Bank Position" icon="building" />
+      <PageHead crumbs="Cash & Bank / Reports" title="Cash & Bank Position" icon="building"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
         <>
           <TileGrid>
@@ -88,28 +123,58 @@ export function CashBankPositionScreen({ go: _go, user: _me }: { go: Go; user?: 
 
 /* ---------------------------- Cashbook Activity ---------------------------- */
 
-export function CashbookActivityScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function CashbookActivityScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    cashBankReportsApi.get('cashbook-activity', { from: fromDate || undefined, to: toDate || undefined })
+    cashBankReportsApi.get('cashbook-activity', { from: fromDate || undefined, to: toDate || undefined, branchId })
       .then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [fromDate, toDate])
+  }, [fromDate, toDate, branchId])
 
   const byCategory = data ? Object.entries(data.byCategory || {}).map(([label, v]: [string, any], i) => ({ label, value: (v.in || 0) + (v.out || 0), color: PALETTE[i % PALETTE.length] })).filter((d) => d.value > 0) : []
 
+  const exportExcel = () => {
+    if (!data) return
+    void exportReportToExcel({
+      sheetName: 'Cashbook Activity', reportTitle: 'Cashbook Activity', meta: `Period: ${data.from} to ${data.to}`,
+      sections: [
+        { title: 'Summary', columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right', format: 'money' }], rows: [{ metric: 'Total In', value: Number(data.totalIn || 0) }, { metric: 'Total Out', value: Number(data.totalOut || 0) }] },
+        {
+          title: 'By Category', columns: [{ label: 'Category', key: 'category' }, { label: 'In', key: 'in', align: 'right', format: 'money' }, { label: 'Out', key: 'out', align: 'right', format: 'money' }],
+          rows: Object.entries(data.byCategory || {}).map(([k, v]: [string, any]) => ({ category: k, in: Number(v.in || 0), out: Number(v.out || 0) })), emptyText: 'No entries in this range',
+        },
+        {
+          title: 'Entries',
+          columns: [
+            { label: 'Date', key: 'date' }, { label: 'Cash Account', key: 'account' }, { label: 'Branch', key: 'branch' }, { label: 'Direction', key: 'direction', align: 'center' },
+            { label: 'Category', key: 'category' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'By', key: 'by' },
+          ],
+          rows: (data.entries || []).map((e: any) => ({
+            date: typeof e.entryDate === 'string' ? e.entryDate.slice(0, 10) : '—', account: e.cashAccount?.name || '—', branch: e.branch?.name || '—',
+            direction: e.direction, category: e.category, amount: Number(e.amount || 0), by: e.creator?.name || '—',
+          })),
+          emptyText: 'No entries in this range',
+        },
+      ],
+    }, `cashbook-activity-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await cashBankReportsApi.pdf('cashbook-activity', { from: fromDate || undefined, to: toDate || undefined, branchId }), `cashbook-activity-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Cash & Bank / Reports" title="Cashbook Activity" icon="receipt" />
+      <PageHead crumbs="Cash & Bank / Reports" title="Cashbook Activity" icon="receipt"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
@@ -146,28 +211,58 @@ export function CashbookActivityScreen({ go: _go, user: _me }: { go: Go; user?: 
 
 /* ---------------------------- Bank Activity ---------------------------- */
 
-export function BankActivityScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function BankActivityScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
     setLoading(true); setErr('')
-    cashBankReportsApi.get('bank-activity', { from: fromDate || undefined, to: toDate || undefined })
+    cashBankReportsApi.get('bank-activity', { from: fromDate || undefined, to: toDate || undefined, branchId })
       .then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [fromDate, toDate])
+  }, [fromDate, toDate, branchId])
 
   const byType = data ? Object.entries(data.byType || {}).map(([label, value], i) => ({ label, value: Number(value), color: PALETTE[i % PALETTE.length] })).filter((d) => d.value > 0) : []
 
+  const exportExcel = () => {
+    if (!data) return
+    void exportReportToExcel({
+      sheetName: 'Bank Activity', reportTitle: 'Bank Activity', meta: `Period: ${data.from} to ${data.to}`,
+      sections: [
+        { title: 'Summary', columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right', format: 'money' }], rows: [{ metric: 'Total Credits', value: Number(data.totalCredits || 0) }, { metric: 'Total Debits', value: Number(data.totalDebits || 0) }] },
+        {
+          title: 'By Transaction Type', columns: [{ label: 'Type', key: 'type' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }],
+          rows: Object.entries(data.byType || {}).map(([k, v]) => ({ type: k, amount: Number(v as number) })), emptyText: 'No transactions in this range',
+        },
+        {
+          title: 'Transactions',
+          columns: [
+            { label: 'Date', key: 'date' }, { label: 'Bank Account', key: 'account' }, { label: 'Type', key: 'type' },
+            { label: 'Reference', key: 'reference' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'Status', key: 'status', align: 'center' }, { label: 'By', key: 'by' },
+          ],
+          rows: (data.transactions || []).map((t: any) => ({
+            date: typeof t.txnDate === 'string' ? t.txnDate.slice(0, 10) : '—', account: t.bankAccount?.name || '—', type: t.transactionType,
+            reference: t.referenceNo || '—', amount: Number(t.amount || 0), status: t.status, by: t.creator?.name || '—',
+          })),
+          emptyText: 'No transactions in this range',
+        },
+      ],
+    }, `bank-activity-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await cashBankReportsApi.pdf('bank-activity', { from: fromDate || undefined, to: toDate || undefined, branchId }), `bank-activity-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Cash & Bank / Reports" title="Bank Activity" icon="swap" />
+      <PageHead crumbs="Cash & Bank / Reports" title="Bank Activity" icon="swap"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (

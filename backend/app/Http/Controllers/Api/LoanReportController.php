@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Loan;
 use App\Support\LoanSummary;
+use App\Support\ReportExport;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 
@@ -38,6 +39,152 @@ class LoanReportController extends Controller
             'disbursement' => $this->disbursement($request),
             'closed-loans' => $this->closedLoans($request),
         };
+    }
+
+    public function exportPdf(Request $request, string $type)
+    {
+        if (!in_array($type, self::TYPES, true)) {
+            abort(404);
+        }
+
+        [$title, $sections, $meta] = match ($type) {
+            'portfolio-summary' => $this->portfolioSummaryPdf(),
+            'arrears' => $this->arrearsPdf($request),
+            'par-aging' => $this->parAgingPdf(),
+            'disbursement' => $this->disbursementPdf($request),
+            'closed-loans' => $this->closedLoansPdf($request),
+        };
+
+        return ReportExport::pdf($title, $sections, null, $meta)->download(ReportExport::filename($type));
+    }
+
+    private function portfolioSummaryPdf(): array
+    {
+        $d = $this->portfolioSummary();
+        $rows = [
+            ['metric' => 'Total Loans', 'value' => $d['totalLoans']],
+            ['metric' => 'Active Loans', 'value' => $d['activeLoans']],
+            ['metric' => 'Closed Loans', 'value' => $d['closedLoans']],
+            ['metric' => 'Pending Loans', 'value' => $d['pendingLoans']],
+            ['metric' => 'Written Off Loans', 'value' => $d['writtenOffLoans']],
+            ['metric' => 'Total Outstanding Balance', 'value' => $d['totalOutstandingBalance'], 'format' => 'money'],
+            ['metric' => 'Average Loan Size', 'value' => $d['avgLoanSize'], 'format' => 'money'],
+            ['metric' => 'Disbursed This Month (count)', 'value' => $d['disbursedThisMonthCount']],
+            ['metric' => 'Disbursed This Month (amount)', 'value' => $d['disbursedThisMonthAmount'], 'format' => 'money'],
+            ['metric' => 'Disbursed Last Month (amount)', 'value' => $d['disbursedLastMonthAmount'], 'format' => 'money'],
+            ['metric' => 'Loan Growth %', 'value' => $d['loanGrowthPct'], 'format' => 'percent'],
+        ];
+        $sections = [['columns' => [['key' => 'metric', 'label' => 'Metric'], ['key' => 'value', 'label' => 'Value', 'align' => 'right']], 'rows' => $this->formattedMetricRows($rows)]];
+
+        return ['Loan Portfolio Summary', $sections, 'As of ' . $d['asOf']];
+    }
+
+    private function parAgingPdf(): array
+    {
+        $d = $this->parAging();
+        $summaryRows = $this->formattedMetricRows([
+            ['metric' => 'Total Active Portfolio', 'value' => $d['totalPortfolio'], 'format' => 'money'],
+            ['metric' => 'PAR 30 %', 'value' => $d['par30Pct'], 'format' => 'percent'],
+            ['metric' => 'PAR 60 %', 'value' => $d['par60Pct'], 'format' => 'percent'],
+            ['metric' => 'NPL % (90+ days)', 'value' => $d['nplPct'], 'format' => 'percent'],
+            ['metric' => 'NPL Amount', 'value' => $d['nplAmount'], 'format' => 'money'],
+        ]);
+
+        $sections = [
+            ['title' => 'Summary', 'columns' => [['key' => 'metric', 'label' => 'Metric'], ['key' => 'value', 'label' => 'Value', 'align' => 'right']], 'rows' => $summaryRows],
+            [
+                'title' => 'Aging Buckets',
+                'columns' => [
+                    ['key' => 'label', 'label' => 'Bucket'], ['key' => 'count', 'label' => 'Loans', 'align' => 'right', 'format' => 'number'],
+                    ['key' => 'amount', 'label' => 'Outstanding', 'align' => 'right', 'format' => 'money'], ['key' => 'pct', 'label' => '% of Portfolio', 'align' => 'right', 'format' => 'percent'],
+                ],
+                'rows' => $d['buckets'],
+            ],
+        ];
+
+        return ['Loan PAR / NPL Aging', $sections, 'As of ' . $d['asOf']];
+    }
+
+    private function arrearsPdf(Request $request): array
+    {
+        $rows = $this->arrears($request);
+        $columns = [
+            ['key' => 'code', 'label' => 'Loan Code'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'branch', 'label' => 'Branch'], ['key' => 'officer', 'label' => 'Officer'],
+            ['key' => 'daysOverdue', 'label' => 'Days Overdue', 'align' => 'right', 'format' => 'number'], ['key' => 'installments', 'label' => 'Installments', 'align' => 'right', 'format' => 'number'],
+            ['key' => 'overdueAmount', 'label' => 'Overdue Amount', 'align' => 'right', 'format' => 'money'], ['key' => 'penaltyDue', 'label' => 'Penalty Due', 'align' => 'right', 'format' => 'money'],
+        ];
+        $mapped = collect($rows)->map(fn ($r) => [
+            'code' => $r['code'] ?? '', 'customer' => $r['customer']['full_name'] ?? '—', 'branch' => $r['branch']['name'] ?? '—',
+            'officer' => $r['loan_detail']['recovery_officer']['name'] ?? $r['loan_detail']['loan_officer']['name'] ?? '—',
+            'daysOverdue' => $r['daysOverdue'] ?? 0, 'installments' => $r['overdueInstallments'] ?? 0,
+            'overdueAmount' => $r['overdueAmount'] ?? 0, 'penaltyDue' => $r['penaltyDue'] ?? 0,
+        ]);
+        $totalRow = ['customer' => 'Total', 'overdueAmount' => $mapped->sum('overdueAmount'), 'penaltyDue' => $mapped->sum('penaltyDue')];
+        $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No overdue loans']];
+
+        $to = $request->filled('to') ? Carbon::parse($request->to)->toDateString() : now()->toDateString();
+        $meta = $request->filled('from') ? 'As of ' . $to . ' (from ' . Carbon::parse($request->from)->toDateString() . ')' : 'As of ' . $to;
+
+        return ['Loan Arrears', $sections, $meta];
+    }
+
+    private function disbursementPdf(Request $request): array
+    {
+        $loans = $this->disbursement($request);
+        $columns = [
+            ['key' => 'code', 'label' => 'Loan Code'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'branch', 'label' => 'Branch'], ['key' => 'loanType', 'label' => 'Loan Type'],
+            ['key' => 'officer', 'label' => 'Officer'], ['key' => 'principal', 'label' => 'Principal', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'disbursed', 'label' => 'Disbursed'], ['key' => 'status', 'label' => 'Status', 'align' => 'center'],
+        ];
+        $mapped = $loans->map(fn (Loan $l) => [
+            'code' => $l->code, 'customer' => $l->customer?->full_name ?? '—', 'branch' => $l->branch?->name ?? '—',
+            'loanType' => $l->loanDetail?->loanType?->name ?? '—', 'officer' => $l->loanDetail?->loanOfficer?->name ?? '—',
+            'principal' => (float) $l->principal_amount, 'disbursed' => $l->disbursed_at?->format('Y-m-d') ?? '—', 'status' => $l->status,
+        ]);
+        $totalRow = ['customer' => 'Total', 'principal' => $mapped->sum('principal')];
+        $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No disbursements in this range']];
+
+        return ['Loan Disbursement', $sections, $this->periodMeta($request)];
+    }
+
+    private function closedLoansPdf(Request $request): array
+    {
+        $loans = $this->closedLoans($request);
+        $columns = [
+            ['key' => 'code', 'label' => 'Loan Code'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'branch', 'label' => 'Branch'],
+            ['key' => 'loanType', 'label' => 'Loan Type'], ['key' => 'principal', 'label' => 'Principal', 'align' => 'right', 'format' => 'money'], ['key' => 'closed', 'label' => 'Closed'],
+        ];
+        $mapped = $loans->map(fn (Loan $l) => [
+            'code' => $l->code, 'customer' => $l->customer?->full_name ?? '—', 'branch' => $l->branch?->name ?? '—',
+            'loanType' => $l->loanDetail?->loanType?->name ?? '—', 'principal' => (float) $l->principal_amount, 'closed' => $l->closed_at?->format('Y-m-d') ?? '—',
+        ]);
+        $totalRow = ['customer' => 'Total', 'principal' => $mapped->sum('principal')];
+        $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No closed loans in this range']];
+
+        return ['Closed Loans', $sections, $this->periodMeta($request)];
+    }
+
+    /** metric/value rows -> ['metric','value','format'] shape the generic view expects per-cell, but format is per-column not per-row, so fold it in as a formatted string here instead. */
+    private function formattedMetricRows(array $rows): array
+    {
+        return array_map(function ($r) {
+            $value = $r['value'];
+            $formatted = match ($r['format'] ?? null) {
+                'money' => number_format((float) $value, 2),
+                'percent' => $value === null ? '—' : number_format((float) $value, 2) . '%',
+                default => (string) $value,
+            };
+
+            return ['metric' => $r['metric'], 'value' => $formatted];
+        }, $rows);
+    }
+
+    private function periodMeta(Request $request): string
+    {
+        $from = $request->filled('from') ? Carbon::parse($request->from)->toDateString() : now()->startOfMonth()->toDateString();
+        $to = $request->filled('to') ? Carbon::parse($request->to)->toDateString() : now()->toDateString();
+
+        return "Period: {$from} to {$to}";
     }
 
     /** Loan Portfolio Ratios source data: counts, outstanding, avg size, disbursement growth. */

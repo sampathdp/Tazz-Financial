@@ -96,6 +96,7 @@ class AuthController extends Controller
                 'role' => $u->role?->slug,
                 'roleId' => $u->role_id,
                 'branch' => $u->branch ? ['id' => $u->branch->id, 'name' => $u->branch->name, 'code' => $u->branch->code] : null,
+                'canViewAllBranches' => (bool) $u->role?->can_view_all_branches,
                 'permissions' => $u->permissionList(),
             ]
         );

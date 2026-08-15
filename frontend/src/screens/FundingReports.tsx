@@ -2,12 +2,54 @@
    types (same "one generic screen, several bindings" idea as Masters.tsx). */
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td } from '../components/ui'
+import { ExportButtons } from '../components/ExportButtons'
+import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
 import {
   fundingReportsApi, customersApi,
   type FundingReportType, type FixedDeposit, type FdDeposit, type FdInterestPayment, type FdRenewal, type Customer, type AuthUser,
 } from '../api'
 import { getErrorText } from '../lib/apiError'
+import { downloadBlob, exportFlatTableToExcel, exportReportToExcel, type ExcelColumn } from '../lib/export'
 import type { Go } from './types'
+
+const today = () => new Date().toISOString().slice(0, 10)
+
+const FD_COLS: ExcelColumn[] = [
+  { label: 'FD No', key: 'fdNo' }, { label: 'Customer', key: 'customer' }, { label: 'Product', key: 'product' },
+  { label: 'Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Maturity Date', key: 'maturity' }, { label: 'Status', key: 'status', align: 'center' },
+]
+const fdRows = (rows: FixedDeposit[]) => rows.map((fd) => ({
+  fdNo: fd.fdNumber, customer: fd.customer?.fullName || '—', product: fd.fundingProduct?.name || '—',
+  principal: Number(fd.principalAmount || 0), maturity: dateOnly(fd.maturityDate), status: fd.status,
+}))
+
+const INTEREST_COLS: ExcelColumn[] = [
+  { label: 'FD No', key: 'fdNo' }, { label: 'Customer', key: 'customer' }, { label: 'Due Date', key: 'due' },
+  { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'Status', key: 'status', align: 'center' }, { label: 'Paid At', key: 'paidAt' },
+]
+const interestRows = (rows: FdInterestPayment[]) => (rows as any[]).map((p) => ({
+  fdNo: p.fixedDeposit?.fdNumber || '—', customer: p.fixedDeposit?.customer?.fullName || '—', due: dateOnly(p.dueDate),
+  amount: Number(p.amount || 0), status: p.status, paidAt: dateOnly(p.paidAt),
+}))
+
+const DEPOSIT_COLS: ExcelColumn[] = [
+  { label: 'Deposit No', key: 'depositNo' }, { label: 'Customer', key: 'customer' }, { label: 'Date', key: 'date' }, { label: 'Method', key: 'method' },
+  { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'Status', key: 'status', align: 'center' }, { label: 'FD No', key: 'fdNo' },
+]
+const depositRows = (rows: FdDeposit[]) => rows.map((d) => ({
+  depositNo: d.depositNumber, customer: d.customer?.fullName || '—', date: dateOnly(d.depositDate), method: d.paymentMethod,
+  amount: Number(d.amount || 0), status: d.status, fdNo: d.fixedDeposit?.fdNumber || '—',
+}))
+
+const RENEWAL_COLS: ExcelColumn[] = [
+  { label: 'Old FD', key: 'oldFd' }, { label: 'New FD', key: 'newFd' }, { label: 'Customer', key: 'customer' },
+  { label: 'Old Principal', key: 'oldPrincipal', align: 'right', format: 'money' }, { label: 'Additional', key: 'additional', align: 'right', format: 'money' },
+  { label: 'New Principal', key: 'newPrincipal', align: 'right', format: 'money' }, { label: 'Renewed At', key: 'renewedAt' },
+]
+const renewalRows = (rows: FdRenewal[]) => rows.map((r) => ({
+  oldFd: r.oldFixedDeposit?.fdNumber || '—', newFd: r.newFixedDeposit?.fdNumber || '—', customer: r.oldFixedDeposit?.customer?.fullName || '—',
+  oldPrincipal: Number(r.oldPrincipal || 0), additional: Number(r.additionalDepositAmount || 0), newPrincipal: Number(r.newPrincipal || 0), renewedAt: dateOnly(r.renewedAt),
+}))
 
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -81,11 +123,12 @@ function RenewalRows({ rows }: { rows: FdRenewal[] }) {
     </>} />
 }
 
-export function FundingReportsScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [tab, setTab] = useState<FundingReportType>('active')
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<any>(null)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   // per-tab filter state
   const [days, setDays] = useState(30)
@@ -98,28 +141,59 @@ export function FundingReportsScreen({ go: _go, user: _me }: { go: Go; user?: Au
 
   useEffect(() => { customersApi.list().then(setCustomers).catch(() => setCustomers([])) }, [])
 
+  const buildParams = (): Record<string, any> => ({
+    branchId,
+    ...(tab === 'maturing-soon' ? { days } :
+      tab === 'monthly-interest' ? { status: monthlyStatus || undefined } :
+      tab === 'interest-paid' ? { from: fromDate || undefined, to: toDate || undefined } :
+      tab === 'deposit-history' ? { customerId: customerId || undefined } :
+      tab === 'customer-funding-history' ? { customerId } : {}),
+  })
+
   const load = () => {
     setErr('')
     if (tab === 'customer-funding-history' && !customerId) { setData(null); setLoading(false); return }
     setLoading(true)
-    const params: Record<string, any> =
-      tab === 'maturing-soon' ? { days } :
-      tab === 'monthly-interest' ? { status: monthlyStatus || undefined } :
-      tab === 'interest-paid' ? { from: fromDate || undefined, to: toDate || undefined } :
-      tab === 'deposit-history' ? { customerId: customerId || undefined } :
-      tab === 'customer-funding-history' ? { customerId } : {}
-    fundingReportsApi.get(tab, params).then(setData).catch((ex) => { setErr(getErrorText(ex, 'Failed to load report')); setData(null) }).finally(() => setLoading(false))
+    fundingReportsApi.get(tab, buildParams()).then(setData).catch((ex) => { setErr(getErrorText(ex, 'Failed to load report')); setData(null) }).finally(() => setLoading(false))
   }
-  useEffect(() => { load() }, [tab, days, monthlyStatus, fromDate, toDate, customerId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [tab, days, monthlyStatus, fromDate, toDate, customerId, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const tabLabel = TABS.find((t) => t.id === tab)?.label || tab
+  const exportExcel = () => {
+    if (!data) return
+    if (tab === 'customer-funding-history') {
+      void exportReportToExcel({
+        sheetName: 'Customer Funding History', reportTitle: 'Customer Funding History', subtitle: customerLabel || undefined,
+        sections: [
+          { title: 'Deposits', columns: DEPOSIT_COLS, rows: depositRows(data.deposits || []), emptyText: 'No deposits' },
+          { title: 'Fixed Deposits', columns: FD_COLS, rows: fdRows(data.fixedDeposits || []), emptyText: 'No fixed deposits' },
+        ],
+      }, `customer-funding-history-${today()}.xlsx`)
+      return
+    }
+    const rows: any[] = data || []
+    if (tab === 'active' || tab === 'maturing-soon' || tab === 'matured') {
+      void exportFlatTableToExcel({ reportTitle: tabLabel, columns: FD_COLS, rows: fdRows(rows), totalRow: { customer: 'Total', principal: rows.reduce((a, r) => a + Number(r.principalAmount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
+    } else if (tab === 'monthly-interest' || tab === 'interest-paid') {
+      void exportFlatTableToExcel({ reportTitle: tabLabel, columns: INTEREST_COLS, rows: interestRows(rows), totalRow: { customer: 'Total', amount: rows.reduce((a, r) => a + Number(r.amount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
+    } else if (tab === 'deposit-history') {
+      void exportFlatTableToExcel({ reportTitle: tabLabel, columns: DEPOSIT_COLS, rows: depositRows(rows), totalRow: { customer: 'Total', amount: rows.reduce((a, r) => a + Number(r.amount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
+    } else if (tab === 'renewal-history' || tab === 'capital-enhancements') {
+      void exportFlatTableToExcel({ reportTitle: tabLabel, columns: RENEWAL_COLS, rows: renewalRows(rows), emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
+    }
+  }
+  const exportPdf = async () => downloadBlob(await fundingReportsApi.pdf(tab, buildParams()), `${tab}-${today()}.pdf`)
 
   return (
     <div>
-      <PageHead crumbs="Funding / Investment" title="Funding Reports" icon="chart" />
+      <PageHead crumbs="Funding / Investment" title="Funding Reports" icon="chart"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card pad={0} style={{ marginBottom: 16 }}>
         <div className="row gap-1 wrap" style={{ padding: 14 }}>
           {TABS.map((t) => <Btn key={t.id} size="sm" variant="ghost" active={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</Btn>)}
         </div>
       </Card>
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
 
       {tab === 'maturing-soon' && (
         <Card style={{ marginBottom: 16 }}><Field label="Within Days"><Input type="number" value={days} onChange={(e) => setDays(Number(e.target.value) || 30)} style={{ maxWidth: 160 }} /></Field></Card>

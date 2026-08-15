@@ -8,7 +8,7 @@ use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\JournalLine;
 use App\Support\AccrualInterestCalculator;
-use Barryvdh\DomPDF\Facade\Pdf;
+use App\Support\ReportExport;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -130,33 +130,162 @@ class AccountingReportController extends Controller
     }
 
     /**
-     * PDF export, one report type at a time (profit-loss is the first;
-     * add a `resources/views/reports/{type}.blade.php` and a case below to
-     * extend to the others). Reuses plFigures() so the PDF can never disagree
-     * with the on-screen report.
+     * PDF export for every type in TYPES. Each *Pdf() method reuses the same
+     * private data-builder the JSON endpoint uses, so the PDF can never
+     * disagree with the on-screen report. Rendered through the shared
+     * reports.generic Blade view (see ReportExport) — no bespoke views.
      */
     public function exportPdf(Request $request, string $type)
     {
-        if ($type !== 'profit-loss') {
+        if (!in_array($type, self::TYPES, true)) {
             abort(404);
         }
 
+        [$title, $sections, $subtitle, $meta] = match ($type) {
+            'trial-balance' => $this->trialBalancePdf($request),
+            'general-ledger' => $this->generalLedgerPdf($request),
+            'profit-loss' => $this->profitAndLossPdf($request),
+            'balance-sheet' => $this->balanceSheetPdf($request),
+            'cash-flow' => $this->cashFlowPdf($request),
+            'ledger-drift' => $this->ledgerDriftPdf($request),
+        };
+
+        return ReportExport::pdf($title, $sections, $subtitle, $meta)->download(ReportExport::filename($type));
+    }
+
+    private function trialBalancePdf(Request $request): array
+    {
+        $rows = $this->trialBalance($request);
+        $mapped = $rows->map(fn ($r) => ['code' => $r['code'], 'name' => $r['name'], 'type' => $r['account_type'], 'debit' => $r['total_debit'], 'credit' => $r['total_credit'], 'balance' => $r['balance']]);
+        $sections = [[
+            'columns' => [
+                ['key' => 'code', 'label' => 'Code'], ['key' => 'name', 'label' => 'Name'], ['key' => 'type', 'label' => 'Type', 'align' => 'center'],
+                ['key' => 'debit', 'label' => 'Debit', 'align' => 'right', 'format' => 'money'], ['key' => 'credit', 'label' => 'Credit', 'align' => 'right', 'format' => 'money'], ['key' => 'balance', 'label' => 'Balance', 'align' => 'right', 'format' => 'money'],
+            ],
+            'rows' => $mapped->all(),
+            'totalRow' => ['name' => 'Totals', 'debit' => $mapped->sum(fn ($r) => (float) $r['debit']), 'credit' => $mapped->sum(fn ($r) => (float) $r['credit'])],
+            'emptyText' => 'No accounts yet',
+        ]];
+        $asOf = $request->query('as_of');
+
+        return ['Trial Balance', $sections, null, $asOf ? "As of {$asOf}" : null];
+    }
+
+    private function generalLedgerPdf(Request $request): array
+    {
+        $d = $this->generalLedger($request);
+        $mapped = $d['lines']->map(fn ($l) => [
+            'date' => $l['entry_date'], 'entry' => $l['journal_entry_code'], 'description' => $l['description'] ?? '—',
+            'debit' => (float) $l['debit'] > 0 ? $l['debit'] : null, 'credit' => (float) $l['credit'] > 0 ? $l['credit'] : null, 'balance' => $l['running_balance'],
+        ]);
+        $sections = [[
+            'columns' => [
+                ['key' => 'date', 'label' => 'Date'], ['key' => 'entry', 'label' => 'Entry'], ['key' => 'description', 'label' => 'Description'],
+                ['key' => 'debit', 'label' => 'Debit', 'align' => 'right', 'format' => 'money'], ['key' => 'credit', 'label' => 'Credit', 'align' => 'right', 'format' => 'money'], ['key' => 'balance', 'label' => 'Balance', 'align' => 'right', 'format' => 'money'],
+            ],
+            'rows' => $mapped->all(), 'emptyText' => 'No activity in this range',
+        ]];
+        $from = $request->query('from');
+        $to = $request->query('to');
+
+        return ['General Ledger', $sections, $d['account']['code'] . ' — ' . $d['account']['name'], $from || $to ? ('Period: ' . ($from ?: 'Inception') . ' to ' . ($to ?: 'Today')) : null];
+    }
+
+    private function profitAndLossPdf(Request $request): array
+    {
         $from = $request->query('from');
         $to = $request->query('to');
         [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpense] = $this->plFiguresBothBases($from, $to);
+        $netProfitCash = bcsub($totalIncomeCash, $totalExpense, 2);
+        $netProfitAccrual = bcsub($totalIncomeAccrual, $totalExpense, 2);
 
-        $pdf = Pdf::loadView('reports.profit-loss', [
-            'companyName' => config('app.name'),
-            'from' => $from, 'to' => $to,
-            'income' => $income, 'expense' => $expense,
-            'totalIncomeCash' => $totalIncomeCash, 'totalIncomeAccrual' => $totalIncomeAccrual,
-            'totalExpense' => $totalExpense,
-            'netProfitCash' => bcsub($totalIncomeCash, $totalExpense, 2),
-            'netProfitAccrual' => bcsub($totalIncomeAccrual, $totalExpense, 2),
-            'generatedAt' => now(),
-        ])->setPaper('a4');
+        $sections = [
+            [
+                'title' => 'Income',
+                'columns' => [
+                    ['key' => 'code', 'label' => 'Code'], ['key' => 'name', 'label' => 'Name'],
+                    ['key' => 'cash', 'label' => 'Cash Basis', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'accrual', 'label' => 'Accrual Basis', 'align' => 'right', 'format' => 'money'],
+                ],
+                'rows' => $income->map(fn ($r) => ['code' => $r['code'], 'name' => $r['name'], 'cash' => $r['cash_balance'], 'accrual' => $r['accrual_balance']])->all(),
+                'totalRow' => ['name' => 'Total Income', 'cash' => $totalIncomeCash, 'accrual' => $totalIncomeAccrual],
+                'emptyText' => 'No income posted in this range',
+            ],
+            [
+                'title' => 'Expense',
+                'columns' => [['key' => 'code', 'label' => 'Code'], ['key' => 'name', 'label' => 'Name'], ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money']],
+                'rows' => collect($expense)->map(fn ($r) => ['code' => $r['code'], 'name' => $r['name'], 'amount' => $r['balance']])->all(),
+                'totalRow' => ['name' => 'Total Expense', 'amount' => $totalExpense],
+                'emptyText' => 'No expense posted in this range',
+            ],
+            [
+                'title' => 'Net Profit',
+                'columns' => [['key' => 'basis', 'label' => 'Basis'], ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money']],
+                'rows' => [['basis' => 'Cash Basis', 'amount' => $netProfitCash], ['basis' => 'Accrual Basis', 'amount' => $netProfitAccrual]],
+            ],
+        ];
 
-        return $pdf->download('profit-loss-' . now()->format('Y-m-d-His') . '.pdf');
+        return ['Profit & Loss Statement', $sections, 'Cash and Accrual Basis', 'Period: ' . ($from ?: 'Inception') . ' to ' . ($to ?: 'Today')];
+    }
+
+    private function balanceSheetPdf(Request $request): array
+    {
+        $d = $this->balanceSheet($request);
+        $section = fn (string $title, array $rows, string $total) => [
+            'title' => $title,
+            'columns' => [['key' => 'code', 'label' => 'Code'], ['key' => 'name', 'label' => 'Name'], ['key' => 'balance', 'label' => 'Amount', 'align' => 'right', 'format' => 'money']],
+            'rows' => collect($rows)->map(fn ($r) => ['code' => $r['code'], 'name' => $r['name'], 'balance' => $r['balance']])->all(),
+            'totalRow' => ['name' => "Total {$title}", 'balance' => $total], 'emptyText' => 'Nothing here yet',
+        ];
+        $sections = [
+            $section('Assets', $d['assets'], $d['total_assets']),
+            $section('Liabilities', $d['liabilities'], $d['total_liabilities']),
+            $section('Equity', $d['equity'], $d['total_equity']),
+            [
+                'columns' => [['key' => 'metric', 'label' => 'Metric'], ['key' => 'value', 'label' => 'Value', 'align' => 'right', 'format' => 'money']],
+                'rows' => [['metric' => 'Total Liabilities + Equity', 'value' => $d['total_liabilities_and_equity']]],
+            ],
+        ];
+
+        return ['Balance Sheet', $sections, $d['balanced'] ? 'Balanced' : 'Out of balance', 'As of ' . $d['as_of']];
+    }
+
+    private function cashFlowPdf(Request $request): array
+    {
+        $d = $this->cashFlow($request);
+        $section = fn (string $title, array $rows, string $total) => [
+            'title' => $title,
+            'columns' => [['key' => 'code', 'label' => 'Code'], ['key' => 'name', 'label' => 'Name'], ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money']],
+            'rows' => $rows, 'totalRow' => ['name' => "Net Cash from {$title}", 'amount' => $total], 'emptyText' => 'No cash movement in this range',
+        ];
+        $sections = [
+            $section('Operating Activities', $d['operating_activities'], $d['net_cash_from_operating']),
+            $section('Investing Activities', $d['investing_activities'], $d['net_cash_from_investing']),
+            $section('Financing Activities', $d['financing_activities'], $d['net_cash_from_financing']),
+            [
+                'columns' => [['key' => 'metric', 'label' => 'Metric'], ['key' => 'value', 'label' => 'Value', 'align' => 'right', 'format' => 'money']],
+                'rows' => [
+                    ['metric' => 'Opening Cash', 'value' => $d['opening_cash']], ['metric' => 'Net Change in Cash', 'value' => $d['net_change_in_cash']], ['metric' => 'Closing Cash', 'value' => $d['closing_cash']],
+                ],
+            ],
+        ];
+
+        return ['Cash Flow Statement', $sections, $d['reconciled'] ? 'Reconciled' : 'Out of balance', 'Period: ' . $d['from'] . ' to ' . $d['to']];
+    }
+
+    private function ledgerDriftPdf(Request $request): array
+    {
+        $d = $this->ledgerDrift($request);
+        $mapped = $d['rows']->map(fn ($r) => ['name' => $r['name'], 'kind' => $r['kind'], 'glAccount' => $r['gl_account_code'], 'book' => $r['book_balance'], 'gl' => $r['gl_balance'], 'variance' => $r['variance']]);
+        $sections = [[
+            'columns' => [
+                ['key' => 'name', 'label' => 'Account'], ['key' => 'kind', 'label' => 'Kind', 'align' => 'center'], ['key' => 'glAccount', 'label' => 'GL Account'],
+                ['key' => 'book', 'label' => 'Book Balance', 'align' => 'right', 'format' => 'money'], ['key' => 'gl', 'label' => 'GL Balance', 'align' => 'right', 'format' => 'money'], ['key' => 'variance', 'label' => 'Variance', 'align' => 'right', 'format' => 'money'],
+            ],
+            'rows' => $mapped->all(), 'emptyText' => 'No cash tills or bank accounts linked to the ledger yet',
+        ]];
+
+        return ['Ledger Drift', $sections, $d['has_drift'] ? 'Drift found' : 'In agreement', 'As of ' . $d['as_of']];
     }
 
     private function balanceSheet(Request $request)

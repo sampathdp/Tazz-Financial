@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { ExportButtons } from '../components/ExportButtons'
 import {
   chartOfAccountsApi, journalEntriesApi, accountingReportsApi,
   type ChartOfAccount, type AccountType, type JournalEntry, type GeneralLedgerReport,
@@ -14,13 +15,14 @@ import {
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
-import { downloadBlob, exportSheetsToExcel } from '../lib/export'
+import { downloadBlob, exportFlatTableToExcel, exportReportToExcel } from '../lib/export'
 import type { Go } from './types'
 
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
 const typeTone = (t: AccountType) => t === 'Asset' ? 'blue' : t === 'Liability' ? 'amber' : t === 'Equity' ? 'neutral' : t === 'Income' ? 'green' : 'red'
+const today = () => new Date().toISOString().slice(0, 10)
 
 /* ---------------------------- Chart of Accounts ---------------------------- */
 
@@ -197,9 +199,27 @@ export function GeneralLedgerScreen({ user: _me }: { go: Go; user?: AuthUser | n
       .then(setReport).catch((ex) => { setErr(getErrorText(ex, 'Failed to load')); setReport(null) }).finally(() => setLoading(false))
   }, [accountId, fromDate, toDate])
 
+  const exportExcel = () => {
+    if (!report) return
+    void exportFlatTableToExcel({
+      reportTitle: 'General Ledger', subtitle: `${report.account.code} — ${report.account.name}`, meta: `Period: ${fromDate || 'Inception'} to ${toDate || 'Today'}`,
+      columns: [
+        { label: 'Date', key: 'date' }, { label: 'Entry', key: 'entry' }, { label: 'Description', key: 'description' },
+        { label: 'Debit', key: 'debit', align: 'right', format: 'money' }, { label: 'Credit', key: 'credit', align: 'right', format: 'money' }, { label: 'Balance', key: 'balance', align: 'right', format: 'money' },
+      ],
+      rows: report.lines.map((l) => ({
+        date: dateOnly(l.entryDate), entry: l.journalEntryCode, description: l.description || '—',
+        debit: Number(l.debit) > 0 ? Number(l.debit) : null, credit: Number(l.credit) > 0 ? Number(l.credit) : null, balance: Number(l.runningBalance),
+      })),
+      emptyText: 'No activity in this range',
+    }, `general-ledger-${report.account.code}-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('general-ledger', { accountId, from: fromDate || undefined, to: toDate || undefined }), `general-ledger-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Accounting" title="General Ledger" icon="layers" />
+      <PageHead crumbs="Accounting" title="General Ledger" icon="layers"
+        actions={report && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="Account"><Select value={accountId} onChange={(e) => setAccountId(Number(e.target.value) || '')} style={{ minWidth: 260 }}>
@@ -245,9 +265,24 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
   const totalDebit = rows.reduce((s, r) => s + Number(r.totalDebit || 0), 0)
   const totalCredit = rows.reduce((s, r) => s + Number(r.totalCredit || 0), 0)
 
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Trial Balance', meta: asOf ? `As of ${asOf}` : undefined,
+      columns: [
+        { label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Type', key: 'type', align: 'center' },
+        { label: 'Debit', key: 'debit', align: 'right', format: 'money' }, { label: 'Credit', key: 'credit', align: 'right', format: 'money' }, { label: 'Balance', key: 'balance', align: 'right', format: 'money' },
+      ],
+      rows: rows.map((r) => ({ code: r.code, name: r.name, type: r.accountType, debit: Number(r.totalDebit || 0), credit: Number(r.totalCredit || 0), balance: Number(r.balance) })),
+      totalRow: { name: 'Totals', debit: totalDebit, credit: totalCredit },
+      emptyText: 'No accounts yet',
+    }, `trial-balance-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('trial-balance', asOf ? { as_of: asOf } : {}), `trial-balance-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Accounting" title="Trial Balance" icon="chart" />
+      <PageHead crumbs="Accounting" title="Trial Balance" icon="chart"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
       <Card pad={0}>
         {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
@@ -290,30 +325,39 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
 
   const exportExcel = () => {
     if (!report) return
-    const rows: (string | number)[][] = [
-      ['Profit & Loss', 'Cash and Accrual Basis'],
-      ['From', fromDate || 'Inception', 'To', toDate || 'Today'],
-      [],
-      ['Income'],
-      ['Code', 'Name', 'Cash Basis', 'Accrual Basis'],
-      ...report.income.map((r) => [r.code, r.name, Number(r.cashBalance), Number(r.accrualBalance)]),
-      ['', 'Total Income', Number(report.totalIncomeCash), Number(report.totalIncomeAccrual)],
-      [],
-      ['Expense'],
-      ['Code', 'Name', 'Amount'],
-      ...report.expense.map((r) => [r.code, r.name, Number(r.balance)]),
-      ['', 'Total Expense', Number(report.totalExpense)],
-      [],
-      ['', 'Net Profit (Cash Basis)', Number(report.netProfitCash)],
-      ['', 'Net Profit (Accrual Basis)', Number(report.netProfitAccrual)],
-    ]
-    void exportSheetsToExcel([{ name: 'Profit & Loss', rows }], `profit-loss-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    void exportReportToExcel({
+      sheetName: 'Profit & Loss',
+      reportTitle: 'Profit & Loss Statement',
+      subtitle: 'Cash and Accrual Basis',
+      meta: `Period: ${fromDate || 'Inception'} to ${toDate || 'Today'}  •  Generated: ${new Date().toLocaleString()}`,
+      sections: [
+        {
+          title: 'Income',
+          columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
+          rows: report.income.map((r) => ({ code: r.code, name: r.name, cash: Number(r.cashBalance), accrual: Number(r.accrualBalance) })),
+          totalRow: { code: '', name: 'Total Income', cash: Number(report.totalIncomeCash), accrual: Number(report.totalIncomeAccrual) },
+          emptyText: 'No income posted in this range',
+        },
+        {
+          title: 'Expense',
+          columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }],
+          rows: report.expense.map((r) => ({ code: r.code, name: r.name, amount: Number(r.balance) })),
+          totalRow: { code: '', name: 'Total Expense', amount: Number(report.totalExpense) },
+          emptyText: 'No expense posted in this range',
+        },
+        {
+          title: 'Net Profit',
+          columns: [{ label: 'Basis', key: 'basis' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }],
+          rows: [{ basis: 'Cash Basis', amount: Number(report.netProfitCash) }, { basis: 'Accrual Basis', amount: Number(report.netProfitAccrual) }],
+        },
+      ],
+    }, `profit-loss-${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
   const exportPdf = async () => {
     setExportingPdf(true)
     try {
-      const blob = await accountingReportsApi.profitLossPdf({ from: fromDate || undefined, to: toDate || undefined })
+      const blob = await accountingReportsApi.pdf('profit-loss', { from: fromDate || undefined, to: toDate || undefined })
       downloadBlob(blob, `profit-loss-${new Date().toISOString().slice(0, 10)}.pdf`)
     } catch (ex: any) {
       notify.error('Export failed', getErrorText(ex, 'Could not generate PDF'))
@@ -402,10 +446,30 @@ export function BalanceSheetScreen({ user: _me }: { go: Go; user?: AuthUser | nu
   }
   useEffect(refresh, [asOf]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const exportExcel = () => {
+    if (!report) return
+    const section = (title: string, rows: { code: string; name: string; balance: string }[], total: string) => ({
+      title, columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Amount', key: 'balance', align: 'right' as const, format: 'money' as const }],
+      rows: rows.map((r) => ({ code: r.code, name: r.name, balance: Number(r.balance) })),
+      totalRow: { name: `Total ${title}`, balance: Number(total) }, emptyText: 'Nothing here yet',
+    })
+    void exportReportToExcel({
+      sheetName: 'Balance Sheet', reportTitle: 'Balance Sheet', meta: `As of ${report.asOf}`,
+      sections: [
+        section('Assets', report.assets, report.totalAssets), section('Liabilities', report.liabilities, report.totalLiabilities), section('Equity', report.equity, report.totalEquity),
+        { columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right', format: 'money' }], rows: [{ metric: 'Total Liabilities + Equity', value: Number(report.totalLiabilitiesAndEquity) }] },
+      ],
+    }, `balance-sheet-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('balance-sheet', asOf ? { as_of: asOf } : {}), `balance-sheet-${today()}.pdf`)
+
   return (
     <div>
       <PageHead crumbs="Accounting" title="Balance Sheet" icon="grid"
-        actions={report && <Badge tone={report.balanced ? 'green' : 'red'} dot>{report.balanced ? 'Balanced' : 'Out of balance'}</Badge>} />
+        actions={report && <div className="row gap-3" style={{ alignItems: 'center' }}>
+          <Badge tone={report.balanced ? 'green' : 'red'} dot>{report.balanced ? 'Balanced' : 'Out of balance'}</Badge>
+          <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />
+        </div>} />
       <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
       {loading ? <Card><div style={{ padding: 20, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div></Card> : report && (
         <div className="col gap-4">
@@ -458,10 +522,34 @@ export function CashFlowScreen({ user: _me }: { go: Go; user?: AuthUser | null }
   }
   useEffect(refresh, [fromDate, toDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const exportExcel = () => {
+    if (!report) return
+    const section = (title: string, rows: { code: string; name: string; amount: number }[], total: string) => ({
+      title, columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Amount', key: 'amount', align: 'right' as const, format: 'money' as const }],
+      rows, totalRow: { name: `Net Cash from ${title}`, amount: Number(total) }, emptyText: 'No cash movement in this range',
+    })
+    void exportReportToExcel({
+      sheetName: 'Cash Flow', reportTitle: 'Cash Flow Statement', meta: `Period: ${report.from} to ${report.to}`,
+      sections: [
+        section('Operating Activities', report.operatingActivities, report.netCashFromOperating),
+        section('Investing Activities', report.investingActivities, report.netCashFromInvesting),
+        section('Financing Activities', report.financingActivities, report.netCashFromFinancing),
+        {
+          columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right', format: 'money' }],
+          rows: [{ metric: 'Opening Cash', value: Number(report.openingCash) }, { metric: 'Net Change in Cash', value: Number(report.netChangeInCash) }, { metric: 'Closing Cash', value: Number(report.closingCash) }],
+        },
+      ],
+    }, `cash-flow-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('cash-flow', { from: fromDate || undefined, to: toDate || undefined }), `cash-flow-${today()}.pdf`)
+
   return (
     <div>
       <PageHead crumbs="Accounting" title="Cash Flow Statement" icon="swap"
-        actions={report && <Badge tone={report.reconciled ? 'green' : 'red'} dot>{report.reconciled ? 'Reconciled' : 'Out of balance'}</Badge>} />
+        actions={report && <div className="row gap-3" style={{ alignItems: 'center' }}>
+          <Badge tone={report.reconciled ? 'green' : 'red'} dot>{report.reconciled ? 'Reconciled' : 'Out of balance'}</Badge>
+          <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />
+        </div>} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
@@ -509,11 +597,28 @@ export function LedgerDriftScreen({ user: _me }: { go: Go; user?: AuthUser | nul
   }
   useEffect(refresh, [asOf]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const exportExcel = () => {
+    if (!report) return
+    void exportFlatTableToExcel({
+      reportTitle: 'Ledger Drift', meta: `As of ${report.asOf}`,
+      columns: [
+        { label: 'Account', key: 'name' }, { label: 'Kind', key: 'kind', align: 'center' }, { label: 'GL Account', key: 'glAccount' },
+        { label: 'Book Balance', key: 'book', align: 'right', format: 'money' }, { label: 'GL Balance', key: 'gl', align: 'right', format: 'money' }, { label: 'Variance', key: 'variance', align: 'right', format: 'money' },
+      ],
+      rows: report.rows.map((r) => ({ name: r.name, kind: r.kind, glAccount: r.glAccountCode, book: Number(r.bookBalance), gl: Number(r.glBalance), variance: Number(r.variance) })),
+      emptyText: 'No cash tills or bank accounts linked to the ledger yet',
+    }, `ledger-drift-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('ledger-drift', asOf ? { as_of: asOf } : {}), `ledger-drift-${today()}.pdf`)
+
   return (
     <div>
       <PageHead crumbs="Accounting" title="Ledger Drift" icon="adjust"
         sub="Book balance (cash/bank account) vs. the general ledger's own derived balance for the same account"
-        actions={report && <Badge tone={report.hasDrift ? 'red' : 'green'} dot>{report.hasDrift ? 'Drift found' : 'In agreement'}</Badge>} />
+        actions={report && <div className="row gap-3" style={{ alignItems: 'center' }}>
+          <Badge tone={report.hasDrift ? 'red' : 'green'} dot>{report.hasDrift ? 'Drift found' : 'In agreement'}</Badge>
+          <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />
+        </div>} />
       <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
       <Card pad={0}>
         {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :

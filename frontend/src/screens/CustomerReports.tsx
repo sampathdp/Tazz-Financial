@@ -3,10 +3,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Card, PageHead, Badge, Table, Td } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { ExportButtons } from '../components/ExportButtons'
+import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
 import { Donut, ProgressRow } from '../components/charts'
 import { customerReportsApi, type AuthUser } from '../api'
 import { getErrorText } from '../lib/apiError'
+import { downloadBlob, exportFlatTableToExcel } from '../lib/export'
 import type { Go } from './types'
+
+const today = () => new Date().toISOString().slice(0, 10)
 
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -38,14 +43,16 @@ function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, te
 
 /* ---------------------------- Summary ---------------------------- */
 
-export function CustomerSummaryScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function CustomerSummaryScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
-    customerReportsApi.get('summary').then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [])
+    setLoading(true)
+    customerReportsApi.get('summary', { branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [branchId])
 
   const statusData = data ? [
     { label: 'Active', value: data.activeCustomers, color: PALETTE[0] },
@@ -53,9 +60,27 @@ export function CustomerSummaryScreen({ go: _go, user: _me }: { go: Go; user?: A
     { label: 'Blacklisted', value: data.blacklistedCustomers, color: PALETTE[2] },
   ].filter((d) => d.value > 0) : []
 
+  const exportExcel = () => {
+    if (!data) return
+    void exportFlatTableToExcel({
+      reportTitle: 'Customer Summary', meta: `As of ${data.asOf}`,
+      columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right' }],
+      rows: [
+        { metric: 'Total Customers', value: data.totalCustomers }, { metric: 'Active Customers', value: data.activeCustomers },
+        { metric: 'Inactive Customers', value: data.inactiveCustomers }, { metric: 'Blacklisted Customers', value: data.blacklistedCustomers },
+        { metric: 'New This Month', value: data.newThisMonth }, { metric: 'New Last Month', value: data.newLastMonth },
+        { metric: 'Growth %', value: pct(data.growthPct) }, { metric: 'Borrower Count', value: data.borrowerCount },
+        { metric: 'Repeat Customer Count', value: data.repeatCustomerCount }, { metric: 'Repeat Customer %', value: pct(data.repeatCustomerPct) },
+      ],
+    }, `customer-summary-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await customerReportsApi.pdf('summary', { branchId }), `customer-summary-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Customer Management / Reports" title="Customer Summary" icon="users" />
+      <PageHead crumbs="Customer Management / Reports" title="Customer Summary" icon="users"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
         <>
           <TileGrid>
@@ -81,22 +106,45 @@ export function CustomerSummaryScreen({ go: _go, user: _me }: { go: Go; user?: A
 
 /* ---------------------------- Activity ---------------------------- */
 
-export function CustomerActivityScreen({ go: _go, user: _me }: { go: Go; user?: AuthUser | null }) {
+export function CustomerActivityScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [rows, setRows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
 
   useEffect(() => {
-    customerReportsApi.get('activity').then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [])
+    setLoading(true)
+    customerReportsApi.get('activity', { branchId }).then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [branchId])
 
   const topBorrowers = useMemo(() =>
     [...rows].sort((a, b) => Number(b.totalBorrowed) - Number(a.totalBorrowed)).slice(0, 8), [rows])
   const maxBorrowed = Math.max(1, ...topBorrowers.map((c) => Number(c.totalBorrowed || 0)))
 
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Customer Activity',
+      columns: [
+        { label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Branch', key: 'branch' }, { label: 'Status', key: 'status', align: 'center' },
+        { label: 'Loans', key: 'loans', align: 'right', format: 'number' }, { label: 'Borrowed', key: 'borrowed', align: 'right', format: 'money' },
+        { label: 'Outstanding', key: 'outstanding', align: 'right', format: 'money' }, { label: 'FDs', key: 'fds', align: 'right', format: 'number' },
+        { label: 'Deposited', key: 'deposited', align: 'right', format: 'money' }, { label: 'Joined', key: 'joined' },
+      ],
+      rows: rows.map((c) => ({
+        code: c.code, name: c.fullName, branch: c.branch?.name || '—', status: c.status, loans: c.loanCount, borrowed: Number(c.totalBorrowed || 0),
+        outstanding: Number(c.totalOutstanding || 0), fds: c.fdCount, deposited: Number(c.totalDeposited || 0), joined: dateOnly(c.joinedAt),
+      })),
+      totalRow: { name: 'Total', borrowed: rows.reduce((a, c) => a + Number(c.totalBorrowed || 0), 0), outstanding: rows.reduce((a, c) => a + Number(c.totalOutstanding || 0), 0), deposited: rows.reduce((a, c) => a + Number(c.totalDeposited || 0), 0) },
+      emptyText: 'No customers',
+    }, `customer-activity-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await customerReportsApi.pdf('activity', { branchId }), `customer-activity-${today()}.pdf`)
+
   return (
     <div>
-      <PageHead crumbs="Customer Management / Reports" title="Customer Activity" icon="list" />
+      <PageHead crumbs="Customer Management / Reports" title="Customer Activity" icon="list"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (
         <>
           {topBorrowers.length > 0 && (
