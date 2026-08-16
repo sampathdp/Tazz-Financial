@@ -344,6 +344,13 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [scheduleTab, setScheduleTab] = useState<'all' | 'paid' | 'unpaid'>('unpaid')
   const [viewPayment, setViewPayment] = useState<LoanPayment | null>(null)
 
+  // Pending-payment worklist shown before a loan is picked — every Active loan
+  // still carrying a balance, filtered by loan (code/customer/NIC/product) and
+  // by Disbursed Date range, mirroring the pattern used on Overdue Loans.
+  const [listSearch, setListSearch] = useState('')
+  const [listFrom, setListFrom] = useState('')
+  const [listTo, setListTo] = useState('')
+
   const refresh = () => {
     setLoading(true)
     loansApi.list().then(setLoans).catch(() => setLoans([])).finally(() => setLoading(false))
@@ -363,7 +370,19 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     return () => { cancelled = true }
   }, [selected, payOpen, method, settleOpen, settleMethod])
 
+  const installmentAmountOf = (loan: Loan) => (loan.schedules?.length ? num(loan.schedules[0].totalDue) : null)
+  const interestAmountOf = (loan: Loan) => loan.summary?.dueBreakdown?.find((r) => r.type === 'Interest')?.due ?? null
   const payable = loans.filter((l) => l.status === 'Active')
+  const disbursedDate = (l: Loan) => (l.disbursedAt ? l.disbursedAt.slice(0, 10) : '')
+  const pendingPayment = payable.filter((l) => num(l.totalDueSum) - num(l.paidSum) > 0)
+  const listQ = listSearch.trim().toLowerCase()
+  const filteredPending = pendingPayment.filter((l) => {
+    if (listFrom && disbursedDate(l) < listFrom) return false
+    if (listTo && disbursedDate(l) > listTo) return false
+    if (!listQ) return true
+    return [l.code, l.customer?.fullName, l.customer?.nicNo, l.loanDetail?.loanType?.name].some((v) => (v || '').toLowerCase().includes(listQ))
+  })
+  const todayLabel = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
   const outstanding = selected ? outstandingOf(selected) : 0
   const totalPaid = (selected?.schedules || []).reduce((s, r) => s + num(r.paidAmount), 0)
   const pendingSettlement = selected?.payments?.find((p) => p.paymentType === 'Settlement' && p.approvalStatus === 'PendingApproval')
@@ -563,7 +582,8 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   return (
     <div>
       <PageHead crumbs="Loan Management" title="Payment Receipt" icon="receipt"
-        sub="Look up a loan by NIC, Loan ID, or customer name, then pay an installment or settle the loan completely." />
+        sub="Look up a loan by NIC, Loan ID, or customer name, then pay an installment or settle the loan completely."
+        actions={<div className="t-2" style={{ fontSize: 12.5 }}>Today: <b style={{ color: 'var(--tx-0)' }}>{todayLabel}</b></div>} />
 
       <Card style={{ marginBottom: 16 }}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>Find Loan</div>
@@ -603,6 +623,8 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
               <div><span className="t-2">Loan Code: </span><b>{selected.code}</b></div>
               <div><span className="t-2">Product: </span><b>{selected.loanDetail?.loanType?.name || '—'}</b></div>
               <div><span className="t-2">Status: </span><Badge tone="green" dot>{selected.status}</Badge></div>
+              <div><span className="t-2">Interest Amount: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{interestAmountOf(selected) != null ? money(interestAmountOf(selected)) : '—'}</b></div>
+              <div><span className="t-2">Installment Amount: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{installmentAmountOf(selected) != null ? money(installmentAmountOf(selected)) : '—'}</b></div>
               <div><span className="t-2">Outstanding Balance: </span><b style={{ fontFamily: 'JetBrains Mono', color: outstanding > 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(outstanding)}</b></div>
             </div>
           </Card>
@@ -682,9 +704,37 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       )}
 
       {!selected && !loading && !loadingLoan && (
-        <div className="t-2" style={{ fontSize: 12.5, textAlign: 'center', padding: '20px 0' }}>
-          <Icon n="search" s={16} /> Search above to find a loan by NIC number, loan code, or customer name.
-        </div>
+        <Card pad={0}>
+          <div className="row between wrap gap-2" style={{ padding: '14px 16px 0' }}>
+            <div className="eyebrow">Loans Awaiting Payment</div>
+            {listQ || listFrom || listTo ? <span className="t-2" style={{ fontSize: 12 }}>{filteredPending.length} of {pendingPayment.length}</span> : null}
+          </div>
+          <div className="row gap-2 wrap" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', alignItems: 'flex-end' }}>
+            <div style={{ position: 'relative', maxWidth: 320, flex: 1, minWidth: 200 }}>
+              <span className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', display: 'block', marginBottom: 6 }}>Loan-wise Filter</span>
+              <span style={{ position: 'absolute', left: 10, top: 32, color: 'var(--tx-2)' }}><Icon n="search" s={15} /></span>
+              <Input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="NIC, loan code, customer, or product…" style={{ paddingLeft: 32 }} />
+            </div>
+            <Field label="Disbursed From"><Input type="date" value={listFrom} max={listTo || undefined} onChange={(e) => setListFrom(e.target.value)} /></Field>
+            <Field label="Disbursed To"><Input type="date" value={listTo} min={listFrom || undefined} onChange={(e) => setListTo(e.target.value)} /></Field>
+            {(listSearch || listFrom || listTo) &&
+              <Btn variant="ghost" onClick={() => { setListSearch(''); setListFrom(''); setListTo('') }}>Reset</Btn>}
+          </div>
+          <Table cols={[{ label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Disbursed' }, { label: 'Outstanding', align: 'right' }]}
+            rows={filteredPending}
+            empty={pendingPayment.length ? 'No loans match these filters.' : 'No active loans with an outstanding balance right now.'}
+            onRow={(l: Loan) => pickLoan('', l)}
+            render={(l: Loan) => <>
+              <Td mono style={{ fontWeight: 600 }}>{l.code}</Td>
+              <Td>
+                <div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div>
+                <div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.nicNo || '—'}</div>
+              </Td>
+              <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
+              <Td>{dateOnly(l.disbursedAt)}</Td>
+              <Td mono align="right" c="var(--bad)">{money(num(l.totalDueSum) - num(l.paidSum))}</Td>
+            </>} />
+        </Card>
       )}
 
       <Modal open={payOpen} onClose={resetPayForm} title="Make Payment" sub={selected ? `${selected.code} — payment is allocated automatically to the oldest unpaid installment first.` : undefined}

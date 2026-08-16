@@ -974,7 +974,7 @@ export interface SpeedDraftType {
   /** Template for this type's generated Speed Draft numbers, e.g. "{BRANCH}-SD-{YEAR}-{SEQ:6}". Null = system default. */
   referenceFormat?: string | null;
   interestRatePercent: number | string;
-  ratePeriod?: 'monthly' | 'annual';
+  ratePeriod?: 'monthly' | 'annual' | 'daily';
   minAmount?: number | string | null;
   maxAmount?: number | string | null;
   minPeriodMonths?: number | null;
@@ -1073,7 +1073,7 @@ export interface SpeedDraft {
   /** Starts equal to principalAmount; reduced by CapitalReduction/Settlement payments. */
   outstandingBalanceCache: number | string;
   interestRatePercent: number | string;
-  ratePeriod?: 'monthly' | 'annual';
+  ratePeriod?: 'monthly' | 'annual' | 'daily';
   termMonths: number;
   /** Set once disbursed — see speedDraftsApi.disburse(). */
   startDate?: string | null;

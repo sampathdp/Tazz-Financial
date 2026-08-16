@@ -122,7 +122,7 @@ function OverviewPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5, marginBottom: 20 }}>
         <div><span className="t-2">Customer: </span><b>{d.customer?.fullName}</b></div>
         <div><span className="t-2">Type: </span><b>{d.speedDraftDetail?.speedDraftType?.name} ({CATEGORY_LABEL[d.speedDraftDetail?.speedDraftType?.category || ''] || d.speedDraftDetail?.speedDraftType?.category})</b></div>
-        <div><span className="t-2">Rate: </span><b>{Number(d.interestRatePercent).toFixed(3)}% {d.ratePeriod === 'annual' ? 'p.a.' : 'p.m.'}</b></div>
+        <div><span className="t-2">Rate: </span><b>{Number(d.interestRatePercent).toFixed(3)}% {d.ratePeriod === 'annual' ? 'p.a.' : d.ratePeriod === 'daily' ? 'p.d.' : 'p.m.'}</b></div>
         <div><span className="t-2">Period: </span><b>{d.termMonths} months</b></div>
         <div><span className="t-2">Start: </span><b>{dateOnly(d.startDate)}</b></div>
         <div><span className="t-2">Maturity: </span><b>{dateOnly(d.maturityDate)}</b></div>

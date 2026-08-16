@@ -236,7 +236,7 @@ class SpeedDraftController extends Controller
             'speed_draft_type_id' => 'required|exists:speed_draft_types,id',
             'principal_amount' => $principalRules,
             'interest_rate_percent' => 'nullable|numeric|min:0',
-            'rate_period' => ['nullable', Rule::in(['monthly', 'annual'])],
+            'rate_period' => ['nullable', Rule::in(['monthly', 'annual', 'daily'])],
             'term_months' => $termRules,
             'payment_frequency' => 'nullable|string|max:16',
             'vehicle_no' => 'nullable|string|max:20',

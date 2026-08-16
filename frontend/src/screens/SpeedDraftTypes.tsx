@@ -84,7 +84,7 @@ export function SpeedDraftTypesScreen({ user: me }: { go: Go; user?: AuthUser | 
             render={(t) => <>
               <Td style={{ fontWeight: 600 }}>{t.name}<div className="t-2" style={{ fontSize: 11 }}>{t.code}</div></Td>
               <Td><Badge tone="blue">{categoryLabel(t.category)}</Badge></Td>
-              <Td mono>{Number(t.interestRatePercent).toFixed(3)}% {t.ratePeriod === 'annual' ? 'p.a.' : 'p.m.'}</Td>
+              <Td mono>{Number(t.interestRatePercent).toFixed(3)}% {t.ratePeriod === 'annual' ? 'p.a.' : t.ratePeriod === 'daily' ? 'p.d.' : 'p.m.'}</Td>
               <Td mono>{t.minAmount != null ? Number(t.minAmount).toLocaleString() : '—'}–{t.maxAmount != null ? Number(t.maxAmount).toLocaleString() : '—'}</Td>
               <Td mono>{t.minPeriodMonths ?? '—'}–{t.maxPeriodMonths ?? '—'}</Td>
               <Td align="center">{t.requiresCollateral ? <Badge tone="amber" dot>Required</Badge> : <span className="t-2">—</span>}</Td>
@@ -123,7 +123,7 @@ export function SpeedDraftTypesScreen({ user: me }: { go: Go; user?: AuthUser | 
             </Select></Field>
             <Field label="Interest Rate %"><Input type="number" step="0.001" value={form.interestRatePercent ?? ''} onChange={(e) => set('interestRatePercent', e.target.value as any)} /></Field>
             <Field label="Rate Period"><Select value={form.ratePeriod || 'monthly'} onChange={(e) => set('ratePeriod', e.target.value as any)}>
-              <option value="monthly">Monthly</option><option value="annual">Annual</option>
+              <option value="monthly">Monthly</option><option value="annual">Annual</option><option value="daily">Daily</option>
             </Select></Field>
             <Field label="Grace Period (Days)"><Input type="number" min={0} value={form.gracePeriodDays ?? 5} onChange={(e) => set('gracePeriodDays', Number(e.target.value) as any)} /></Field>
             <Field label="Min Amount"><Input type="number" value={form.minAmount ?? ''} onChange={(e) => set('minAmount', e.target.value as any)} /></Field>

@@ -30,7 +30,7 @@ interface FormState {
   speedDraftTypeId?: number
   principalAmount?: number | string
   interestRatePercent?: number | string
-  ratePeriod?: 'monthly' | 'annual'
+  ratePeriod?: 'monthly' | 'annual' | 'daily'
   termMonths?: number
   vehicleNo?: string
   insurance?: Partial<FacilityInsuranceDetail>
@@ -232,7 +232,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
                 placeholder={selectedType?.minAmount != null ? `${money(selectedType.minAmount)} – ${money(selectedType.maxAmount)}` : undefined} /></Field>
               <Field label="Interest Rate %"><Input type="number" step="0.001" value={form.interestRatePercent ?? ''} onChange={(e) => setForm((s) => ({ ...s, interestRatePercent: e.target.value }))} /></Field>
               <Field label="Rate Period"><Select value={form.ratePeriod || 'monthly'} onChange={(e) => setForm((s) => ({ ...s, ratePeriod: e.target.value as any }))}>
-                <option value="monthly">Monthly</option><option value="annual">Annual</option>
+                <option value="monthly">Monthly</option><option value="annual">Annual</option><option value="daily">Daily</option>
               </Select></Field>
               <Field label="Period (Months)"><Input type="number" value={form.termMonths ?? ''} onChange={(e) => setForm((s) => ({ ...s, termMonths: Number(e.target.value) }))}
                 placeholder={selectedType ? `${selectedType.minPeriodMonths ?? 1}–${selectedType.maxPeriodMonths ?? ''}` : undefined} /></Field>

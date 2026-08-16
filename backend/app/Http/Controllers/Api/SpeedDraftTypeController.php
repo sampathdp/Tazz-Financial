@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 class SpeedDraftTypeController extends Controller
 {
     private const CATEGORIES = ['Loan', 'Mortgage', 'GoldPawning', 'Lease'];
-    private const RATE_PERIODS = ['monthly', 'annual'];
+    private const RATE_PERIODS = ['monthly', 'annual', 'daily'];
 
     public function index()
     {

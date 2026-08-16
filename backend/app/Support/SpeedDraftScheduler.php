@@ -22,14 +22,13 @@ class SpeedDraftScheduler
     public static function generate(SpeedDraft $draft): array
     {
         $n = $draft->term_months;
-        $monthlyRate = self::monthlyRate($draft);
         $capital = (float) $draft->outstanding_balance_cache;
 
-        $date = Carbon::parse($draft->start_date);
+        $prevDate = Carbon::parse($draft->start_date);
         $rows = [];
         for ($i = 1; $i <= $n; $i++) {
-            $date = $date->copy()->addMonthNoOverflow();
-            $interest = round($capital * ($monthlyRate / 100), 2);
+            $date = $prevDate->copy()->addMonthNoOverflow();
+            $interest = round($capital * (self::periodRate($draft, $prevDate->diffInDays($date)) / 100), 2);
             $capitalDue = $i === $n ? $capital : 0.0;
             $rows[] = [
                 'credit_facility_id' => $draft->id,
@@ -43,6 +42,7 @@ class SpeedDraftScheduler
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
+            $prevDate = $date;
         }
 
         return $rows;
@@ -58,26 +58,36 @@ class SpeedDraftScheduler
      */
     public static function recalculateOpenRows(SpeedDraft $draft): void
     {
-        $monthlyRate = self::monthlyRate($draft);
         $capital = (float) $draft->outstanding_balance_cache;
-        $lastInstallmentNo = (int) $draft->schedules()->max('installment_no');
+        $rows = $draft->schedules()->get();
+        $lastInstallmentNo = (int) $rows->max('installment_no');
 
-        $draft->schedules()->where('status', 'Pending')->get()
-            ->each(function ($row) use ($monthlyRate, $capital, $lastInstallmentNo) {
-                $interest = round($capital * ($monthlyRate / 100), 2);
+        $prevDate = Carbon::parse($draft->start_date);
+        foreach ($rows as $row) {
+            $dueDate = Carbon::parse($row->due_date);
+            $days = $prevDate->diffInDays($dueDate);
+            if ($row->status === 'Pending') {
+                $interest = round($capital * (self::periodRate($draft, $days) / 100), 2);
                 $capitalDue = $row->installment_no === $lastInstallmentNo ? $capital : 0.0;
                 $row->update([
                     'interest_due' => $interest,
                     'principal_due' => $capitalDue,
                     'total_due' => round($interest + $capitalDue, 2),
                 ]);
-            });
+            }
+            $prevDate = $dueDate;
+        }
     }
 
-    private static function monthlyRate(SpeedDraft $draft): float
+    /** Rate applied for one installment period spanning $days days. Monthly/annual
+     *  rates are flat per installment regardless of the month's actual length —
+     *  only 'daily' scales with the real day count (see class docblock). */
+    private static function periodRate(SpeedDraft $draft, int $days): float
     {
-        return $draft->rate_period === 'annual'
-            ? ((float) $draft->interest_rate_percent) / 12
-            : (float) $draft->interest_rate_percent;
+        return match ($draft->rate_period) {
+            'annual' => ((float) $draft->interest_rate_percent) / 12,
+            'daily' => (float) $draft->interest_rate_percent * $days,
+            default => (float) $draft->interest_rate_percent,
+        };
     }
 }

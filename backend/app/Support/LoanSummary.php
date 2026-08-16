@@ -232,8 +232,10 @@ class LoanSummary
      *   - Base is that installment's own unpaid principal+interest balance
      *     (its arrears), not the full outstanding loan principal.
      *   - default_charge_rate_percent is a MONTHLY rate, prorated to a daily
-     *     rate by dividing by 30, then applied per day elapsed since the
-     *     grace period ended (simple, non-compounding day-by-day accrual).
+     *     rate using the actual number of days in each calendar month the
+     *     overdue period passes through (not a flat 30-day assumption), then
+     *     applied per exact day elapsed since the grace period ended (simple,
+     *     non-compounding day-by-day accrual).
      */
     public static function penaltyDueForRow($schedule, int $graceDays, float $chargeRate, ?Carbon $asOf = null): float
     {
@@ -243,12 +245,18 @@ class LoanSummary
             return 0.0;
         }
         $chargeStart = $schedule->due_date->copy()->addDays($graceDays);
-        $daysLate = $today->greaterThan($chargeStart) ? $chargeStart->diffInDays($today) : 0;
-        if ($daysLate <= 0) {
+        if (!$today->greaterThan($chargeStart)) {
             return 0.0;
         }
 
-        return round($overdueBalance * ($chargeRate / 100 / 30) * $daysLate, 2);
+        $penalty = 0.0;
+        $cursor = $chargeStart->copy();
+        while ($cursor->lessThan($today)) {
+            $penalty += $overdueBalance * ($chargeRate / 100) / $cursor->daysInMonth;
+            $cursor->addDay();
+        }
+
+        return round($penalty, 2);
     }
 
     /**
