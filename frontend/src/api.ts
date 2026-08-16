@@ -809,7 +809,7 @@ export const loansApi = {
   get: (id: number) => http.get(`/loans/${id}`).then((r) => camelize(r.data) as Loan),
   create: (body: Partial<Loan>) => http.post('/loans', snakeize(body)).then((r) => camelize(r.data) as Loan),
   update: (id: number, body: Partial<Loan>) => http.put(`/loans/${id}`, snakeize(body)).then((r) => camelize(r.data) as Loan),
-  remove: (id: number) => http.delete(`/loans/${id}`).then((r) => r.data),
+  remove: (id: number, reason: string) => http.delete(`/loans/${id}`, { data: { rejected_reason: reason } }).then((r) => r.data),
   approve: (id: number) => http.post(`/loans/${id}/approve`).then((r) => camelize(r.data) as Loan),
   reject: (id: number, reason: string) => http.post(`/loans/${id}/reject`, { rejected_reason: reason }).then((r) => camelize(r.data) as Loan),
   cancel: (id: number, reason: string) => http.post(`/loans/${id}/cancel`, { cancelled_reason: reason }).then((r) => camelize(r.data) as Loan),

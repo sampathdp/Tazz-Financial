@@ -260,12 +260,13 @@ class LoanController extends Controller
         return $loan->load(self::DETAIL_RELATIONS);
     }
 
-    public function destroy(Loan $loan)
+    public function destroy(Request $request, Loan $loan)
     {
         if ($loan->status !== 'Pending') {
             return response()->json(['message' => 'Only pending applications can be withdrawn.'], 422);
         }
-        $loan->delete();
+        $data = $request->validate(['rejected_reason' => 'required|string|max:255']);
+        $loan->update(['status' => 'Rejected', 'rejected_reason' => $data['rejected_reason']]);
 
         return response()->noContent();
     }

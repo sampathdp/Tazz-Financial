@@ -261,9 +261,9 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   }
 
   const remove = async (loan: Loan) => {
-    const ok = await notify.confirm({ title: 'Withdraw this application?', msg: 'This action cannot be undone.', danger: true, okText: 'Withdraw' })
-    if (!ok) return
-    try { await loansApi.remove(loan.id); refresh(); notify.success('Application withdrawn', loan.code) }
+    const reason = await notify.prompt({ title: `Withdraw application ${loan.code}?`, msg: 'Give a reason — the application stays on record, marked Rejected.', placeholder: 'Reason for withdrawal', required: true, danger: true, okText: 'Withdraw' })
+    if (!reason) return
+    try { await loansApi.remove(loan.id, reason); refresh(); notify.success('Application withdrawn', loan.code) }
     catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
   }
 
