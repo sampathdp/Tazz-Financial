@@ -103,7 +103,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
             </Td>
             <Td>{l.loanDetail?.loanType?.name}</Td>
             <Td align="center"><Badge tone={daysTone(l.daysOverdue)} dot>{l.daysOverdue}d</Badge></Td>
-            <Td align="center">{l.overdueInstallments}</Td>
+            <Td align="center">{l.overdueInstallments.toFixed(2)}</Td>
             <Td mono align="right">{money(l.overdueAmount)}</Td>
             <Td mono align="right">{money(l.penaltyDue)}</Td>
             <Td mono align="right">{money(num(l.totalDueSum) - num(l.paidSum))}</Td>

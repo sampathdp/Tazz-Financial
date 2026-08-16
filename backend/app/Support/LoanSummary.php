@@ -210,7 +210,13 @@ class LoanSummary
             $data = $loan->toArray();
             $data['oldestOverdueDate'] = $oldestDueDate;
             $data['daysOverdue'] = $oldestDueDate ? (int) $asOf->diffInDays($oldestDueDate) : 0;
-            $data['overdueInstallments'] = $overdueSchedules->count();
+            // Fractional, not a plain row count: a partially paid installment (e.g.
+            // 60% collected) contributes 0.4, not a full 1 — mirrors penaltyDueForRow's
+            // exact-balance basis instead of treating every overdue row as whole.
+            $data['overdueInstallments'] = round((float) $overdueSchedules->sum(function ($s) {
+                $totalDue = (float) $s->total_due;
+                return $totalDue > 0 ? max(0, $totalDue - (float) $s->paid_amount) / $totalDue : 0;
+            }), 2);
             $data['overdueAmount'] = round((float) $overdueSchedules->sum(
                 fn ($s) => max(0, (float) $s->principal_due + (float) $s->interest_due - (float) $s->paid_amount)
             ), 2);

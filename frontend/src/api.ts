@@ -563,6 +563,7 @@ export interface LoanWaiver {
 export interface OverdueLoan extends Loan {
   oldestOverdueDate: string;
   daysOverdue: number;
+  /** Fractional count — a partially paid overdue installment contributes less than 1 (see LoanSummary::overdueList). */
   overdueInstallments: number;
   /** Principal + interest arrears on the overdue installments (excludes penalty). */
   overdueAmount: number;
