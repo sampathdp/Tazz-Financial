@@ -63,6 +63,13 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
     return <DisburseForm loan={loan} me={me} onChanged={onChanged} notify={notify} />
   }
 
+  const cancelLoan = async () => {
+    const reason = await notify.prompt({ title: `Cancel loan ${loan.code}?`, msg: 'Approved but not yet disbursed — give a reason.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Cancel Loan' })
+    if (!reason) return
+    try { await loansApi.cancel(loan.id, reason); notify.success('Loan cancelled', loan.code); onChanged() }
+    catch (ex: any) { notify.error('Cancel failed', getErrorText(ex)) }
+  }
+
   const eventOf = (type: FacilityStatusEventType) => (loan.statusEvents || []).find((e) => e.eventType === type)
   const flags: { label: string; on?: boolean; at?: string | null }[] = [
     { label: 'Terminated', on: !!eventOf('Terminated'), at: eventOf('Terminated')?.eventDate },
@@ -81,6 +88,11 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           {loan.status === 'Cancelled' && loan.cancelledReason && <span className="t-2" style={{ fontSize: 12 }}>Reason: {loan.cancelledReason}</span>}
         </div>
         <div className="row gap-2 wrap">
+          {loan.status === 'Approved' && (
+            <Can user={me} module="Loan Applications" action="Approve">
+              <Btn size="sm" variant="danger" icon="x" onClick={cancelLoan}>Cancel Loan</Btn>
+            </Can>
+          )}
           <Can user={me} module="Active Loans" action="Edit">
             <Btn size="sm" variant="solid" icon="flag" onClick={() => setStatusModal(true)}>Contract Status Change</Btn>
           </Can>
@@ -825,9 +837,21 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
     } finally { setBusy(false) }
   }
 
+  const cancel = async () => {
+    const reason = await notify.prompt({ title: `Cancel loan ${loan.code}?`, msg: 'Approved but not yet disbursed — give a reason.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Cancel Loan' })
+    if (!reason) return
+    try { await loansApi.cancel(loan.id, reason); notify.success('Loan cancelled', loan.code); onChanged() }
+    catch (ex: any) { notify.error('Cancel failed', getErrorText(ex)) }
+  }
+
   return (
     <Card>
-      <div className="eyebrow" style={{ marginBottom: 12 }}>Disburse this loan to generate its repayment schedule</div>
+      <div className="row between wrap gap-2" style={{ marginBottom: 12 }}>
+        <div className="eyebrow">Disburse this loan to generate its repayment schedule</div>
+        <Can user={me} module="Active Loans" action="Approve">
+          <Btn size="sm" variant="danger" icon="x" onClick={cancel}>Cancel Loan</Btn>
+        </Can>
+      </div>
       <ErrorBanner error={err} style={{ marginBottom: 14 }} />
 
       <DocumentChargeSection loan={loan} me={me} docCharge={docCharge} docBalance={docBalance} computedAmount={computedDocCharge} feePercent={feePercent} onChanged={onChanged} notify={notify} />
