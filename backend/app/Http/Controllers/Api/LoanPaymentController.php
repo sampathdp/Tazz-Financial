@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApprovalRequest;
+use App\Models\ApprovalType;
 use App\Models\Branch;
 use App\Models\FacilityPayment;
 use App\Models\Loan;
@@ -22,7 +24,7 @@ class LoanPaymentController extends Controller
 
     public function index(Loan $loan)
     {
-        return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name', 'bank:id,name'])->get();
+        return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name', 'bank:id,name', 'pendingVoidRequest.requester:id,name'])->get();
     }
 
     /** Preview-only: the receipt number the next payment on this loan would get,
@@ -238,7 +240,12 @@ class LoanPaymentController extends Controller
         return $payment->fresh()->load('receiver:id,name');
     }
 
-    public function destroy(Request $request, FacilityPayment $payment)
+    /** Submits a request to void this payment — doesn't touch the schedule/
+     *  ledger/cashbook itself, only takes effect once approveVoidRequest()
+     *  collects enough distinct approvals (approval_types.required_approvals
+     *  for code 'payment_void', snapshotted here). See that method for the
+     *  actual reversal. */
+    public function voidRequest(Request $request, FacilityPayment $payment)
     {
         if ($payment->status === 'Voided') {
             return response()->json(['message' => 'This payment is already voided.'], 422);
@@ -246,10 +253,60 @@ class LoanPaymentController extends Controller
         if ($payment->payment_type === 'Settlement' && $payment->approval_status === 'PendingApproval') {
             return response()->json(['message' => 'Reject the pending settlement request instead of voiding it.'], 422);
         }
+        if ($payment->voidRequests()->where('status', 'PendingApproval')->exists()) {
+            return response()->json(['message' => 'A cancel request is already pending approval for this receipt.'], 422);
+        }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
+        $type = ApprovalType::where('code', 'payment_void')->firstOrFail();
+
+        $voidRequest = ApprovalRequest::create([
+            'approval_type_id' => $type->id,
+            'subject_id' => $payment->id,
+            'requested_by' => $request->user()->id,
+            'requested_at' => now(),
+            'reason' => $data['void_reason'] ?? null,
+            'required_approvals' => $type->required_approvals,
+        ]);
+
+        return response()->json($voidRequest->load('requester:id,name'), 201);
+    }
+
+    public function approveVoidRequest(Request $request, ApprovalRequest $voidRequest)
+    {
+        if ($voidRequest->approvalType->code !== 'payment_void') {
+            abort(404);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'payment_void')) {
+            return response()->json(['message' => 'You are not an approver for payment cancellations.'], 403);
+        }
+        if ($voidRequest->status !== 'PendingApproval') {
+            return response()->json(['message' => 'This request is not pending approval.'], 422);
+        }
+        if ($voidRequest->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own cancel request.'], 422);
+        }
+        if ($voidRequest->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
+        $payment = FacilityPayment::findOrFail($voidRequest->subject_id);
+        if ($payment->status === 'Voided') {
+            $voidRequest->update(['status' => 'Rejected', 'rejected_by' => $request->user()->id, 'rejected_at' => now(), 'reject_reason' => 'This payment was already voided by another action.']);
+
+            return response()->json(['message' => 'This payment is already voided — the request has been auto-rejected.'], 422);
+        }
         $payment->load(['allocations.schedule', 'chargeAllocations.charge']);
 
-        DB::transaction(function () use ($payment, $data, $request) {
+        DB::transaction(function () use ($voidRequest, $payment, $request) {
+            if (!$voidRequest->first_approved_by) {
+                $voidRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $voidRequest->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($voidRequest->fresh()->approvalsCount() < $voidRequest->required_approvals) {
+                return;
+            }
+
             foreach ($payment->allocations as $alloc) {
                 $row = $alloc->schedule;
                 // Undo the accrued-to-date interest waiver this settlement applied
@@ -284,16 +341,39 @@ class LoanPaymentController extends Controller
             // "Cancelled Receipt" on the loan's history rather than vanishing.
             $payment->update([
                 'status' => 'Voided',
-                'void_reason' => $data['void_reason'] ?? null,
+                'void_reason' => $voidRequest->reason,
                 'voided_by' => $request->user()->id,
                 'voided_at' => now(),
             ]);
             $this->refreshOutstandingCache($loan);
             CashbookPoster::reverseCashReceipt($payment);
             LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
+            $voidRequest->update(['status' => 'Approved']);
         });
 
-        return response()->noContent();
+        return $voidRequest->fresh()->load('requester:id,name', 'firstApprover:id,name', 'secondApprover:id,name');
+    }
+
+    public function rejectVoidRequest(Request $request, ApprovalRequest $voidRequest)
+    {
+        if ($voidRequest->approvalType->code !== 'payment_void') {
+            abort(404);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'payment_void')) {
+            return response()->json(['message' => 'You are not an approver for payment cancellations.'], 403);
+        }
+        if ($voidRequest->status !== 'PendingApproval') {
+            return response()->json(['message' => 'This request is not pending approval.'], 422);
+        }
+        $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);
+        $voidRequest->update([
+            'status' => 'Rejected',
+            'rejected_by' => $request->user()->id,
+            'rejected_at' => now(),
+            'reject_reason' => $data['reject_reason'] ?? null,
+        ]);
+
+        return $voidRequest->fresh()->load('requester:id,name', 'rejecter:id,name');
     }
 
     /** Keeps credit_facilities.outstanding_balance_cache in step with LoanPaymentAllocator::outstandingBalance() after every mutation that could change it — see that column's docblock on the credit_facilities migration. */

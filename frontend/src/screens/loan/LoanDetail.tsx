@@ -13,7 +13,7 @@ import {
   type LoanCharge, type PaymentMethod, type LoanCollateralDocument,
   type FacilityStatusEventType, type AuthUser,
 } from '../../api'
-import { Can } from '../../lib/permissions'
+import { Can, canApprove } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
 import { getErrorText } from '../../lib/apiError'
 import type { Go } from '../types'
@@ -63,11 +63,35 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
     return <DisburseForm loan={loan} me={me} onChanged={onChanged} notify={notify} />
   }
 
+  // Submitting a cancel request uses the same module as today's other decisions
+  // on this loan; approving/rejecting one is a deliberately separate permission
+  // ('Loan Cancel Approvals') — being able to approve a normal application or
+  // disbursement doesn't imply being trusted to approve cancelling one.
+  const cancelModule = context === 'active' ? 'Active Loans' : 'Loan Applications'
+  const pendingCancel = loan.pendingCancelRequest
+
   const cancelLoan = async () => {
-    const reason = await notify.prompt({ title: `Cancel loan ${loan.code}?`, msg: 'Approved but not yet disbursed — give a reason.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Cancel Loan' })
+    const msg = loan.status === 'Active'
+      ? 'Disbursed but no payments collected yet — this removes the schedule and reverts the disbursement once approved. Give a reason.'
+      : 'Approved but not yet disbursed — give a reason. Needs a second person to approve before it takes effect.'
+    const reason = await notify.prompt({ title: `Request cancel for loan ${loan.code}?`, msg, placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Send Request' })
     if (!reason) return
-    try { await loansApi.cancel(loan.id, reason); notify.success('Loan cancelled', loan.code); onChanged() }
-    catch (ex: any) { notify.error('Cancel failed', getErrorText(ex)) }
+    try { await loansApi.requestCancel(loan.id, reason); notify.success('Cancel request sent', 'Awaiting approval'); onChanged() }
+    catch (ex: any) { notify.error('Request failed', getErrorText(ex)) }
+  }
+
+  const approveCancel = async () => {
+    if (!pendingCancel) return
+    try { await loansApi.approveCancelRequest(pendingCancel.id); notify.success('Approved'); onChanged() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+
+  const rejectCancel = async () => {
+    if (!pendingCancel) return
+    const reason = await notify.prompt({ title: 'Reject this cancel request?', msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await loansApi.rejectCancelRequest(pendingCancel.id, reason || undefined); notify.success('Cancel request rejected'); onChanged() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
   const eventOf = (type: FacilityStatusEventType) => (loan.statusEvents || []).find((e) => e.eventType === type)
@@ -88,8 +112,8 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           {loan.status === 'Cancelled' && loan.cancelledReason && <span className="t-2" style={{ fontSize: 12 }}>Reason: {loan.cancelledReason}</span>}
         </div>
         <div className="row gap-2 wrap">
-          {loan.status === 'Approved' && (
-            <Can user={me} module="Loan Applications" action="Approve">
+          {!pendingCancel && (loan.status === 'Approved' || (loan.status === 'Active' && !loan.payments?.length)) && (
+            <Can user={me} module={cancelModule} action="Delete">
               <Btn size="sm" variant="danger" icon="x" onClick={cancelLoan}>Cancel Loan</Btn>
             </Can>
           )}
@@ -101,6 +125,24 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           )}
         </div>
       </div>
+
+      {pendingCancel && (
+        <div className="row between wrap gap-2" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
+          <div style={{ fontSize: 12.5 }}>
+            <b>Cancel request pending</b> — {pendingCancel.requester?.name || '—'} · {pendingCancel.reason}
+            <div className="t-2" style={{ fontSize: 11.5, marginTop: 2 }}>
+              {pendingCancel.firstApprover ? `Approved by ${pendingCancel.firstApprover.name}, ` : ''}
+              needs {pendingCancel.requiredApprovals - (pendingCancel.firstApprover ? 1 : 0)} more approval{pendingCancel.requiredApprovals - (pendingCancel.firstApprover ? 1 : 0) === 1 ? '' : 's'}
+            </div>
+          </div>
+          {canApprove(me, 'loan_cancel') && me?.id !== pendingCancel.requester?.id && me?.id !== pendingCancel.firstApprover?.id && (
+            <div className="row gap-2">
+              <Btn size="sm" variant="primary" icon="check" onClick={approveCancel}>Approve</Btn>
+              <Btn size="sm" variant="danger" icon="x" onClick={rejectCancel}>Reject</Btn>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tabs — one section loaded at a time, matching the reference screen's button row without the scroll-everything sprawl. */}
       <div className="row gap-2" style={{ marginBottom: 16, overflowX: 'auto', paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
@@ -387,7 +429,10 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.code}</span>
                   <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · {p.paymentMethod}{p.receiptNo ? ` · #${p.receiptNo}` : ''} · {p.receiver?.name}{p.clearanceStatus === 'Realized' ? ` · cheque realized ${dateOnly(p.realizedAt)}` : ''}</span>
                 </div>
-                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
+                  {p.pendingVoidRequest && <Badge tone="amber" dot>Cancel Pending</Badge>}
+                </div>
               </div>
             ))}
           </div>}
@@ -837,21 +882,56 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
     } finally { setBusy(false) }
   }
 
+  const pendingCancel = loan.pendingCancelRequest
+
   const cancel = async () => {
-    const reason = await notify.prompt({ title: `Cancel loan ${loan.code}?`, msg: 'Approved but not yet disbursed — give a reason.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Cancel Loan' })
+    const reason = await notify.prompt({ title: `Request cancel for loan ${loan.code}?`, msg: 'Approved but not yet disbursed — give a reason. Needs a second person to approve before it takes effect.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Send Request' })
     if (!reason) return
-    try { await loansApi.cancel(loan.id, reason); notify.success('Loan cancelled', loan.code); onChanged() }
-    catch (ex: any) { notify.error('Cancel failed', getErrorText(ex)) }
+    try { await loansApi.requestCancel(loan.id, reason); notify.success('Cancel request sent', 'Awaiting approval'); onChanged() }
+    catch (ex: any) { notify.error('Request failed', getErrorText(ex)) }
+  }
+
+  const approveCancel = async () => {
+    if (!pendingCancel) return
+    try { await loansApi.approveCancelRequest(pendingCancel.id); notify.success('Approved'); onChanged() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+
+  const rejectCancel = async () => {
+    if (!pendingCancel) return
+    const reason = await notify.prompt({ title: 'Reject this cancel request?', msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await loansApi.rejectCancelRequest(pendingCancel.id, reason || undefined); notify.success('Cancel request rejected'); onChanged() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
   return (
     <Card>
       <div className="row between wrap gap-2" style={{ marginBottom: 12 }}>
         <div className="eyebrow">Disburse this loan to generate its repayment schedule</div>
-        <Can user={me} module="Active Loans" action="Approve">
-          <Btn size="sm" variant="danger" icon="x" onClick={cancel}>Cancel Loan</Btn>
-        </Can>
+        {!pendingCancel && (
+          <Can user={me} module="Active Loans" action="Delete">
+            <Btn size="sm" variant="danger" icon="x" onClick={cancel}>Cancel Loan</Btn>
+          </Can>
+        )}
       </div>
+      {pendingCancel && (
+        <div className="row between wrap gap-2" style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
+          <div style={{ fontSize: 12.5 }}>
+            <b>Cancel request pending</b> — {pendingCancel.requester?.name || '—'} · {pendingCancel.reason}
+            <div className="t-2" style={{ fontSize: 11.5, marginTop: 2 }}>
+              {pendingCancel.firstApprover ? `Approved by ${pendingCancel.firstApprover.name}, ` : ''}
+              needs {pendingCancel.requiredApprovals - (pendingCancel.firstApprover ? 1 : 0)} more approval{pendingCancel.requiredApprovals - (pendingCancel.firstApprover ? 1 : 0) === 1 ? '' : 's'}
+            </div>
+          </div>
+          {canApprove(me, 'loan_cancel') && me?.id !== pendingCancel.requester?.id && me?.id !== pendingCancel.firstApprover?.id && (
+            <div className="row gap-2">
+              <Btn size="sm" variant="primary" icon="check" onClick={approveCancel}>Approve</Btn>
+              <Btn size="sm" variant="danger" icon="x" onClick={rejectCancel}>Reject</Btn>
+            </div>
+          )}
+        </div>
+      )}
       <ErrorBanner error={err} style={{ marginBottom: 14 }} />
 
       <DocumentChargeSection loan={loan} me={me} docCharge={docCharge} docBalance={docBalance} computedAmount={computedDocCharge} feePercent={feePercent} onChanged={onChanged} notify={notify} />
@@ -867,8 +947,9 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
       </div>
       <Can user={me} module="Active Loans" action="Approve">
         <div className="row gap-2" style={{ alignItems: 'center' }}>
-          <Btn variant="primary" icon="check" onClick={disburse} disabled={busy || chargeBlocking}>{busy ? 'Disbursing…' : 'Disburse Loan'}</Btn>
-          {chargeBlocking && <span className="t-2" style={{ fontSize: 12 }}>{docCharge ? 'Settle' : 'Add and settle'} the document charge above first.</span>}
+          <Btn variant="primary" icon="check" onClick={disburse} disabled={busy || chargeBlocking || !!pendingCancel}>{busy ? 'Disbursing…' : 'Disburse Loan'}</Btn>
+          {chargeBlocking && !pendingCancel && <span className="t-2" style={{ fontSize: 12 }}>{docCharge ? 'Settle' : 'Add and settle'} the document charge above first.</span>}
+          {pendingCancel && <span className="t-2" style={{ fontSize: 12 }}>A cancel request is pending — resolve it before disbursing.</span>}
         </div>
       </Can>
     </Card>

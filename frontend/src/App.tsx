@@ -34,6 +34,9 @@ const FundingReportsScreen = lazy(() => import('./screens/FundingReports').then(
 const named = <M, K extends keyof M>(loader: () => Promise<M>, key: K) =>
   lazy(() => loader().then((m) => ({ default: m[key] as unknown as ComponentType<any> })))
 
+const ApprovalsScreen = named(() => import('./screens/Approvals'), 'ApprovalsScreen')
+const ApprovalTypesScreen = named(() => import('./screens/ApprovalTypes'), 'ApprovalTypesScreen')
+
 const BranchesScreen = named(() => import('./screens/Admin'), 'BranchesScreen')
 const RolesScreen = named(() => import('./screens/Admin'), 'RolesScreen')
 const UsersScreen = named(() => import('./screens/Admin'), 'UsersScreen')
@@ -140,6 +143,8 @@ const SCREENS: Record<string, ScreenComp> = {
   'sd/types': SpeedDraftTypesScreen,
   'sd/drafts': SpeedDraftsScreen,
   'sd/payments': SpeedDraftPaymentReceiptScreen,
+  'ad/approvals': ApprovalsScreen,
+  'ad/approval-types': ApprovalTypesScreen,
   'ad/branches': BranchesScreen,
   'ad/roles': RolesScreen,
   'ad/users': UsersScreen,

@@ -12,6 +12,13 @@ export function userCan(user: AuthUser | null | undefined, module: string, actio
   return list.includes(`${module}:${action}`)
 }
 
+/** Whether the user may approve/reject a given approval_types code (e.g.
+ *  'loan_cancel', 'payment_void') — separate from the module permission grid,
+ *  see ApprovalType::isAuthorized() on the backend. */
+export function canApprove(user: AuthUser | null | undefined, code: string): boolean {
+  return !!user?.approvalTypes?.includes(code)
+}
+
 /** Gate for page/button-level UI: renders children only if the user has the
  *  given module+action. This is the standard pattern every screen uses to
  *  hide/disable Add/Edit/Delete/Approve/Export buttons. */
@@ -55,8 +62,9 @@ export const ROUTE_MODULE: Record<string, string> = {
   'loan/payments': 'Loan Payments',
   'loan/doc-tracking': 'Document Tracking',
   'loan/commissions': 'Sales Executive Commissions',
-  // 'loan/adjustments' is intentionally NOT mapped here — canAccessRoute() below
-  // falls back to an admin-only check for any route id absent from this map.
+  // 'loan/adjustments', 'ad/approvals', and 'ad/approval-types' are intentionally
+  // NOT mapped here — canAccessRoute() below falls back to an admin-only check
+  // for any route id absent from this map.
   'sd/types': 'Speed Draft Types',
   'sd/drafts': 'Speed Drafts',
   'sd/payments': 'Speed Draft Payments',

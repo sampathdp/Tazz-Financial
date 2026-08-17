@@ -282,10 +282,10 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   }
 
   const cancel = async (loan: Loan) => {
-    const reason = await notify.prompt({ title: `Cancel loan ${loan.code}?`, msg: 'Already approved but not yet disbursed — give a reason.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Cancel Loan' })
+    const reason = await notify.prompt({ title: `Request cancel for loan ${loan.code}?`, msg: 'Already approved but not yet disbursed — give a reason. Needs a second person to approve before it takes effect.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Send Request' })
     if (!reason) return
-    try { await loansApi.cancel(loan.id, reason); refresh(); notify.success('Loan cancelled', loan.code) }
-    catch (ex: any) { notify.error('Cancel failed', getErrorText(ex)) }
+    try { await loansApi.requestCancel(loan.id, reason); refresh(); notify.success('Cancel request sent', 'Awaiting approval') }
+    catch (ex: any) { notify.error('Request failed', getErrorText(ex)) }
   }
 
   const addGuarantor = () => setForm((s) => ({ ...s, guarantors: [...s.guarantors, { guarantorCustomerId: 0, guaranteedAmount: '' }] }))
@@ -667,11 +667,12 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
                     <button className="mms-act" title="Withdraw" onClick={() => remove(l)}><Icon n="trash" s={15} /></button>
                   </Can>
                 )}
-                {l.status === 'Approved' && (
-                  <Can user={me} module="Loan Applications" action="Approve">
-                    <button className="mms-act" title="Cancel" onClick={() => cancel(l)}><Icon n="x" s={15} c="var(--bad)" /></button>
+                {l.status === 'Approved' && !l.pendingCancelRequest && (
+                  <Can user={me} module="Loan Applications" action="Delete">
+                    <button className="mms-act" title="Request Cancel" onClick={() => cancel(l)}><Icon n="x" s={15} c="var(--bad)" /></button>
                   </Can>
                 )}
+                {l.status === 'Approved' && !!l.pendingCancelRequest && <Badge tone="amber" dot>Cancel Pending</Badge>}
               </div>
             </Td>
           </>} />}

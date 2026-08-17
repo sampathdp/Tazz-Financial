@@ -158,6 +158,24 @@ class Loan extends Model
         return $this->hasMany(FacilityPayment::class, 'credit_facility_id')->orderByDesc('paid_at');
     }
 
+    /** Shared approval_requests table, scoped to this loan's 'loan_cancel'
+     *  rows via subject_id — see ApprovalRequest's docblock. */
+    public function cancelRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_cancel'))
+            ->orderByDesc('requested_at');
+    }
+
+    /** The one cancel request currently awaiting approval, if any — a loan can
+     *  only ever have at most one live at a time, see cancelRequest()'s guard. */
+    public function pendingCancelRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_cancel'))
+            ->where('status', 'PendingApproval');
+    }
+
     /** Recurring commission cycles for this loan's sales executive — see facility_type SalesExecutiveCommission. */
     public function salesExecutiveCommissions()
     {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApprovalType;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -98,6 +99,10 @@ class AuthController extends Controller
                 'branch' => $u->branch ? ['id' => $u->branch->id, 'name' => $u->branch->name, 'code' => $u->branch->code] : null,
                 'canViewAllBranches' => (bool) $u->role?->can_view_all_branches,
                 'permissions' => $u->permissionList(),
+                // Codes of approval_types this user may approve/reject — see
+                // ApprovalType::isAuthorized(). Separate from the module
+                // permission grid above; admins get every code.
+                'approvalTypes' => ApprovalType::codesForUser($u),
             ]
         );
     }

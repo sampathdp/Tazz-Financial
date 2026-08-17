@@ -70,4 +70,22 @@ class FacilityPayment extends Model
     {
         return $this->hasOne(FacilityPostDatedCheque::class, 'facility_payment_id');
     }
+
+    /** Shared approval_requests table, scoped to this payment's 'payment_void'
+     *  rows via subject_id — see ApprovalRequest's docblock. */
+    public function voidRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_void'))
+            ->orderByDesc('requested_at');
+    }
+
+    /** The one void request currently awaiting approval, if any — a payment can
+     *  only ever have at most one live at a time, see voidRequest()'s guard. */
+    public function pendingVoidRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_void'))
+            ->where('status', 'PendingApproval');
+    }
 }

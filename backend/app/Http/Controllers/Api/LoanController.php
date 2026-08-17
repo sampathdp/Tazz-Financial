@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApprovalRequest;
+use App\Models\ApprovalType;
 use App\Models\Branch;
 use App\Models\FacilityCollateralVehicleDetail;
 use App\Models\FacilitySchedule;
@@ -33,6 +35,7 @@ class LoanController extends Controller
         'branch:id,name,code',
         'loanDetail.loanType:id,name,code',
         'loanDetail.loanOfficer:id,name',
+        'pendingCancelRequest:id,approval_type_id,subject_id,status,required_approvals',
     ];
 
     private const DETAIL_RELATIONS = [
@@ -49,6 +52,7 @@ class LoanController extends Controller
         'applier:id,name',
         'approver:id,name',
         'canceller:id,name',
+        'cancelRequests.requester:id,name', 'cancelRequests.firstApprover:id,name', 'cancelRequests.secondApprover:id,name', 'cancelRequests.rejecter:id,name',
         'coApplicants.coApplicant:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
         'guarantors.guarantor:id,full_name,code,nic_no,phone',
         'collateral.vehicleDetail',
@@ -58,6 +62,7 @@ class LoanController extends Controller
         'payments.receiver:id,name',
         'payments.voider:id,name',
         'payments.bank:id,name',
+        'payments.pendingVoidRequest.requester:id,name',
         'charges.creator:id,name', 'charges.category:id,name',
         'postDatedCheques.creator:id,name',
         'postDatedCheques.bank:id,name',
@@ -302,23 +307,113 @@ class LoanController extends Controller
         return $loan->load(self::DETAIL_RELATIONS);
     }
 
-    /** Cancels an Approved-but-not-yet-disbursed loan — distinct from reject(),
-     *  which only applies to Pending applications. No schedule/ledger/cashbook
-     *  postings exist yet at this stage, so this is a plain status flip. */
-    public function cancel(Request $request, Loan $loan)
+    /** Submits a request to cancel a loan — either Approved-but-not-yet-
+     *  disbursed (distinct from reject(), which only applies to Pending
+     *  applications), or Active with zero payments collected so far (a bad/
+     *  mistaken disbursement). Doesn't cancel anything itself: it only takes
+     *  effect once approveCancelRequest() has collected enough distinct
+     *  approvals (approval_types.required_approvals for code 'loan_cancel',
+     *  snapshotted here) — see that method for what actually gets reversed. */
+    public function cancelRequest(Request $request, Loan $loan)
     {
-        if ($loan->status !== 'Approved') {
-            return response()->json(['message' => 'Only approved (not yet disbursed) loans can be cancelled.'], 422);
+        if (!in_array($loan->status, ['Approved', 'Active'], true)) {
+            return response()->json(['message' => 'Only approved (not yet disbursed) or freshly disbursed (no payments yet) loans can be cancelled.'], 422);
+        }
+        if ($loan->status === 'Active' && $loan->payments()->exists()) {
+            return response()->json(['message' => 'This loan already has payments recorded — cancel is only for loans with no collection history yet. Use Contract Status Change instead.'], 422);
+        }
+        if ($loan->cancelRequests()->where('status', 'PendingApproval')->exists()) {
+            return response()->json(['message' => 'A cancel request is already pending approval for this loan.'], 422);
         }
         $data = $request->validate(['cancelled_reason' => 'required|string|max:255']);
-        $loan->update([
-            'status' => 'Cancelled',
-            'cancelled_by' => $request->user()->id,
-            'cancelled_at' => now(),
-            'cancelled_reason' => $data['cancelled_reason'],
+        $type = ApprovalType::where('code', 'loan_cancel')->firstOrFail();
+
+        $cancelRequest = ApprovalRequest::create([
+            'approval_type_id' => $type->id,
+            'subject_id' => $loan->id,
+            'requested_by' => $request->user()->id,
+            'requested_at' => now(),
+            'reason' => $data['cancelled_reason'],
+            'required_approvals' => $type->required_approvals,
         ]);
 
-        return $loan->load(self::DETAIL_RELATIONS);
+        return response()->json($cancelRequest->load('requester:id,name'), 201);
+    }
+
+    public function approveCancelRequest(Request $request, ApprovalRequest $cancelRequest)
+    {
+        if ($cancelRequest->approvalType->code !== 'loan_cancel') {
+            abort(404);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'loan_cancel')) {
+            return response()->json(['message' => 'You are not an approver for loan cancellations.'], 403);
+        }
+        if ($cancelRequest->status !== 'PendingApproval') {
+            return response()->json(['message' => 'This request is not pending approval.'], 422);
+        }
+        if ($cancelRequest->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own cancel request.'], 422);
+        }
+        if ($cancelRequest->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
+        $loan = Loan::findOrFail($cancelRequest->subject_id);
+        // Re-check nothing changed since the request was submitted — a payment
+        // could have been recorded on this loan in the meantime.
+        if ($loan->status === 'Active' && $loan->payments()->exists()) {
+            $cancelRequest->update(['status' => 'Rejected', 'rejected_by' => $request->user()->id, 'rejected_at' => now(), 'reject_reason' => 'Payments were recorded on this loan after the request was submitted.']);
+
+            return response()->json(['message' => 'This loan now has payments recorded — the request has been auto-rejected. Use Contract Status Change instead.'], 422);
+        }
+
+        DB::transaction(function () use ($cancelRequest, $loan, $request) {
+            if (!$cancelRequest->first_approved_by) {
+                $cancelRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $cancelRequest->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($cancelRequest->fresh()->approvalsCount() < $cancelRequest->required_approvals) {
+                return;
+            }
+
+            if ($loan->status === 'Active') {
+                $loan->schedules()->delete();
+                $loan->salesExecutiveCommissions()->delete();
+                $loan->update(['disbursed_amount' => null, 'disbursed_at' => null, 'outstanding_balance_cache' => 0]);
+            }
+            $loan->update([
+                'status' => 'Cancelled',
+                'cancelled_by' => $request->user()->id,
+                'cancelled_at' => now(),
+                'cancelled_reason' => $cancelRequest->reason,
+            ]);
+            $cancelRequest->update(['status' => 'Approved']);
+        });
+
+        return $cancelRequest->fresh()->load('requester:id,name', 'firstApprover:id,name', 'secondApprover:id,name');
+    }
+
+    public function rejectCancelRequest(Request $request, ApprovalRequest $cancelRequest)
+    {
+        if ($cancelRequest->approvalType->code !== 'loan_cancel') {
+            abort(404);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'loan_cancel')) {
+            return response()->json(['message' => 'You are not an approver for loan cancellations.'], 403);
+        }
+        if ($cancelRequest->status !== 'PendingApproval') {
+            return response()->json(['message' => 'This request is not pending approval.'], 422);
+        }
+        $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);
+        $cancelRequest->update([
+            'status' => 'Rejected',
+            'rejected_by' => $request->user()->id,
+            'rejected_at' => now(),
+            'reject_reason' => $data['reject_reason'] ?? null,
+        ]);
+
+        return $cancelRequest->fresh()->load('requester:id,name', 'rejecter:id,name');
     }
 
     public function disburse(Request $request, Loan $loan)

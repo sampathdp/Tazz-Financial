@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\AccountingReportController;
+use App\Http\Controllers\Api\ApprovalController;
+use App\Http\Controllers\Api\ApprovalTypeController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BankAccountController;
 use App\Http\Controllers\Api\BankController;
@@ -79,6 +81,16 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     Route::get('dashboard', [DashboardController::class, 'index'])->middleware('perm:Dashboard,View');
 
+    // --- Approvals inbox (admin-only, see ApprovalController) ---
+    Route::get('approvals', [ApprovalController::class, 'index'])->middleware('admin');
+
+    // --- Approval Types registry (admin-only, see ApprovalTypeController) ---
+    Route::get('approval-types', [ApprovalTypeController::class, 'index'])->middleware('admin');
+    Route::post('approval-types', [ApprovalTypeController::class, 'store'])->middleware('admin');
+    Route::put('approval-types/{approvalType}', [ApprovalTypeController::class, 'update'])->middleware('admin');
+    Route::delete('approval-types/{approvalType}', [ApprovalTypeController::class, 'destroy'])->middleware('admin');
+    Route::put('approval-types/{approvalType}/approvers', [ApprovalTypeController::class, 'updateApprovers'])->middleware('admin');
+
     // --- Branch Management ---
     Route::get('branches', [BranchController::class, 'index'])->middleware('perm:Branch Management,View');
     Route::post('branches', [BranchController::class, 'store'])->middleware('perm:Branch Management,Create');
@@ -147,7 +159,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('loans/{loan}', [LoanController::class, 'destroy'])->middleware('perm:Loan Applications,Delete');
     Route::post('loans/{loan}/approve', [LoanController::class, 'approve'])->middleware('perm:Loan Applications,Approve');
     Route::post('loans/{loan}/reject', [LoanController::class, 'reject'])->middleware('perm:Loan Applications,Approve');
-    Route::post('loans/{loan}/cancel', [LoanController::class, 'cancel'])->middleware('perm:Loan Applications,Approve');
+    Route::post('loans/{loan}/cancel-request', [LoanController::class, 'cancelRequest'])->middleware('perm:Loan Applications,Delete');
+    // approve/reject gated inline by ApprovalType::isAuthorized('loan_cancel', ...) — see LoanController — not
+    // the module permission grid, so who may approve is admin-manageable data, not a hardcoded permission module.
+    Route::post('loan-cancel-requests/{cancelRequest}/approve', [LoanController::class, 'approveCancelRequest']);
+    Route::post('loan-cancel-requests/{cancelRequest}/reject', [LoanController::class, 'rejectCancelRequest']);
 
     // --- Loan Management: Active Loans ---
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
@@ -164,7 +180,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('loans/{loan}/payments', [LoanPaymentController::class, 'index'])->middleware('perm:Loan Payments,View');
     Route::get('loans/{loan}/next-receipt-no', [LoanPaymentController::class, 'nextReceiptNo'])->middleware('perm:Loan Payments,Create');
     Route::post('loans/{loan}/payments', [LoanPaymentController::class, 'store'])->middleware('perm:Loan Payments,Create');
-    Route::delete('loan-payments/{payment}', [LoanPaymentController::class, 'destroy'])->middleware('perm:Loan Payments,Delete');
+    Route::post('loan-payments/{payment}/void-request', [LoanPaymentController::class, 'voidRequest'])->middleware('perm:Loan Payments,Delete');
+    // approve/reject gated inline by ApprovalType::isAuthorized('payment_void', ...) — see LoanPaymentController.
+    Route::post('loan-payment-void-requests/{voidRequest}/approve', [LoanPaymentController::class, 'approveVoidRequest']);
+    Route::post('loan-payment-void-requests/{voidRequest}/reject', [LoanPaymentController::class, 'rejectVoidRequest']);
     Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement'])->middleware('perm:Loan Payments,Approve');
     Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement'])->middleware('perm:Loan Payments,Approve');
     // Admin-only — realizing/bouncing a cheque is a Loan Adjustments action, not a regular Loan Payments one.

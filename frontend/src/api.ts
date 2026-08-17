@@ -170,6 +170,10 @@ export interface AuthUser {
   canViewAllBranches?: boolean;
   /** Flat list of "Module:Action" strings the role is allowed to perform. */
   permissions?: string[];
+  /** Codes of approval_types this user may approve/reject (e.g. 'loan_cancel',
+   *  'payment_void') — separate from the module permission grid above, see
+   *  ApprovalType::isAuthorized(). Admins get every code. */
+  approvalTypes?: string[];
 }
 
 export interface PermUser {
@@ -345,6 +349,21 @@ export interface FacilityStatusEvent {
   createdAt?: string;
 }
 
+export type ApprovalRequestStatus = 'PendingApproval' | 'Approved' | 'Rejected'
+
+/** A cashier-submitted request to cancel a loan — a row in the shared
+ *  approval_requests table (approvalTypeId for code 'loan_cancel', subjectId =
+ *  the loan's id) — only takes effect once requiredApprovals distinct people
+ *  approve it, snapshotted at request time. See LoanController::cancelRequest(). */
+export interface LoanCancelRequest {
+  id: number; approvalTypeId: number; subjectId: number;
+  requester?: { id: number; name: string } | null; requestedAt: string;
+  reason: string; requiredApprovals: number; status: ApprovalRequestStatus;
+  firstApprover?: { id: number; name: string } | null; firstApprovedAt?: string | null;
+  secondApprover?: { id: number; name: string } | null; secondApprovedAt?: string | null;
+  rejecter?: { id: number; name: string } | null; rejectedAt?: string | null; rejectReason?: string | null;
+}
+
 export interface Loan {
   id: number; code: string;
   branchId: number; branch?: { id: number; name: string; code: string };
@@ -371,6 +390,9 @@ export interface Loan {
   canceller?: { id: number; name: string } | null;
   cancelledAt?: string | null;
   cancelledReason?: string | null;
+  /** The one cancel request awaiting approval right now, if any — see loansApi.requestCancel(). */
+  pendingCancelRequest?: LoanCancelRequest | null;
+  cancelRequests?: LoanCancelRequest[];
   disbursedAmount?: number | string | null;
   disbursedAt?: string | null;
   outstandingBalanceCache?: number | string | null;
@@ -475,6 +497,18 @@ export type PaymentClearanceStatus = 'Pending' | 'Realized' | 'Bounced'
 
 export type LoanPaymentType = 'Regular' | 'Settlement'
 
+/** A cashier-submitted request to void a payment receipt — same shared
+ *  approval_requests row shape as LoanCancelRequest (approvalTypeId for code
+ *  'payment_void', subjectId = the payment's id). See LoanPaymentController::voidRequest(). */
+export interface LoanPaymentVoidRequest {
+  id: number; approvalTypeId: number; subjectId: number;
+  requester?: { id: number; name: string } | null; requestedAt: string;
+  reason?: string | null; requiredApprovals: number; status: ApprovalRequestStatus;
+  firstApprover?: { id: number; name: string } | null; firstApprovedAt?: string | null;
+  secondApprover?: { id: number; name: string } | null; secondApprovedAt?: string | null;
+  rejecter?: { id: number; name: string } | null; rejectedAt?: string | null; rejectReason?: string | null;
+}
+
 export interface LoanPayment {
   id: number; code: string; creditFacilityId: number;
   amount: number | string; paymentMethod: PaymentMethod;
@@ -500,6 +534,8 @@ export interface LoanPayment {
   approvalStatus?: PaymentApprovalStatus;
   approver?: { id: number; name: string } | null; approvedAt?: string | null;
   voidReason?: string | null; voider?: { id: number; name: string } | null; voidedAt?: string | null;
+  /** The one void request awaiting approval right now, if any — see loanPaymentsApi.requestVoid(). */
+  pendingVoidRequest?: LoanPaymentVoidRequest | null;
   createdAt?: string;
 }
 
@@ -813,7 +849,10 @@ export const loansApi = {
   remove: (id: number, reason: string) => http.delete(`/loans/${id}`, { data: { rejected_reason: reason } }).then((r) => r.data),
   approve: (id: number) => http.post(`/loans/${id}/approve`).then((r) => camelize(r.data) as Loan),
   reject: (id: number, reason: string) => http.post(`/loans/${id}/reject`, { rejected_reason: reason }).then((r) => camelize(r.data) as Loan),
-  cancel: (id: number, reason: string) => http.post(`/loans/${id}/cancel`, { cancelled_reason: reason }).then((r) => camelize(r.data) as Loan),
+  /** Submits a cancel request — doesn't cancel the loan itself, see LoanCancelRequest. */
+  requestCancel: (id: number, reason: string) => http.post(`/loans/${id}/cancel-request`, { cancelled_reason: reason }).then((r) => camelize(r.data) as LoanCancelRequest),
+  approveCancelRequest: (requestId: number) => http.post(`/loan-cancel-requests/${requestId}/approve`).then((r) => camelize(r.data) as LoanCancelRequest),
+  rejectCancelRequest: (requestId: number, reason?: string) => http.post(`/loan-cancel-requests/${requestId}/reject`, snakeize({ rejectReason: reason })).then((r) => camelize(r.data) as LoanCancelRequest),
   disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>
@@ -857,7 +896,10 @@ export const loanPaymentsApi = {
     http.get(`/loans/${loanId}/next-receipt-no`, { params: { payment_method: paymentMethod } }).then((r) => r.data.code as string),
   create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankId?: number; chequeDate?: string; notes?: string; isSettlement?: boolean }) =>
     http.post(`/loans/${loanId}/payments`, snakeize(body)).then((r) => camelize(r.data) as LoanPayment),
-  remove: (paymentId: number, voidReason?: string) => http.delete(`/loan-payments/${paymentId}`, { data: { void_reason: voidReason } }).then((r) => r.data),
+  /** Submits a void request — doesn't void the payment itself, see LoanPaymentVoidRequest. */
+  requestVoid: (paymentId: number, voidReason?: string) => http.post(`/loan-payments/${paymentId}/void-request`, { void_reason: voidReason }).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
+  approveVoidRequest: (requestId: number) => http.post(`/loan-payment-void-requests/${requestId}/approve`).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
+  rejectVoidRequest: (requestId: number, reason?: string) => http.post(`/loan-payment-void-requests/${requestId}/reject`, snakeize({ rejectReason: reason })).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
   approveSettlement: (paymentId: number) => http.post(`/loan-payments/${paymentId}/approve-settlement`).then((r) => camelize(r.data) as LoanPayment),
   rejectSettlement: (paymentId: number, voidReason?: string) =>
     http.post(`/loan-payments/${paymentId}/reject-settlement`, snakeize({ voidReason })).then((r) => camelize(r.data) as LoanPayment),
@@ -866,6 +908,46 @@ export const loanPaymentsApi = {
    *  payment (it was never applied). */
   clearCheque: (paymentId: number, status: 'Realized' | 'Bounced', realizedAt?: string) =>
     http.patch(`/loan-payments/${paymentId}/clear-cheque`, snakeize({ status, realizedAt })).then((r) => camelize(r.data) as LoanPayment),
+}
+
+/** Admin-only consolidated inbox — see ApprovalController::index(). */
+export interface ApprovalsInbox {
+  loanCancelRequests: (LoanCancelRequest & {
+    loan?: { id: number; code: string; principalAmount: number | string; status: LoanStatus; customer?: { id: number; fullName: string } } | null
+  })[]
+  paymentVoidRequests: (LoanPaymentVoidRequest & {
+    payment?: {
+      id: number; code: string; amount: number | string; paymentType?: LoanPaymentType
+      facility?: { id: number; code: string; customer?: { id: number; fullName: string } } | null
+    } | null
+  })[]
+}
+
+export const approvalsApi = {
+  list: () => http.get('/approvals').then((r) => camelize(r.data) as ApprovalsInbox),
+}
+
+/** A named, data-driven "approval point" (e.g. loan_cancel, payment_void) —
+ *  admin-manageable list of who may approve it, decoupled from the module
+ *  permission grid so new approval points don't need a code deploy to
+ *  configure approvers for. See ApprovalType::isAuthorized(). */
+export interface ApprovalType {
+  id: number; code: string; name: string; description?: string | null;
+  isSystem?: boolean;
+  /** How many distinct people must approve a request of this type before it executes — 1 or 2. */
+  requiredApprovals?: number;
+  approvers?: { id: number; name: string }[];
+}
+
+export const approvalTypesApi = {
+  list: () => http.get('/approval-types').then((r) => camelize(r.data) as ApprovalType[]),
+  create: (body: { code: string; name: string; description?: string; requiredApprovals?: number }) =>
+    http.post('/approval-types', snakeize(body)).then((r) => camelize(r.data) as ApprovalType),
+  update: (id: number, body: { name: string; description?: string; requiredApprovals?: number }) =>
+    http.put(`/approval-types/${id}`, snakeize(body)).then((r) => camelize(r.data) as ApprovalType),
+  remove: (id: number) => http.delete(`/approval-types/${id}`).then((r) => r.data),
+  updateApprovers: (id: number, userIds: number[]) =>
+    http.put(`/approval-types/${id}/approvers`, { user_ids: userIds }).then((r) => camelize(r.data) as ApprovalType),
 }
 
 export const loanChargesApi = {

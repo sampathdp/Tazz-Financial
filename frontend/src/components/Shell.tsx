@@ -146,6 +146,8 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Administration', icon: 'shield', items: [
+    { id: 'ad/approvals', label: 'Approvals', icon: 'check' },
+    { id: 'ad/approval-types', label: 'Approval Types', icon: 'shield' },
     { id: 'ad/branches', label: 'Branch Management', icon: 'building' },
     { id: 'ad/roles', label: 'Role Management', icon: 'shield' },
     { id: 'ad/users', label: 'User Management', icon: 'users' },

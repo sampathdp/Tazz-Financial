@@ -17,7 +17,7 @@ import {
   type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser,
   type SpeedDraft, type SpeedDraftPayment, type SpeedDraftSchedule, type SpeedDraftPaymentType,
 } from '../api'
-import { Can, userCan } from '../lib/permissions'
+import { Can, userCan, canApprove } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -44,6 +44,7 @@ const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = { Pa
 /** Payment History row status — mirrors LoanDetail's ReceiptsPanel classification. */
 function PaymentStatusBadge({ p }: { p: LoanPayment }) {
   if (p.status === 'Voided') return <Badge tone="red" dot>Voided</Badge>
+  if (p.pendingVoidRequest) return <Badge tone="amber" dot>Cancel Pending</Badge>
   if (p.approvalStatus === 'PendingApproval') return <Badge tone="amber" dot>Pending Approval</Badge>
   if (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending') return <Badge tone="amber" dot>Pending Clearance</Badge>
   return <Badge tone="green" dot>Recorded</Badge>
@@ -495,15 +496,39 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   }
 
   const voidPayment = async (payment: LoanPayment) => {
-    const reason = await notify.prompt({ title: `Cancel receipt ${payment.code}?`, msg: 'Reverses this payment from the schedule, ledger, and cashbook. This action cannot be undone.', placeholder: 'Reason for cancelling', danger: true, okText: 'Cancel Receipt' })
+    const reason = await notify.prompt({ title: `Request cancel for receipt ${payment.code}?`, msg: 'Needs approval before it reverses this payment from the schedule, ledger, and cashbook.', placeholder: 'Reason for cancelling', danger: true, okText: 'Send Request' })
     if (reason === null) return
     try {
-      await loanPaymentsApi.remove(payment.id, reason || undefined)
-      notify.success('Receipt cancelled', payment.code)
+      await loanPaymentsApi.requestVoid(payment.id, reason || undefined)
+      notify.success('Cancel request sent', 'Awaiting approval')
       setViewPayment(null)
       await reloadSelected()
       refresh()
-    } catch (ex: any) { notify.error('Cancel failed', getErrorText(ex)) }
+    } catch (ex: any) { notify.error('Request failed', getErrorText(ex)) }
+  }
+
+  const approveVoid = async (payment: LoanPayment) => {
+    if (!payment.pendingVoidRequest) return
+    try {
+      await loanPaymentsApi.approveVoidRequest(payment.pendingVoidRequest.id)
+      notify.success('Approved')
+      setViewPayment(null)
+      await reloadSelected()
+      refresh()
+    } catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+
+  const rejectVoid = async (payment: LoanPayment) => {
+    if (!payment.pendingVoidRequest) return
+    const reason = await notify.prompt({ title: 'Reject this cancel request?', msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try {
+      await loanPaymentsApi.rejectVoidRequest(payment.pendingVoidRequest.id, reason || undefined)
+      notify.success('Cancel request rejected')
+      setViewPayment(null)
+      await reloadSelected()
+      refresh()
+    } catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
   const startOver = () => {
@@ -786,10 +811,17 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
       <Modal open={!!viewPayment} onClose={() => setViewPayment(null)} title={viewPayment ? `Payment ${viewPayment.code}` : ''} sub={selected ? `${selected.code} — ${selected.customer?.fullName}` : undefined}
         footer={<>
-          {viewPayment && viewPayment.status !== 'Voided' && viewPayment.approvalStatus !== 'PendingApproval' && (
+          {viewPayment && !viewPayment.pendingVoidRequest && viewPayment.status !== 'Voided' && viewPayment.approvalStatus !== 'PendingApproval' && (
             <Can user={me} module="Loan Payments" action="Delete">
               <Btn variant="danger" icon="x" onClick={() => voidPayment(viewPayment)}>Cancel Receipt</Btn>
             </Can>
+          )}
+          {viewPayment?.pendingVoidRequest && canApprove(me, 'payment_void')
+            && me?.id !== viewPayment.pendingVoidRequest.requester?.id && me?.id !== viewPayment.pendingVoidRequest.firstApprover?.id && (
+            <>
+              <Btn variant="danger" icon="x" onClick={() => rejectVoid(viewPayment)}>Reject</Btn>
+              <Btn variant="primary" icon="check" onClick={() => approveVoid(viewPayment)}>Approve</Btn>
+            </>
           )}
           <Btn variant="solid" onClick={() => setViewPayment(null)}>Close</Btn>
         </>}>
@@ -817,6 +849,15 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 <div className="col gap-1" style={{ marginTop: 8, padding: '8px 12px', background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
                   <div>Voided {dateOnly(p.voidedAt)} by {p.voider?.name || '—'}</div>
                   {p.voidReason && <div>Reason: {p.voidReason}</div>}
+                </div>
+              )}
+              {p.pendingVoidRequest && (
+                <div className="col gap-1" style={{ marginTop: 8, padding: '8px 12px', background: 'var(--warn-dim)', color: 'var(--warn)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
+                  <div><b>Cancel request pending</b> — {p.pendingVoidRequest.requester?.name || '—'}{p.pendingVoidRequest.reason ? ` · ${p.pendingVoidRequest.reason}` : ''}</div>
+                  <div>
+                    {p.pendingVoidRequest.firstApprover ? `Approved by ${p.pendingVoidRequest.firstApprover.name}, ` : ''}
+                    needs {p.pendingVoidRequest.requiredApprovals - (p.pendingVoidRequest.firstApprover ? 1 : 0)} more approval{p.pendingVoidRequest.requiredApprovals - (p.pendingVoidRequest.firstApprover ? 1 : 0) === 1 ? '' : 's'}
+                  </div>
                 </div>
               )}
               {pendingClearance && (
