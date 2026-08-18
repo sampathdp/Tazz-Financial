@@ -634,6 +634,7 @@ export interface LoanSummary {
   };
   recovery: {
     lastPaymentDate: string | null; lastPaymentAmount: number | null;
+    /** Fractional, not row counts — a rental 60% collected contributes 0.6 settled / 0.4 outstanding. */
     fallenDueRentals: number; settledRentals: number; outstandingRentals: number; futureRentals: number;
   };
 }

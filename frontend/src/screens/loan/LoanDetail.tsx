@@ -318,15 +318,18 @@ function RecoveryDetails({ loan, me, onChanged, notify }: { loan: Loan; me?: Aut
         <div className="eyebrow">Recovery Details</div>
         <Can user={me} module="Active Loans" action="Edit"><Btn size="sm" variant="solid" icon="edit" onClick={openEdit}>Assign Officers</Btn></Can>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5 }}>
-        <div><span className="t-2">Follow Up Officer: </span>{loan.loanDetail?.recoveryOfficer?.name || '—'}</div>
-        <div><span className="t-2">Marketing Executive: </span>{loan.loanDetail?.loanOfficer?.name || '—'}</div>
-        <div><span className="t-2">Last Payment: </span>{r?.lastPaymentDate ? `${dateOnly(r.lastPaymentDate)} · ${money(r.lastPaymentAmount)}` : '—'}</div>
-        <div><span className="t-2">Fallen Due Rentals: </span>{r?.fallenDueRentals ?? 0}</div>
-        <div><span className="t-2">Settled Rentals: </span>{r?.settledRentals ?? 0}</div>
-        <div><span className="t-2">Outstanding Rentals: </span>{r?.outstandingRentals ?? 0}</div>
-        <div><span className="t-2">Future Rentals: </span>{r?.futureRentals ?? 0}</div>
-      </div>
+      <KpiGrid items={[
+        { label: 'Follow Up Officer', value: loan.loanDetail?.recoveryOfficer?.name || '—', icon: 'users', tone: 'blue' },
+        { label: 'Marketing Executive', value: loan.loanDetail?.loanOfficer?.name || '—', icon: 'users', tone: 'blue' },
+        {
+          label: 'Last Payment', icon: 'receipt', tone: 'green',
+          value: r?.lastPaymentDate ? <>{money(r.lastPaymentAmount)}<div className="t-2" style={{ fontSize: 11, fontWeight: 400 }}>{dateOnly(r.lastPaymentDate)}</div></> : '—',
+        },
+        { label: 'Fallen Due Rentals', value: (r?.fallenDueRentals ?? 0).toFixed(2), icon: 'alert', tone: (r?.fallenDueRentals ?? 0) > 0 ? 'red' : 'green' },
+        { label: 'Settled Rentals', value: (r?.settledRentals ?? 0).toFixed(2), icon: 'check', tone: 'green' },
+        { label: 'Outstanding Rentals', value: (r?.outstandingRentals ?? 0).toFixed(2), icon: 'clock', tone: (r?.outstandingRentals ?? 0) > 0 ? 'amber' : 'green' },
+        { label: 'Future Rentals', value: (r?.futureRentals ?? 0).toFixed(2), icon: 'calendar', tone: 'neutral' },
+      ]} />
 
       <Modal open={editing} onClose={() => setEditing(false)} title="Assign Officers" footer={<>
         <Btn variant="solid" onClick={() => setEditing(false)}>Cancel</Btn>

@@ -150,11 +150,17 @@ class LoanSummary
         }), 2);
 
         // --- Recovery details ---
+        // Fractional, not row counts — same basis as overdueInstallments above:
+        // a rental 60% collected contributes 0.6 settled / 0.4 outstanding, not a
+        // whole 1, so these track real recovery progress instead of round numbers.
+        $paidFraction = fn ($s) => (float) $s->total_due > 0 ? min(1, (float) $s->paid_amount / (float) $s->total_due) : ($s->status === 'Paid' ? 1 : 0);
+        $unpaidFraction = fn ($s) => 1 - $paidFraction($s);
+
         $lastPayment = $activePayments->sortByDesc('paid_at')->first();
-        $fallenDueRentals = $schedules->filter(fn ($s) => !$s->due_date->greaterThan($today) && $s->status !== 'Paid')->count();
-        $settledRentals = $schedules->where('status', 'Paid')->count();
-        $outstandingRentals = $schedules->where('status', '!=', 'Paid')->count();
-        $futureRentals = $schedules->filter(fn ($s) => $s->due_date->greaterThan($today) && $s->status !== 'Paid')->count();
+        $fallenDueRentals = round((float) $schedules->filter(fn ($s) => !$s->due_date->greaterThan($today))->sum($unpaidFraction), 2);
+        $settledRentals = round((float) $schedules->sum($paidFraction), 2);
+        $outstandingRentals = round((float) $schedules->sum($unpaidFraction), 2);
+        $futureRentals = round((float) $schedules->filter(fn ($s) => $s->due_date->greaterThan($today))->sum($unpaidFraction), 2);
 
         // Per-installment penalty (due = collected + still-outstanding, same
         // basis as the Default Charges row above), so the ledger card can post
