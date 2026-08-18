@@ -141,7 +141,13 @@ class LoanSummary
         $overdueSchedules = $schedules->filter(fn ($s) => $s->due_date->lessThan($today) && $s->status !== 'Paid');
         $oldestOverdueDate = $overdueSchedules->min('due_date');
         $daysOverdue = $oldestOverdueDate ? (int) $today->diffInDays($oldestOverdueDate) : 0;
-        $overdueInstallments = $overdueSchedules->count();
+        // Fractional, not a row count — a partially paid overdue installment (e.g.
+        // 60% collected) contributes 0.4, not a full 1. Same basis as overdueList()
+        // below, so Loan Detail and Overdue Loans never disagree.
+        $overdueInstallments = round((float) $overdueSchedules->sum(function ($s) {
+            $totalDue = (float) $s->total_due;
+            return $totalDue > 0 ? max(0, $totalDue - (float) $s->paid_amount) / $totalDue : 0;
+        }), 2);
 
         // --- Recovery details ---
         $lastPayment = $activePayments->sortByDesc('paid_at')->first();

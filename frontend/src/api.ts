@@ -628,7 +628,8 @@ export interface LoanSummary {
     balancePrePayment: number; amountToBeCollected: number;
     /** Sum of all waivers (write-offs) recorded on this loan — already netted out of every figure above. */
     totalWaived: number;
-    /** Past due date and not fully paid — same definition as loansApi.overdue(). */
+    /** Past due date and not fully paid — same definition as loansApi.overdue().
+     *  overdueInstallments is fractional: a partially paid installment contributes less than 1. */
     daysOverdue: number; overdueInstallments: number;
   };
   recovery: {

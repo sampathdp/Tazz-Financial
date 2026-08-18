@@ -273,7 +273,7 @@ function ArrearsPanel({ loan }: { loan: Loan }) {
     <>
       <div className="eyebrow" style={{ marginBottom: 10 }}>Contract Status</div>
       <KpiGrid items={[
-        { label: 'Total OD', value: <>{a.daysOverdue} days<div className="t-2" style={{ fontSize: 11, fontWeight: 400 }}>{a.overdueInstallments} installment{a.overdueInstallments === 1 ? '' : 's'}</div></>, icon: 'clock', tone: a.daysOverdue > 0 ? 'red' : 'green' },
+        { label: 'Total OD', value: <>{a.daysOverdue} days<div className="t-2" style={{ fontSize: 11, fontWeight: 400 }}>{a.overdueInstallments.toFixed(2)} installments</div></>, icon: 'clock', tone: a.daysOverdue > 0 ? 'red' : 'green' },
         { label: 'Rental Arrears', value: money(a.rentalArrears), icon: 'alert', tone: a.rentalArrears > 0 ? 'red' : 'green' },
         { label: 'Other Charge Arrears', value: money(a.otherChargeArrears), icon: 'alert', tone: a.otherChargeArrears > 0 ? 'red' : 'green' },
         { label: 'Default Charges', value: money(a.defaultCharges), icon: 'alert', tone: a.defaultCharges > 0 ? 'red' : 'green' },

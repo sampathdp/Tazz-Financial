@@ -540,6 +540,10 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     const { payment, loan, balanceBefore } = receipt
     const balanceAfter = outstandingOf(loan)
     const pendingClearance = payment.paymentMethod === 'Cheque' && payment.clearanceStatus === 'Pending'
+    // Equivalent installment count this payment covers (e.g. installment 100, pay 375 -> 3.75),
+    // same fractional basis as the OD/arrears figures — not rounded to whole installments.
+    const receiptInstallmentAmount = installmentAmountOf(loan)
+    const installmentsCovered = receiptInstallmentAmount ? num(payment.amount) / receiptInstallmentAmount : null
     return (
       <div>
         <div className="row between wrap gap-2 no-print" style={{ marginBottom: 16 }}>
@@ -590,6 +594,9 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <div className="col gap-2" style={{ fontSize: 13, marginBottom: 20 }}>
             <div className="row between"><span className="t-2">Balance Before</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(balanceBefore)}</span></div>
             <div className="row between"><span className="t-2">{pendingClearance ? 'Cheque Amount (pending)' : 'Amount Paid'}</span><span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700 }}>{money(payment.amount)}</span></div>
+            {!pendingClearance && installmentsCovered != null && (
+              <div className="row between"><span className="t-2">Installments Paid</span><span style={{ fontFamily: 'JetBrains Mono' }}>{installmentsCovered.toFixed(2)}</span></div>
+            )}
             <div className="row between" style={{ fontSize: 15, fontWeight: 700, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
               <span>{pendingClearance ? 'Balance (unchanged until cleared)' : 'Balance After'}</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(balanceAfter)}</span>
             </div>
