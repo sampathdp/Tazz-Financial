@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CashAccount;
 use App\Models\CashTransfer;
+use App\Models\ChartOfAccount;
+use App\Support\LedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -64,6 +66,20 @@ class CashTransferController extends Controller
                 'status' => 'Completed',
                 'approved_by' => $request->user()->id,
                 'approved_at' => now(),
+            ]);
+
+            // Each till is its own GL leaf account (ChartOfAccount::forCashTill) —
+            // moving current_balance between two tills without a matching journal
+            // entry would silently desync Trial Balance from the physical tills.
+            LedgerPoster::post([
+                ['account_id' => ChartOfAccount::forCashTill($to)->id, 'debit' => $cashTransfer->amount, 'credit' => 0],
+                ['account_id' => ChartOfAccount::forCashTill($from)->id, 'debit' => 0, 'credit' => $cashTransfer->amount],
+            ], $cashTransfer->transfer_date->toDateString(), [
+                'source_type' => 'CashTransfer',
+                'source_id' => $cashTransfer->id,
+                'description' => "Cash transfer {$from->name} -> {$to->name}" . ($cashTransfer->description ? " - {$cashTransfer->description}" : ''),
+                'branch_id' => $from->branch_id,
+                'posted_by' => $request->user()->id,
             ]);
         });
 

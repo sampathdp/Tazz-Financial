@@ -605,7 +605,14 @@ function LedgerCard({ loan }: { loan: Loan }) {
   
   // 2. Schedules (Debits)
   for (const s of loan.schedules || []) rows.push({ date: s.dueDate, particulars: `Installment #${s.installmentNo} due`, debit: num(s.totalDue), credit: 0, typeOrder: 2 })
-  
+
+  // 2b. Default Charges / OD (Debits) — not a column on the schedule itself
+  // (penalty is computed live, never persisted — see LoanSummary), so it's
+  // posted here from loan.summary.schedulePenalties instead. A receipt's
+  // credit already includes whatever penalty it collected, so without this
+  // row the ledger balance understates arrears by the penalty amount.
+  for (const p of loan.summary?.schedulePenalties || []) rows.push({ date: p.dueDate, particulars: `Default charge (OD) — Installment #${p.installmentNo}`, debit: num(p.due), credit: 0, typeOrder: 2 })
+
   // 3. Waivers (Credits)
   for (const w of loan.waivers || []) rows.push({ date: w.waivedAt, particulars: `${w.waiverType} waived${w.reason ? ` — ${w.reason}` : ''}`, debit: 0, credit: num(w.amount), typeOrder: 3 })
   

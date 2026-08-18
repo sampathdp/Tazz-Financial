@@ -478,8 +478,10 @@ class AccountingReportController extends Controller
         $totalExpense = '0.00';
         foreach ($accounts as $account) {
             $balance = $balances->get($account->id)->balance ?? '0.00';
-            if ($basis === 'accrual' && isset(self::ACCRUAL_INCOME_ACCOUNTS[$account->code])) {
-                $balance = AccrualInterestCalculator::incomeForPeriod(self::ACCRUAL_INCOME_ACCOUNTS[$account->code], $from, $to);
+            if ($basis === 'accrual' && $account->account_type === 'Income') {
+                $balance = isset(self::ACCRUAL_INCOME_ACCOUNTS[$account->code])
+                    ? AccrualInterestCalculator::incomeForPeriod(self::ACCRUAL_INCOME_ACCOUNTS[$account->code], $from, $to)
+                    : '0.00';
             }
             $rows[$account->account_type][] = ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => $balance];
             if ($account->account_type === 'Income') {

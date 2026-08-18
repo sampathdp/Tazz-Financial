@@ -11,7 +11,7 @@ class SalesExecutiveCommission extends Model
     protected $fillable = [
         'credit_facility_id', 'sales_executive_id', 'loan_type_id', 'cycle_no', 'from_installment',
         'commission_type', 'commission_value', 'commission_amount', 'required_installments',
-        'paid_at', 'payment_amount', 'payment_method', 'reference_no', 'notes', 'paid_by',
+        'paid_at', 'payment_amount', 'payment_method', 'cash_account_id', 'bank_account_id', 'reference_no', 'notes', 'paid_by',
     ];
 
     protected $casts = [
@@ -42,5 +42,15 @@ class SalesExecutiveCommission extends Model
     public function paidBy()
     {
         return $this->belongsTo(User::class, 'paid_by');
+    }
+
+    public function cashAccount()
+    {
+        return $this->belongsTo(CashAccount::class);
+    }
+
+    public function bankAccount()
+    {
+        return $this->belongsTo(BankAccount::class);
     }
 }

@@ -2,8 +2,9 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
 import {
-  api, loanTypesApi, salesExecutiveCommissionsApi,
+  api, loanTypesApi, salesExecutiveCommissionsApi, cashAccountsApi, bankAccountsApi,
   type AuthUser, type LoanType, type SalesExecutiveCommission, type CommissionStatus, type PaymentMethod,
+  type CashAccount, type BankAccount,
 } from '../api'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -17,12 +18,14 @@ const paymentTone = (s: string) => s === 'Overdue' ? 'red' : s === 'Closed' ? 'n
 
 interface PayForm {
   paymentDate: string; paymentAmount: number | string; paymentMethod: PaymentMethod
+  cashAccountId: number | ''; bankAccountId: number | ''
   referenceNo: string; notes: string
 }
 const blankPayForm = (c: SalesExecutiveCommission): PayForm => ({
   paymentDate: new Date().toISOString().slice(0, 10),
   paymentAmount: c.commissionAmount,
   paymentMethod: 'Cash',
+  cashAccountId: '', bankAccountId: '',
   referenceNo: '', notes: '',
 })
 
@@ -32,6 +35,8 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
   const [loading, setLoading] = useState(true)
   const [executives, setExecutives] = useState<{ id: number; name: string }[]>([])
   const [loanTypes, setLoanTypes] = useState<LoanType[]>([])
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
 
   const [salesExecutiveId, setSalesExecutiveId] = useState<number | ''>('')
   const [loanTypeId, setLoanTypeId] = useState<number | ''>('')
@@ -45,6 +50,8 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
   useEffect(() => {
     api.users.marketingExecutives().then(setExecutives).catch(() => setExecutives([]))
     loanTypesApi.list().then((d) => setLoanTypes(d.filter((t) => t.isProduct && Number(t.commissionValue || 0) > 0))).catch(() => setLoanTypes([]))
+    cashAccountsApi.list().then(setCashAccounts).catch(() => setCashAccounts([]))
+    bankAccountsApi.list().then(setBankAccounts).catch(() => setBankAccounts([]))
   }, [])
 
   const refresh = () => {
@@ -61,12 +68,17 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
     if (!payTarget || !payForm) return
     if (!payForm.paymentDate) { setErr('Payment date is required.'); return }
     if (!payForm.paymentAmount || Number(payForm.paymentAmount) <= 0) { setErr('Payment amount must be greater than zero.'); return }
+    if (payForm.paymentMethod === 'Cash' && !payForm.cashAccountId) { setErr('Pick which till this was paid from.'); return }
+    if (payForm.paymentMethod !== 'Cash' && !payForm.bankAccountId) { setErr('Pick which bank account this was paid from.'); return }
+    if (payForm.paymentMethod === 'Cheque' && !payForm.referenceNo) { setErr('Cheque number is required.'); return }
     setBusy(true); setErr('')
     try {
       await salesExecutiveCommissionsApi.pay(payTarget.id, {
         paymentDate: payForm.paymentDate,
         paymentAmount: payForm.paymentAmount,
         paymentMethod: payForm.paymentMethod,
+        cashAccountId: payForm.cashAccountId ? Number(payForm.cashAccountId) : undefined,
+        bankAccountId: payForm.bankAccountId ? Number(payForm.bankAccountId) : undefined,
         referenceNo: payForm.referenceNo || undefined,
         notes: payForm.notes || undefined,
       })
@@ -145,7 +157,18 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
             <Field label="Payment Method"><Select value={payForm.paymentMethod} onChange={(e) => setPayForm((s) => s && ({ ...s, paymentMethod: e.target.value as PaymentMethod }))}>
               <option value="Cash">Cash</option><option value="Bank">Bank</option><option value="Cheque">Cheque</option>
             </Select></Field>
-            <Field label="Reference Number"><Input value={payForm.referenceNo} onChange={(e) => setPayForm((s) => s && ({ ...s, referenceNo: e.target.value }))} /></Field>
+            {payForm.paymentMethod === 'Cash' ? (
+              <Field label="Cash Till"><Select value={payForm.cashAccountId} onChange={(e) => setPayForm((s) => s && ({ ...s, cashAccountId: Number(e.target.value) || '' }))}>
+                <option value="">Select till...</option>
+                {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </Select></Field>
+            ) : (
+              <Field label="Bank Account"><Select value={payForm.bankAccountId} onChange={(e) => setPayForm((s) => s && ({ ...s, bankAccountId: Number(e.target.value) || '' }))}>
+                <option value="">Select account...</option>
+                {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bank?.name || ''}</option>)}
+              </Select></Field>
+            )}
+            <Field label={payForm.paymentMethod === 'Cheque' ? 'Cheque No.' : 'Reference Number'}><Input value={payForm.referenceNo} onChange={(e) => setPayForm((s) => s && ({ ...s, referenceNo: e.target.value }))} /></Field>
             <Field label="Notes" full><Input value={payForm.notes} onChange={(e) => setPayForm((s) => s && ({ ...s, notes: e.target.value }))} /></Field>
           </div>
         )}

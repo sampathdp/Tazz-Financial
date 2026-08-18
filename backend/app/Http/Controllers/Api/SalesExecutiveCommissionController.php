@@ -3,7 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\BankAccount;
+use App\Models\CashAccount;
+use App\Models\ChartOfAccount;
 use App\Models\SalesExecutiveCommission;
+use App\Support\LedgerPoster;
 use App\Support\LoanSummary;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -58,23 +62,52 @@ class SalesExecutiveCommissionController extends Controller
             'payment_date' => 'required|date',
             'payment_amount' => 'required|numeric|min:0',
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
-            'reference_no' => 'nullable|string|max:64',
+            'cash_account_id' => 'required_if:payment_method,Cash|nullable|exists:cash_accounts,id',
+            'bank_account_id' => 'required_if:payment_method,Bank,Cheque|nullable|exists:bank_accounts,id',
+            'reference_no' => 'required_if:payment_method,Cheque|nullable|string|max:64',
             'notes' => 'nullable|string|max:255',
         ]);
 
         DB::transaction(function () use ($commission, $data, $request) {
+            $amount = (float) $data['payment_amount'];
+            $isCash = $data['payment_method'] === 'Cash';
+
+            if ($isCash) {
+                $till = CashAccount::lockForUpdate()->findOrFail($data['cash_account_id']);
+                $outAccount = ChartOfAccount::forCashTill($till);
+                $till->update(['current_balance' => bcsub((string) $till->current_balance, (string) $amount, 2)]);
+            } else {
+                $bank = BankAccount::lockForUpdate()->findOrFail($data['bank_account_id']);
+                $outAccount = ChartOfAccount::forBankAccount($bank);
+                $bank->update(['current_balance' => bcsub((string) $bank->current_balance, (string) $amount, 2)]);
+            }
+
             $commission->update([
                 // Freeze the live-computed (interest-based) amount at the moment of
                 // payment, so interest collected afterward never retroactively
                 // changes this historical record — see self::commissionAmount().
                 'commission_amount' => self::commissionAmount($commission),
                 'paid_at' => $data['payment_date'],
-                'payment_amount' => $data['payment_amount'],
+                'payment_amount' => $amount,
                 'payment_method' => $data['payment_method'],
+                'cash_account_id' => $isCash ? $data['cash_account_id'] : null,
+                'bank_account_id' => $isCash ? null : $data['bank_account_id'],
                 'reference_no' => $data['reference_no'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'paid_by' => $request->user()->id,
             ]);
+
+            LedgerPoster::post([
+                ['account_id' => ChartOfAccount::system('5200')->id, 'debit' => $amount, 'credit' => 0],
+                ['account_id' => $outAccount->id, 'debit' => 0, 'credit' => $amount],
+            ], Carbon::parse($data['payment_date'])->toDateString(), [
+                'source_type' => 'SalesExecutiveCommission',
+                'source_id' => $commission->id,
+                'description' => "Commission paid - {$commission->salesExecutive?->name} - {$commission->facility?->code}",
+                'branch_id' => $commission->facility?->branch_id,
+                'posted_by' => $request->user()->id,
+            ]);
+
             self::maybeStartNextCycle($commission);
         });
 

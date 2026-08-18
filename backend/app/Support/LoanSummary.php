@@ -40,6 +40,8 @@ class LoanSummary
             $paidPenalty = self::activePenaltyPaid($s);
 
             return (object) [
+                'scheduleId' => $s->id,
+                'installmentNo' => $s->installment_no,
                 'dueDate' => $s->due_date,
                 'isFuture' => $s->due_date->greaterThan(Carbon::today()),
                 'status' => $s->status,
@@ -84,8 +86,16 @@ class LoanSummary
         $interestDue = max(0, round((float) $schedules->sum('interest_due') - $waivedInterest, 2));
         $interestPaid = round((float) $rows->sum('paidInterest'), 2);
         $rentalPaid = round((float) $schedules->sum('paid_amount'), 2);
-        $penaltyDue = max(0, round((float) $rows->sum('penaltyDue') - $waivedPenalty, 2));
+        // penaltyDueForRow() is LIVE: once an installment is fully settled its
+        // overdue balance is 0, so the row's live penalty resets to 0 even though
+        // penalty WAS charged and collected while it sat overdue. Summing that
+        // live figure as "due" would understate/zero out anything already paid
+        // off, so "due" here is built from what's provably happened instead:
+        // collected penalty (paidPenalty, a real historical sum) plus whatever
+        // penalty is still outstanding right now (remainingPenalty) — this can
+        // never fall below paid, unlike summing the live per-row figure.
         $penaltyPaid = round((float) $rows->sum('paidPenalty'), 2);
+        $penaltyDue = max(0, round($penaltyPaid + (float) $rows->sum('remainingPenalty') - $waivedPenalty, 2));
 
         $dueBreakdown = [
             self::breakdownRow('Principal', $principalDue, $principalPaid),
@@ -140,8 +150,22 @@ class LoanSummary
         $outstandingRentals = $schedules->where('status', '!=', 'Paid')->count();
         $futureRentals = $schedules->filter(fn ($s) => $s->due_date->greaterThan($today) && $s->status !== 'Paid')->count();
 
+        // Per-installment penalty (due = collected + still-outstanding, same
+        // basis as the Default Charges row above), so the ledger card can post
+        // a debit for it — schedules/charges/payments alone carry no penalty
+        // figure, since penalty is never persisted (see class docblock).
+        $schedulePenalties = $rows->filter(fn ($r) => $r->paidPenalty > 0 || $r->remainingPenalty > 0)
+            ->map(fn ($r) => [
+                'scheduleId' => $r->scheduleId,
+                'installmentNo' => $r->installmentNo,
+                'dueDate' => $r->dueDate,
+                'due' => round($r->paidPenalty + $r->remainingPenalty, 2),
+                'paid' => round($r->paidPenalty, 2),
+            ])->values();
+
         return [
             'dueBreakdown' => $dueBreakdown,
+            'schedulePenalties' => $schedulePenalties,
             'arrears' => [
                 'rentalArrears' => $rentalArrears,
                 'otherChargeArrears' => $otherChargeArrears,

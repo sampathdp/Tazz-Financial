@@ -273,12 +273,14 @@ export function ChargeCategoriesScreen({ user: me }: { go: Go; user?: AuthUser |
   const [modal, setModal] = useState(false)
   const [editing, setEditing] = useState<ChargeCategory | null>(null)
   const [form, setForm] = useState<Partial<ChargeCategory>>(blankChargeCategoryForm())
+  const [incomeAccounts, setIncomeAccounts] = useState<ChartOfAccount[]>([])
 
   const refresh = () => {
     setLoading(true)
     chargeCategoriesApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
   }
   useEffect(refresh, [])
+  useEffect(() => { chartOfAccountsApi.list().then((d) => setIncomeAccounts(d.filter((a) => a.accountType === 'Income'))).catch(() => setIncomeAccounts([])) }, [])
 
   const openCreate = () => { setEditing(null); setForm(blankChargeCategoryForm()); setErr(''); setModal(true) }
   const openEdit = (r: ChargeCategory) => { setEditing(r); setForm({ ...r }); setErr(''); setModal(true) }
@@ -310,11 +312,12 @@ export function ChargeCategoriesScreen({ user: me }: { go: Go; user?: AuthUser |
         actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Category</Btn></Can>} />
       <Card pad={0}>
         {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
-        <Table cols={[{ label: 'Category Name' }, { label: 'Status', align: 'center' }, { label: 'Sort Order', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+        <Table cols={[{ label: 'Category Name' }, { label: 'Posts To' }, { label: 'Status', align: 'center' }, { label: 'Sort Order', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No charge categories found."
           rows={rows}
           render={(r) => <>
             <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}</Td>
+            <Td>{r.chartOfAccount ? `${r.chartOfAccount.code} ${r.chartOfAccount.name}` : <span style={{ color: 'var(--bad)' }}>Not linked — posts to 4020 Loan Charges / Fees</span>}</Td>
             <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
             <Td align="center">{r.sortOrder}</Td>
             <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
@@ -323,7 +326,7 @@ export function ChargeCategoriesScreen({ user: me }: { go: Go; user?: AuthUser |
             </div></Td>
           </>} />}
       </Card>
-      
+
       <Modal open={modal} onClose={close} width={400} title={editing ? 'Edit Category' : 'Add Category'}
         footer={<>
           <Btn variant="plain" onClick={close}>Cancel</Btn>
@@ -332,6 +335,12 @@ export function ChargeCategoriesScreen({ user: me }: { go: Go; user?: AuthUser |
         <ErrorBanner error={err} />
         <div className="col gap-3">
           <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
+          <Field label="Posts To (GL Account)" full>
+            <Select value={form.chartOfAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, chartOfAccountId: Number(e.target.value) || undefined }))}>
+              <option value="">Not linked yet — falls back to 4020 Loan Charges / Fees</option>
+              {incomeAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+            </Select>
+          </Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
         </div>
       </Modal>

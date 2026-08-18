@@ -3,9 +3,9 @@ import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
-  branchesApi, bankAccountsApi, bankTransactionsApi, bankReconciliationsApi,
-  type Branch, type AuthUser, type BankAccount, type BankAccountType,
-  type BankTransaction, type BankTxnType, type BankReconciliation,
+  branchesApi, bankAccountsApi, bankTransactionsApi, bankReconciliationsApi, cashAccountsApi, chartOfAccountsApi,
+  type Branch, type AuthUser, type BankAccount, type BankAccountType, type CashAccount, type ChartOfAccount,
+  type BankTransaction, type BankTxnType, type BankTxnContraKind, type BankReconciliation,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -116,7 +116,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
 /* ========================== Bank Transactions =========================== */
 
 interface TxnForm extends Partial<BankTransaction> {}
-const blankTxnForm = (accountId?: number): TxnForm => ({ bankAccountId: accountId, transactionType: 'Deposit', status: 'Cleared', txnDate: new Date().toISOString().slice(0, 10) })
+const blankTxnForm = (accountId?: number): TxnForm => ({ bankAccountId: accountId, transactionType: 'Deposit', status: 'Cleared', txnDate: new Date().toISOString().slice(0, 10), contraKind: 'Ledger' })
 
 export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -128,8 +128,12 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
   const [err, setErr] = useState('')
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState<TxnForm>(blankTxnForm())
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([])
+  const [ledgerAccounts, setLedgerAccounts] = useState<ChartOfAccount[]>([])
 
   useEffect(() => { bankAccountsApi.list().then((d) => { setAccounts(d); setAccountId((cur) => cur || d[0]?.id || '') }).catch(() => setAccounts([])) }, [])
+  useEffect(() => { cashAccountsApi.list().then(setCashAccounts).catch(() => setCashAccounts([])) }, [])
+  useEffect(() => { chartOfAccountsApi.list().then(setLedgerAccounts).catch(() => setLedgerAccounts([])) }, [])
 
   const refresh = () => {
     setLoading(true)
@@ -145,6 +149,9 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
   const save = async () => {
     if (!form.bankAccountId) { setErr('Bank account is required.'); return }
     if (!form.amount || Number(form.amount) <= 0) { setErr('Amount must be greater than zero.'); return }
+    if (form.contraKind === 'Cash' && !form.contraCashAccountId) { setErr('Pick which till the other side of this transaction is.'); return }
+    if (form.contraKind === 'Bank' && !form.contraBankAccountId) { setErr('Pick which bank account the other side of this transaction is.'); return }
+    if (form.contraKind === 'Ledger' && !form.contraChartOfAccountId) { setErr('Pick the GL account the other side of this transaction posts to.'); return }
     setBusy(true); setErr('')
     try {
       await bankTransactionsApi.create(form)
@@ -213,6 +220,31 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
           <Field label="Amount"><Input type="number" step="0.01" value={form.amount ?? ''} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
           <Field label="Status"><Select value={form.status || 'Cleared'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Cleared</option><option>Pending</option></Select></Field>
           <Field label="Reference No"><Input value={form.referenceNo || ''} onChange={(e) => setForm((s) => ({ ...s, referenceNo: e.target.value }))} /></Field>
+          <Field label="Other Side Of This Transaction" full>
+            <Select value={form.contraKind || 'Ledger'} onChange={(e) => setForm((s) => ({ ...s, contraKind: e.target.value as BankTxnContraKind, contraCashAccountId: undefined, contraBankAccountId: undefined, contraChartOfAccountId: undefined }))}>
+              <option value="Ledger">GL Account (bank charges, interest, owner injection...)</option>
+              <option value="Cash">A Cash Till (money moved between till and bank)</option>
+              <option value="Bank">Another Bank Account (bank-to-bank transfer)</option>
+            </Select>
+          </Field>
+          {form.contraKind === 'Cash' && (
+            <Field label="Till" full><Select value={form.contraCashAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, contraCashAccountId: Number(e.target.value) || undefined }))}>
+              <option value="">Select till...</option>
+              {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </Select></Field>
+          )}
+          {form.contraKind === 'Bank' && (
+            <Field label="Bank Account" full><Select value={form.contraBankAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, contraBankAccountId: Number(e.target.value) || undefined }))}>
+              <option value="">Select account...</option>
+              {accounts.filter((a) => a.id !== form.bankAccountId).map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+            </Select></Field>
+          )}
+          {form.contraKind === 'Ledger' && (
+            <Field label="GL Account" full><Select value={form.contraChartOfAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, contraChartOfAccountId: Number(e.target.value) || undefined }))}>
+              <option value="">Select account...</option>
+              {ledgerAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+            </Select></Field>
+          )}
           <Field label="Description" full><Input value={form.description || ''} onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} /></Field>
         </div>
       </Modal>

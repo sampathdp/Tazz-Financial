@@ -103,7 +103,6 @@ class LoanLedgerPoster
         $principal = (float) $payment->allocations()->sum('principal_applied');
         $interest = (float) $payment->allocations()->sum('interest_applied');
         $penalty = (float) $payment->allocations()->sum('penalty_applied');
-        $charges = (float) $payment->chargeAllocations()->sum('amount_applied');
 
         $lines = [];
         if ($principal > 0) {
@@ -115,8 +114,21 @@ class LoanLedgerPoster
         if ($penalty > 0) {
             $lines[] = ['account_id' => ChartOfAccount::system('4030')->id, 'credit' => $penalty];
         }
-        if ($charges > 0) {
-            $lines[] = ['account_id' => ChartOfAccount::system('4020')->id, 'credit' => $charges];
+
+        // Split by the charge's category account rather than one blanket
+        // bucket — a category with no chart_of_account_id set yet (or a
+        // charge with no category) still falls back to 4020, same as before
+        // this split existed, instead of silently going nowhere.
+        $chargesByAccount = $payment->chargeAllocations()
+            ->with('charge.category:id,chart_of_account_id')
+            ->get()
+            ->groupBy(fn ($allocation) => $allocation->charge?->category?->chart_of_account_id ?? ChartOfAccount::system('4020')->id)
+            ->map(fn ($group) => (float) $group->sum('amount_applied'));
+
+        foreach ($chargesByAccount as $accountId => $amount) {
+            if ($amount > 0) {
+                $lines[] = ['account_id' => (int) $accountId, 'credit' => $amount];
+            }
         }
 
         return $lines;

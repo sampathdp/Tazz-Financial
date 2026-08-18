@@ -676,11 +676,14 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             </Card>
           )}
 
-          <div className="row gap-2" style={{ marginBottom: 16, borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
-            <Btn size="sm" variant="ghost" icon="receipt" active={panelTab === 'history'} onClick={() => setPanelTab('history')}>Payment History</Btn>
-            <Btn size="sm" variant="ghost" icon="calendar" active={panelTab === 'schedule'} onClick={() => setPanelTab('schedule')}>Payment Schedule</Btn>
-            <Btn size="sm" variant="ghost" icon="doc" active={panelTab === 'details'} onClick={() => setPanelTab('details')}>Loan Details</Btn>
-            <Btn size="sm" variant="ghost" icon="doc" active={panelTab === 'ledger'} onClick={() => setPanelTab('ledger')}>Ledger Card</Btn>
+          <div className="row between wrap gap-2" style={{ marginBottom: 16, borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
+            <div className="row gap-2">
+              <Btn size="sm" variant="ghost" icon="receipt" active={panelTab === 'history'} onClick={() => setPanelTab('history')}>Payment History</Btn>
+              <Btn size="sm" variant="ghost" icon="calendar" active={panelTab === 'schedule'} onClick={() => setPanelTab('schedule')}>Payment Schedule</Btn>
+              <Btn size="sm" variant="ghost" icon="doc" active={panelTab === 'details'} onClick={() => setPanelTab('details')}>Loan Details</Btn>
+              <Btn size="sm" variant="ghost" icon="doc" active={panelTab === 'ledger'} onClick={() => setPanelTab('ledger')}>Ledger Card</Btn>
+            </div>
+            <Btn size="sm" variant="solid" icon="plus" onClick={startOver}>New Receipt</Btn>
           </div>
 
           {panelTab === 'history' && (
@@ -1194,7 +1197,7 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
               <Can user={me} module="Speed Draft Payments" action="Create">
                 <div className="row gap-2">
                   {summary.outstandingInterest > 0 && <Btn variant="primary" size="sm" icon="check" onClick={() => openPay('Interest')}>Pay Interest</Btn>}
-                  {summary.outstandingCapital > 0 && <Btn variant="solid" size="sm" icon="coins" onClick={() => openPay('CapitalReduction')}>Make Capital Payment</Btn>}
+                  {summary.outstandingCapital > 0 && summary.outstandingInterest <= 0 && <Btn variant="solid" size="sm" icon="coins" onClick={() => openPay('CapitalReduction')}>Make Capital Payment</Btn>}
                   {summary.amountToSettleToday > 0 && <Btn variant="solid" size="sm" icon="flag" onClick={() => setSettleOpen(true)}>Settle Full Balance</Btn>}
                 </div>
               </Can>

@@ -467,6 +467,8 @@ export interface SalesExecutiveCommission {
   paidAt?: string | null;
   paymentAmount?: number | string | null;
   paymentMethod?: PaymentMethod | null;
+  cashAccountId?: number | null;
+  bankAccountId?: number | null;
   referenceNo?: string | null;
   notes?: string | null;
 }
@@ -478,7 +480,7 @@ export const salesExecutiveCommissionsApi = {
       loanTypeId: params.loanTypeId || undefined,
       status: params.status || undefined,
     }) }).then((r) => camelize(r.data) as SalesExecutiveCommission[]),
-  pay: (id: number, body: { paymentDate: string; paymentAmount: number | string; paymentMethod: PaymentMethod; referenceNo?: string; notes?: string }) =>
+  pay: (id: number, body: { paymentDate: string; paymentAmount: number | string; paymentMethod: PaymentMethod; cashAccountId?: number; bankAccountId?: number; referenceNo?: string; notes?: string }) =>
     http.post(`/sales-executive-commissions/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as SalesExecutiveCommission),
 }
 
@@ -574,6 +576,7 @@ export interface DocumentCategory {
 
 export interface ChargeCategory {
   id: number; name: string; status: string; sortOrder: number;
+  chartOfAccountId?: number | null; chartOfAccount?: ChartOfAccount | null;
 }
 
 
@@ -611,8 +614,14 @@ export interface LoanDueTypeRow {
   type: string; due: number; paid: number; balance: number; recoveryPct: number;
 }
 
+export interface LoanSchedulePenaltyRow {
+  scheduleId: number; installmentNo: number; dueDate: string; due: number; paid: number;
+}
+
 export interface LoanSummary {
   dueBreakdown: LoanDueTypeRow[];
+  /** Per-installment Default Charges (OD) — only rows with penalty due or paid > 0. Not on LoanSchedule itself since penalty isn't persisted. */
+  schedulePenalties: LoanSchedulePenaltyRow[];
   arrears: {
     rentalArrears: number; otherChargeArrears: number; defaultCharges: number; totalArrears: number;
     overPayment: number; futureCapital: number; futureInterest: number; totalInterestRemaining: number;
@@ -674,6 +683,7 @@ export interface BankAccount {
 
 export type BankTxnType = 'Deposit' | 'Withdrawal' | 'TransferIn' | 'TransferOut'
 export type BankTxnStatus = 'Cleared' | 'Pending'
+export type BankTxnContraKind = 'Cash' | 'Bank' | 'Ledger'
 
 export interface BankTransaction {
   id: number;
@@ -682,6 +692,11 @@ export interface BankTransaction {
   referenceNo?: string | null; description?: string | null;
   amount: number | string; balanceAfter?: number | string;
   status?: BankTxnStatus;
+  /** The other side of this transaction's double entry — a till/bank account whose own balance moves too, or a GL account directly (bank charges, interest, an owner injection, ...). See BankTransactionController::applyContra(). */
+  contraKind?: BankTxnContraKind;
+  contraCashAccountId?: number | null;
+  contraBankAccountId?: number | null;
+  contraChartOfAccountId?: number | null;
   creator?: { id: number; name: string } | null;
   createdAt?: string;
 }

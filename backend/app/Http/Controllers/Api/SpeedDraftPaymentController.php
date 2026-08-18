@@ -63,6 +63,10 @@ class SpeedDraftPaymentController extends Controller
                 return response()->json(['message' => "Amount exceeds the outstanding interest ({$outstanding})."], 422);
             }
         } elseif ($type === 'CapitalReduction') {
+            $outstandingInterest = SpeedDraftPaymentAllocator::outstandingInterest($speedDraft);
+            if ($outstandingInterest > 0) {
+                return response()->json(['message' => "Settle the outstanding interest ({$outstandingInterest}) before making a capital payment."], 422);
+            }
             $outstanding = (float) $speedDraft->outstanding_balance_cache;
             if ($outstanding <= 0) {
                 return response()->json(['message' => 'There is no outstanding capital to reduce on this Speed Draft.'], 422);

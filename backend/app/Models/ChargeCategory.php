@@ -9,5 +9,11 @@ class ChargeCategory extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'status', 'sort_order'];
+    protected $fillable = ['name', 'chart_of_account_id', 'status', 'sort_order'];
+
+    /** The chart_of_accounts income account this category's charges post to (e.g. a dedicated Service Charge account) — see LoanLedgerPoster::splitLines(). */
+    public function chartOfAccount()
+    {
+        return $this->belongsTo(ChartOfAccount::class);
+    }
 }
