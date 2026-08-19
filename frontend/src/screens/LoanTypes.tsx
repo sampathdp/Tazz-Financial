@@ -191,7 +191,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
          tree.map((n) => <Row key={n.id} node={n} depth={0} me={me} onAddChild={openCreate} onEdit={openEdit} onDelete={remove} />)}
       </Card>
 
-      <Modal open={modal} onClose={close} width={640}
+      <Modal open={modal} onClose={close} width={960}
         title={editing ? 'Edit Loan Type' : (parentLabel ? 'Add Sub-Item' : 'Add Loan Type')}
         sub={editing ? (nameChain(rows, editing.parentId) || 'Top-level') : (parentLabel ? `Under: ${parentLabel}` : 'Top-level loan type')}
         footer={<>
@@ -200,7 +200,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
         </>}>
         <ErrorBanner error={err} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 16, marginBottom: 16 }}>
           <Field label="Name"><Input value={form.name || ''} onChange={(e) => set('name', e.target.value)} /></Field>
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => set('code', e.target.value.toUpperCase())} placeholder="e.g. SME-DAILY" /></Field>
         </div>
@@ -212,7 +212,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
 
         {form.isProduct && (
           <div style={{ padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)', marginBottom: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 16 }}>
               <Field label="Type"><Select value={form.category || ''} onChange={(e) => set('category', (e.target.value || null) as any)}>
                 <option value="">—</option>{CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select></Field>

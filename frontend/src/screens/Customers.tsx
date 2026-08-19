@@ -32,6 +32,40 @@ const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Re
 
 const blankForm = (): Partial<Customer> => ({ status: 'Active' })
 
+/** Sri Lanka NIC: old = 9 digits + V/X (birth year 1900+YY), new = 12 digits (birth year YYYY).
+ *  Digits 3-5 (old) / 5-7 (new) are day-of-year, +500 for female. */
+function nicToDob(nic: string): string | undefined {
+  const s = nic.trim().toUpperCase()
+  let year: number, dayOfYear: number
+  if (/^\d{9}[VX]$/.test(s)) { year = 1900 + parseInt(s.slice(0, 2), 10); dayOfYear = parseInt(s.slice(2, 5), 10) }
+  else if (/^\d{12}$/.test(s)) { year = parseInt(s.slice(0, 4), 10); dayOfYear = parseInt(s.slice(4, 7), 10) }
+  else return undefined
+  if (dayOfYear > 500) dayOfYear -= 500
+  if (dayOfYear < 1 || dayOfYear > 366) return undefined
+  // NIC day-of-year is always encoded against a 366-day calendar (Feb treated as 29 days),
+  // so in non-leap years anything from Mar 1 onward (encoded day > 59) needs -1.
+  const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+  if (!isLeap && dayOfYear > 59) dayOfYear -= 1
+  const d = new Date(year, 0, dayOfYear)
+  if (d.getFullYear() !== year) return undefined
+  return `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const validateNic = (v: string): string | undefined => {
+  if (!v) return undefined
+  const s = v.trim().toUpperCase()
+  return /^\d{9}[VX]$/.test(s) || /^\d{12}$/.test(s) ? undefined : 'Enter valid NIC (9 digits + V/X, or 12 digits)'
+}
+const validatePhone = (v: string): string | undefined => {
+  if (!v) return undefined
+  const s = v.replace(/[\s-]/g, '')
+  return /^(0\d{9}|\+94\d{9})$/.test(s) ? undefined : 'Enter valid phone number (e.g. 0771234567)'
+}
+const validateEmail = (v: string): string | undefined => {
+  if (!v) return undefined
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) ? undefined : 'Enter valid email address'
+}
+const FieldError = ({ msg }: { msg?: string }) => msg ? <span style={{ fontSize: 11, color: 'var(--bad)' }}>{msg}</span> : null
+
 /** Upload/view/delete KYC documents for one customer. Its own panel since it
  *  needs a customer id to exist first — only shown once editing a saved record. */
 function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser | null }) {
@@ -305,6 +339,17 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const [loanLoading, setLoanLoading] = useState(false)
   const [form, setForm] = useState<Partial<Customer>>(blankForm())
   const set = <K extends keyof Customer>(k: K, v: Customer[K]) => setForm((s) => ({ ...s, [k]: v }))
+  const [formErrors, setFormErrors] = useState<{ nic?: string; phone?: string; altPhone?: string; email?: string }>({})
+
+  const onNicChange = (v: string) => {
+    set('nicNo', v as any)
+    setFormErrors((s) => ({ ...s, nic: validateNic(v) }))
+    const dob = nicToDob(v)
+    if (dob) set('dob', dob as any)
+  }
+  const onPhoneChange = (v: string) => { set('phone', v as any); setFormErrors((s) => ({ ...s, phone: validatePhone(v) })) }
+  const onAltPhoneChange = (v: string) => { set('altPhone', v as any); setFormErrors((s) => ({ ...s, altPhone: validatePhone(v) })) }
+  const onEmailChange = (v: string) => { set('email', v as any); setFormErrors((s) => ({ ...s, email: validateEmail(v) })) }
 
   const refresh = () => {
     setLoading(true)
@@ -331,7 +376,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const isLoan = !!params.loanId
 
   useEffect(() => {
-    if (isNew) { setEditing(null); setForm(blankForm()); setErr(''); setMode('form'); return }
+    if (isNew) { setEditing(null); setForm(blankForm()); setFormErrors({}); setErr(''); setMode('form'); return }
     if (!params.id) { refresh(); setMode('list'); setEditing(null); setViewing(null); setViewingLoan(null); return }
 
     let cancelled = false
@@ -344,7 +389,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
         // employmentDetail/businessDetail are read-only nested relations — flatten
         // them back onto the form's flat fields, which is what the save API accepts.
         setForm({ ...c, ...(c.employmentDetail || {}), ...(c.businessDetail || {}) })
-        setErr(''); setMode('form')
+        setFormErrors({}); setErr(''); setMode('form')
       } else if (isLoan) {
         setMode('loan'); setLoanLoading(true)
         loansApi.get(Number(params.loanId)).then((l) => { if (!cancelled) setViewingLoan(l) }).catch(() => { if (!cancelled) setViewingLoan(null) }).finally(() => { if (!cancelled) setLoanLoading(false) })
@@ -363,6 +408,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const save = async () => {
     if (!form.title || !form.surname || !form.initials) { setErr('Title, Surname and Initial are required.'); return }
     if (!form.branchId) { setErr('Branch is required.'); return }
+    if (formErrors.nic || formErrors.phone || formErrors.altPhone || formErrors.email) { setErr('Fix the validation errors before saving.'); return }
     setBusy(true); setErr('')
     try {
       if (editing) await customersApi.update(editing.id, form)
@@ -441,16 +487,28 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
             <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => set('status', e.target.value as any)}>
               <option>Active</option><option>Blacklisted</option><option>Inactive</option>
             </Select></Field>
-            <Field label="NIC Number"><Input value={form.nicNo || ''} onChange={(e) => set('nicNo', e.target.value)} /></Field>
+            <Field label="NIC Number">
+              <Input value={form.nicNo || ''} onChange={(e) => onNicChange(e.target.value)} />
+              <FieldError msg={formErrors.nic} />
+            </Field>
             <Field label="Passport Number"><Input value={form.passportNo || ''} onChange={(e) => set('passportNo', e.target.value)} /></Field>
             <Field label="Driving License Number"><Input value={form.drivingLicenseNo || ''} onChange={(e) => set('drivingLicenseNo', e.target.value)} /></Field>
             <Field label="Date of Birth"><Input type="date" value={form.dob || ''} onChange={(e) => set('dob', e.target.value)} /></Field>
             <Field label="Gender"><Select value={form.gender || ''} onChange={(e) => set('gender', e.target.value)}>
               <option value="">—</option><option>Male</option><option>Female</option><option>Other</option>
             </Select></Field>
-            <Field label="Phone"><Input value={form.phone || ''} onChange={(e) => set('phone', e.target.value)} /></Field>
-            <Field label="Alternate Phone"><Input value={form.altPhone || ''} onChange={(e) => set('altPhone', e.target.value)} /></Field>
-            <Field label="Email"><Input type="email" value={form.email || ''} onChange={(e) => set('email', e.target.value)} /></Field>
+            <Field label="Phone">
+              <Input value={form.phone || ''} onChange={(e) => onPhoneChange(e.target.value)} />
+              <FieldError msg={formErrors.phone} />
+            </Field>
+            <Field label="Alternate Phone">
+              <Input value={form.altPhone || ''} onChange={(e) => onAltPhoneChange(e.target.value)} />
+              <FieldError msg={formErrors.altPhone} />
+            </Field>
+            <Field label="Email">
+              <Input type="email" value={form.email || ''} onChange={(e) => onEmailChange(e.target.value)} />
+              <FieldError msg={formErrors.email} />
+            </Field>
             <Field label="Address" full><textarea value={form.address || ''} onChange={(e) => set('address', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
             <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', gridColumn: '1/-1' }}>
               <input type="checkbox" checked={!!form.isGuarantor} onChange={(e) => set('isGuarantor', e.target.checked)} />
