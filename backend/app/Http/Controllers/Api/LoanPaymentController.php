@@ -24,7 +24,7 @@ class LoanPaymentController extends Controller
 
     public function index(Loan $loan)
     {
-        return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name', 'bank:id,name', 'pendingVoidRequest.requester:id,name'])->get();
+        return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name', 'bank:id,name', 'pendingVoidRequest.requester:id,name', 'pendingAllocationRequest.requester:id,name'])->get();
     }
 
     /** Preview-only: the receipt number the next payment on this loan would get,
@@ -42,6 +42,18 @@ class LoanPaymentController extends Controller
         return response()->json(['code' => $code]);
     }
 
+    /** Preview-only: what's currently due per bucket (Interest/OD/Other Charges/
+     *  Capital) — powers the Make Payment modal's manual-allocation breakdown, so
+     *  the cashier sees the same caps store() will validate against before
+     *  submitting. See LoanPaymentAllocator::outstandingByBucket(). */
+    public function outstandingByBucket(Request $request, Loan $loan)
+    {
+        $data = $request->validate(['as_of' => 'nullable|date']);
+        $asOf = isset($data['as_of']) ? Carbon::parse($data['as_of']) : null;
+
+        return response()->json(LoanPaymentAllocator::outstandingByBucket($loan, $asOf));
+    }
+
     public function store(Request $request, Loan $loan)
     {
         // Active covers normal loan servicing; Approved covers a pre-disbursement
@@ -53,6 +65,9 @@ class LoanPaymentController extends Controller
         if ($loan->payments()->where('payment_type', 'Settlement')->where('approval_status', 'PendingApproval')->exists()) {
             return response()->json(['message' => 'A full settlement request is already pending approval for this loan — approve or reject it before recording further payments.'], 422);
         }
+        if ($loan->payments()->where('payment_type', 'ManualAllocation')->where('approval_status', 'PendingApproval')->exists()) {
+            return response()->json(['message' => 'A manual allocation request is already pending approval for this loan — approve or reject it before recording further payments.'], 422);
+        }
         $data = $request->validate([
             'amount' => 'required|numeric|min:0.01',
             'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
@@ -62,9 +77,20 @@ class LoanPaymentController extends Controller
             'cheque_date' => 'required_if:payment_method,Cheque|nullable|date',
             'notes' => 'nullable|string|max:255',
             'is_settlement' => 'boolean',
+            'allocation_mode' => ['nullable', Rule::in(['auto', 'manual'])],
+            'allocations' => 'required_if:allocation_mode,manual|array',
+            'allocations.interest' => 'nullable|numeric|min:0',
+            'allocations.capital' => 'nullable|numeric|min:0',
+            'allocations.od_charge' => 'nullable|numeric|min:0',
+            'allocations.other_charges' => 'nullable|numeric|min:0',
         ]);
         $isSettlement = (bool) ($data['is_settlement'] ?? false);
+        $isManual = ($data['allocation_mode'] ?? 'auto') === 'manual';
         $isCheque = ($data['payment_method'] ?? 'Cash') === 'Cheque';
+
+        if ($isManual && $isSettlement) {
+            return response()->json(['message' => 'A payment cannot be both a full settlement and a manual allocation.'], 422);
+        }
 
         // Full settlement pays off and closes an active loan — meaningless before
         // the loan has even been disbursed.
@@ -95,7 +121,29 @@ class LoanPaymentController extends Controller
             return response()->json(['message' => "Amount exceeds the outstanding balance ({$outstanding})."], 422);
         }
 
-        $payment = DB::transaction(function () use ($loan, $data, $isSettlement, $isCheque, $request) {
+        $allocations = null;
+        if ($isManual) {
+            $allocations = [
+                'interest' => round((float) ($data['allocations']['interest'] ?? 0), 2),
+                'od_charge' => round((float) ($data['allocations']['od_charge'] ?? 0), 2),
+                'other_charges' => round((float) ($data['allocations']['other_charges'] ?? 0), 2),
+                'capital' => round((float) ($data['allocations']['capital'] ?? 0), 2),
+            ];
+            $sum = round(array_sum($allocations), 2);
+            if (abs($sum - round((float) $data['amount'], 2)) > 0.01) {
+                return response()->json(['message' => "The allocation split ({$sum}) must add up to the payment amount ({$data['amount']})."], 422);
+            }
+            $asOf = Carbon::parse($data['paid_at'] ?? now());
+            $due = LoanPaymentAllocator::outstandingByBucket($loan, $asOf);
+            $labels = ['interest' => 'Interest', 'od_charge' => 'OD Charges', 'other_charges' => 'Other Charges', 'capital' => 'Capital'];
+            foreach ($allocations as $bucket => $amt) {
+                if ($amt > $due[$bucket]) {
+                    return response()->json(['message' => "{$labels[$bucket]} amount ({$amt}) exceeds what's due for that bucket ({$due[$bucket]})."], 422);
+                }
+            }
+        }
+
+        $payment = DB::transaction(function () use ($loan, $data, $isSettlement, $isManual, $isCheque, $allocations, $request) {
             $branch = Branch::find($loan->branch_id);
             $method = $data['payment_method'] ?? 'Cash';
             $code = NumberGenerator::next('payment', [
@@ -110,31 +158,47 @@ class LoanPaymentController extends Controller
                 'branch_id' => $loan->branch_id,
                 'amount' => $data['amount'],
                 'payment_method' => $method,
-                'payment_type' => $isSettlement ? 'Settlement' : 'Regular',
-                // Cash/Bank and settlement payments have no clearance concept (null).
-                // A regular cheque payment starts Pending — see clearCheque().
-                'clearance_status' => (!$isSettlement && $isCheque) ? 'Pending' : null,
+                'payment_type' => $isSettlement ? 'Settlement' : ($isManual ? 'ManualAllocation' : 'Regular'),
+                // Cash/Bank and settlement/manual-allocation payments have no
+                // clearance concept (null). A regular cheque payment starts
+                // Pending — see clearCheque().
+                'clearance_status' => (!$isSettlement && !$isManual && $isCheque) ? 'Pending' : null,
                 'received_by' => $request->user()->id,
                 'paid_at' => $data['paid_at'] ?? now(),
                 'receipt_no' => $data['receipt_no'] ?? null,
                 'bank_id' => $data['bank_id'] ?? null,
                 'cheque_date' => $data['cheque_date'] ?? null,
                 'notes' => $data['notes'] ?? null,
-                'approval_status' => $isSettlement ? 'PendingApproval' : 'Approved',
+                'approval_status' => ($isSettlement || $isManual) ? 'PendingApproval' : 'Approved',
+                'manual_allocation' => $allocations,
             ]);
             NumberGenerator::attach($code, $payment);
 
-            // A settlement request just reserves the amount for review — nothing is
-            // applied to the schedule until it's approved. A regular cheque payment
-            // similarly reserves the amount until the cheque is manually realized
-            // (it can still bounce) — see clearCheque().
-            if (!$isSettlement && !$isCheque) {
+            // A settlement or manual-allocation request just reserves the amount
+            // for review — nothing is applied to the schedule until it's
+            // approved. A regular cheque payment similarly reserves the amount
+            // until the cheque is manually realized (it can still bounce) — see
+            // clearCheque().
+            if (!$isSettlement && !$isManual && !$isCheque) {
                 LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $data['amount']);
             }
 
+            if ($isManual) {
+                $type = ApprovalType::where('code', 'payment_manual_allocation')->firstOrFail();
+                ApprovalRequest::create([
+                    'approval_type_id' => $type->id,
+                    'subject_id' => $payment->id,
+                    'requested_by' => $request->user()->id,
+                    'requested_at' => now(),
+                    'reason' => $data['notes'] ?? null,
+                    'required_approvals' => $type->required_approvals,
+                ]);
+            }
+
             // Cash is physically in hand the moment it's recorded, independent of
-            // whether it's a pending settlement awaiting approval — post it to the
-            // Cashbook now rather than only when/if the allocation is applied.
+            // whether it's a pending settlement/manual-allocation awaiting
+            // approval — post it to the Cashbook now rather than only when/if the
+            // allocation is applied.
             CashbookPoster::postCashReceipt($payment);
             LoanLedgerPoster::postCashReceipt($payment);
 
@@ -374,6 +438,107 @@ class LoanPaymentController extends Controller
         ]);
 
         return $voidRequest->fresh()->load('requester:id,name', 'rejecter:id,name');
+    }
+
+    /** Applies a pending manual-allocation request's stored split once it's
+     *  collected enough distinct approvals (approval_types.required_approvals
+     *  for code 'payment_manual_allocation', snapshotted on the request) — see
+     *  store() for where the request/reservation is created. */
+    public function approveAllocationRequest(Request $request, ApprovalRequest $allocationRequest)
+    {
+        if ($allocationRequest->approvalType->code !== 'payment_manual_allocation') {
+            abort(404);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'payment_manual_allocation')) {
+            return response()->json(['message' => 'You are not an approver for manual payment allocations.'], 403);
+        }
+        if ($allocationRequest->status !== 'PendingApproval') {
+            return response()->json(['message' => 'This request is not pending approval.'], 422);
+        }
+        if ($allocationRequest->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own allocation request.'], 422);
+        }
+        if ($allocationRequest->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
+        $payment = FacilityPayment::findOrFail($allocationRequest->subject_id);
+        if ($payment->payment_type !== 'ManualAllocation' || $payment->approval_status !== 'PendingApproval') {
+            $allocationRequest->update(['status' => 'Rejected', 'rejected_by' => $request->user()->id, 'rejected_at' => now(), 'reject_reason' => 'This payment is no longer pending — it was already voided or resolved by another action.']);
+
+            return response()->json(['message' => 'This payment is no longer pending approval — the request has been auto-rejected.'], 422);
+        }
+        $loan = Loan::findOrFail($payment->credit_facility_id);
+        // Re-validate against the current outstanding — matches
+        // approveSettlement()'s drift check.
+        $due = LoanPaymentAllocator::outstandingByBucket($loan, $payment->paid_at);
+        foreach ((array) $payment->manual_allocation as $bucket => $amt) {
+            if ((float) $amt > ($due[$bucket] ?? 0)) {
+                return response()->json(['message' => "The outstanding balance has changed since this request was made (now {$due[$bucket]} for {$bucket}). Reject it and ask the cashier to resubmit."], 422);
+            }
+        }
+
+        DB::transaction(function () use ($loan, $payment, $allocationRequest, $request) {
+            if (!$allocationRequest->first_approved_by) {
+                $allocationRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $allocationRequest->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($allocationRequest->fresh()->approvalsCount() < $allocationRequest->required_approvals) {
+                return;
+            }
+
+            LoanPaymentAllocator::applyManualAllocation($loan, $payment, (array) $payment->manual_allocation, $payment->paid_at);
+            LoanLedgerPoster::postManualAllocationApplied($payment);
+            $payment->update([
+                'approval_status' => 'Approved',
+                'approved_by' => $request->user()->id,
+                'approved_at' => now(),
+            ]);
+            $allocationRequest->update(['status' => 'Approved']);
+        });
+
+        return $allocationRequest->fresh()->load('requester:id,name', 'firstApprover:id,name', 'secondApprover:id,name');
+    }
+
+    public function rejectAllocationRequest(Request $request, ApprovalRequest $allocationRequest)
+    {
+        if ($allocationRequest->approvalType->code !== 'payment_manual_allocation') {
+            abort(404);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'payment_manual_allocation')) {
+            return response()->json(['message' => 'You are not an approver for manual payment allocations.'], 403);
+        }
+        if ($allocationRequest->status !== 'PendingApproval') {
+            return response()->json(['message' => 'This request is not pending approval.'], 422);
+        }
+        $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);
+        $payment = FacilityPayment::findOrFail($allocationRequest->subject_id);
+
+        DB::transaction(function () use ($payment, $allocationRequest, $data, $request) {
+            if ($payment->payment_type === 'ManualAllocation' && $payment->approval_status === 'PendingApproval') {
+                $payment->update([
+                    'approval_status' => 'Rejected',
+                    'status' => 'Voided',
+                    'void_reason' => $data['reject_reason'] ?? null,
+                    'voided_by' => $request->user()->id,
+                    'voided_at' => now(),
+                ]);
+                // The cash was posted to the Cashbook at record time (see store()) —
+                // a rejected allocation request means it's being handed back, so
+                // unwind that entry.
+                CashbookPoster::reverseCashReceipt($payment);
+                LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
+            }
+            $allocationRequest->update([
+                'status' => 'Rejected',
+                'rejected_by' => $request->user()->id,
+                'rejected_at' => now(),
+                'reject_reason' => $data['reject_reason'] ?? null,
+            ]);
+        });
+
+        return $allocationRequest->fresh()->load('requester:id,name', 'rejecter:id,name');
     }
 
     /** Keeps credit_facilities.outstanding_balance_cache in step with LoanPaymentAllocator::outstandingBalance() after every mutation that could change it — see that column's docblock on the credit_facilities migration. */

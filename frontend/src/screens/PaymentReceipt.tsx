@@ -14,7 +14,7 @@ import { Card, PageHead, Btn, Badge, Field, Input, Select, BankSelect, SearchSel
 import { Icon } from '../components/Icon'
 import {
   loansApi, loanPaymentsApi, loanPostDatedChequesApi, speedDraftsApi, speedDraftPaymentsApi, company,
-  type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser,
+  type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser, type PaymentAllocationSplit,
   type SpeedDraft, type SpeedDraftPayment, type SpeedDraftSchedule, type SpeedDraftPaymentType,
 } from '../api'
 import { Can, userCan, canApprove } from '../lib/permissions'
@@ -45,6 +45,7 @@ const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = { Pa
 function PaymentStatusBadge({ p }: { p: LoanPayment }) {
   if (p.status === 'Voided') return <Badge tone="red" dot>Voided</Badge>
   if (p.pendingVoidRequest) return <Badge tone="amber" dot>Cancel Pending</Badge>
+  if (p.pendingAllocationRequest) return <Badge tone="amber" dot>Allocation Pending Approval</Badge>
   if (p.approvalStatus === 'PendingApproval') return <Badge tone="amber" dot>Pending Approval</Badge>
   if (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending') return <Badge tone="amber" dot>Pending Clearance</Badge>
   return <Badge tone="green" dot>Recorded</Badge>
@@ -314,6 +315,18 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // Manual allocation — cashier splits the amount across buckets instead of the
+  // automatic waterfall; held PendingApproval until a top-level user approves it
+  // (see LoanPaymentController::approveAllocationRequest()).
+  const [allocationMode, setAllocationMode] = useState<'auto' | 'manual'>('auto')
+  const [allocInterest, setAllocInterest] = useState('')
+  const [allocCapital, setAllocCapital] = useState('')
+  const [allocOdCharge, setAllocOdCharge] = useState('')
+  const [allocOtherCharges, setAllocOtherCharges] = useState('')
+  // What's actually due per bucket right now — fetched fresh whenever the Make
+  // Payment modal is open with a date set, so the manual-split caps shown match
+  // what store() will validate against (see LoanPaymentAllocator::outstandingByBucket()).
+  const [allocDue, setAllocDue] = useState<PaymentAllocationSplit | null>(null)
 
   // Full-settlement modal
   const [settleOpen, setSettleOpen] = useState(false)
@@ -371,6 +384,16 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     return () => { cancelled = true }
   }, [selected, payOpen, method, settleOpen, settleMethod])
 
+  // Fetches the per-bucket breakdown as of the payment's own date whenever the
+  // Make Payment modal is open — used both to display the breakdown and to cap
+  // each manual-split field, matching what store() will validate against.
+  useEffect(() => {
+    if (!selected || !payOpen) { setAllocDue(null); return }
+    let cancelled = false
+    loanPaymentsApi.outstandingByBucket(selected.id, paidAt || undefined).then((d) => { if (!cancelled) setAllocDue(d) }).catch(() => { if (!cancelled) setAllocDue(null) })
+    return () => { cancelled = true }
+  }, [selected, payOpen, paidAt])
+
   const installmentAmountOf = (loan: Loan) => (loan.schedules?.length ? num(loan.schedules[0].totalDue) : null)
   const interestAmountOf = (loan: Loan) => loan.summary?.dueBreakdown?.find((r) => r.type === 'Interest')?.due ?? null
   const payable = loans.filter((l) => l.status === 'Active')
@@ -394,7 +417,10 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     : allSchedules
   const locked = !!pendingSettlement
 
-  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('') }
+  const resetPayForm = () => {
+    setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
+    setAllocationMode('auto'); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges('')
+  }
   const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleRefNo(''); setSettleBankId(undefined); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
   const resetChequeForm = () => { setChequeOpen(false); setChequeNo(''); setRcBankId(undefined); setRcChequeDate(todayIso()); setChequeAmount(''); setChequeErr('') }
 
@@ -414,12 +440,23 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
   const openPay = () => {
     setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
+    setAllocationMode('auto'); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges(''); setAllocDue(null)
   }
+
+  const allocSplit = { interest: num(allocInterest), capital: num(allocCapital), odCharge: num(allocOdCharge), otherCharges: num(allocOtherCharges) }
+  const allocTotal = allocSplit.interest + allocSplit.capital + allocSplit.odCharge + allocSplit.otherCharges
+  const allocRows: { key: string; label: string; due: number; value: string; set: (v: string) => void }[] = [
+    { key: 'interest', label: 'Interest', due: allocDue?.interest ?? 0, value: allocInterest, set: setAllocInterest },
+    { key: 'capital', label: 'Capital', due: allocDue?.capital ?? 0, value: allocCapital, set: setAllocCapital },
+    { key: 'odCharge', label: 'OD Charges', due: allocDue?.odCharge ?? 0, value: allocOdCharge, set: setAllocOdCharge },
+    { key: 'otherCharges', label: 'Other Charges', due: allocDue?.otherCharges ?? 0, value: allocOtherCharges, set: setAllocOtherCharges },
+  ]
 
   const record = async () => {
     if (!selected) return
     if (!amount || Number(amount) <= 0) { setErr('Enter a payment amount.'); return }
     if (method === 'Cheque' && (!payBankId || !payChequeDate)) { setErr('Bank and Cheque Date are required for a cheque payment.'); return }
+    if (allocationMode === 'manual' && Math.abs(allocTotal - Number(amount)) > 0.01) { setErr('The allocation split must add up to the payment amount.'); return }
     setBusy(true); setErr('')
     try {
       const balanceBefore = outstandingOf(selected)
@@ -428,7 +465,16 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
         bankId: method === 'Cheque' ? payBankId : undefined,
         chequeDate: method === 'Cheque' ? payChequeDate : undefined,
         notes: notes || undefined,
+        allocationMode: allocationMode === 'manual' ? 'manual' : undefined,
+        allocations: allocationMode === 'manual' ? allocSplit : undefined,
       })
+      if (allocationMode === 'manual') {
+        resetPayForm()
+        notify.success('Allocation request submitted', 'Awaiting top-level approval')
+        await reloadSelected()
+        refresh()
+        return
+      }
       const fresh = await loansApi.get(selected.id)
       setReceipt({ payment, loan: fresh, balanceBefore })
       refresh()
@@ -525,6 +571,30 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     try {
       await loanPaymentsApi.rejectVoidRequest(payment.pendingVoidRequest.id, reason || undefined)
       notify.success('Cancel request rejected')
+      setViewPayment(null)
+      await reloadSelected()
+      refresh()
+    } catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
+  }
+
+  const approveAllocation = async (payment: LoanPayment) => {
+    if (!payment.pendingAllocationRequest) return
+    try {
+      await loanPaymentsApi.approveAllocationRequest(payment.pendingAllocationRequest.id)
+      notify.success('Approved')
+      setViewPayment(null)
+      await reloadSelected()
+      refresh()
+    } catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+
+  const rejectAllocation = async (payment: LoanPayment) => {
+    if (!payment.pendingAllocationRequest) return
+    const reason = await notify.prompt({ title: 'Reject this allocation request?', msg: 'Give a reason — the cashier can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try {
+      await loanPaymentsApi.rejectAllocationRequest(payment.pendingAllocationRequest.id, reason || undefined)
+      notify.success('Allocation request rejected')
       setViewPayment(null)
       await reloadSelected()
       refresh()
@@ -635,7 +705,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       {selected && !loadingLoan && (
         <>
           <Card style={{ marginBottom: 16 }}>
-            <div className="row between wrap gap-2" style={{ marginBottom: 10 }}>
+            <div className="row between wrap gap-2" style={{ marginBottom: 14 }}>
               <div className="eyebrow">Loan Summary</div>
               <div className="row gap-2">
                 <Can user={me} module="Loan Payments" action="Create">
@@ -649,15 +719,46 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 )}
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5 }}>
-              <div><span className="t-2">Customer: </span><b>{selected.customer?.fullName}</b></div>
-              <div><span className="t-2">NIC: </span><b>{selected.customer?.nicNo || '—'}</b></div>
-              <div><span className="t-2">Loan Code: </span><b>{selected.code}</b></div>
-              <div><span className="t-2">Product: </span><b>{selected.loanDetail?.loanType?.name || '—'}</b></div>
-              <div><span className="t-2">Status: </span><Badge tone="green" dot>{selected.status}</Badge></div>
-              <div><span className="t-2">Interest Amount: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{interestAmountOf(selected) != null ? money(interestAmountOf(selected)) : '—'}</b></div>
-              <div><span className="t-2">Installment Amount: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{installmentAmountOf(selected) != null ? money(installmentAmountOf(selected)) : '—'}</b></div>
-              <div><span className="t-2">Outstanding Balance: </span><b style={{ fontFamily: 'JetBrains Mono', color: outstanding > 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(outstanding)}</b></div>
+
+            <div className="row wrap gap-3" style={{ alignItems: 'center', paddingBottom: 14, marginBottom: 14, borderBottom: '1px solid var(--line)' }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>{selected.customer?.fullName}</div>
+                <div className="t-2" style={{ fontSize: 11.5 }}>NIC {selected.customer?.nicNo || '—'}</div>
+              </div>
+              <div style={{ width: 1, height: 30, background: 'var(--line)' }} />
+              <div>
+                <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em' }}>Loan Code</div>
+                <div style={{ fontFamily: 'JetBrains Mono', fontWeight: 600, fontSize: 13 }}>{selected.code}</div>
+              </div>
+              <div style={{ width: 1, height: 30, background: 'var(--line)' }} />
+              <div>
+                <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em' }}>Product</div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{selected.loanDetail?.loanType?.name || '—'}</div>
+              </div>
+              <div style={{ width: 1, height: 30, background: 'var(--line)' }} />
+              <div>
+                <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Status</div>
+                <Badge tone="green" dot>{selected.status}</Badge>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+              <div style={{ padding: '10px 14px', background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
+                <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em' }}>Interest Amount</div>
+                <div style={{ fontFamily: 'JetBrains Mono', fontSize: 16, fontWeight: 700, marginTop: 3 }}>{interestAmountOf(selected) != null ? money(interestAmountOf(selected)) : '—'}</div>
+              </div>
+              <div style={{ padding: '10px 14px', background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
+                <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em' }}>Installment Amount</div>
+                <div style={{ fontFamily: 'JetBrains Mono', fontSize: 16, fontWeight: 700, marginTop: 3 }}>{installmentAmountOf(selected) != null ? money(installmentAmountOf(selected)) : '—'}</div>
+              </div>
+              <div style={{
+                padding: '10px 14px', borderRadius: 'var(--r-s)',
+                background: outstanding > 0 ? 'var(--bad-dim)' : 'var(--bg-2)',
+                border: `1px solid ${outstanding > 0 ? 'var(--bad)' : 'var(--line)'}`,
+              }}>
+                <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em', color: outstanding > 0 ? 'var(--bad)' : 'var(--tx-2)' }}>Outstanding Balance</div>
+                <div style={{ fontFamily: 'JetBrains Mono', fontSize: 18, fontWeight: 700, marginTop: 3, color: outstanding > 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(outstanding)}</div>
+              </div>
             </div>
           </Card>
 
@@ -755,7 +856,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             {(listSearch || listFrom || listTo) &&
               <Btn variant="ghost" onClick={() => { setListSearch(''); setListFrom(''); setListTo('') }}>Reset</Btn>}
           </div>
-          <Table cols={[{ label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Disbursed' }, { label: 'Outstanding', align: 'right' }]}
+          <Table cols={[{ label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Area' }, { label: 'Disbursed' }, { label: 'Outstanding', align: 'right' }]}
             rows={filteredPending}
             empty={pendingPayment.length ? 'No loans match these filters.' : 'No active loans with an outstanding balance right now.'}
             onRow={(l: Loan) => pickLoan('', l)}
@@ -766,16 +867,20 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 <div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.nicNo || '—'}</div>
               </Td>
               <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
+              <Td>{l.branch?.name || '—'}</Td>
               <Td>{dateOnly(l.disbursedAt)}</Td>
               <Td mono align="right" c="var(--bad)">{money(num(l.totalDueSum) - num(l.paidSum))}</Td>
             </>} />
         </Card>
       )}
 
-      <Modal open={payOpen} onClose={resetPayForm} title="Make Payment" sub={selected ? `${selected.code} — payment is allocated automatically to the oldest unpaid installment first.` : undefined}
+      <Modal open={payOpen} onClose={resetPayForm} title="Make Payment"
+        sub={selected ? (allocationMode === 'manual' ? `${selected.code} — manual split needs top-level approval before it's applied.` : `${selected.code} — payment is allocated automatically to the oldest unpaid installment first.`) : undefined}
         footer={<>
           <Btn variant="solid" onClick={resetPayForm}>Cancel</Btn>
-          <Btn variant="primary" icon="check" onClick={record} disabled={busy}>{busy ? 'Recording…' : 'Record Payment & Print Receipt'}</Btn>
+          <Btn variant="primary" icon="check" onClick={record} disabled={busy || (allocationMode === 'manual' && Math.abs(allocTotal - Number(amount || 0)) > 0.01)}>
+            {busy ? (allocationMode === 'manual' ? 'Submitting…' : 'Recording…') : (allocationMode === 'manual' ? 'Submit for Approval' : 'Record Payment & Print Receipt')}
+          </Btn>
         </>}>
         <div className="col gap-3">
           <ErrorBanner error={err} style={{ marginBottom: 0 }} />
@@ -784,6 +889,56 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             <div><span className="t-2">Already Paid</span><br /><b style={{ fontFamily: 'JetBrains Mono' }}>{money(totalPaid)}</b></div>
           </div>
           <Field label="Payment Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Up to ${money(outstanding)}`} /></Field>
+          <Field label="Allocation">
+            <div className="row gap-3" style={{ alignItems: 'center' }}>
+              <label className="row gap-1" style={{ alignItems: 'center', cursor: 'pointer' }}>
+                <input type="radio" checked={allocationMode === 'auto'} onChange={() => setAllocationMode('auto')} /> <span style={{ fontSize: 12.5 }}>Auto (oldest unpaid first)</span>
+              </label>
+              <label className="row gap-1" style={{ alignItems: 'center', cursor: 'pointer' }}>
+                <input type="radio" checked={allocationMode === 'manual'} onChange={() => setAllocationMode('manual')} /> <span style={{ fontSize: 12.5 }}>Manual split — needs approval</span>
+              </label>
+            </div>
+          </Field>
+          {allocationMode === 'manual' && (() => {
+            const target = Number(amount || 0)
+            const balanced = Math.abs(allocTotal - target) <= 0.01
+            return (
+              <div style={{ border: '1px solid var(--line)', borderRadius: 'var(--r-s)', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '9px 12px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>Bucket</th>
+                      <th style={{ textAlign: 'right', padding: '9px 12px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>Due</th>
+                      <th style={{ textAlign: 'right', padding: '9px 12px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)', width: 150 }}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allocRows.map((row) => {
+                      const over = allocDue !== null && num(row.value) > row.due
+                      return (
+                        <tr key={row.key}>
+                          <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--line-soft)' }}>{row.label}</td>
+                          <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--line-soft)', textAlign: 'right', fontFamily: 'JetBrains Mono', color: 'var(--tx-2)' }}>{allocDue ? money(row.due) : '…'}</td>
+                          <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--line-soft)' }}>
+                            <Input type="number" value={row.value} onChange={(e) => row.set(e.target.value)}
+                              style={{ textAlign: 'right', ...(over ? { color: 'var(--bad)', borderColor: 'var(--bad)' } : {}) }} />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={2} style={{ padding: '9px 12px', fontWeight: 600, background: 'var(--bg-2)' }}>Split Total</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'JetBrains Mono', fontWeight: 700, background: 'var(--bg-2)', color: balanced ? 'var(--ok)' : 'var(--bad)' }}>
+                        {money(allocTotal)} / {money(target)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )
+          })()}
           <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} backDated={payBackDated} setBackDated={setPayBackDated} refNo={refNo} setRefNo={setRefNo} nextReceipt={nextReceipt}
             bankId={payBankId} setBankId={setPayBankId} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes} />
         </div>
@@ -833,6 +988,13 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
               <Btn variant="primary" icon="check" onClick={() => approveVoid(viewPayment)}>Approve</Btn>
             </>
           )}
+          {viewPayment?.pendingAllocationRequest && canApprove(me, 'payment_manual_allocation')
+            && me?.id !== viewPayment.pendingAllocationRequest.requester?.id && me?.id !== viewPayment.pendingAllocationRequest.firstApprover?.id && (
+            <>
+              <Btn variant="danger" icon="x" onClick={() => rejectAllocation(viewPayment)}>Reject</Btn>
+              <Btn variant="primary" icon="check" onClick={() => approveAllocation(viewPayment)}>Approve</Btn>
+            </>
+          )}
           <Btn variant="solid" onClick={() => setViewPayment(null)}>Close</Btn>
         </>}>
         {viewPayment && (() => {
@@ -868,6 +1030,18 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                     {p.pendingVoidRequest.firstApprover ? `Approved by ${p.pendingVoidRequest.firstApprover.name}, ` : ''}
                     needs {p.pendingVoidRequest.requiredApprovals - (p.pendingVoidRequest.firstApprover ? 1 : 0)} more approval{p.pendingVoidRequest.requiredApprovals - (p.pendingVoidRequest.firstApprover ? 1 : 0) === 1 ? '' : 's'}
                   </div>
+                </div>
+              )}
+              {p.paymentType === 'ManualAllocation' && p.manualAllocation && (
+                <div className="col gap-1" style={{ marginTop: 8, padding: '8px 12px', background: 'var(--warn-dim)', color: 'var(--warn)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
+                  <div><b>Requested split</b> — Interest {money(p.manualAllocation.interest)} · Capital {money(p.manualAllocation.capital)} · OD {money(p.manualAllocation.odCharge)} · Other {money(p.manualAllocation.otherCharges)}</div>
+                  {p.pendingAllocationRequest && (
+                    <div>
+                      {p.pendingAllocationRequest.requester?.name ? `Requested by ${p.pendingAllocationRequest.requester.name}. ` : ''}
+                      {p.pendingAllocationRequest.firstApprover ? `Approved by ${p.pendingAllocationRequest.firstApprover.name}, ` : ''}
+                      needs {p.pendingAllocationRequest.requiredApprovals - (p.pendingAllocationRequest.firstApprover ? 1 : 0)} more approval{p.pendingAllocationRequest.requiredApprovals - (p.pendingAllocationRequest.firstApprover ? 1 : 0) === 1 ? '' : 's'}
+                    </div>
+                  )}
                 </div>
               )}
               {pendingClearance && (

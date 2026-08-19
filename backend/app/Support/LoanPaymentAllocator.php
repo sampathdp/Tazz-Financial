@@ -258,6 +258,102 @@ class LoanPaymentAllocator
         // Pay any remaining charges if there were no schedules or schedules were fully paid
         $payCharges();
 
+        self::finalizeApplied($loan, $schedules, $applied, $payment, $asOf);
+    }
+
+    /**
+     * Applies `$amount` split across explicit buckets the caller (or the
+     * cashier, via a payment_manual_allocation approval request) chose,
+     * instead of the standard waterfall priority — e.g. only Interest and
+     * Capital, skipping OD and other charges entirely, even though OD is due.
+     * Each bucket has its own independent remaining amount and is applied
+     * oldest-installment/oldest-charge-first, same as applyAllocation()'s
+     * per-bucket passes, just not gated behind the buckets before it.
+     *
+     * $allocations keys: interest, od_charge, capital, other_charges — any
+     * missing key is treated as 0.
+     */
+    public static function applyManualAllocation(Loan $loan, FacilityPayment $payment, array $allocations, ?Carbon $asOf = null): void
+    {
+        $asOf ??= Carbon::today();
+        $schedules = $loan->schedules()->where('status', '!=', 'Paid')->orderBy('installment_no')
+            ->with('allocations.payment:id,status,approval_status')->get();
+        [$graceDays, $chargeRate] = self::penaltyTerms($loan);
+
+        $activeApplied = fn ($row, string $column) => (float) $row->allocations
+            ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
+            ->sum($column);
+
+        $applied = [];
+        $touch = function (int $scheduleId, string $bucket, float $amt) use (&$applied) {
+            if ($amt <= 0) {
+                return;
+            }
+            $applied[$scheduleId] ??= ['interest' => 0.0, 'penalty' => 0.0, 'principal' => 0.0];
+            $applied[$scheduleId][$bucket] += $amt;
+        };
+
+        $interestRemaining = round((float) ($allocations['interest'] ?? 0), 2);
+        $penaltyRemaining = round((float) ($allocations['od_charge'] ?? 0), 2);
+        $principalRemaining = round((float) ($allocations['capital'] ?? 0), 2);
+        $chargeRemaining = round((float) ($allocations['other_charges'] ?? 0), 2);
+
+        foreach ($schedules as $row) {
+            if ($interestRemaining > 0) {
+                $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2));
+                if ($due > 0) {
+                    $pay = min($interestRemaining, $due);
+                    $touch($row->id, 'interest', $pay);
+                    $interestRemaining = round($interestRemaining - $pay, 2);
+                }
+            }
+
+            if ($penaltyRemaining > 0 && $chargeRate > 0) {
+                $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf);
+                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied'), 2));
+                if ($due > 0) {
+                    $pay = min($penaltyRemaining, $due);
+                    $touch($row->id, 'penalty', $pay);
+                    $penaltyRemaining = round($penaltyRemaining - $pay, 2);
+                }
+            }
+
+            if ($principalRemaining > 0) {
+                $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2));
+                if ($due > 0) {
+                    $pay = min($principalRemaining, $due);
+                    $touch($row->id, 'principal', $pay);
+                    $principalRemaining = round($principalRemaining - $pay, 2);
+                }
+            }
+        }
+
+        if ($chargeRemaining > 0) {
+            $charges = $loan->charges()->orderBy('charged_at')->get();
+            foreach ($charges as $charge) {
+                if ($chargeRemaining <= 0) {
+                    break;
+                }
+                $due = max(0, round((float) $charge->due_amount - (float) $charge->paid_amount, 2));
+                if ($due <= 0) {
+                    continue;
+                }
+                $pay = min($chargeRemaining, $due);
+                $charge->update(['paid_amount' => round((float) $charge->paid_amount + $pay, 2)]);
+                FacilityChargeAllocation::create(['facility_payment_id' => $payment->id, 'facility_charge_id' => $charge->id, 'amount_applied' => $pay]);
+                $chargeRemaining = round($chargeRemaining - $pay, 2);
+            }
+        }
+
+        self::finalizeApplied($loan, $schedules, $applied, $payment, $asOf);
+    }
+
+    /** Writes one FacilityPaymentAllocation row per touched installment, updates
+     *  each row's paid_amount/status, and refreshes the loan's outstanding-balance
+     *  cache/closed status — shared tail for applyAllocation() and
+     *  applyManualAllocation(), which only differ in how $applied gets built. */
+    private static function finalizeApplied(Loan $loan, $schedules, array $applied, FacilityPayment $payment, Carbon $asOf): void
+    {
         foreach ($applied as $scheduleId => $buckets) {
             FacilityPaymentAllocation::create([
                 'facility_payment_id' => $payment->id,
@@ -291,5 +387,46 @@ class LoanPaymentAllocator
         if ($loan->status === 'Active' && $outstanding <= 0) {
             $loan->update(['status' => 'Closed', 'closed_at' => $asOf]);
         }
+    }
+
+    /**
+     * Same totals as outstandingBalance(), kept split by bucket instead of
+     * summed — lets a manual-allocation request (and its approval-time
+     * re-check) validate each chosen bucket amount against what's actually
+     * still due for that bucket specifically, e.g. rejecting an Interest
+     * amount that exceeds unpaid interest even if the loan's total balance
+     * would easily cover it.
+     *
+     * @return array{interest: float, od_charge: float, other_charges: float, capital: float}
+     */
+    public static function outstandingByBucket(Loan $loan, ?Carbon $asOf = null): array
+    {
+        $asOf ??= Carbon::today();
+        $schedules = $loan->schedules()->where('status', '!=', 'Paid')
+            ->with('allocations.payment:id,status,approval_status')->get();
+        [$graceDays, $chargeRate] = self::penaltyTerms($loan);
+
+        $activeApplied = fn ($row, string $column) => (float) $row->allocations
+            ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
+            ->sum($column);
+
+        $interest = $schedules->sum(fn ($row) => max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2)));
+        $capital = $schedules->sum(fn ($row) => max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2)));
+        $odCharge = $chargeRate > 0
+            ? $schedules->sum(function ($row) use ($graceDays, $chargeRate, $asOf) {
+                $due = LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf);
+                $paid = LoanSummary::activePenaltyPaid($row);
+
+                return max(0, round($due - $paid, 2));
+            })
+            : 0.0;
+        $otherCharges = (float) $loan->charges()->get()->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
+
+        return [
+            'interest' => round($interest, 2),
+            'od_charge' => round($odCharge, 2),
+            'other_charges' => round($otherCharges, 2),
+            'capital' => round($capital, 2),
+        ];
     }
 }

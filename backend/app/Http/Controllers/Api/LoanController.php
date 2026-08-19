@@ -63,6 +63,7 @@ class LoanController extends Controller
         'payments.voider:id,name',
         'payments.bank:id,name',
         'payments.pendingVoidRequest.requester:id,name',
+        'payments.pendingAllocationRequest.requester:id,name',
         'charges.creator:id,name', 'charges.category:id,name',
         'postDatedCheques.creator:id,name',
         'postDatedCheques.bank:id,name',

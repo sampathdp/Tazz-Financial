@@ -25,12 +25,12 @@ function progressLabel(requiredApprovals: number, firstApprover?: { name: string
 
 export function ApprovalsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
-  const [data, setData] = useState<ApprovalsInbox>({ loanCancelRequests: [], paymentVoidRequests: [] })
+  const [data, setData] = useState<ApprovalsInbox>({ loanCancelRequests: [], paymentVoidRequests: [], allocationRequests: [] })
   const [loading, setLoading] = useState(true)
 
   const refresh = () => {
     setLoading(true)
-    approvalsApi.list().then(setData).catch(() => setData({ loanCancelRequests: [], paymentVoidRequests: [] })).finally(() => setLoading(false))
+    approvalsApi.list().then(setData).catch(() => setData({ loanCancelRequests: [], paymentVoidRequests: [], allocationRequests: [] })).finally(() => setLoading(false))
   }
   useEffect(() => { refresh() }, [])
 
@@ -58,7 +58,18 @@ export function ApprovalsScreen({ user: me }: { go: Go; user?: AuthUser | null }
     catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
-  const total = data.loanCancelRequests.length + data.paymentVoidRequests.length
+  const approveAllocation = async (id: number, code: string) => {
+    try { await loanPaymentsApi.approveAllocationRequest(id); notify.success('Approved', code); refresh() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+  const rejectAllocation = async (id: number, code: string) => {
+    const reason = await notify.prompt({ title: `Reject allocation request for ${code}?`, msg: 'Give a reason — the cashier can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await loanPaymentsApi.rejectAllocationRequest(id, reason || undefined); notify.success('Rejected', code); refresh() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
+  }
+
+  const total = data.loanCancelRequests.length + data.paymentVoidRequests.length + data.allocationRequests.length
 
   return (
     <div>
@@ -103,6 +114,33 @@ export function ApprovalsScreen({ user: me }: { go: Go; user?: AuthUser | null }
                 <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
                   <Btn size="sm" variant="primary" icon="check" onClick={() => approvePayment(r.id, r.payment?.code || '')}>Approve</Btn>
                   <Btn size="sm" variant="danger" icon="x" onClick={() => rejectPayment(r.id, r.payment?.code || '')}>Reject</Btn>
+                </div>
+              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
+            </Td>
+          </>} />
+      </Card>
+
+      <Card pad={0} style={{ marginTop: 16 }}>
+        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Payment Manual Allocations</div>
+        <Table cols={[{ label: 'Receipt' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Amount', align: 'right' }, { label: 'Requested Split' }, { label: 'Requested By' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
+          rows={data.allocationRequests} empty={loading ? 'Loading…' : 'No allocation requests pending.'}
+          render={(r) => <>
+            <Td mono style={{ fontWeight: 600 }}>{r.payment?.code || '—'}</Td>
+            <Td mono>{r.payment?.facility?.code || '—'}</Td>
+            <Td>{r.payment?.facility?.customer?.fullName || '—'}</Td>
+            <Td mono align="right">{r.payment ? money(r.payment.amount) : '—'}</Td>
+            <Td style={{ fontSize: 11.5 }}>
+              {r.payment?.manualAllocation
+                ? `Int ${money(r.payment.manualAllocation.interest)} · Cap ${money(r.payment.manualAllocation.capital)} · OD ${money(r.payment.manualAllocation.odCharge)} · Oth ${money(r.payment.manualAllocation.otherCharges)}`
+                : '—'}
+            </Td>
+            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
+            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
+            <Td align="right">
+              {canAct(r) ? (
+                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveAllocation(r.id, r.payment?.code || '')}>Approve</Btn>
+                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectAllocation(r.id, r.payment?.code || '')}>Reject</Btn>
                 </div>
               ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
             </Td>

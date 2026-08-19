@@ -40,12 +40,17 @@ class LoanLedgerPoster
         $tillAccount = ChartOfAccount::forCashTill($till);
         $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
 
-        if ($payment->payment_type === 'Settlement') {
+        // Settlement and ManualAllocation both hold the cash pending approval —
+        // neither has been allocated to the schedule yet (see
+        // LoanPaymentAllocator::applyAllocation()/applyManualAllocation()), so
+        // there's nothing splitLines() below could credit yet.
+        if (in_array($payment->payment_type, ['Settlement', 'ManualAllocation'], true)) {
             $suspense = ChartOfAccount::system('2100');
+            $label = $payment->payment_type === 'Settlement' ? 'settlement' : 'manual allocation';
             LedgerPoster::post([
                 ['account_id' => $tillAccount->id, 'debit' => $payment->amount, 'credit' => 0],
                 ['account_id' => $suspense->id, 'debit' => 0, 'credit' => $payment->amount],
-            ], $entryDate, self::meta($payment, "Cash receipt pending settlement approval - {$payment->code}"));
+            ], $entryDate, self::meta($payment, "Cash receipt pending {$label} approval - {$payment->code}"));
 
             return;
         }
@@ -71,6 +76,24 @@ class LoanLedgerPoster
         $suspense = ChartOfAccount::system('2100');
         $lines = array_merge([['account_id' => $suspense->id, 'debit' => $payment->amount, 'credit' => 0]], $credits);
         LedgerPoster::post($lines, now()->toDateString(), self::meta($payment, "Settlement applied {$payment->code}"));
+    }
+
+    /** A pending manual-allocation payment's cash moves from suspense into
+     *  what it was actually allocated to — called once
+     *  LoanPaymentAllocator::applyManualAllocation() has run at approval time.
+     *  Cash-method only, same shape as postSettlementApplied(). */
+    public static function postManualAllocationApplied(FacilityPayment $payment): void
+    {
+        if ($payment->payment_method !== 'Cash') {
+            return;
+        }
+        $credits = self::splitLines($payment);
+        if (!$credits) {
+            return;
+        }
+        $suspense = ChartOfAccount::system('2100');
+        $lines = array_merge([['account_id' => $suspense->id, 'debit' => $payment->amount, 'credit' => 0]], $credits);
+        LedgerPoster::post($lines, now()->toDateString(), self::meta($payment, "Manual allocation applied {$payment->code}"));
     }
 
     /** A Cheque-method payment's amount, once realized — called after LoanPaymentAllocator::applyAllocation() has run, from both the manual clear-cheque flow and post-dated-cheque realization. Lands in 1030 (not a specific bank account) since neither flow captures which bank account it was actually deposited into. */

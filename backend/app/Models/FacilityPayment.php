@@ -13,7 +13,7 @@ class FacilityPayment extends Model
         'code', 'credit_facility_id', 'branch_id', 'amount', 'payment_type', 'payment_method',
         'status', 'approval_status', 'clearance_status', 'receipt_no', 'bank_id',
         'cheque_date', 'realized_at', 'received_by', 'approved_by', 'approved_at', 'paid_at',
-        'notes', 'void_reason', 'voided_by', 'voided_at',
+        'notes', 'void_reason', 'voided_by', 'voided_at', 'manual_allocation',
     ];
 
     protected $casts = [
@@ -23,6 +23,7 @@ class FacilityPayment extends Model
         'approved_at' => 'datetime',
         'paid_at' => 'datetime',
         'voided_at' => 'datetime',
+        'manual_allocation' => 'array',
     ];
 
     public function facility()
@@ -86,6 +87,24 @@ class FacilityPayment extends Model
     {
         return $this->hasOne(ApprovalRequest::class, 'subject_id')
             ->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_void'))
+            ->where('status', 'PendingApproval');
+    }
+
+    /** Shared approval_requests table, scoped to this payment's
+     *  'payment_manual_allocation' rows via subject_id — see store()'s guard,
+     *  which only ever lets one be pending per payment. */
+    public function allocationRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_manual_allocation'))
+            ->orderByDesc('requested_at');
+    }
+
+    /** The one manual-allocation request currently awaiting approval, if any. */
+    public function pendingAllocationRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_manual_allocation'))
             ->where('status', 'PendingApproval');
     }
 }

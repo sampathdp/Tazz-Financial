@@ -36,9 +36,19 @@ class ApprovalController extends Controller
         ])->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_void'))
             ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
 
+        $allocationRequests = ApprovalRequest::with([
+            'requester:id,name',
+            'firstApprover:id,name',
+            'payment:id,code,amount,payment_type,manual_allocation,credit_facility_id',
+            'payment.facility:id,code,customer_id',
+            'payment.facility.customer:id,full_name',
+        ])->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_manual_allocation'))
+            ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
+
         return [
             'loanCancelRequests' => $cancelRequests,
             'paymentVoidRequests' => $voidRequests,
+            'allocationRequests' => $allocationRequests,
         ];
     }
 }

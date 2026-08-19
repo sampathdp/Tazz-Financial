@@ -179,11 +179,15 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Loan Management: Loan Payments ---
     Route::get('loans/{loan}/payments', [LoanPaymentController::class, 'index'])->middleware('perm:Loan Payments,View');
     Route::get('loans/{loan}/next-receipt-no', [LoanPaymentController::class, 'nextReceiptNo'])->middleware('perm:Loan Payments,Create');
+    Route::get('loans/{loan}/outstanding-by-bucket', [LoanPaymentController::class, 'outstandingByBucket'])->middleware('perm:Loan Payments,Create');
     Route::post('loans/{loan}/payments', [LoanPaymentController::class, 'store'])->middleware('perm:Loan Payments,Create');
     Route::post('loan-payments/{payment}/void-request', [LoanPaymentController::class, 'voidRequest'])->middleware('perm:Loan Payments,Delete');
     // approve/reject gated inline by ApprovalType::isAuthorized('payment_void', ...) — see LoanPaymentController.
     Route::post('loan-payment-void-requests/{voidRequest}/approve', [LoanPaymentController::class, 'approveVoidRequest']);
     Route::post('loan-payment-void-requests/{voidRequest}/reject', [LoanPaymentController::class, 'rejectVoidRequest']);
+    // approve/reject gated inline by ApprovalType::isAuthorized('payment_manual_allocation', ...) — see LoanPaymentController.
+    Route::post('loan-payment-allocation-requests/{allocationRequest}/approve', [LoanPaymentController::class, 'approveAllocationRequest']);
+    Route::post('loan-payment-allocation-requests/{allocationRequest}/reject', [LoanPaymentController::class, 'rejectAllocationRequest']);
     Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement'])->middleware('perm:Loan Payments,Approve');
     Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement'])->middleware('perm:Loan Payments,Approve');
     // Admin-only — realizing/bouncing a cheque is a Loan Adjustments action, not a regular Loan Payments one.

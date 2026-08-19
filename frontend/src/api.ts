@@ -497,7 +497,14 @@ export type PaymentStatus = 'Active' | 'Voided'
 export type PaymentApprovalStatus = 'Approved' | 'PendingApproval' | 'Rejected'
 export type PaymentClearanceStatus = 'Pending' | 'Realized' | 'Bounced'
 
-export type LoanPaymentType = 'Regular' | 'Settlement'
+export type LoanPaymentType = 'Regular' | 'Settlement' | 'ManualAllocation'
+
+/** A cashier-chosen split of a payment across buckets — see
+ *  LoanPaymentAllocator::applyManualAllocation(). Keys mirror the payload
+ *  loanPaymentsApi.create() sends when allocationMode is 'manual'. */
+export interface PaymentAllocationSplit {
+  interest: number; odCharge: number; otherCharges: number; capital: number
+}
 
 /** A cashier-submitted request to void a payment receipt — same shared
  *  approval_requests row shape as LoanCancelRequest (approvalTypeId for code
@@ -538,6 +545,13 @@ export interface LoanPayment {
   voidReason?: string | null; voider?: { id: number; name: string } | null; voidedAt?: string | null;
   /** The one void request awaiting approval right now, if any — see loanPaymentsApi.requestVoid(). */
   pendingVoidRequest?: LoanPaymentVoidRequest | null;
+  /** Set only when paymentType is 'ManualAllocation' — the cashier-requested split,
+   *  applied once pendingAllocationRequest is approved (see LoanPaymentAllocator::applyManualAllocation()). */
+  manualAllocation?: PaymentAllocationSplit | null;
+  /** The one manual-allocation request awaiting approval right now, if any —
+   *  same shared approval_requests shape as pendingVoidRequest, just for code
+   *  'payment_manual_allocation'. */
+  pendingAllocationRequest?: LoanPaymentVoidRequest | null;
   createdAt?: string;
 }
 
@@ -911,12 +925,20 @@ export const loanPaymentsApi = {
    *  is actually created, so it can shift if another payment lands first. */
   nextReceiptNo: (loanId: number, paymentMethod: PaymentMethod) =>
     http.get(`/loans/${loanId}/next-receipt-no`, { params: { payment_method: paymentMethod } }).then((r) => r.data.code as string),
-  create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankId?: number; chequeDate?: string; notes?: string; isSettlement?: boolean }) =>
+  /** What's currently due per bucket — powers the manual-allocation breakdown in
+   *  the Make Payment modal. See LoanPaymentAllocator::outstandingByBucket(). */
+  outstandingByBucket: (loanId: number, asOf?: string) =>
+    http.get(`/loans/${loanId}/outstanding-by-bucket`, { params: snakeize({ asOf }) }).then((r) => camelize(r.data) as PaymentAllocationSplit),
+  create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankId?: number; chequeDate?: string; notes?: string; isSettlement?: boolean; allocationMode?: 'auto' | 'manual'; allocations?: PaymentAllocationSplit }) =>
     http.post(`/loans/${loanId}/payments`, snakeize(body)).then((r) => camelize(r.data) as LoanPayment),
   /** Submits a void request — doesn't void the payment itself, see LoanPaymentVoidRequest. */
   requestVoid: (paymentId: number, voidReason?: string) => http.post(`/loan-payments/${paymentId}/void-request`, { void_reason: voidReason }).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
   approveVoidRequest: (requestId: number) => http.post(`/loan-payment-void-requests/${requestId}/approve`).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
   rejectVoidRequest: (requestId: number, reason?: string) => http.post(`/loan-payment-void-requests/${requestId}/reject`, snakeize({ rejectReason: reason })).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
+  /** Approve/reject a pending manual-allocation request — see loanPaymentsApi.create()'s
+   *  allocationMode: 'manual' and LoanPaymentController::approveAllocationRequest(). */
+  approveAllocationRequest: (requestId: number) => http.post(`/loan-payment-allocation-requests/${requestId}/approve`).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
+  rejectAllocationRequest: (requestId: number, reason?: string) => http.post(`/loan-payment-allocation-requests/${requestId}/reject`, snakeize({ rejectReason: reason })).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
   approveSettlement: (paymentId: number) => http.post(`/loan-payments/${paymentId}/approve-settlement`).then((r) => camelize(r.data) as LoanPayment),
   rejectSettlement: (paymentId: number, voidReason?: string) =>
     http.post(`/loan-payments/${paymentId}/reject-settlement`, snakeize({ voidReason })).then((r) => camelize(r.data) as LoanPayment),
@@ -935,6 +957,12 @@ export interface ApprovalsInbox {
   paymentVoidRequests: (LoanPaymentVoidRequest & {
     payment?: {
       id: number; code: string; amount: number | string; paymentType?: LoanPaymentType
+      facility?: { id: number; code: string; customer?: { id: number; fullName: string } } | null
+    } | null
+  })[]
+  allocationRequests: (LoanPaymentVoidRequest & {
+    payment?: {
+      id: number; code: string; amount: number | string; paymentType?: LoanPaymentType; manualAllocation?: PaymentAllocationSplit | null
       facility?: { id: number; code: string; customer?: { id: number; fullName: string } } | null
     } | null
   })[]
