@@ -269,6 +269,31 @@ class FixedDepositController extends Controller
         return response()->json($withdrawal->load(['fixedDeposit' => fn ($q) => $q->with(self::DETAIL_RELATIONS)]), 201);
     }
 
+    /**
+     * Undoes a mistaken closure — reverses the GL/Cashbook entries, reopens
+     * the FD (Active, closed_at cleared), and deletes the withdrawal row
+     * (FdWithdrawal has no Voided status of its own to flip, unlike
+     * FacilityPayment, so removal is the only way to represent "this never
+     * happened" — the reversed journal entries are the permanent audit
+     * trail of the correction, same as everywhere else in this codebase).
+     */
+    public function voidWithdrawal(Request $request, FixedDeposit $fixedDeposit)
+    {
+        $withdrawal = $fixedDeposit->withdrawal;
+        if (!$withdrawal) {
+            return response()->json(['message' => 'This FD has no withdrawal to void.'], 422);
+        }
+
+        DB::transaction(function () use ($fixedDeposit, $withdrawal, $request) {
+            FdCashbookPoster::reverseWithdrawal($withdrawal);
+            FdLedgerPoster::reverseWithdrawal($withdrawal, $request->user()->id);
+            $fixedDeposit->update(['status' => 'Active', 'closed_at' => null]);
+            $withdrawal->delete();
+        });
+
+        return $fixedDeposit->fresh()->load(self::DETAIL_RELATIONS);
+    }
+
     /** Value the customer chose (only allowed if the product permits a choice) or the product's fixed default. */
     private function resolveInterestMethod(?string $requested, FundingProduct $product): string
     {

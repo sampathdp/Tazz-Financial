@@ -62,6 +62,11 @@ class NumberGenerator
         // {TYPE} is the payment's intent short code (INT/CAP/SET) — see
         // SpeedDraftPaymentController::TYPE_CODES.
         'speed_draft_payment' => '{BRANCH}-SDP-{TYPE}-{YEAR:2}-{MONTH:2}-{SEQ:5}',
+        // No {CODE} — same reasoning as speed_draft: pawning_type_id isn't
+        // wired into the loan_type_id/funding_product_id key columns, so
+        // numbering is one company-wide series per year across all schemes.
+        'pawning' => '{BRANCH}-PW-{YEAR:2}-{SEQ:6}',
+        'pawning_auction' => '{BRANCH}-PWA-{YEAR:2}-{SEQ:4}',
     ];
 
     // Modules whose {CODE} placeholder is keyed off a funding product (own

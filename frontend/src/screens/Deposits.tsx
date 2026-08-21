@@ -2,7 +2,7 @@
    Record a deposit, print its Deposit Slip, and later allocate it to an FD
    from the Fixed Deposits screen (fdDepositsApi status flips Available -> Allocated). */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   fdDepositsApi, branchesApi, customersApi, company,
@@ -155,7 +155,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
             <Btn key={id} size="sm" variant="ghost" active={tab === id} onClick={() => setTab(id)}>{label}</Btn>
           ))}
         </div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Deposit No' }, { label: 'Customer' }, { label: 'Date' }, { label: 'Method' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 110 }]}
           rows={rows}
           render={(d) => <>

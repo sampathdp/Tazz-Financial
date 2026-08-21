@@ -8,6 +8,7 @@ use App\Support\LoanSummary;
 use App\Support\ReportExport;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Loan portfolio reports (Reports > Loan Reports). Same type-dispatch shape
@@ -17,7 +18,7 @@ use Illuminate\Http\Request;
  */
 class LoanReportController extends Controller
 {
-    private const TYPES = ['portfolio-summary', 'arrears', 'par-aging', 'disbursement', 'closed-loans'];
+    private const TYPES = ['portfolio-summary', 'arrears', 'par-aging', 'disbursement', 'closed-loans', 'loan-detail'];
 
     private const LIST_RELATIONS = [
         'customer:id,full_name,code,nic_no,phone',
@@ -25,6 +26,28 @@ class LoanReportController extends Controller
         'loanDetail.loanType:id,name,code',
         'loanDetail.loanOfficer:id,name',
     ];
+
+    /** Every relation needed to flatten a loan to one wide row for the
+     *  'loan-detail' export — the only report type here that isn't a fixed
+     *  metric/period roll-up, so it pulls in far more than LIST_RELATIONS. */
+    private const DETAIL_RELATIONS = [
+        'customer:id,full_name,code,nic_no,passport_no,phone,email,address,occupation_type,monthly_income',
+        'branch:id,name,code',
+        'loanDetail.loanType:id,name,code,category,default_charge_rate_percent,grace_period_days',
+        'loanDetail.loanOfficer:id,name',
+        'loanDetail.recoveryOfficer:id,name',
+        'approver:id,name',
+        'guarantors.guarantor:id,full_name',
+        'coApplicants.coApplicant:id,full_name',
+        'collateral:id,credit_facility_id,collateral_type,description,estimated_value',
+        'insurance',
+        'charges:id,credit_facility_id,due_amount,paid_amount',
+        'schedules:id,credit_facility_id,due_date,status,principal_due,interest_due,total_due,paid_amount',
+    ];
+
+    /** Which loan date the from/to range filters against — 'applicationDate'
+     *  lives on loanDetail, the rest are columns on credit_facilities itself. */
+    private const DATE_FIELDS = ['applicationDate', 'disbursedAt', 'closedAt', 'startDate', 'createdAt'];
 
     public function show(Request $request, string $type)
     {
@@ -38,6 +61,7 @@ class LoanReportController extends Controller
             'par-aging' => $this->parAging(),
             'disbursement' => $this->disbursement($request),
             'closed-loans' => $this->closedLoans($request),
+            'loan-detail' => $this->loanDetail($request),
         };
     }
 
@@ -45,6 +69,12 @@ class LoanReportController extends Controller
     {
         if (!in_array($type, self::TYPES, true)) {
             abort(404);
+        }
+        // Loan Detail is a wide (40+ column) per-loan export — unlike every other
+        // report here it doesn't fit a printable PDF table, so it's Excel-only
+        // (see LoanReports.tsx, which never passes onPdf for this screen).
+        if ($type === 'loan-detail') {
+            return response()->json(['message' => 'The Loan Detail report is available as Excel export only.'], 422);
         }
 
         [$title, $sections, $meta] = match ($type) {
@@ -234,7 +264,19 @@ class LoanReportController extends Controller
     private function parAging(): array
     {
         $today = now()->startOfDay();
-        $overdue = LoanSummary::overdueList($today)->keyBy('id');
+        // Only daysOverdue (from the oldest unpaid schedule) is needed here —
+        // not the money figures LoanSummary::overdueList() also computes
+        // (including the per-row penalty calc), so this queries just the
+        // oldest overdue due_date per loan directly instead of loading full
+        // Loan models with their relations.
+        $oldestDueDate = DB::table('facility_schedules')
+            ->join('credit_facilities', 'credit_facilities.id', '=', 'facility_schedules.credit_facility_id')
+            ->where('credit_facilities.status', 'Active')
+            ->where('facility_schedules.due_date', '<', $today)
+            ->where('facility_schedules.status', '!=', 'Paid')
+            ->groupBy('facility_schedules.credit_facility_id')
+            ->selectRaw('facility_schedules.credit_facility_id as loan_id, MIN(facility_schedules.due_date) as oldest_due_date')
+            ->pluck('oldest_due_date', 'loan_id');
 
         $buckets = [
             'current' => ['label' => 'Current (not overdue)', 'min' => null, 'max' => null, 'count' => 0, 'amount' => 0.0],
@@ -246,11 +288,12 @@ class LoanReportController extends Controller
 
         $totalPortfolio = 0.0;
         Loan::where('status', 'Active')->select('id', 'outstanding_balance_cache')
-            ->chunk(500, function ($loans) use (&$buckets, &$totalPortfolio, $overdue) {
+            ->chunk(500, function ($loans) use (&$buckets, &$totalPortfolio, $oldestDueDate, $today) {
                 foreach ($loans as $loan) {
                     $balance = (float) $loan->outstanding_balance_cache;
                     $totalPortfolio += $balance;
-                    $daysOverdue = (int) ($overdue->get($loan->id)['daysOverdue'] ?? 0);
+                    $oldest = $oldestDueDate->get($loan->id);
+                    $daysOverdue = $oldest ? (int) $today->diffInDays(Carbon::parse($oldest)) : 0;
 
                     $key = match (true) {
                         $daysOverdue <= 0 => 'current',
@@ -307,5 +350,161 @@ class LoanReportController extends Controller
             ->whereBetween('closed_at', [$from, $to])
             ->orderByDesc('closed_at')
             ->get();
+    }
+
+    /**
+     * Loan Detail Report: every loan flattened to one row, covering the
+     * customer, product, financial, officer, and recovery-status fields
+     * needed for a full-portfolio export — no fixed period, filtered
+     * entirely by the params below so it doubles as the "customized" report.
+     * daysOverdue/overdueAmount/penaltyDue are computed the same way
+     * LoanSummary::overdueList() does (so this can never disagree with the
+     * Arrears report or Loan Detail screen) but inline here since every loan
+     * needs the figure, not just already-overdue ones.
+     */
+    private function loanDetail(Request $request)
+    {
+        $query = Loan::with(self::DETAIL_RELATIONS)
+            ->withSum('schedules as total_due_sum', 'total_due')
+            ->withSum('schedules as paid_sum', 'paid_amount');
+
+        if ($request->filled('branchId')) {
+            $query->where('branch_id', $request->branchId);
+        }
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('minPrincipal')) {
+            $query->where('principal_amount', '>=', $request->minPrincipal);
+        }
+        if ($request->filled('maxPrincipal')) {
+            $query->where('principal_amount', '<=', $request->maxPrincipal);
+        }
+        if ($request->filled('loanTypeId') || $request->filled('loanOfficerId') || $request->filled('recoveryOfficerId')) {
+            $query->whereHas('loanDetail', function ($q) use ($request) {
+                if ($request->filled('loanTypeId')) {
+                    $q->where('loan_type_id', $request->loanTypeId);
+                }
+                if ($request->filled('loanOfficerId')) {
+                    $q->where('loan_officer_id', $request->loanOfficerId);
+                }
+                if ($request->filled('recoveryOfficerId')) {
+                    $q->where('recovery_officer_id', $request->recoveryOfficerId);
+                }
+            });
+        }
+        if ($request->filled('customerSearch')) {
+            $term = $request->customerSearch;
+            $query->whereHas('customer', fn ($q) => $q->where('full_name', 'like', "%{$term}%")
+                ->orWhere('nic_no', 'like', "%{$term}%")
+                ->orWhere('phone', 'like', "%{$term}%")
+                ->orWhere('code', 'like', "%{$term}%"));
+        }
+
+        $dateField = in_array($request->dateField, self::DATE_FIELDS, true) ? $request->dateField : 'createdAt';
+        if ($request->filled('from') || $request->filled('to')) {
+            $from = $request->filled('from') ? Carbon::parse($request->from)->startOfDay() : null;
+            $to = $request->filled('to') ? Carbon::parse($request->to)->endOfDay() : null;
+            if ($dateField === 'applicationDate') {
+                $query->whereHas('loanDetail', function ($q) use ($from, $to) {
+                    if ($from) {
+                        $q->where('application_date', '>=', $from->toDateString());
+                    }
+                    if ($to) {
+                        $q->where('application_date', '<=', $to->toDateString());
+                    }
+                });
+            } else {
+                $column = ['disbursedAt' => 'disbursed_at', 'closedAt' => 'closed_at', 'startDate' => 'start_date', 'createdAt' => 'created_at'][$dateField];
+                if ($from) {
+                    $query->where($column, '>=', $from);
+                }
+                if ($to) {
+                    $query->where($column, '<=', $to);
+                }
+            }
+        }
+
+        $today = Carbon::today();
+        $rows = $query->orderByDesc('id')->get()->map(function (Loan $loan) use ($today) {
+            $loanType = $loan->loanDetail?->loanType;
+            $graceDays = (int) ($loanType?->grace_period_days ?? 5);
+            $chargeRate = (float) ($loanType?->default_charge_rate_percent ?? 0);
+            $overdueSchedules = $loan->schedules->filter(fn ($s) => $s->due_date->lessThan($today) && $s->status !== 'Paid');
+            $oldest = $overdueSchedules->min('due_date');
+            $daysOverdue = $oldest ? (int) $today->diffInDays($oldest) : 0;
+            $overdueAmount = round((float) $overdueSchedules->sum(
+                fn ($s) => max(0, (float) $s->principal_due + (float) $s->interest_due - (float) $s->paid_amount)
+            ), 2);
+            $penaltyDue = round((float) $overdueSchedules->sum(
+                fn ($s) => LoanSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $today)
+            ), 2);
+
+            return [
+                'code' => $loan->code,
+                'status' => $loan->status,
+                'branch' => $loan->branch?->name,
+                'branchCode' => $loan->branch?->code,
+                'customerCode' => $loan->customer?->code,
+                'customerName' => $loan->customer?->full_name,
+                'nicNo' => $loan->customer?->nic_no,
+                'passportNo' => $loan->customer?->passport_no,
+                'phone' => $loan->customer?->phone,
+                'email' => $loan->customer?->email,
+                'address' => $loan->customer?->address,
+                'occupation' => $loan->customer?->occupation_type,
+                'monthlyIncome' => (float) ($loan->customer?->monthly_income ?? 0),
+                'loanType' => $loanType?->name,
+                'loanCategory' => $loanType?->category,
+                'principal' => (float) $loan->principal_amount,
+                'interestRate' => (float) ($loan->interest_rate_percent ?? 0),
+                'ratePeriod' => $loan->rate_period,
+                'termMonths' => $loan->term_months,
+                'frequency' => $loan->loanDetail?->installment_frequency,
+                'interestMethod' => $loan->loanDetail?->interest_method,
+                'downPayment' => (float) ($loan->loanDetail?->down_payment ?? 0),
+                'purpose' => $loan->loanDetail?->purpose,
+                'applicationDate' => optional($loan->loanDetail?->application_date)->toDateString(),
+                'approvedAt' => optional($loan->approved_at)->toDateString(),
+                'approvedBy' => $loan->approver?->name,
+                'disbursedAt' => optional($loan->disbursed_at)->toDateString(),
+                'disbursedAmount' => (float) ($loan->disbursed_amount ?? 0),
+                'firstInstallmentDate' => optional($loan->loanDetail?->first_installment_date)->toDateString(),
+                'startDate' => optional($loan->start_date)->toDateString(),
+                'maturityDate' => optional($loan->maturity_date)->toDateString(),
+                'closedAt' => optional($loan->closed_at)->toDateString(),
+                'loanOfficer' => $loan->loanDetail?->loanOfficer?->name,
+                'recoveryOfficer' => $loan->loanDetail?->recoveryOfficer?->name,
+                'referenceName' => $loan->loanDetail?->reference_name,
+                'referenceIdNo' => $loan->loanDetail?->reference_id_no,
+                'referenceAddress' => $loan->loanDetail?->reference_address,
+                'vehicleNo' => $loan->loanDetail?->vehicle_no,
+                'guarantors' => $loan->guarantors->map(fn ($g) => $g->guarantor?->full_name)->filter()->implode(', '),
+                'coApplicants' => $loan->coApplicants->map(fn ($c) => $c->coApplicant?->full_name)->filter()->implode(', '),
+                'collateral' => $loan->collateral->map(fn ($c) => $c->description)->filter()->implode(', '),
+                'collateralValue' => round((float) $loan->collateral->sum('estimated_value'), 2),
+                'insuranceCompany' => $loan->insurance?->insurance_company,
+                'insurancePolicyNo' => $loan->insurance?->policy_no,
+                'insuranceAmount' => (float) ($loan->insurance?->amount ?? 0),
+                'chargesDue' => round((float) $loan->charges->sum('due_amount'), 2),
+                'chargesPaid' => round((float) $loan->charges->sum('paid_amount'), 2),
+                'totalScheduled' => round((float) ($loan->total_due_sum ?? 0), 2),
+                'totalPaid' => round((float) ($loan->paid_sum ?? 0), 2),
+                'outstandingBalance' => round((float) ($loan->outstanding_balance_cache ?? 0), 2),
+                'daysOverdue' => $daysOverdue,
+                'overdueAmount' => $overdueAmount,
+                'penaltyDue' => $penaltyDue,
+                'rejectedReason' => $loan->rejected_reason,
+                'cancelledReason' => $loan->cancelled_reason,
+                'cancelledAt' => optional($loan->cancelled_at)->toDateString(),
+                'createdAt' => optional($loan->created_at)->toDateString(),
+            ];
+        });
+
+        if ($request->boolean('overdueOnly')) {
+            $rows = $rows->filter(fn ($r) => $r['daysOverdue'] > 0)->values();
+        }
+
+        return $rows;
     }
 }

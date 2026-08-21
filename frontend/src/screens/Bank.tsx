@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Bank Management (API-backed) */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   branchesApi, bankAccountsApi, bankTransactionsApi, bankReconciliationsApi, cashAccountsApi, chartOfAccountsApi,
@@ -68,7 +68,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
       <PageHead crumbs="Bank Management" title="Bank Accounts" icon="building" sub={`${rows.length} accounts`}
         actions={<Can user={me} module="Bank Accounts" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Account</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Account' }, { label: 'Bank' }, { label: 'Type' }, { label: 'Branch' }, { label: 'Balance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           rows={rows}
           render={(a) => <>
@@ -186,7 +186,7 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
       </Card>
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Date' }, { label: 'Account' }, { label: 'Type' }, { label: 'Reference' }, { label: 'Description' }, { label: 'Amount', align: 'right' }, { label: 'Balance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 60 }]}
           rows={rows}
           render={(t) => <>
@@ -318,7 +318,7 @@ export function BankReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
       </Card>
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Statement Date' }, { label: 'Account' }, { label: 'Statement Bal.', align: 'right' }, { label: 'Book Bal.', align: 'right' }, { label: 'Difference', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           rows={rows}
           render={(r) => <>

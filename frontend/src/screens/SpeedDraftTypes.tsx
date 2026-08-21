@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Speed Draft Types (configurable rules for Loans / Mortgages / Gold Pawning / Leases) */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { speedDraftTypesApi, type SpeedDraftType, type SpeedDraftCategory, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
@@ -78,7 +78,7 @@ export function SpeedDraftTypesScreen({ user: me }: { go: Go; user?: AuthUser | 
         actions={<Can user={me} module="Speed Draft Types" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Speed Draft Type</Btn></Can>} />
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> : (
+        {loading ? <LoadingBlock /> : (
           <Table cols={[{ label: 'Name' }, { label: 'Category' }, { label: 'Rate' }, { label: 'Amount Range' }, { label: 'Period (mo)' }, { label: 'Collateral', align: 'center' }, { label: 'Status', align: 'center' }, { label: '', w: 90 }]}
             rows={rows} empty="No Speed Draft Types yet"
             render={(t) => <>

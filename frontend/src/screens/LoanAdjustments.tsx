@@ -6,7 +6,7 @@
    Valuation/Other charges are permission-gated on the backend (Active Loans),
    not admin-only, but this is the only place a charge can actually be added. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td , LoadingBlock } from '../components/ui'
 import {
   loansApi, loanSchedulesApi, loanWaiversApi, loanChargesApi, loanTypesApi, chargeCategoriesApi,
   type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type ChargeCategory,
@@ -197,7 +197,7 @@ function SkipByLoanType({ notify }: { notify: ReturnType<typeof useNotify> }) {
               </div>
             )}
           </div>
-          {loadingDates ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+          {loadingDates ? <LoadingBlock /> :
           <Table cols={[{ label: '', w: 34 }, { label: 'Due Date' }, { label: 'Loans', align: 'right' }, { label: 'Installments', align: 'right' }, { label: 'Amount', align: 'right' }]}
             rows={dates} empty="No skippable installments for this loan type"
             render={(d: SkipDateOption) => <>

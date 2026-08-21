@@ -51,7 +51,16 @@ class LoanPostDatedChequeController extends Controller
             'facility.branch:id,name,code',
             'creator:id,name',
             'bank:id,name',
-        ])->get()->map(fn (FacilityPostDatedCheque $c) => [
+        ])
+            ->when($status, fn ($q, $s) => $q->where('status', $s))
+            ->when($dueToday, fn ($q) => $q->whereDate('cheque_date', $today))
+            // Effective date for From/To is realized_at once cleared, cheque_date
+            // otherwise — realized_at is only ever set together with
+            // status='Realized' (see updateStatus() below), so COALESCE picks
+            // the same date the old PHP filter did.
+            ->when($fromDate, fn ($q, $d) => $q->whereRaw('COALESCE(realized_at, cheque_date) >= ?', [$d]))
+            ->when($toDate, fn ($q, $d) => $q->whereRaw('COALESCE(realized_at, cheque_date) <= ?', [$d]))
+            ->get()->map(fn (FacilityPostDatedCheque $c) => [
             'id' => $c->id,
             'source' => 'PostDated',
             'cheque_no' => $c->cheque_no,
@@ -81,6 +90,12 @@ class LoanPostDatedChequeController extends Controller
             // bounced (so its rejection still shows up in the history); drop
             // payments voided for any other reason (a cancelled receipt entirely).
             ->where(fn ($q) => $q->where('status', '!=', 'Voided')->orWhere('clearance_status', 'Bounced'))
+            // clearance_status is null for an approved settlement cheque, which
+            // reads as 'Realized' below — match that same fallback in SQL.
+            ->when($status, fn ($q, $s) => $s === 'Realized' ? $q->where(fn ($qq) => $qq->where('clearance_status', 'Realized')->orWhereNull('clearance_status')) : $q->where('clearance_status', $s))
+            ->when($dueToday, fn ($q) => $q->whereDate('cheque_date', $today))
+            ->when($fromDate, fn ($q, $d) => $q->whereRaw('COALESCE(realized_at, cheque_date) >= ?', [$d]))
+            ->when($toDate, fn ($q, $d) => $q->whereRaw('COALESCE(realized_at, cheque_date) <= ?', [$d]))
             ->get()->map(fn (FacilityPayment $p) => [
                 'id' => $p->id,
                 'source' => 'Payment',

@@ -2,7 +2,7 @@
    trend/series data available yet), so no chart/legend is needed — see the
    dataviz skill's guidance that a single-number KPI is a stat tile, not a chart. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead } from '../components/ui'
+import { Card, PageHead , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { fundingDashboardApi, type FundingDashboardSummary, type AuthUser } from '../api'
 import { moneyK } from '../data'
@@ -30,7 +30,7 @@ export function FundingDashboardScreen({ go: _go, user: _me }: { go: Go; user?: 
     fundingDashboardApi.get().then(setData).catch(() => setData(null)).finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+  if (loading) return <LoadingBlock />
   if (!data) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)' }}>Failed to load the funding dashboard.</div>
 
   return (

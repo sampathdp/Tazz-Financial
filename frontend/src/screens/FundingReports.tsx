@@ -1,9 +1,10 @@
 /* Funding Management — Reports: one screen, tab-switched over the report
    types (same "one generic screen, several bindings" idea as Masters.tsx). */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td , LoadingBlock } from '../components/ui'
 import { ExportButtons } from '../components/ExportButtons'
 import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
+import { DateRangeSelect } from '../components/DateRangeSelect'
 import {
   fundingReportsApi, customersApi,
   type FundingReportType, type FixedDeposit, type FdDeposit, type FdInterestPayment, type FdRenewal, type Customer, type AuthUser,
@@ -206,6 +207,7 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
       {tab === 'interest-paid' && (
         <Card style={{ marginBottom: 16 }}>
           <div className="row gap-3 wrap">
+            <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
             <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
             <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
           </div>
@@ -221,7 +223,7 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
       )}
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
          err ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)', whiteSpace: 'pre-line' }}>{err}</div> :
          tab === 'customer-funding-history' && !customerId ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Pick a customer to view their funding history.</div> :
          (tab === 'active' || tab === 'maturing-soon' || tab === 'matured') ? <FdRows rows={data || []} /> :

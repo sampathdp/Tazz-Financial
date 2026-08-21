@@ -12,13 +12,13 @@ use Illuminate\Support\Facades\DB;
 
 class CashTransferController extends Controller
 {
-    private const WITH = ['fromAccount:id,name', 'toAccount:id,name', 'requester:id,name', 'approver:id,name'];
+    private const WITH = ['fromAccount:id,name', 'toAccount:id,name', 'requester:id,name', 'approver:id,name', 'voider:id,name'];
 
     public function index(Request $request)
     {
         $query = CashTransfer::with(self::WITH)->orderByDesc('transfer_date')->orderByDesc('id');
         if ($request->filled('cash_account_id')) {
-            $accountId = $request->integer('cash_account_id');
+            $accountId = (int) $request->query('cash_account_id');
             $query->where(function ($q) use ($accountId) {
                 $q->where('from_cash_account_id', $accountId)->orWhere('to_cash_account_id', $accountId);
             });
@@ -55,7 +55,7 @@ class CashTransferController extends Controller
             // Lock in a stable id order to avoid deadlocks against opposite-direction transfers.
             $ids = [$cashTransfer->from_cash_account_id, $cashTransfer->to_cash_account_id];
             sort($ids);
-            $accounts = CashAccount::whereIn('id', $ids)->lockForUpdate()->get()->keyBy('id');
+            $accounts = CashAccount::whereIn('id', $ids)->with('chartOfAccount')->lockForUpdate()->get()->keyBy('id');
             $from = $accounts[$cashTransfer->from_cash_account_id];
             $to = $accounts[$cashTransfer->to_cash_account_id];
 
@@ -97,6 +97,48 @@ class CashTransferController extends Controller
             'approved_by' => $request->user()->id,
             'approved_at' => now(),
         ]);
+
+        return $cashTransfer->load(self::WITH);
+    }
+
+    /**
+     * Undoes a mistakenly-approved transfer — moves both till balances back
+     * and reverses the GL entry. Completed-only (a Pending transfer is
+     * deleted outright via destroy(), never approved in the first place).
+     */
+    public function void(Request $request, CashTransfer $cashTransfer)
+    {
+        if ($cashTransfer->status !== 'Completed') {
+            return response()->json(['message' => 'Only a completed transfer can be voided.'], 422);
+        }
+        $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
+
+        DB::transaction(function () use ($cashTransfer, $data, $request) {
+            $ids = [$cashTransfer->from_cash_account_id, $cashTransfer->to_cash_account_id];
+            sort($ids);
+            $accounts = CashAccount::whereIn('id', $ids)->with('chartOfAccount')->lockForUpdate()->get()->keyBy('id');
+            $from = $accounts[$cashTransfer->from_cash_account_id];
+            $to = $accounts[$cashTransfer->to_cash_account_id];
+
+            $from->update(['current_balance' => bcadd((string) $from->current_balance, $cashTransfer->amount, 2)]);
+            $to->update(['current_balance' => bcsub((string) $to->current_balance, $cashTransfer->amount, 2)]);
+
+            $cashTransfer->update([
+                'status' => 'Voided',
+                'void_reason' => $data['void_reason'] ?? null,
+                'voided_by' => $request->user()->id,
+                'voided_at' => now(),
+            ]);
+
+            $entry = \App\Models\JournalEntry::where('source_type', 'CashTransfer')
+                ->where('source_id', $cashTransfer->id)
+                ->where('status', 'Posted')
+                ->whereNull('reversal_of_id')
+                ->first();
+            if ($entry) {
+                LedgerPoster::reverse($entry, "Voided transfer #{$cashTransfer->id}", $request->user()->id);
+            }
+        });
 
         return $cashTransfer->load(self::WITH);
     }

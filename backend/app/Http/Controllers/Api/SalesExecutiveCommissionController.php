@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BankAccount;
 use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
+use App\Models\JournalEntry;
 use App\Models\SalesExecutiveCommission;
 use App\Support\LedgerPoster;
 use App\Support\LoanSummary;
@@ -112,6 +113,58 @@ class SalesExecutiveCommissionController extends Controller
         });
 
         return self::present($commission->load(self::RELATIONS));
+    }
+
+    /**
+     * Undoes a mistaken payout — reverses the GL entry, restores the till/
+     * bank balance pay() moved, puts the commission back to unpaid, and
+     * (for a percentage-type cycle) removes the next cycle pay() auto-
+     * started via maybeStartNextCycle(), provided that next cycle is still
+     * itself untouched. Admin-only, same gate as pay().
+     */
+    public function void(Request $request, SalesExecutiveCommission $commission)
+    {
+        if (!$commission->paid_at) {
+            return response()->json(['message' => 'This commission has not been paid.'], 422);
+        }
+        $commission->loadMissing('facility');
+        $amount = (float) $commission->payment_amount;
+
+        DB::transaction(function () use ($commission, $amount, $request) {
+            if ($commission->payment_method === 'Cash' && $commission->cash_account_id) {
+                $till = CashAccount::lockForUpdate()->find($commission->cash_account_id);
+                $till?->update(['current_balance' => bcadd((string) $till->current_balance, (string) $amount, 2)]);
+            } elseif ($commission->bank_account_id) {
+                $bank = BankAccount::lockForUpdate()->find($commission->bank_account_id);
+                $bank?->update(['current_balance' => bcadd((string) $bank->current_balance, (string) $amount, 2)]);
+            }
+
+            JournalEntry::where('source_type', 'SalesExecutiveCommission')
+                ->where('source_id', $commission->id)
+                ->where('status', 'Posted')
+                ->whereNull('reversal_of_id')
+                ->get()
+                ->each(fn (JournalEntry $entry) => LedgerPoster::reverse($entry, "Voided commission payment - {$commission->facility?->code}", $request->user()->id));
+
+            if ($commission->commission_type === 'percentage') {
+                SalesExecutiveCommission::where('credit_facility_id', $commission->credit_facility_id)
+                    ->where('cycle_no', $commission->cycle_no + 1)
+                    ->whereNull('paid_at')
+                    ->delete();
+            }
+
+            $commission->update([
+                'paid_at' => null,
+                'payment_amount' => null,
+                'payment_method' => null,
+                'cash_account_id' => null,
+                'bank_account_id' => null,
+                'reference_no' => null,
+                'paid_by' => null,
+            ]);
+        });
+
+        return self::present($commission->fresh()->load(self::RELATIONS));
     }
 
     private static function paidInstallments(SalesExecutiveCommission $commission): int

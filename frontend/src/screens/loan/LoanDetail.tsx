@@ -94,6 +94,13 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
     catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
+  const writeOffLoan = async () => {
+    const reason = await notify.prompt({ title: `Write off loan ${loan.code}?`, msg: `Bad debt — posts ${money(loan.outstandingBalanceCache)} as a loss and closes the loan. This cannot be undone from the UI.`, placeholder: 'Reason for write-off', required: true, danger: true, okText: 'Write Off' })
+    if (!reason) return
+    try { await loansApi.writeOff(loan.id, reason); notify.success('Loan written off', loan.code); onChanged() }
+    catch (ex: any) { notify.error('Write-off failed', getErrorText(ex)) }
+  }
+
   const eventOf = (type: FacilityStatusEventType) => (loan.statusEvents || []).find((e) => e.eventType === type)
   const flags: { label: string; on?: boolean; at?: string | null }[] = [
     { label: 'Terminated', on: !!eventOf('Terminated'), at: eventOf('Terminated')?.eventDate },
@@ -110,6 +117,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           {flags.map((f) => <Badge key={f.label} tone="red">{f.label}{f.at ? ` · ${dateOnly(f.at)}` : ''}</Badge>)}
           {loan.status === 'Rejected' && loan.rejectedReason && <span className="t-2" style={{ fontSize: 12 }}>Reason: {loan.rejectedReason}</span>}
           {loan.status === 'Cancelled' && loan.cancelledReason && <span className="t-2" style={{ fontSize: 12 }}>Reason: {loan.cancelledReason}</span>}
+          {loan.status === 'WrittenOff' && loan.writtenOffReason && <span className="t-2" style={{ fontSize: 12 }}>Reason: {loan.writtenOffReason}{loan.writtenOffBy ? ` — ${loan.writtenOffBy.name}` : ''}</span>}
         </div>
         <div className="row gap-2 wrap">
           {!pendingCancel && (loan.status === 'Approved' || (loan.status === 'Active' && !loan.payments?.length)) && (
@@ -120,6 +128,9 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           <Can user={me} module="Active Loans" action="Edit">
             <Btn size="sm" variant="solid" icon="flag" onClick={() => setStatusModal(true)}>Contract Status Change</Btn>
           </Can>
+          {loan.status === 'Active' && me?.role === 'admin' && (
+            <Btn size="sm" variant="danger" icon="alert" onClick={writeOffLoan}>Write Off</Btn>
+          )}
           {context === 'applications' && go && ACTIVE_STAGE_STATUSES.includes(loan.status) && (
             <Btn size="sm" variant="solid" icon="coins" onClick={() => go('loan/active')}>Open in Active Loans</Btn>
           )}
@@ -869,6 +880,7 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const [amount, setAmount] = useState<string>(String(financedAmount))
   const [disbursedAt, setDisbursedAt] = useState(todayIso())
   const [firstDate, setFirstDate] = useState('')
+  const [method, setMethod] = useState<'Cash' | 'Bank' | 'Cheque'>('Cash')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -884,7 +896,7 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
     if (chargeBlocking) { setErr('Settle the document charge before disbursing this loan.'); return }
     setBusy(true); setErr('')
     try {
-      await loansApi.disburse(loan.id, { disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate })
+      await loansApi.disburse(loan.id, { disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate, disbursementMethod: method })
       notify.success('Loan disbursed', loan.code)
       onChanged()
     } catch (ex: any) {
@@ -950,6 +962,9 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         <Field label="Disbursed Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <Field label="Disbursed Date"><Input type="date" value={disbursedAt} onChange={(e) => setDisbursedAt(e.target.value)} /></Field>
         <Field label="First Installment Date"><Input type="date" value={firstDate} onChange={(e) => setFirstDate(e.target.value)} /></Field>
+        <Field label="Disbursement Method"><Select value={method} onChange={(e) => setMethod(e.target.value as any)}>
+          <option value="Cash">Cash</option><option value="Bank">Bank Transfer</option><option value="Cheque">Cheque</option>
+        </Select></Field>
       </div>
       <div className="t-2" style={{ fontSize: 12, marginBottom: 16 }}>
         {loan.termMonths} months · {loan.loanDetail?.installmentFrequency} · {loan.loanDetail?.interestMethod === 'reducing_balance' ? 'Reducing balance' : 'Flat'} interest at {loan.interestRatePercent}%

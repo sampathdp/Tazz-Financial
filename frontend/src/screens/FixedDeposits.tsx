@@ -4,7 +4,7 @@
    action (create/renew/withdraw/pay-interest) prints a document following the
    same window.print()/.no-print pattern as PaymentReceipt.tsx. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   fixedDepositsApi, fdDepositsApi, fundingProductsApi, fdInterestPaymentsApi, company,
@@ -470,12 +470,27 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
   onChanged: () => void
   onPrint: (doc: PrintDoc) => void
 }) {
+  const notify = useNotify()
   const [renewOpen, setRenewOpen] = useState(false)
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [payTarget, setPayTarget] = useState<FdInterestPayment | null>(null)
 
   const canRenewOrWithdraw = fd.status === 'Active' && fd.isMatured
   const hasPendingInterest = fd.interestPaymentMethod === 'monthly' && (fd.interestPayments || []).some((p) => p.status === 'Pending')
+
+  const voidInterestPayment = async (p: FdInterestPayment) => {
+    const ok = await notify.confirm({ title: `Void interest payment #${p.installmentNo}?`, msg: 'Reverses its GL/Cashbook entries and puts it back to Pending.', danger: true, okText: 'Void' })
+    if (!ok) return
+    try { await fdInterestPaymentsApi.void(p.id); notify.success('Payment voided'); onChanged() }
+    catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
+  }
+
+  const voidWithdrawal = async () => {
+    const ok = await notify.confirm({ title: `Void the withdrawal on ${fd.fdNumber}?`, msg: 'Reverses its GL/Cashbook entries and reopens this FD as Active.', danger: true, okText: 'Void' })
+    if (!ok) return
+    try { await fixedDepositsApi.voidWithdrawal(fd.id); notify.success('Withdrawal voided'); onChanged() }
+    catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
+  }
 
   return (
     <div>
@@ -531,6 +546,11 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
                     <Btn size="sm" variant="primary" icon="check" onClick={() => setPayTarget(p)}>Pay</Btn>
                   </Can>
                 )}
+                {p.status === 'Paid' && (
+                  <Can user={me} module="Fixed Deposits" action="Delete">
+                    <button className="mms-act" title="Void" onClick={() => voidInterestPayment(p)}><Icon n="trash" s={14} /></button>
+                  </Can>
+                )}
               </Td>
             </>} />
         </Card>
@@ -556,7 +576,12 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
             <div><span className="t-2">Closed At: </span><b>{dateOnly(fd.withdrawal.closedAt)}</b></div>
             <div><span className="t-2">Total Paid: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(fd.withdrawal.totalAmount)}</b></div>
           </div>
-          <Btn size="sm" variant="solid" icon="print" style={{ marginTop: 10 }} onClick={() => onPrint({ kind: 'withdrawal', withdrawal: fd.withdrawal!, fd })}>Print Voucher</Btn>
+          <div className="row gap-2" style={{ marginTop: 10 }}>
+            <Btn size="sm" variant="solid" icon="print" onClick={() => onPrint({ kind: 'withdrawal', withdrawal: fd.withdrawal!, fd })}>Print Voucher</Btn>
+            <Can user={me} module="Fixed Deposits" action="Delete">
+              <Btn size="sm" variant="danger" icon="x" onClick={voidWithdrawal}>Void Withdrawal</Btn>
+            </Can>
+          </div>
         </Card>
       )}
 
@@ -602,7 +627,7 @@ export function FixedDepositsScreen({ go: _go, user: me }: { go: Go; user?: Auth
   if (printDoc) return <PrintView doc={printDoc} brand={brand} onClose={() => { setPrintDoc(null); if (selectedId) reloadSelected(); else refresh() }} />
 
   if (selectedId) {
-    if (loadingSelected || !selected) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+    if (loadingSelected || !selected) return <LoadingBlock />
     return <FDDetail fd={selected} me={me} onBack={backToList} onChanged={reloadSelected} onPrint={setPrintDoc} />
   }
 
@@ -617,7 +642,7 @@ export function FixedDepositsScreen({ go: _go, user: me }: { go: Go; user?: Auth
             <Btn key={t} size="sm" variant="ghost" active={tab === t} onClick={() => setTab(t)}>{t}</Btn>
           ))}
         </div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'FD No' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Principal', align: 'right' }, { label: 'Rate', align: 'right' }, { label: 'Maturity Date' }, { label: 'Status', align: 'center' }]}
           rows={rows} onRow={(r: FixedDeposit) => openDetail(r.id)}
           render={(fd: FixedDeposit) => <>

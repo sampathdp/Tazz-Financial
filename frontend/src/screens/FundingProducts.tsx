@@ -1,6 +1,6 @@
 /* Funding Management — Funding Products (Fixed Deposit product catalog) */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { fundingProductsApi, type FundingProduct, type FdInterestMethod, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
@@ -81,7 +81,7 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
       <PageHead crumbs="Funding / Investment" title="Funding Products" icon="layers" sub={`${rows.length} products`}
         actions={<Can user={me} module="Funding Products" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Product</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Product' }, { label: 'Interest Method' }, { label: 'Annual Rate', align: 'right' }, { label: 'Terms' }, { label: 'Deposit Range', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           rows={rows}
           render={(p) => <>

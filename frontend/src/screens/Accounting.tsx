@@ -4,9 +4,10 @@
    straight from journal_lines (see ChartOfAccount::balancesAsOf on the
    backend), so what you see here can never disagree with the ledger itself. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, Pager, ErrorBanner, LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { ExportButtons } from '../components/ExportButtons'
+import { DateRangeSelect } from '../components/DateRangeSelect'
 import {
   chartOfAccountsApi, journalEntriesApi, accountingReportsApi,
   type ChartOfAccount, type AccountType, type JournalEntry, type GeneralLedgerReport,
@@ -69,7 +70,7 @@ export function ChartOfAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
       <PageHead crumbs="Accounting" title="Chart of Accounts" icon="list" sub={`${rows.length} accounts`}
         actions={<Can user={me} module="Chart of Accounts" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Account</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Type', align: 'center' }, { label: 'Parent' }, { label: 'Balance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 70 }]}
           empty="No accounts yet"
           rows={rows}
@@ -123,24 +124,31 @@ export function ChartOfAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
 
 export function JournalEntriesScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
   const [rows, setRows] = useState<JournalEntry[]>([])
+  const [page, setPage] = useState(1)
+  const [lastPage, setLastPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [status, setStatus] = useState<'' | 'Posted' | 'Reversed'>('')
   const [viewing, setViewing] = useState<JournalEntry | null>(null)
 
-  const refresh = () => {
+  // Date/status changes always jump back to page 1.
+  useEffect(() => { setPage(1) }, [fromDate, toDate, status])
+
+  useEffect(() => {
     setLoading(true)
-    journalEntriesApi.list({ from: fromDate || undefined, to: toDate || undefined, status: status || undefined })
-      .then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
-  }
-  useEffect(refresh, [fromDate, toDate, status]) // eslint-disable-line react-hooks/exhaustive-deps
+    journalEntriesApi.browse({ from: fromDate || undefined, to: toDate || undefined, status: status || undefined, page })
+      .then((r) => { setRows(r.data); setLastPage(r.lastPage); setTotalCount(r.total) })
+      .catch(() => { setRows([]); setLastPage(1); setTotalCount(0) })
+      .finally(() => setLoading(false))
+  }, [fromDate, toDate, status, page])
 
   const total = (e: JournalEntry) => (e.lines || []).reduce((s, l) => s + Number(l.debit || 0), 0)
 
   return (
     <div>
-      <PageHead crumbs="Accounting" title="Journal Entries" icon="doc" sub={`${rows.length} entries`} />
+      <PageHead crumbs="Accounting" title="Journal Entries" icon="doc" sub={`${totalCount} entries`} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
@@ -151,7 +159,7 @@ export function JournalEntriesScreen({ user: _me }: { go: Go; user?: AuthUser | 
         </div>
       </Card>
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> : <>
         <Table cols={[{ label: 'Date' }, { label: 'Code' }, { label: 'Description' }, { label: 'Reference' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }]}
           empty="No journal entries yet" rows={rows} onRow={(e) => setViewing(e)}
           render={(e) => <>
@@ -161,7 +169,9 @@ export function JournalEntriesScreen({ user: _me }: { go: Go; user?: AuthUser | 
             <Td c="var(--tx-2)" style={{ fontSize: 12 }}>{e.sourceType ? e.sourceType + ' #' + e.sourceId : '—'}</Td>
             <Td align="right" mono>{money(total(e))}</Td>
             <Td align="center"><Badge tone={e.status === 'Posted' ? 'green' : 'neutral'} dot>{e.status}</Badge></Td>
-          </>} />}
+          </>} />
+        <Pager page={page} lastPage={lastPage} total={totalCount} onChange={setPage} />
+        </>}
       </Card>
 
       <Modal open={!!viewing} onClose={() => setViewing(null)} width={620} title={viewing?.code} sub={viewing?.description || undefined}>
@@ -232,7 +242,7 @@ export function GeneralLedgerScreen({ user: _me }: { go: Go; user?: AuthUser | n
       </Card>
       <Card pad={0}>
         {!accountId ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Pick an account to view its ledger.</div> :
-         loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+         loading ? <LoadingBlock /> :
          err ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)' }}>{err}</div> :
         <Table cols={[{ label: 'Date' }, { label: 'Entry' }, { label: 'Description' }, { label: 'Debit', align: 'right' }, { label: 'Credit', align: 'right' }, { label: 'Balance', align: 'right' }]}
           empty="No activity in this range" rows={report?.lines || []}
@@ -285,7 +295,7 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
         actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Type', align: 'center' }, { label: 'Debit', align: 'right' }, { label: 'Credit', align: 'right' }, { label: 'Balance', align: 'right' }]}
           empty="No accounts yet" rows={rows}
           render={(r) => <>
@@ -308,6 +318,33 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
 }
 
 /* ---------------------------- Profit & Loss ---------------------------- */
+
+const getPath = (o: any, path: string) => path.split('.').reduce((v, k) => (v == null ? v : v[k]), o)
+
+const WATERFALL_ROWS: { key: string; label: string; indent?: boolean; bold?: boolean }[] = [
+  { key: 'lendingIncome', label: 'Income' },
+  { key: 'interZonalInterest', label: 'Inter Zonal Interest Income/(Exp)' },
+  { key: 'totalIncome', label: 'Total Income', bold: true },
+  { key: 'interestCost', label: 'Interest Cost' },
+  { key: 'netIncomeExOther', label: 'Net Income/(Expense) Without Other Income', bold: true },
+  { key: 'documentationIncome', label: 'Documentation Income (Other Income)' },
+  { key: 'realEstateProfit', label: 'Real Estate Profit' },
+  { key: 'refundsOnWriteOffs', label: 'Refunds on Write-offs from General Treasury' },
+  { key: 'netIncome', label: 'Net Income/(Expense)', bold: true },
+  { key: 'staffCost.salary', label: 'Salary/EPF/ETF', indent: true },
+  { key: 'staffCost.allowances', label: 'Allowances', indent: true },
+  { key: 'staffCost.total', label: 'Staff Cost' },
+  { key: 'otherOperatingExpenses', label: 'Other Operating Expenses' },
+  { key: 'profitBeforeHoAbsorption', label: 'Profit/(Loss) Before Absorption of HO Exp', bold: true },
+  { key: 'hoExpAbsorption', label: 'HO Exp Absorption' },
+  { key: 'netProfitBeforeTaxImpairment', label: 'Net Profit Before Tax & Impairment', bold: true },
+  { key: 'provisioningForImpairment', label: 'Provisioning for Impairment' },
+  { key: 'netProfitAfterImpairment', label: 'Net Profit After Provision for Impairment', bold: true },
+  { key: 'vatNbt', label: 'VAT & NBT on Finance Services' },
+  { key: 'incomeTax', label: 'Income Tax' },
+  { key: 'netProfitAfterTax', label: 'Net Profit After Tax', bold: true },
+  { key: 'netProfitBeforeInterZonal', label: 'Net Profit Before Inter Zonal Interest' },
+]
 
 export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -332,7 +369,26 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
       meta: `Period: ${fromDate || 'Inception'} to ${toDate || 'Today'}  •  Generated: ${new Date().toLocaleString()}`,
       sections: [
         {
-          title: 'Income',
+          title: 'P&L Waterfall',
+          columns: [{ label: 'Line', key: 'label' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
+          rows: WATERFALL_ROWS.map((r) => ({ label: (r.indent ? '    ' : '') + r.label, cash: Number(getPath(report.waterfallCash, r.key)), accrual: Number(getPath(report.waterfallAccrual, r.key)) })),
+        },
+        {
+          title: 'Income by Loan Product',
+          columns: [
+            { label: 'Product', key: 'loanType' }, { label: 'Interest (Cash)', key: 'interestCash', align: 'right', format: 'money' },
+            { label: 'Interest (Accrual)', key: 'interestAccrual', align: 'right', format: 'money' }, { label: 'Charges', key: 'charges', align: 'right', format: 'money' },
+            { label: 'Penalty', key: 'penalty', align: 'right', format: 'money' }, { label: 'Total (Cash)', key: 'totalCash', align: 'right', format: 'money' },
+            { label: 'Total (Accrual)', key: 'totalAccrual', align: 'right', format: 'money' },
+          ],
+          rows: report.incomeByProduct.map((r) => ({
+            loanType: r.loanType, interestCash: Number(r.interestCash), interestAccrual: Number(r.interestAccrual),
+            charges: Number(r.charges), penalty: Number(r.penalty), totalCash: Number(r.totalCash), totalAccrual: Number(r.totalAccrual),
+          })),
+          emptyText: 'No loan payment income posted in this range',
+        },
+        {
+          title: 'Income by Chart of Account',
           columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
           rows: report.income.map((r) => ({ code: r.code, name: r.name, cash: Number(r.cashBalance), accrual: Number(r.accrualBalance) })),
           totalRow: { code: '', name: 'Total Income', cash: Number(report.totalIncomeCash), accrual: Number(report.totalIncomeAccrual) },
@@ -373,6 +429,7 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
         </div>} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap" style={{ alignItems: 'flex-end' }}>
+          <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
         </div>
@@ -380,10 +437,34 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
           Cash Basis: income counted when actually collected. Accrual Basis: interest income counted as it's scheduled to be earned, not when collected. Only Interest Income differs between the two — expenses stay the same either way.
         </div>
       </Card>
-      {loading ? <Card><div style={{ padding: 20, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div></Card> : report && (
+      {loading ? <Card><LoadingBlock /></Card> : report && (
         <div className="col gap-4">
           <Card pad={0}>
-            <div className="eyebrow" style={{ padding: '14px 20px 0' }}>Income</div>
+            <div className="eyebrow" style={{ padding: '14px 20px 0' }}>P&L Waterfall</div>
+            <Table cols={[{ label: 'Line' }, { label: 'Cash Basis', align: 'right' }, { label: 'Accrual Basis', align: 'right' }]} rows={WATERFALL_ROWS} empty=""
+              render={(r) => <>
+                <Td style={{ paddingLeft: r.indent ? 36 : 20, fontWeight: r.bold ? 700 : 400 }}>{r.label}</Td>
+                <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(getPath(report.waterfallCash, r.key))}</Td>
+                <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(getPath(report.waterfallAccrual, r.key))}</Td>
+              </>} />
+          </Card>
+          <Card pad={0}>
+            <div className="eyebrow" style={{ padding: '14px 20px 0' }}>Income by Loan Product</div>
+            <Table
+              cols={[{ label: 'Product' }, { label: 'Interest (Cash)', align: 'right' }, { label: 'Interest (Accrual)', align: 'right' }, { label: 'Charges', align: 'right' }, { label: 'Penalty', align: 'right' }, { label: 'Total (Cash)', align: 'right' }, { label: 'Total (Accrual)', align: 'right' }]}
+              rows={report.incomeByProduct} empty="No loan payment income posted in this range"
+              render={(r) => <>
+                <Td>{r.loanType}</Td>
+                <Td align="right" mono>{money(r.interestCash)}</Td>
+                <Td align="right" mono>{money(r.interestAccrual)}</Td>
+                <Td align="right" mono>{money(r.charges)}</Td>
+                <Td align="right" mono>{money(r.penalty)}</Td>
+                <Td align="right" mono style={{ fontWeight: 600 }}>{money(r.totalCash)}</Td>
+                <Td align="right" mono style={{ fontWeight: 600 }}>{money(r.totalAccrual)}</Td>
+              </>} />
+          </Card>
+          <Card pad={0}>
+            <div className="eyebrow" style={{ padding: '14px 20px 0' }}>Income by Chart of Account</div>
             <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Cash Basis', align: 'right' }, { label: 'Accrual Basis', align: 'right' }]} rows={report.income} empty="No income posted in this range"
               render={(r) => <><Td mono>{r.code}</Td><Td>{r.name}</Td><Td align="right" mono>{money(r.cashBalance)}</Td><Td align="right" mono>{money(r.accrualBalance)}</Td></>} />
             <div className="row between" style={{ padding: '10px 20px', borderTop: '1px solid var(--line)', fontWeight: 700 }}>
@@ -471,7 +552,7 @@ export function BalanceSheetScreen({ user: _me }: { go: Go; user?: AuthUser | nu
           <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />
         </div>} />
       <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
-      {loading ? <Card><div style={{ padding: 20, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div></Card> : report && (
+      {loading ? <Card><LoadingBlock /></Card> : report && (
         <div className="col gap-4">
           <BsSection title="Assets" rows={report.assets} total={report.totalAssets} />
           <BsSection title="Liabilities" rows={report.liabilities} total={report.totalLiabilities} />
@@ -556,7 +637,7 @@ export function CashFlowScreen({ user: _me }: { go: Go; user?: AuthUser | null }
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
         </div>
       </Card>
-      {loading ? <Card><div style={{ padding: 20, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div></Card> : report && (
+      {loading ? <Card><LoadingBlock /></Card> : report && (
         <div className="col gap-4">
           <CfSection title="Operating Activities" rows={report.operatingActivities} total={report.netCashFromOperating} />
           <CfSection title="Investing Activities" rows={report.investingActivities} total={report.netCashFromInvesting} />
@@ -621,7 +702,7 @@ export function LedgerDriftScreen({ user: _me }: { go: Go; user?: AuthUser | nul
         </div>} />
       <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Account' }, { label: 'Kind', align: 'center' }, { label: 'GL Account' }, { label: 'Book Balance', align: 'right' }, { label: 'GL Balance', align: 'right' }, { label: 'Variance', align: 'right' }]}
           empty="No cash tills or bank accounts linked to the ledger yet" rows={report?.rows || []}
           render={(r) => {

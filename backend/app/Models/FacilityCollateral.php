@@ -31,6 +31,12 @@ class FacilityCollateral extends Model
         return $this->hasOne(FacilityCollateralJewelryDetail::class);
     }
 
+    /** Populated only when collateral_type = PawnedJewelry. */
+    public function pawnDetail()
+    {
+        return $this->hasOne(FacilityCollateralPawnDetail::class);
+    }
+
     public function documents()
     {
         return $this->hasMany(FacilityCollateralDocument::class);

@@ -1,7 +1,7 @@
 /* Tazz Investment & Credit — Loan Applications (intake → approve/reject workflow) */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   loansApi, customersApi, customerLoansApi, loanTypesApi, branchesApi, api, loanCollateralDocumentsApi,
@@ -638,7 +638,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           </div>
           {q && <span className="t-2" style={{ fontSize: 12 }}>{filtered.length} of {rows.length}</span>}
         </div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Application' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Amount' }, { label: 'Term' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 130 }]}
           rows={filtered}
           empty="No loan applications"

@@ -291,11 +291,21 @@ class LoanSummary
             return 0.0;
         }
 
+        // Same sum as a day-by-day loop (one term per day, at that day's
+        // calendar month's daily rate) but grouped into one term per calendar
+        // month spanned — a loan overdue 300+ days needs ~10 iterations here
+        // instead of 300+, since the per-day rate is constant within a month.
+        $dailyBase = $overdueBalance * ($chargeRate / 100);
         $penalty = 0.0;
         $cursor = $chargeStart->copy();
         while ($cursor->lessThan($today)) {
-            $penalty += $overdueBalance * ($chargeRate / 100) / $cursor->daysInMonth;
-            $cursor->addDay();
+            $segmentEnd = $cursor->copy()->addMonthNoOverflow()->startOfMonth();
+            if ($segmentEnd->greaterThan($today)) {
+                $segmentEnd = $today->copy();
+            }
+            $days = $cursor->diffInDays($segmentEnd);
+            $penalty += $dailyBase / $cursor->daysInMonth * $days;
+            $cursor = $segmentEnd;
         }
 
         return round($penalty, 2);

@@ -266,7 +266,7 @@ export interface LoanCollateralDocument {
   createdAt?: string;
 }
 
-export type CollateralType = 'Vehicle' | 'Jewelry' | 'Property' | 'Other'
+export type CollateralType = 'Vehicle' | 'Jewelry' | 'PawnedJewelry' | 'Property' | 'Other'
 
 export interface LoanCollateralVehicleDetail {
   vehicleType?: string | null; makeModel?: string | null; registrationNo?: string | null;
@@ -304,6 +304,8 @@ export interface LoanFacilityDetail {
   vehicleNo?: string | null;
   /** Paid upfront; the schedule amortizes principalAmount - downPayment. */
   downPayment?: number | string | null;
+  /** Set once disbursed — see loansApi.disburse(). */
+  disbursementMethod?: 'Cash' | 'Bank' | 'Cheque' | null;
   interestMethod?: InterestMethod | null;
   /** Flat Rate loans only: equivalent reducing-balance rate implied by the generated EMI, as a percentage. Null until disbursed, and always null for Reducing Rate loans (their entered rate already IS the effective rate — see interestRatePercent on Loan). */
   effectiveMonthlyRate?: number | string | null;
@@ -390,6 +392,8 @@ export interface Loan {
   canceller?: { id: number; name: string } | null;
   cancelledAt?: string | null;
   cancelledReason?: string | null;
+  writtenOffBy?: { id: number; name: string } | null;
+  writtenOffReason?: string | null;
   /** The one cancel request awaiting approval right now, if any — see loansApi.requestCancel(). */
   pendingCancelRequest?: LoanCancelRequest | null;
   cancelRequests?: LoanCancelRequest[];
@@ -482,6 +486,8 @@ export const salesExecutiveCommissionsApi = {
     }) }).then((r) => camelize(r.data) as SalesExecutiveCommission[]),
   pay: (id: number, body: { paymentDate: string; paymentAmount: number | string; paymentMethod: PaymentMethod; cashAccountId?: number; bankAccountId?: number; referenceNo?: string; notes?: string }) =>
     http.post(`/sales-executive-commissions/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as SalesExecutiveCommission),
+  /** Undoes a mistaken payout — reverses GL + restores the till/bank balance (see backend SalesExecutiveCommissionController::void). */
+  void: (id: number) => http.post(`/sales-executive-commissions/${id}/void`).then((r) => camelize(r.data) as SalesExecutiveCommission),
 }
 
 export type ScheduleStatus = 'Pending' | 'Paid' | 'Partial' | 'Overdue'
@@ -667,7 +673,14 @@ export interface LoanStatusFlags {
 }
 
 export const branchesApi = resource<Branch>('branches')
-export const customersApi = resource<Customer>('customers')
+export const customersApi = {
+  ...resource<Customer>('customers'),
+  /** Server-paginated + searched — powers the Customers browse screen so it
+   *  never has to fetch the whole customer base. list() above is untouched
+   *  and still used everywhere a picker needs the full list for local search. */
+  browse: (params: { search?: string; page: number; perPage?: number }) =>
+    http.get('/customers', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<Customer>),
+}
 export const loanTypesApi = resource<LoanType>('loan-types')
 
 /** A local bank (Masters > Banks) — used everywhere a "Bank Name" field is
@@ -770,7 +783,7 @@ export interface CashbookEntry {
   createdAt?: string;
 }
 
-export type CashTransferStatus = 'Pending' | 'Completed' | 'Rejected'
+export type CashTransferStatus = 'Pending' | 'Completed' | 'Rejected' | 'Voided'
 
 export interface CashTransfer {
   id: number;
@@ -783,6 +796,9 @@ export interface CashTransfer {
   requester?: { id: number; name: string } | null;
   approver?: { id: number; name: string } | null;
   approvedAt?: string | null;
+  voider?: { id: number; name: string } | null;
+  voidReason?: string | null;
+  voidedAt?: string | null;
 }
 
 /** Denomination note value -> quantity counted, e.g. { "5000": 20, "2000": 0, ... }. */
@@ -832,6 +848,8 @@ export const cashTransfersApi = {
   approve: (id: number) => http.put(`/cash-transfers/${id}/approve`).then((r) => camelize(r.data) as CashTransfer),
   reject: (id: number) => http.put(`/cash-transfers/${id}/reject`).then((r) => camelize(r.data) as CashTransfer),
   remove: (id: number) => http.delete(`/cash-transfers/${id}`).then((r) => r.data),
+  /** Undoes a mistakenly-approved transfer — moves both till balances back and reverses the GL entry (see backend CashTransferController::void). */
+  void: (id: number, voidReason?: string) => http.post(`/cash-transfers/${id}/void`, { void_reason: voidReason }).then((r) => camelize(r.data) as CashTransfer),
 }
 
 export const cashReconciliationsApi = {
@@ -870,10 +888,30 @@ export interface GeneratedNumber {
   createdAt?: string;
 }
 
-export const generatedNumbersApi = resource<GeneratedNumber>('generated-numbers')
+export const generatedNumbersApi = {
+  ...resource<GeneratedNumber>('generated-numbers'),
+  /** Server-paginated + filtered — powers Document Tracking. list() above (capped at 500, no filters) is kept only for any other caller. */
+  browse: (params: { search?: string; module?: string; year?: string; page: number; perPage?: number }) =>
+    http.get('/generated-numbers', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<GeneratedNumber>),
+  /** Every year a number has ever been generated in — for the year filter dropdown, independent of the current page/filters. */
+  years: () => http.get('/generated-numbers-years').then((r) => r.data as number[]),
+}
+
+/** Laravel paginate() envelope, camelized — see loansApi.browse()/customersApi.browse(). */
+export interface Paginated<T> {
+  data: T[]; currentPage: number; lastPage: number; perPage: number; total: number
+}
 
 export const loansApi = {
   list: () => http.get('/loans').then((r) => camelize(r.data) as Loan[]),
+  /** Server-paginated + searched — powers the Active Loans browse screen so it
+   *  never has to fetch the whole loan book. Unlike list(), always scoped to
+   *  LIVE_STATUSES on the server unless `status` narrows it further (see
+   *  LoanController::index's paginated branch). */
+  browse: (params: { status?: string; search?: string; page: number; perPage?: number }) =>
+    http.get('/loans', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<Loan>),
+  /** Counts per LIVE_STATUSES status for the Active Loans filter chips — independent of the current search text, same as before pagination. */
+  statusCounts: () => http.get('/loans-status-counts').then((r) => camelize(r.data) as Record<string, number>),
   get: (id: number) => http.get(`/loans/${id}`).then((r) => camelize(r.data) as Loan),
   create: (body: Partial<Loan>) => http.post('/loans', snakeize(body)).then((r) => camelize(r.data) as Loan),
   update: (id: number, body: Partial<Loan>) => http.put(`/loans/${id}`, snakeize(body)).then((r) => camelize(r.data) as Loan),
@@ -884,7 +922,9 @@ export const loansApi = {
   requestCancel: (id: number, reason: string) => http.post(`/loans/${id}/cancel-request`, { cancelled_reason: reason }).then((r) => camelize(r.data) as LoanCancelRequest),
   approveCancelRequest: (requestId: number) => http.post(`/loan-cancel-requests/${requestId}/approve`).then((r) => camelize(r.data) as LoanCancelRequest),
   rejectCancelRequest: (requestId: number, reason?: string) => http.post(`/loan-cancel-requests/${requestId}/reject`, snakeize({ rejectReason: reason })).then((r) => camelize(r.data) as LoanCancelRequest),
-  disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string }) =>
+  /** Admin-only (see backend LoanController::writeOff) — direct bad-debt write-off, posts the outstanding balance as a loss and closes the loan. */
+  writeOff: (id: number, reason: string) => http.post(`/loans/${id}/write-off`, { reason }).then((r) => camelize(r.data) as Loan),
+  disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque' }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>
     http.patch(`/loans/${id}/status-flags`, snakeize(body)).then((r) => camelize(r.data) as Loan),
@@ -1248,6 +1288,10 @@ export interface OverdueSpeedDraft extends SpeedDraft {
 export const speedDraftsApi = {
   list: (params?: { status?: SpeedDraftStatus }) =>
     http.get('/speed-drafts', { params: { status: params?.status || undefined } }).then((r) => camelize(r.data) as SpeedDraft[]),
+  /** Server-paginated + searched — powers the Speed Drafts browse screen. list() above is untouched and still used by the PaymentReceipt picker. */
+  browse: (params: { status?: string; search?: string; page: number; perPage?: number }) =>
+    http.get('/speed-drafts', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<SpeedDraft>),
+  statusCounts: () => http.get('/speed-drafts-status-counts').then((r) => camelize(r.data) as Record<string, number>),
   get: (id: number) => http.get(`/speed-drafts/${id}`).then((r) => camelize(r.data) as SpeedDraft),
   create: (body: Partial<SpeedDraft> & { collateral?: SpeedDraftCollateralInput[] }) =>
     http.post('/speed-drafts', snakeize(body)).then((r) => camelize(r.data) as SpeedDraft),
@@ -1416,6 +1460,8 @@ export const fixedDepositsApi = {
     http.post(`/fixed-deposits/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { fixedDeposit: FixedDeposit; enhancementDeposit: FdDeposit | null }),
   withdraw: (id: number, body: { paymentMethod: FdPaymentMethod; referenceNo?: string; notes?: string; closedAt?: string }) =>
     http.post(`/fixed-deposits/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
+  /** Undoes a mistaken closure — reverses GL/Cashbook and reopens the FD (see backend FixedDepositController::voidWithdrawal). */
+  voidWithdrawal: (id: number) => http.post(`/fixed-deposits/${id}/void-withdrawal`).then((r) => camelize(r.data) as FixedDeposit),
 }
 
 export interface FinanceCalcCharge { label?: string; amount: number | string; financed?: boolean }
@@ -1450,6 +1496,8 @@ export const fdInterestPaymentsApi = {
   list: (fixedDepositId: number) => http.get(`/fixed-deposits/${fixedDepositId}/interest-payments`).then((r) => camelize(r.data) as FdInterestPayment[]),
   pay: (id: number, body: { paidAt?: string; paymentMethod: FdPaymentMethod; referenceNo?: string }) =>
     http.post(`/fd-interest-payments/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as FdInterestPayment),
+  /** Undoes a mistaken interest payment — reverses GL/Cashbook and puts the installment back to Pending (see backend FdInterestPaymentController::void). */
+  void: (id: number) => http.post(`/fd-interest-payments/${id}/void`).then((r) => camelize(r.data) as FdInterestPayment),
 }
 
 /** Shared by every *ReportsApi below — same `{prefix}-reports/{type}[/pdf]` shape as the backend's *ReportController classes. */
@@ -1466,11 +1514,35 @@ export const fundingReportsApi = {
   pdf: (type: FundingReportType, params?: Record<string, any>) => reportPdf('funding', type, params),
 }
 
-export type LoanReportType = 'portfolio-summary' | 'arrears' | 'par-aging' | 'disbursement' | 'closed-loans'
+export type LoanReportType = 'portfolio-summary' | 'arrears' | 'par-aging' | 'disbursement' | 'closed-loans' | 'loan-detail'
+
+/** One flattened row returned by loanReportsApi.get('loan-detail', ...) — see
+ *  LoanReportController::loanDetail(). Distinct from Loan (which mirrors the
+ *  nested DB shape); this is already a flat report row. */
+export interface LoanDetailReportRow {
+  code: string; status: LoanStatus; branch?: string | null; branchCode?: string | null;
+  customerCode?: string | null; customerName?: string | null; nicNo?: string | null; passportNo?: string | null;
+  phone?: string | null; email?: string | null; address?: string | null; occupation?: string | null; monthlyIncome: number;
+  loanType?: string | null; loanCategory?: string | null;
+  principal: number; interestRate: number; ratePeriod?: string | null; termMonths: number;
+  frequency?: string | null; interestMethod?: string | null; downPayment: number; purpose?: string | null;
+  applicationDate?: string | null; approvedAt?: string | null; approvedBy?: string | null;
+  disbursedAt?: string | null; disbursedAmount: number; firstInstallmentDate?: string | null;
+  startDate?: string | null; maturityDate?: string | null; closedAt?: string | null;
+  loanOfficer?: string | null; recoveryOfficer?: string | null;
+  referenceName?: string | null; referenceIdNo?: string | null; referenceAddress?: string | null; vehicleNo?: string | null;
+  guarantors?: string | null; coApplicants?: string | null; collateral?: string | null; collateralValue: number;
+  insuranceCompany?: string | null; insurancePolicyNo?: string | null; insuranceAmount: number;
+  chargesDue: number; chargesPaid: number;
+  totalScheduled: number; totalPaid: number; outstandingBalance: number;
+  daysOverdue: number; overdueAmount: number; penaltyDue: number;
+  rejectedReason?: string | null; cancelledReason?: string | null; cancelledAt?: string | null; createdAt?: string | null;
+}
 
 export const loanReportsApi = {
-  get: (type: LoanReportType, params?: Record<string, any>) =>
-    http.get(`/loan-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  /** signal lets a caller (Loan Detail Report — the heaviest report endpoint) cancel a stale in-flight request when filters change again before it lands. */
+  get: (type: LoanReportType, params?: Record<string, any>, signal?: AbortSignal) =>
+    http.get(`/loan-reports/${type}`, { params: snakeize(params || {}), signal }).then((r) => camelize(r.data)),
   pdf: (type: LoanReportType, params?: Record<string, any>) => reportPdf('loan', type, params),
 }
 
@@ -1566,6 +1638,9 @@ export interface JournalEntry {
 export const journalEntriesApi = {
   list: (params?: { from?: string; to?: string; branchId?: number; status?: string }) =>
     http.get('/journal-entries', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as JournalEntry[]),
+  /** Server-paginated — powers the Journal Entries browse screen so it never has to fetch the whole GL audit trail. */
+  browse: (params: { from?: string; to?: string; branchId?: number; status?: string; page: number; perPage?: number }) =>
+    http.get('/journal-entries', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<JournalEntry>),
 }
 
 export interface GeneralLedgerLine {
@@ -1580,10 +1655,22 @@ export interface GeneralLedgerReport {
 export interface TrialBalanceRow { accountId: number; code: string; name: string; accountType: AccountType; totalDebit: string; totalCredit: string; balance: string }
 export interface PLRow { accountId: number; code: string; name: string; balance: string }
 export interface PLIncomeRow { accountId: number; code: string; name: string; cashBalance: string; accrualBalance: string }
+export interface PLWaterfall {
+  lendingIncome: string; interZonalInterest: string; totalIncome: string; interestCost: string;
+  netIncomeExOther: string; documentationIncome: string; realEstateProfit: string; refundsOnWriteOffs: string; netIncome: string;
+  staffCost: { salary: string; allowances: string; total: string };
+  otherOperatingExpenses: string; profitBeforeHoAbsorption: string; hoExpAbsorption: string;
+  netProfitBeforeTaxImpairment: string; provisioningForImpairment: string; netProfitAfterImpairment: string;
+  vatNbt: string; incomeTax: string; netProfitAfterTax: string; netProfitBeforeInterZonal: string;
+}
+export interface PLProductRow {
+  loanType: string; interestCash: string; interestAccrual: string; charges: string; penalty: string; totalCash: string; totalAccrual: string;
+}
 export interface ProfitLossReport {
   from?: string | null; to?: string | null; income: PLIncomeRow[]; expense: PLRow[];
   totalIncomeCash: string; totalIncomeAccrual: string; totalExpense: string;
   netProfitCash: string; netProfitAccrual: string;
+  waterfallCash: PLWaterfall; waterfallAccrual: PLWaterfall; incomeByProduct: PLProductRow[];
 }
 export interface BalanceSheetRow { accountId: number; code: string; name: string; balance: string }
 export interface BalanceSheetReport {
@@ -1756,6 +1843,243 @@ export const company = {
   },
   /** Always the same endpoint — append a cache-busting `?v=` when rendering. */
   logoUrl: `${API_BASE}/company-profile/logo`,
+}
+
+/* ======================= Pawning (Gold Loan) Management =======================
+   A pawning ticket is issued and disbursed in one step (see backend
+   PawningController's docblock) — there is no Pending/Approved/disburse chain
+   like Loan/SpeedDraft, and no installment schedule: interest is flat and
+   cycle-based (see PawningSummary below), settled via renew() or redeem(). */
+
+export type PawningStatus = 'Active' | 'Closed' | 'Cancelled' | 'WrittenOff'
+export type PawningItemStatus = 'Pledged' | 'Released' | 'Auctioned' | 'Forfeited'
+export type PawningRedemptionType = 'Full' | 'Partial'
+export type PawningAuctionStatus = 'Scheduled' | 'Completed' | 'Cancelled'
+export type PawningAuctionItemStatus = 'Listed' | 'Sold' | 'Unsold' | 'Cancelled'
+
+export interface PawningType {
+  id: number; name: string; code: string;
+  normalRatePercent: number | string;
+  /** Discounted rate for settling within specialRateDays of the current cycle's start — null if this scheme offers no discount. */
+  specialRatePercent?: number | string | null;
+  specialRateDays?: number | null;
+  /** Ticket cycle length in days (e.g. 30) — the real tenure; credit_facilities.termMonths is only a coarse month-equivalent. */
+  cycleDays: number;
+  /** Max advance as a % of appraised article value. */
+  ltvPercent: number | string;
+  maxRenewalCount?: number | null;
+  gracePeriodDays?: number;
+  /** Days overdue (past repayDueDate + gracePeriodDays) before a ticket's articles become auction-eligible. */
+  auctionEligibleDays: number;
+  /** Statutory notice period required before an auction sale. */
+  auctionNoticeDays: number;
+  status?: 'Active' | 'Inactive';
+  sortOrder?: number;
+}
+export const pawningTypesApi = resource<PawningType>('pawning-types')
+
+export interface PawningArticleType {
+  id: number; name: string; code: string;
+  status?: 'Active' | 'Inactive'; sortOrder?: number;
+}
+export const pawningArticleTypesApi = resource<PawningArticleType>('pawning-article-types')
+
+export interface PawningGoldRate {
+  id: number; effectiveDate: string; karat: number | string; ratePerGram: number | string;
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  createdAt?: string;
+}
+export const pawningGoldRatesApi = {
+  list: (karat?: number) => http.get('/pawning-gold-rates', { params: { karat } }).then((r) => camelize(r.data) as PawningGoldRate[]),
+  /** The rate to prefill an appraisal with — organisation-wide unless a branch-specific rate exists for that date. */
+  latest: (karat: number, branchId?: number, asOf?: string) =>
+    http.get('/pawning-gold-rates/latest', { params: { karat, branch_id: branchId, as_of: asOf } }).then((r) => camelize(r.data).rate as PawningGoldRate | null),
+  create: (body: { effectiveDate: string; karat: number | string; ratePerGram: number | string; branchId?: number | null }) =>
+    http.post('/pawning-gold-rates', snakeize(body)).then((r) => camelize(r.data) as PawningGoldRate),
+  remove: (id: number) => http.delete(`/pawning-gold-rates/${id}`).then((r) => r.data),
+}
+
+/** One appraised article, 1:1 on a PawnedJewelry facility_collateral row. */
+export interface PawningArticleAppraisal {
+  itemNo: number;
+  articleTypeId: number; articleType?: PawningArticleType | null;
+  /** What the customer states — may differ from testedKarat, which is what the loan is actually based on. */
+  declaredKarat?: number | string | null;
+  testedKarat: number | string;
+  grossWeightGrams: number | string;
+  netWeightGrams: number | string;
+  ratePerGram: number | string;
+  appraisedValue: number | string;
+  maxLoanValue: number | string;
+  itemStatus: PawningItemStatus;
+  appraisedBy?: { id: number; name: string } | null;
+  remark?: string | null;
+}
+
+export interface PawningCollateralItem {
+  id: number; creditFacilityId: number;
+  collateralType: 'PawnedJewelry';
+  description: string; estimatedValue?: number | string | null;
+  pawnDetail?: PawningArticleAppraisal | null;
+}
+
+/** Write-side: one article line on pawningsApi.create()'s `articles` array. */
+export interface PawningArticleInput {
+  articleTypeId: number;
+  description?: string;
+  declaredKarat?: number | string | null;
+  testedKarat: number | string;
+  grossWeightGrams: number | string;
+  netWeightGrams: number | string;
+  ratePerGram: number | string;
+  remark?: string | null;
+}
+
+export interface PawningFacilityDetail {
+  pawningTypeId: number; pawningType?: PawningType | null;
+  appliedRatePercent: number | string;
+  isSpecialRate: boolean;
+  totalGrossWeightGrams: number | string;
+  totalNetWeightGrams: number | string;
+  totalAppraisedValue: number | string;
+  repayDueDate: string;
+  renewalCount: number;
+  previousFacilityId?: number | null; previousFacility?: { id: number; code: string } | null;
+  purpose?: string | null;
+}
+
+export interface PawningPayment {
+  id: number; code: string; creditFacilityId: number;
+  amount: number | string;
+  paymentType: 'Regular' | 'Interest' | 'CapitalReduction' | 'Settlement';
+  paymentMethod: PaymentMethod;
+  receiver?: { id: number; name: string } | null;
+  paidAt: string; receiptNo?: string | null; notes?: string | null;
+  status?: 'Active' | 'Voided';
+  voider?: { id: number; name: string } | null; voidedAt?: string | null;
+}
+
+export interface PawningRenewal {
+  id: number; creditFacilityId: number; renewalNo: number;
+  oldDueDate: string; newDueDate: string;
+  capitalBefore: number | string; interestSettled: number | string; capitalAfter: number | string;
+  appliedRatePercent: number | string;
+  renewedBy?: { id: number; name: string } | null; renewedAt: string;
+  remark?: string | null;
+}
+
+export interface PawningRedemption {
+  id: number; creditFacilityId: number; redemptionType: PawningRedemptionType;
+  capitalSettled: number | string; interestSettled: number | string; totalSettled: number | string;
+  receiptNo?: string | null;
+  settledBy?: { id: number; name: string } | null; settledAt: string;
+  /** Which articles this redemption released. */
+  items?: PawningCollateralItem[];
+}
+
+/** Live quote (never stored) — what settling now would cost, at today's cycle position. See backend PawningInterestCalculator. */
+export interface PawningInterestQuote {
+  rate: number; isSpecial: boolean; daysElapsed: number; interest: number;
+}
+
+export interface Pawning {
+  id: number; code: string;
+  branchId: number; branch?: { id: number; name: string; code: string };
+  customerId: number; customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null; address?: string | null };
+  principalAmount: number | string;
+  /** Starts equal to principalAmount; reduced by renew()'s capital_payment and redeem(). */
+  outstandingBalanceCache: number | string;
+  interestRatePercent: number | string;
+  startDate?: string | null;
+  maturityDate?: string | null;
+  disbursedAmount?: number | string | null;
+  disbursedAt?: string | null;
+  status: PawningStatus;
+  closedAt?: string | null;
+  applier?: { id: number; name: string } | null;
+  creator?: { id: number; name: string } | null;
+
+  pawningDetail?: PawningFacilityDetail | null;
+  collateral?: PawningCollateralItem[];
+  payments?: PawningPayment[];
+  renewals?: PawningRenewal[];
+  redemptions?: PawningRedemption[];
+
+  /** Write-side only — pawningsApi.create()'s article lines. Never populated on read. */
+  articles?: PawningArticleInput[];
+  purpose?: string | null;
+  previousFacilityId?: number | null;
+
+  summary?: PawningInterestQuote;
+}
+
+/** An Active ticket past repayDueDate + the scheme's grace period — see pawningsApi.overdue(). */
+export interface OverduePawning extends Pawning {
+  daysOverdue: number;
+  repayDueDate: string;
+}
+
+export const pawningsApi = {
+  list: (status?: PawningStatus) => http.get('/pawnings', { params: { status } }).then((r) => camelize(r.data) as Pawning[]),
+  get: (id: number) => http.get(`/pawnings/${id}`).then((r) => camelize(r.data) as Pawning),
+  overdue: () => http.get('/pawnings-overdue').then((r) => camelize(r.data) as OverduePawning[]),
+  create: (body: { branchId: number; customerId: number; pawningTypeId: number; principalAmount: number | string; startDate?: string; purpose?: string; previousFacilityId?: number; articles: PawningArticleInput[] }) =>
+    http.post('/pawnings', snakeize(body)).then((r) => camelize(r.data) as Pawning),
+  renew: (id: number, body?: { capitalPayment?: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; notes?: string }) =>
+    http.post(`/pawnings/${id}/renew`, snakeize(body || {})).then((r) => camelize(r.data) as Pawning),
+  redeem: (id: number, body: { redemptionType: PawningRedemptionType; facilityCollateralIds?: number[]; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; notes?: string }) =>
+    http.post(`/pawnings/${id}/redeem`, snakeize(body)).then((r) => camelize(r.data) as Pawning),
+  /** Voids a renewal/redemption payment and unwinds its effect — only the most recent Active payment on the ticket may be voided (see backend PawningController::voidPayment). */
+  voidPayment: (paymentId: number, voidReason?: string) =>
+    http.post(`/pawning-payments/${paymentId}/void`, { void_reason: voidReason }).then((r) => camelize(r.data) as Pawning),
+}
+
+export interface PawningAuctionItem {
+  id: number; pawningAuctionId: number; facilityCollateralId: number; creditFacilityId: number;
+  outstandingCapital: number | string; outstandingInterest: number | string;
+  reservePrice?: number | string | null; hammerPrice?: number | string | null;
+  buyerName?: string | null; buyerNic?: string | null;
+  surplusAmount: number | string;
+  settlementStatus: 'Pending' | 'Refunded' | 'Forfeited';
+  status: PawningAuctionItemStatus;
+  soldAt?: string | null;
+  collateral?: PawningCollateralItem | null;
+  facility?: { id: number; code: string; customer?: { id: number; fullName: string; code: string; nicNo?: string | null } } | null;
+}
+
+export interface PawningAuction {
+  id: number; branchId: number; branch?: { id: number; name: string; code: string };
+  auctionNo: string; scheduledDate: string; noticePublishedDate?: string | null;
+  auctioneerName?: string | null; venue?: string | null;
+  status: PawningAuctionStatus;
+  creator?: { id: number; name: string } | null;
+  itemsCount?: number;
+  items?: PawningAuctionItem[];
+}
+
+/** An Active ticket's pledged article past its scheme's auctionEligibleDays — the pool a new auction batch is built from. See pawningAuctionsApi.eligible(). */
+export interface PawningAuctionEligiblePawning extends Pawning {
+  daysPastEligible: number;
+}
+
+export const pawningAuctionsApi = {
+  list: (params?: { status?: PawningAuctionStatus; branchId?: number }) =>
+    http.get('/pawning-auctions', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as PawningAuction[]),
+  get: (id: number) => http.get(`/pawning-auctions/${id}`).then((r) => camelize(r.data) as PawningAuction),
+  eligible: (branchId?: number) =>
+    http.get('/pawning-auctions-eligible', { params: { branch_id: branchId } }).then((r) => camelize(r.data) as PawningAuctionEligiblePawning[]),
+  create: (body: { branchId: number; scheduledDate: string; auctioneerName?: string; venue?: string }) =>
+    http.post('/pawning-auctions', snakeize(body)).then((r) => camelize(r.data) as PawningAuction),
+  addItems: (auctionId: number, facilityCollateralIds: number[]) =>
+    http.post(`/pawning-auctions/${auctionId}/items`, { facility_collateral_ids: facilityCollateralIds }).then((r) => camelize(r.data) as PawningAuction),
+  complete: (auctionId: number) => http.post(`/pawning-auctions/${auctionId}/complete`).then((r) => camelize(r.data) as PawningAuction),
+  recordSale: (itemId: number, body: { hammerPrice: number | string; buyerName?: string; buyerNic?: string }) =>
+    http.post(`/pawning-auction-items/${itemId}/sale`, snakeize(body)).then((r) => camelize(r.data) as PawningAuctionItem),
+  markUnsold: (itemId: number) => http.post(`/pawning-auction-items/${itemId}/unsold`).then((r) => camelize(r.data) as PawningAuctionItem),
+  /** Pays a Sold lot's surplus out to the pledger — Dr 2110, Cr till (see PawningLedgerPoster::postSurplusRefund). */
+  settleSurplus: (itemId: number) => http.post(`/pawning-auction-items/${itemId}/settle-surplus`).then((r) => camelize(r.data) as PawningAuctionItem),
+  /** Surplus unclaimed within the branch's window — becomes the company's (see PawningLedgerPoster::postSurplusForfeiture). */
+  forfeitSurplus: (itemId: number) => http.post(`/pawning-auction-items/${itemId}/forfeit-surplus`).then((r) => camelize(r.data) as PawningAuctionItem),
 }
 
 export interface DashboardSummary {

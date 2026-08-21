@@ -1,7 +1,7 @@
 /* Tazz Investment & Credit — Customer Management (API-backed) */
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, Pager, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type FdDeposit, type FixedDeposit, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
@@ -326,6 +326,10 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const params = useParams<{ id?: string; loanId?: string }>()
   const location = useLocation()
   const [rows, setRows] = useState<Customer[]>([])
+  const [page, setPage] = useState(1)
+  const [lastPage, setLastPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [branches, setBranches] = useState<Branch[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -353,11 +357,33 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
 
   const refresh = () => {
     setLoading(true)
-    customersApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+    customersApi.browse({ search: debouncedSearch || undefined, page })
+      .then((r) => { setRows(r.data); setLastPage(r.lastPage); setTotal(r.total) })
+      .catch(() => { setRows([]); setLastPage(1); setTotal(0) })
+      .finally(() => setLoading(false))
   }
   useEffect(() => {
     branchesApi.list().then(setBranches).catch(() => setBranches([]))
   }, [])
+
+  // Search text is debounced so a keystroke doesn't fire a request per
+  // character — see LoanCalculator.tsx for the same debounce-ref shape.
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [search])
+
+  // A search change always jumps back to page 1 — staying on page 5 of a
+  // now-different, shorter result set would just show an empty page.
+  useEffect(() => { setPage(1) }, [debouncedSearch])
+
+  useEffect(() => {
+    if (mode !== 'list') return
+    refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, page, mode])
 
   // Which customer/sub-view is open lives in the URL — see the effect below —
   // so a hard refresh on a view/edit/loan URL reopens the same screen instead
@@ -377,7 +403,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
 
   useEffect(() => {
     if (isNew) { setEditing(null); setForm(blankForm()); setFormErrors({}); setErr(''); setMode('form'); return }
-    if (!params.id) { refresh(); setMode('list'); setEditing(null); setViewing(null); setViewingLoan(null); return }
+    if (!params.id) { setMode('list'); setEditing(null); setViewing(null); setViewingLoan(null); return }
 
     let cancelled = false
     setViewLoading(true)
@@ -430,19 +456,13 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const isEmployed = form.occupationType === 'Employed'
   const isBusiness = form.occupationType === 'SelfEmployed' || form.occupationType === 'BusinessOwner'
 
-  const q = search.trim().toLowerCase()
-  const filtered = q
-    ? rows.filter((c) => [c.fullName, c.surname, c.initials, c.code, c.nicNo, c.passportNo, c.drivingLicenseNo, c.phone, c.email, c.branch?.name]
-        .some((v) => (v || '').toLowerCase().includes(q)))
-    : rows
-
   if (mode === 'view') {
     return (
       <div>
         <PageHead crumbs="Customers" title={viewLoading || !viewing ? 'Loading…' : viewing.fullName} icon="users"
           sub={viewing ? `${viewing.code} — ${viewing.branch?.name || ''}` : undefined}
           actions={<Btn variant="solid" onClick={back}>← Back to Customers</Btn>} />
-        {viewLoading || !viewing ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+        {viewLoading || !viewing ? <LoadingBlock />
           : <CustomerView customer={viewing} me={me} onEdit={() => openEdit(viewing)} onOpenLoan={openLoan} />}
       </div>
     )
@@ -454,7 +474,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
         <PageHead crumbs={`Customers / ${viewing?.fullName || ''}`} title={loanLoading || !viewingLoan ? 'Loading…' : `Loan ${viewingLoan.code}`} icon="coins"
           sub={viewingLoan ? `${viewingLoan.customer?.fullName} — ${viewingLoan.loanDetail?.loanType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={backToCustomer}>← Back to Customer</Btn>} />
-        {loanLoading || !viewingLoan ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+        {loanLoading || !viewingLoan ? <LoadingBlock />
           : <LoanDetail loan={viewingLoan} me={me} onChanged={reloadLoan} go={go} context="active" />}
       </div>
     )
@@ -563,7 +583,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
 
   return (
     <div>
-      <PageHead crumbs="Customers" title="Customer Management" icon="users" sub={`${rows.length} customers`}
+      <PageHead crumbs="Customers" title="Customer Management" icon="users" sub={`${total} customers`}
         actions={<Can user={me} module="Customer Management" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Customer</Btn></Can>} />
       <Card pad={0}>
         <div className="row gap-2" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', alignItems: 'center' }}>
@@ -571,12 +591,12 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx-2)' }}><Icon n="search" s={15} /></span>
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, NIC, phone, branch…" style={{ paddingLeft: 32 }} />
           </div>
-          {q && <span className="t-2" style={{ fontSize: 12 }}>{filtered.length} of {rows.length}</span>}
+          {search.trim() && <span className="t-2" style={{ fontSize: 12 }}>{total} match{total === 1 ? '' : 'es'}</span>}
         </div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> : <>
         <Table cols={[{ label: 'Customer' }, { label: 'NIC / ID' }, { label: 'Phone' }, { label: 'Branch' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
-          rows={filtered}
-          empty={q ? 'No customers match your search' : 'No records'}
+          rows={rows}
+          empty={search.trim() ? 'No customers match your search' : 'No records'}
           onRow={openView}
           render={(c) => <>
             <Td c="var(--tx-0)"><div className="row gap-2" style={{ alignItems: 'center' }}><span style={{ fontWeight: 600 }}>{c.fullName}</span>{c.isGuarantor && <Badge tone="blue">Guarantor</Badge>}</div><div className="t-2" style={{ fontSize: 11.5 }}>{c.code}</div></Td>
@@ -588,7 +608,9 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
               <Can user={me} module="Customer Management" action="Edit"><button className="mms-act" title="Edit" onClick={() => openEdit(c)}><Icon n="edit" s={15} /></button></Can>
               <Can user={me} module="Customer Management" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(c)}><Icon n="trash" s={15} /></button></Can>
             </div></Td>
-          </>} />}
+          </>} />
+        <Pager page={page} lastPage={lastPage} total={total} onChange={setPage} />
+        </>}
       </Card>
     </div>
   )

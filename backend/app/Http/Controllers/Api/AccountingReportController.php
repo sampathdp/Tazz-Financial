@@ -75,20 +75,19 @@ class AccountingReportController extends Controller
             throw ValidationException::withMessages(['account_id' => 'account_id is required for this report.']);
         }
 
+        // Filters/sorts on journal_lines.entry_date directly — the denormalized
+        // copy that (account_id, entry_date) is indexed on (see its migration) —
+        // instead of a whereHas('entry', ...) join, and orders in SQL instead of
+        // pulling every line into PHP just to sort it. The 'Posted' filter still
+        // needs journal_entries, but as a single indexed join, not a correlated
+        // subquery per row.
         $lines = JournalLine::with('entry:id,code,entry_date,description,source_type,source_id,status')
             ->where('account_id', $accountId)
-            ->whereHas('entry', function ($q) use ($request) {
-                $q->where('status', 'Posted')
-                    ->when($request->query('from'), fn ($qq, $d) => $qq->whereDate('entry_date', '>=', $d))
-                    ->when($request->query('to'), fn ($qq, $d) => $qq->whereDate('entry_date', '<=', $d));
-            })
-            ->get()
-            ->sort(function (JournalLine $a, JournalLine $b) {
-                $byDate = $a->entry->entry_date <=> $b->entry->entry_date;
-
-                return $byDate !== 0 ? $byDate : ($a->id <=> $b->id);
-            })
-            ->values();
+            ->when($request->query('from'), fn ($q, $d) => $q->whereDate('entry_date', '>=', $d))
+            ->when($request->query('to'), fn ($q, $d) => $q->whereDate('entry_date', '<=', $d))
+            ->whereHas('entry', fn ($q) => $q->where('status', 'Posted'))
+            ->orderBy('entry_date')->orderBy('id')
+            ->get();
 
         $account = ChartOfAccount::findOrFail($accountId);
         $running = '0.00';
@@ -126,7 +125,146 @@ class AccountingReportController extends Controller
             'total_expense' => $totalExpense,
             'net_profit_cash' => bcsub($totalIncomeCash, $totalExpense, 2),
             'net_profit_accrual' => bcsub($totalIncomeAccrual, $totalExpense, 2),
+            'waterfall_cash' => $this->plWaterfall($from, $to, 'cash'),
+            'waterfall_accrual' => $this->plWaterfall($from, $to, 'accrual'),
+            'income_by_product' => $this->incomeByLoanProduct($from, $to),
         ];
+    }
+
+    /**
+     * The full management P&L waterfall (Income → Interest Cost → Net Income
+     * → Staff Cost/Opex → HO Absorption → Impairment → VAT/NBT/Tax → Net
+     * Profit After Tax), built on top of the same account balances plFigures()
+     * reads — see 2026_08_20_000001_add_pl_waterfall_accounts_to_chart_of_accounts
+     * for where the non-lending lines (Inter Branch Interest, Documentation
+     * Income, HO Expense Absorption, VAT/NBT, Income Tax, and Staff Cost's
+     * Salary/Allowances split) come from: they're plain accounts booked
+     * through the ordinary Journal Entries screen, not computed here.
+     */
+    private function plWaterfall(?string $from, ?string $to, string $basis): array
+    {
+        $balances = ChartOfAccount::balancesAsOf($to, $from);
+        $bal = fn (string $code) => $balances->get(ChartOfAccount::system($code)->id)->balance ?? '0.00';
+
+        $interestIncome = $basis === 'accrual'
+            ? bcadd(AccrualInterestCalculator::incomeForPeriod('Loan', $from, $to), AccrualInterestCalculator::incomeForPeriod('SpeedDraft', $from, $to), 2)
+            : bcadd($bal('4010'), $bal('4015'), 2);
+        $lendingIncome = bcadd($interestIncome, bcadd($bal('4020'), $bal('4030'), 2), 2);
+
+        $interZonalInterest = $bal('4040');
+        $totalIncome = bcadd($lendingIncome, $interZonalInterest, 2);
+
+        $interestCost = $bal('5100');
+        $netIncomeExOther = bcsub($totalIncome, $interestCost, 2);
+
+        $documentationIncome = $bal('4910');
+        $realEstateProfit = $bal('4920');
+        $refundsOnWriteOffs = $bal('4930');
+        $otherIncome = bcadd(bcadd($documentationIncome, $realEstateProfit, 2), $refundsOnWriteOffs, 2);
+        $netIncome = bcadd($netIncomeExOther, $otherIncome, 2);
+
+        $salary = $bal('5210');
+        $allowances = $bal('5220');
+        $staffCost = bcadd(bcadd($salary, $allowances, 2), $bal('5200'), 2);
+        $otherOperatingExpenses = $bal('5010');
+        $profitBeforeHoAbsorption = bcsub(bcsub($netIncome, $staffCost, 2), $otherOperatingExpenses, 2);
+
+        $hoExpAbsorption = $bal('5400');
+        $netProfitBeforeTaxImpairment = bcsub($profitBeforeHoAbsorption, $hoExpAbsorption, 2);
+
+        $provisioningForImpairment = $bal('5300');
+        $netProfitAfterImpairment = bcsub($netProfitBeforeTaxImpairment, $provisioningForImpairment, 2);
+
+        $vatNbt = $bal('5500');
+        $incomeTax = $bal('5600');
+        $netProfitAfterTax = bcsub(bcsub($netProfitAfterImpairment, $vatNbt, 2), $incomeTax, 2);
+
+        return [
+            'lending_income' => $lendingIncome,
+            'inter_zonal_interest' => $interZonalInterest,
+            'total_income' => $totalIncome,
+            'interest_cost' => $interestCost,
+            'net_income_ex_other' => $netIncomeExOther,
+            'documentation_income' => $documentationIncome,
+            'real_estate_profit' => $realEstateProfit,
+            'refunds_on_write_offs' => $refundsOnWriteOffs,
+            'net_income' => $netIncome,
+            'staff_cost' => ['salary' => $salary, 'allowances' => $allowances, 'total' => $staffCost],
+            'other_operating_expenses' => $otherOperatingExpenses,
+            'profit_before_ho_absorption' => $profitBeforeHoAbsorption,
+            'ho_exp_absorption' => $hoExpAbsorption,
+            'net_profit_before_tax_impairment' => $netProfitBeforeTaxImpairment,
+            'provisioning_for_impairment' => $provisioningForImpairment,
+            'net_profit_after_impairment' => $netProfitAfterImpairment,
+            'vat_nbt' => $vatNbt,
+            'income_tax' => $incomeTax,
+            'net_profit_after_tax' => $netProfitAfterTax,
+            'net_profit_before_inter_zonal' => bcsub($netProfitAfterTax, $interZonalInterest, 2),
+        ];
+    }
+
+    /**
+     * Interest/Charges/Penalty income (4010/4020/4030) attributed to each
+     * loan product (loan_types.name), Cash and Accrual basis side by side —
+     * the per-product breakdown table on the P&L. Cash basis is read off
+     * journal_lines the same way plFigures() reads 4010/4020/4030 overall,
+     * just joined through to loan_types via facility_payments →
+     * loan_facility_details rather than left ungrouped; only source_type
+     * 'LoanPayment' entries are included, so Speed Draft income (source_type
+     * 'SpeedDraftPayment', no loan_type_id to join through anyway) never
+     * leaks into this table — it stays on its own 4015 line in the flat
+     * income table above. Accrual basis comes from
+     * AccrualInterestCalculator::incomeForPeriodByLoanType().
+     */
+    private function incomeByLoanProduct(?string $from, ?string $to): array
+    {
+        $accrualByType = AccrualInterestCalculator::incomeForPeriodByLoanType($from, $to);
+
+        $cashRows = DB::table('journal_lines')
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->join('facility_payments', 'facility_payments.id', '=', 'journal_entries.source_id')
+            ->join('loan_facility_details', 'loan_facility_details.credit_facility_id', '=', 'facility_payments.credit_facility_id')
+            ->leftJoin('loan_types', 'loan_types.id', '=', 'loan_facility_details.loan_type_id')
+            ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'journal_lines.account_id')
+            ->where('journal_entries.status', 'Posted')
+            ->where('journal_entries.source_type', 'LoanPayment')
+            ->whereIn('chart_of_accounts.code', ['4010', '4020', '4030'])
+            ->when($from, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '>=', $d))
+            ->when($to, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '<=', $d))
+            ->selectRaw("COALESCE(loan_types.name, 'Unclassified') as loan_type_name, chart_of_accounts.code as code, SUM(journal_lines.credit - journal_lines.debit) as amount")
+            ->groupBy('loan_type_name', 'code')
+            ->get();
+
+        $byType = [];
+        foreach ($cashRows as $row) {
+            $byType[$row->loan_type_name] ??= ['interest_cash' => '0.00', 'charges' => '0.00', 'penalty' => '0.00'];
+            $amount = (string) round((float) $row->amount, 2);
+            $key = ['4010' => 'interest_cash', '4020' => 'charges', '4030' => 'penalty'][$row->code];
+            $byType[$row->loan_type_name][$key] = bcadd($byType[$row->loan_type_name][$key], $amount, 2);
+        }
+        foreach ($accrualByType as $name => $amount) {
+            $byType[$name] ??= ['interest_cash' => '0.00', 'charges' => '0.00', 'penalty' => '0.00'];
+            $byType[$name]['interest_accrual'] = $amount;
+        }
+
+        $rows = collect($byType)->map(function (array $d, string $name) {
+            $charges = $d['charges'] ?? '0.00';
+            $penalty = $d['penalty'] ?? '0.00';
+            $interestCash = $d['interest_cash'] ?? '0.00';
+            $interestAccrual = $d['interest_accrual'] ?? $interestCash;
+
+            return [
+                'loan_type' => $name,
+                'interest_cash' => $interestCash,
+                'interest_accrual' => $interestAccrual,
+                'charges' => $charges,
+                'penalty' => $penalty,
+                'total_cash' => bcadd(bcadd($interestCash, $charges, 2), $penalty, 2),
+                'total_accrual' => bcadd(bcadd($interestAccrual, $charges, 2), $penalty, 2),
+            ];
+        })->values();
+
+        return $rows->sort(fn ($a, $b) => bccomp($b['total_cash'], $a['total_cash'], 2))->values()->all();
     }
 
     /**
@@ -191,6 +329,37 @@ class AccountingReportController extends Controller
         return ['General Ledger', $sections, $d['account']['code'] . ' — ' . $d['account']['name'], $from || $to ? ('Period: ' . ($from ?: 'Inception') . ' to ' . ($to ?: 'Today')) : null];
     }
 
+    /**
+     * (row key, label, indent) for the waterfall PDF, in display order — row
+     * key resolves against plWaterfall()'s array via dot-notation for the
+     * nested staff_cost figures (data_get()), so the PDF table can never
+     * drift out of step with plWaterfall()'s own keys.
+     */
+    private const WATERFALL_ROWS = [
+        ['lending_income', 'Income', 0],
+        ['inter_zonal_interest', 'Inter Zonal Interest Income/(Exp)', 0],
+        ['total_income', 'Total Income', 0],
+        ['interest_cost', 'Interest Cost', 0],
+        ['net_income_ex_other', 'Net Income/(Expense) Without Other Income', 0],
+        ['documentation_income', 'Documentation Income (Other Income)', 0],
+        ['real_estate_profit', 'Real Estate Profit', 0],
+        ['refunds_on_write_offs', 'Refunds on Write-offs from General Treasury', 0],
+        ['net_income', 'Net Income/(Expense)', 0],
+        ['staff_cost.salary', 'Salary/EPF/ETF', 1],
+        ['staff_cost.allowances', 'Allowances', 1],
+        ['staff_cost.total', 'Staff Cost', 0],
+        ['other_operating_expenses', 'Other Operating Expenses', 0],
+        ['profit_before_ho_absorption', 'Profit/(Loss) Before Absorption of HO Exp', 0],
+        ['ho_exp_absorption', 'HO Exp Absorption', 0],
+        ['net_profit_before_tax_impairment', 'Net Profit Before Tax & Impairment', 0],
+        ['provisioning_for_impairment', 'Provisioning for Impairment', 0],
+        ['net_profit_after_impairment', 'Net Profit After Provision for Impairment', 0],
+        ['vat_nbt', 'VAT & NBT on Finance Services', 0],
+        ['income_tax', 'Income Tax', 0],
+        ['net_profit_after_tax', 'Net Profit After Tax', 0],
+        ['net_profit_before_inter_zonal', 'Net Profit Before Inter Zonal Interest', 0],
+    ];
+
     private function profitAndLossPdf(Request $request): array
     {
         $from = $request->query('from');
@@ -198,8 +367,37 @@ class AccountingReportController extends Controller
         [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpense] = $this->plFiguresBothBases($from, $to);
         $netProfitCash = bcsub($totalIncomeCash, $totalExpense, 2);
         $netProfitAccrual = bcsub($totalIncomeAccrual, $totalExpense, 2);
+        $waterfallCash = $this->plWaterfall($from, $to, 'cash');
+        $waterfallAccrual = $this->plWaterfall($from, $to, 'accrual');
+        $byProduct = $this->incomeByLoanProduct($from, $to);
 
         $sections = [
+            [
+                'title' => 'P&L Waterfall',
+                'columns' => [
+                    ['key' => 'label', 'label' => 'Line'],
+                    ['key' => 'cash', 'label' => 'Cash Basis', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'accrual', 'label' => 'Accrual Basis', 'align' => 'right', 'format' => 'money'],
+                ],
+                'rows' => collect(self::WATERFALL_ROWS)->map(fn (array $r) => [
+                    'label' => str_repeat('    ', $r[2]) . $r[1],
+                    'cash' => data_get($waterfallCash, $r[0]),
+                    'accrual' => data_get($waterfallAccrual, $r[0]),
+                ])->all(),
+            ],
+            [
+                'title' => 'Income by Loan Product',
+                'columns' => [
+                    ['key' => 'loan_type', 'label' => 'Product'],
+                    ['key' => 'interest_cash', 'label' => 'Interest (Cash)', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'interest_accrual', 'label' => 'Interest (Accrual)', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'charges', 'label' => 'Charges', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'penalty', 'label' => 'Penalty', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'total_cash', 'label' => 'Total (Cash)', 'align' => 'right', 'format' => 'money'],
+                ],
+                'rows' => $byProduct,
+                'emptyText' => 'No loan payment income posted in this range',
+            ],
             [
                 'title' => 'Income',
                 'columns' => [

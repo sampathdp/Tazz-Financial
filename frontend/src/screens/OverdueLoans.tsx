@@ -1,7 +1,7 @@
 /* Tazz Investment & Credit — Overdue Loans (Active loans with a past-due, unpaid installment) */
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Card, PageHead, Btn, Badge, Input, Table, Td, Field } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Input, Table, Td, Field , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loansApi, type Loan, type OverdueLoan, type AuthUser } from '../api'
 import { LoanDetail } from './loan/LoanDetail'
@@ -63,7 +63,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
         <PageHead crumbs="Loan Management / Overdue Loans" title={detailLoading || !loan ? 'Loading…' : `Loan ${loan.code}`} icon="alert"
           sub={loan ? `${loan.customer?.fullName} — ${loan.loanDetail?.loanType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={back}>← Back to Overdue Loans</Btn>} />
-        {detailLoading || !loan ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+        {detailLoading || !loan ? <LoadingBlock />
           : <LoanDetail loan={loan} me={me} onChanged={reloadLoan} go={go} context="active" />}
       </div>
     )
@@ -86,7 +86,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
             <Btn variant="ghost" onClick={() => { setFrom(''); setTo(todayIso()) }}>Reset</Btn>}
           {q && <span className="t-2" style={{ fontSize: 12 }}>{filtered.length} of {rows.length}</span>}
         </div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[
           { label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Days Overdue', align: 'center' },
           { label: 'Installments', align: 'center' }, { label: 'Overdue Amount', align: 'right' }, { label: 'OD / Penalty', align: 'right' },

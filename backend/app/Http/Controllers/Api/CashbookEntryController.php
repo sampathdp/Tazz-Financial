@@ -16,7 +16,7 @@ class CashbookEntryController extends Controller
         $query = CashbookEntry::with(['cashAccount:id,name,branch_id', 'creator:id,name'])
             ->orderByDesc('entry_date')->orderByDesc('id');
         if ($request->filled('cash_account_id')) {
-            $query->where('cash_account_id', $request->integer('cash_account_id'));
+            $query->where('cash_account_id', (int) $request->query('cash_account_id'));
         }
 
         return $query->get();

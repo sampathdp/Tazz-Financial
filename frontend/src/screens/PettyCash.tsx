@@ -3,7 +3,7 @@
    ("Petty Cash"), the same "related sub-resources, one module" pattern
    Cashbook Management uses for Cash Accounts + Cashbook Entries. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner , LoadingBlock } from '../components/ui'
 import {
   api, branchesApi, cashAccountsApi, bankAccountsApi, expenseCategoriesApi, vendorsApi,
   pettyCashFundsApi, pettyCashReplenishmentsApi, pettyCashVouchersApi,
@@ -198,7 +198,7 @@ export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }
 
       <Card pad={0} style={{ marginBottom: 16 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13.5 }}>Spend</div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table
           cols={[{ label: 'Code' }, { label: 'Category' }, { label: 'Vendor' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 90 }]}
           empty="No spend recorded against this float yet" rows={vouchers}
@@ -217,7 +217,7 @@ export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }
 
       <Card pad={0}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13.5 }}>Top-ups</div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table
           cols={[{ label: 'Code' }, { label: 'Source' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 90 }]}
           empty="No top-ups recorded for this float yet" rows={replenishments}

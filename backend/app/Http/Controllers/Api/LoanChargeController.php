@@ -48,6 +48,18 @@ class LoanChargeController extends Controller
             'notes' => 'nullable|string|max:255',
         ]);
 
+        $hasAllocations = $charge->allocations()->exists();
+        // paid_amount is meant to be driven only by real payment allocations
+        // (see LoanPaymentAllocator) — editable by hand only before any
+        // payment has actually been applied, so hand-editing can never
+        // desync it from the allocation history a payment already created.
+        if (array_key_exists('paid_amount', $data) && $hasAllocations) {
+            return response()->json(['message' => 'This charge already has payments applied — its paid amount can no longer be edited directly.'], 422);
+        }
+        if (array_key_exists('due_amount', $data) && $data['due_amount'] < (float) $charge->paid_amount) {
+            return response()->json(['message' => "Due amount can't be less than the amount already paid ({$charge->paid_amount})."], 422);
+        }
+
         $charge->update($data);
 
         return $charge->load(['creator:id,name', 'category:id,name']);
@@ -55,6 +67,9 @@ class LoanChargeController extends Controller
 
     public function destroy(FacilityCharge $charge)
     {
+        if ($charge->allocations()->exists()) {
+            return response()->json(['message' => 'This charge already has payments applied to it and can no longer be deleted — void the payment(s) first.'], 422);
+        }
         $charge->delete();
 
         return response()->noContent();

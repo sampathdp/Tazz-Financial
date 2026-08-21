@@ -34,4 +34,9 @@ class FacilityCharge extends Model
     {
         return $this->belongsTo(User::class, 'created_by');
     }
+
+    public function allocations()
+    {
+        return $this->hasMany(FacilityChargeAllocation::class, 'facility_charge_id');
+    }
 }

@@ -16,7 +16,7 @@ class CashReconciliationController extends Controller
         $query = CashReconciliation::with(['branch:id,name,code', 'otherBranch:id,name,code', 'otherBranchChequeBranch:id,name,code', 'reconciler:id,name'])
             ->orderByDesc('as_at_date');
         if ($request->filled('branch_id')) {
-            $query->where('branch_id', $request->integer('branch_id'));
+            $query->where('branch_id', (int) $request->query('branch_id'));
         }
 
         return $query->get();

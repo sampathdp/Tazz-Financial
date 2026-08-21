@@ -13,20 +13,57 @@ interface BtnProps {
   size?: 'sm' | 'md' | 'lg'
   icon?: string
   iconR?: string
-  onClick?: () => void
+  onClick?: () => void | Promise<unknown>
   active?: boolean
   disabled?: boolean
   style?: CSSProperties
   title?: string
 }
+function Spinner({ s }: { s: number }) {
+  return <span className="mms-spin" style={{ width: s, height: s, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', opacity: 0.85, flexShrink: 0 }} />
+}
+/** Shared loading placeholder for report/page bodies. Replaces the old bare
+ *  "Loading…" text blocks (54 copies across screens) with a spinner so a
+ *  slow request reads as in-progress rather than a stalled page. */
+export function LoadingBlock({ label = 'Loading…', compact }: { label?: string; compact?: boolean }) {
+  return (
+    <div style={{ padding: compact ? 24 : 48, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--tx-2)' }}>
+      <span className="mms-spin" style={{ width: 28, height: 28, border: '3px solid var(--line)', borderTopColor: 'var(--ac)', borderRadius: '50%', display: 'inline-block' }} />
+      <span>{label}</span>
+    </div>
+  )
+}
+/** Btn auto-disables and swaps its icon for a spinner for the duration of an
+ *  async onClick — a raw <button> stays clickable while its fetch is in
+ *  flight, which is how the app kept getting duplicate submits from users
+ *  re-pressing a report/save/approve button that gave no feedback. A
+ *  busyRef (not just state) blocks a second click synchronously, before
+ *  the disabled re-render has even committed. Sync onClick handlers
+ *  (returning void, not a Promise) are left alone — no spinner flicker for
+ *  instant actions like opening a modal. */
 export function Btn({ children, variant = 'ghost', size = 'md', icon, iconR, onClick, active, disabled, style, title }: BtnProps) {
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  const isBusy = busy || busyRef.current
+  const isDisabled = disabled || isBusy
+
+  const handleClick = () => {
+    if (busyRef.current) return
+    const result = onClick?.()
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      busyRef.current = true
+      setBusy(true)
+      ;(result as Promise<unknown>).finally(() => { busyRef.current = false; setBusy(false) })
+    }
+  }
+
   const base: CSSProperties = {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
     fontFamily: 'Outfit', fontWeight: 600,
     borderRadius: 'var(--r-s)', border: '1px solid transparent',
     padding: size === 'sm' ? '5px 10px' : size === 'lg' ? '11px 18px' : '8px 14px',
     fontSize: size === 'sm' ? 12.5 : 13.5, lineHeight: 1, transition: 'all .15s var(--ease)',
-    opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto', whiteSpace: 'nowrap', ...style,
+    opacity: isDisabled ? 0.5 : 1, pointerEvents: isDisabled ? 'none' : 'auto', whiteSpace: 'nowrap', ...style,
   }
   const V: Record<Variant, CSSProperties> = {
     primary: { background: 'var(--ac)', color: '#fff', boxShadow: '0 2px 10px -2px var(--ac-line)' },
@@ -36,11 +73,12 @@ export function Btn({ children, variant = 'ghost', size = 'md', icon, iconR, onC
     ok: { background: 'var(--ok-dim)', color: 'var(--ok)', border: '1px solid var(--ok)' },
     plain: { background: 'transparent', color: 'var(--tx-2)', border: '1px solid transparent' },
   }
+  const iconSize = size === 'sm' ? 14 : 16
   return (
-    <button title={title} className="mms-btn" style={{ ...base, ...V[variant] }} onClick={onClick} disabled={disabled}>
-      {icon && <Icon n={icon} s={size === 'sm' ? 14 : 16} />}
+    <button title={title} className="mms-btn" style={{ ...base, ...V[variant] }} onClick={handleClick} disabled={isDisabled}>
+      {isBusy ? <Spinner s={iconSize} /> : icon && <Icon n={icon} s={iconSize} />}
       {children}
-      {iconR && <Icon n={iconR} s={size === 'sm' ? 14 : 16} />}
+      {!isBusy && iconR && <Icon n={iconR} s={iconSize} />}
     </button>
   )
 }
@@ -387,6 +425,19 @@ export function Td({ children, align, mono, c, style }: { children?: ReactNode; 
   )
 }
 
+/** Prev/Next pager for a server-paginated Table — see loansApi.browse()/customersApi.browse(). */
+export function Pager({ page, lastPage, total, onChange }: { page: number; lastPage: number; total: number; onChange: (page: number) => void }) {
+  if (lastPage <= 1) return null
+
+  return (
+    <div className="row gap-2" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)', alignItems: 'center', justifyContent: 'flex-end' }}>
+      <span className="t-2" style={{ fontSize: 12, marginRight: 8 }}>{total} total — page {page} of {lastPage}</span>
+      <Btn size="sm" variant="solid" disabled={page <= 1} onClick={() => onChange(page - 1)}>← Prev</Btn>
+      <Btn size="sm" variant="solid" disabled={page >= lastPage} onClick={() => onChange(page + 1)}>Next →</Btn>
+    </div>
+  )
+}
+
 export function statusTone(s: string): Tone {
   s = (s || '').toLowerCase()
   if (/(paid|approved|posted|completed|converted|in|ok|active)/.test(s)) return 'green'
@@ -462,23 +513,38 @@ export function DropdownMenu({ trigger, children, width = 180 }: { trigger: Reac
   )
 }
 
-export function DropdownItem({ icon, label, onClick, danger }: { icon?: string; label: string; onClick?: () => void; danger?: boolean }) {
+/** Same busyRef double-click guard as Btn — DropdownItem is how most
+ *  row-level actions (approve/void/delete) fire, and were just as
+ *  re-clickable mid-request as any other unguarded button. */
+export function DropdownItem({ icon, label, onClick, danger }: { icon?: string; label: string; onClick?: () => void | Promise<unknown>; danger?: boolean }) {
   const [hover, setHover] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (busyRef.current) return
+    const result = onClick?.()
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      busyRef.current = true
+      setBusy(true)
+      ;(result as Promise<unknown>).finally(() => { busyRef.current = false; setBusy(false) })
+    }
+  }
+
   return (
     <button
-      onClick={(e) => {
-        e.stopPropagation()
-        onClick?.()
-      }}
+      onClick={handleClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      disabled={busy}
       style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
         background: hover ? 'var(--bg-2)' : 'transparent', border: 'none', borderRadius: 'var(--r-s)',
-        color: danger ? 'var(--bad)' : 'var(--tx-0)', fontSize: 13,
-        cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'background .15s'
+        color: danger ? 'var(--bad)' : 'var(--tx-0)', fontSize: 13, opacity: busy ? 0.6 : 1,
+        cursor: busy ? 'default' : 'pointer', textAlign: 'left', width: '100%', transition: 'background .15s'
       }}>
-      {icon && <Icon n={icon} s={15} c={danger ? 'var(--bad)' : 'var(--tx-2)'} />}
+      {busy ? <Spinner s={15} /> : icon && <Icon n={icon} s={15} c={danger ? 'var(--bad)' : 'var(--tx-2)'} />}
       {label}
     </button>
   )

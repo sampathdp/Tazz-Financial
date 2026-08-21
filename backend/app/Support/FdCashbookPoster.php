@@ -136,4 +136,36 @@ class FdCashbookPoster
             ]);
         });
     }
+
+    /** Unwinds the Cashbook entry for a withdrawal being voided — reverses the till balance and deletes the entry. No-op if it never had one (Bank/Cheque). */
+    public static function reverseWithdrawal(FdWithdrawal $withdrawal): void
+    {
+        $entry = CashbookEntry::where('source_type', 'FdWithdrawal')->where('source_id', $withdrawal->id)->first();
+        if (!$entry) {
+            return;
+        }
+        DB::transaction(function () use ($entry) {
+            $account = CashAccount::lockForUpdate()->find($entry->cash_account_id);
+            if ($account) {
+                $account->update(['current_balance' => bcadd((string) $account->current_balance, (string) $entry->amount, 2)]);
+            }
+            $entry->delete();
+        });
+    }
+
+    /** Unwinds the Cashbook entry for an interest payment being voided — reverses the till balance and deletes the entry. No-op if it never had one (Bank/Cheque). */
+    public static function reverseInterestPaid(FdInterestPayment $payment): void
+    {
+        $entry = CashbookEntry::where('source_type', 'FdInterestPayment')->where('source_id', $payment->id)->first();
+        if (!$entry) {
+            return;
+        }
+        DB::transaction(function () use ($entry) {
+            $account = CashAccount::lockForUpdate()->find($entry->cash_account_id);
+            if ($account) {
+                $account->update(['current_balance' => bcadd((string) $account->current_balance, (string) $entry->amount, 2)]);
+            }
+            $entry->delete();
+        });
+    }
 }

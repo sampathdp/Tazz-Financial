@@ -30,7 +30,7 @@ class Loan extends Model
         'start_date', 'maturity_date',
         'disbursed_amount', 'disbursed_at', 'outstanding_balance_cache',
         'status', 'applied_by', 'approved_by', 'approved_at', 'rejected_reason', 'closed_at', 'created_by',
-        'cancelled_reason', 'cancelled_by', 'cancelled_at',
+        'cancelled_reason', 'cancelled_by', 'cancelled_at', 'written_off_reason', 'written_off_by',
     ];
 
     protected $casts = [
@@ -94,6 +94,11 @@ class Loan extends Model
     public function canceller()
     {
         return $this->belongsTo(User::class, 'cancelled_by');
+    }
+
+    public function writtenOffBy()
+    {
+        return $this->belongsTo(User::class, 'written_off_by');
     }
 
     public function creator()

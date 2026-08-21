@@ -32,12 +32,40 @@ class SpeedDraftController extends Controller
         'schedules.allocations', 'payments.receiver:id,name', 'payments.voider:id,name',
     ];
 
+    /**
+     * With no `page` param, returns the full (optionally status-filtered)
+     * list exactly as before — PaymentReceipt.tsx's "pay against an Active
+     * Speed Draft" picker calls list({status:'Active'}) with no page param
+     * and needs the full set for local search, unaffected. `page` opts into
+     * search + pagination for the Speed Drafts browse screen.
+     */
     public function index(Request $request)
     {
-        return SpeedDraft::with(self::SUMMARY_RELATIONS)
-            ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
-            ->latest()
-            ->get();
+        $query = SpeedDraft::with(self::SUMMARY_RELATIONS)
+            ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status));
+
+        if (!$request->filled('page')) {
+            return $query->latest()->get();
+        }
+
+        if ($request->filled('search')) {
+            $term = $request->search;
+            $query->where(function ($q) use ($term) {
+                $q->where('code', 'like', "%{$term}%")
+                    ->orWhereHas('customer', fn ($qq) => $qq->where('full_name', 'like', "%{$term}%")->orWhere('code', 'like', "%{$term}%"))
+                    ->orWhereHas('speedDraftDetail.speedDraftType', fn ($qq) => $qq->where('name', 'like', "%{$term}%"));
+            });
+        }
+
+        return $query->latest()->paginate((int) $request->input('perPage', 25));
+    }
+
+    /** Per-status counts for the Speed Drafts filter chips — independent of the current search text, same as before pagination. */
+    public function statusCounts()
+    {
+        $counts = SpeedDraft::selectRaw('status, count(*) as count')->groupBy('status')->pluck('count', 'status');
+
+        return ['All' => (int) $counts->sum(), ...array_map('intval', $counts->all())];
     }
 
     /** Active drafts with at least one not-yet-paid installment past its grace period — computed live, never a stored flag (see SpeedDraftSummary::isOverdue). */

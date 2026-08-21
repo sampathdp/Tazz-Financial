@@ -2,9 +2,9 @@
    interest-only repayment). One screen covers the full lifecycle — intake, approve/
    reject, disburse, and ongoing view — status filter chips replace separate
    Applications/Active screens since the volume here doesn't need them split out yet. */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Pager, ErrorBanner, LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   speedDraftsApi, speedDraftTypesApi, customersApi,
@@ -46,10 +46,15 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
   const params = useParams<{ id?: string }>()
   const location = useLocation()
   const [rows, setRows] = useState<SpeedDraft[]>([])
+  const [page, setPage] = useState(1)
+  const [lastPage, setLastPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [counts, setCounts] = useState<Record<string, number>>({ All: 0 })
   const [types, setTypes] = useState<SpeedDraftType[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<SpeedDraftStatus | 'All'>('All')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -62,12 +67,35 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
 
   const refresh = () => {
     setLoading(true)
-    speedDraftsApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+    speedDraftsApi.browse({ status: statusFilter === 'All' ? undefined : statusFilter, search: debouncedSearch || undefined, page })
+      .then((r) => { setRows(r.data); setLastPage(r.lastPage); setTotal(r.total) })
+      .catch(() => { setRows([]); setLastPage(1); setTotal(0) })
+      .finally(() => setLoading(false))
   }
+  const refreshCounts = () => { speedDraftsApi.statusCounts().then(setCounts).catch(() => {}) }
+
   useEffect(() => {
     speedDraftTypesApi.list().then((all) => setTypes(all.filter((t) => (t.status || 'Active') === 'Active'))).catch(() => setTypes([]))
     customersApi.list().then(setCustomers).catch(() => setCustomers([]))
   }, [])
+
+  // Search text is debounced so a keystroke doesn't fire a request per
+  // character; status/page changes refresh immediately.
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [search])
+
+  // A status/search change always jumps back to page 1.
+  useEffect(() => { setPage(1) }, [statusFilter, debouncedSearch])
+
+  useEffect(() => {
+    if (mode !== 'list') return
+    refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, debouncedSearch, page, mode])
 
   const selectedType = types.find((t) => t.id === form.speedDraftTypeId)
   const needsInsurance = selectedType?.category === 'Lease' || selectedType?.category === 'Mortgage'
@@ -106,7 +134,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
   useEffect(() => {
     if (location.pathname === `${ROUTE_BASE}/new`) { loadCreate(); return }
     if (params.id) { setDetailLoading(true); loadRow(Number(params.id)).finally(() => setDetailLoading(false)); return }
-    setMode('list'); setEditing(null); setDetail(null); refresh()
+    setMode('list'); setEditing(null); setDetail(null); refreshCounts()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, params.id])
 
@@ -162,35 +190,23 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
   const remove = async (d: SpeedDraft) => {
     const ok = await notify.confirm({ title: 'Withdraw this Speed Draft application?', msg: 'This action cannot be undone.', danger: true, okText: 'Withdraw' })
     if (!ok) return
-    try { await speedDraftsApi.remove(d.id); refresh(); notify.success('Application withdrawn', d.code) }
+    try { await speedDraftsApi.remove(d.id); refresh(); refreshCounts(); notify.success('Application withdrawn', d.code) }
     catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
   }
 
   const approve = async (d: SpeedDraft) => {
     const ok = await notify.confirm({ title: `Approve Speed Draft ${d.code}?`, msg: `${d.customer?.fullName} — ${money(d.principalAmount)}`, okText: 'Approve' })
     if (!ok) return
-    try { await speedDraftsApi.approve(d.id); refresh(); notify.success('Speed Draft approved', d.code) }
+    try { await speedDraftsApi.approve(d.id); refresh(); refreshCounts(); notify.success('Speed Draft approved', d.code) }
     catch (ex: any) { notify.error('Approve failed', getErrorText(ex)) }
   }
 
   const reject = async (d: SpeedDraft) => {
     const reason = await notify.prompt({ title: `Reject Speed Draft ${d.code}?`, msg: 'Give a reason — this is shown to branch staff.', placeholder: 'Reason for rejection', required: true, danger: true, okText: 'Reject' })
     if (!reason) return
-    try { await speedDraftsApi.reject(d.id, reason); refresh(); notify.success('Speed Draft rejected', d.code) }
+    try { await speedDraftsApi.reject(d.id, reason); refresh(); refreshCounts(); notify.success('Speed Draft rejected', d.code) }
     catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
   }
-
-  const q = search.trim().toLowerCase()
-  const filtered = rows.filter((d) => {
-    if (statusFilter !== 'All' && d.status !== statusFilter) return false
-    if (!q) return true
-    return [d.code, d.customer?.fullName, d.customer?.code, d.speedDraftDetail?.speedDraftType?.name].some((v) => (v || '').toLowerCase().includes(q))
-  })
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { All: rows.length }
-    for (const d of rows) c[d.status] = (c[d.status] || 0) + 1
-    return c
-  }, [rows])
 
   if (mode === 'detail') {
     return (
@@ -198,7 +214,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
         <PageHead crumbs="Speed Drafts" title={detailLoading || !detail ? 'Loading…' : `Speed Draft ${detail.code}`} icon="coins"
           sub={detail ? `${detail.customer?.fullName} — ${detail.speedDraftDetail?.speedDraftType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={back}>← Back to Speed Drafts</Btn>} />
-        {detailLoading || !detail ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+        {detailLoading || !detail ? <LoadingBlock />
           : <SpeedDraftDetail speedDraft={detail} me={me} onChanged={reloadDetail} />}
       </div>
     )
@@ -291,7 +307,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
 
   return (
     <div>
-      <PageHead crumbs="Speed Drafts" title="Speed Drafts" icon="coins" sub={`${rows.length} drafts`}
+      <PageHead crumbs="Speed Drafts" title="Speed Drafts" icon="coins" sub={`${total} drafts`}
         actions={<Can user={me} module="Speed Drafts" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>New Speed Draft</Btn></Can>} />
 
       <div className="row gap-2 wrap" style={{ marginBottom: 14 }}>
@@ -308,11 +324,11 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx-2)' }}><Icon n="search" s={15} /></span>
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search code, customer, type…" style={{ paddingLeft: 32 }} />
           </div>
-          {q && <span className="t-2" style={{ fontSize: 12 }}>{filtered.length} of {rows.length}</span>}
+          {search.trim() && <span className="t-2" style={{ fontSize: 12 }}>{total} match{total === 1 ? '' : 'es'}</span>}
         </div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> : <>
         <Table cols={[{ label: 'Draft' }, { label: 'Customer' }, { label: 'Type' }, { label: 'Capital' }, { label: 'Outstanding Capital' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 110 }]}
-          rows={filtered}
+          rows={rows}
           empty="No Speed Drafts yet"
           onRow={openRow}
           render={(d) => <>
@@ -335,7 +351,9 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
                 </div>
               )}
             </Td>
-          </>} />}
+          </>} />
+        <Pager page={page} lastPage={lastPage} total={total} onChange={setPage} />
+        </>}
       </Card>
     </div>
   )

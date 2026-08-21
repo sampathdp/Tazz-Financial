@@ -60,8 +60,9 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Pawning Management', icon: 'tag', items: [
-    { id: 'pawn/tickets', label: 'Pawn Tickets', icon: 'tag', soon: true },
-    { id: 'pawn/auctions', label: 'Auctions', icon: 'store', soon: true },
+    { id: 'pawn/types', label: 'Pawning Types', icon: 'layers' },
+    { id: 'pawn/tickets', label: 'Pawn Tickets', icon: 'tag' },
+    { id: 'pawn/auctions', label: 'Auctions', icon: 'store' },
   ] },
 
   { section: 'Cashbook Management', icon: 'wallet', items: [
@@ -110,6 +111,7 @@ export const NAV: NavNode[] = [
       { id: 'rep/loans-arrears', label: 'Arrears', icon: 'alert' },
       { id: 'rep/loans-disbursement', label: 'Disbursement', icon: 'upload' },
       { id: 'rep/loans-closed', label: 'Closed Loans', icon: 'check' },
+      { id: 'rep/loans-detail', label: 'Loan Detail Report', icon: 'list' },
     ] },
     { group: 'Collection Reports', icon: 'receipt', items: [
       { id: 'rep/coll-daily', label: 'Daily Cash Collection', icon: 'wallet' },

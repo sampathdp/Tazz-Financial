@@ -1,7 +1,7 @@
 /* Tazz Investment & Credit — Active Loans (disbursement → repayment schedule → payments) */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Card, PageHead, Btn, Badge, Input, Table, Td } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Input, Table, Td, Pager, LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loansApi, type Loan, type LoanStatus, type AuthUser } from '../api'
 import { LoanDetail } from './loan/LoanDetail'
@@ -22,18 +22,18 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
   const navigate = useNavigate()
   const params = useParams<{ id?: string }>()
   const [rows, setRows] = useState<Loan[]>([])
+  const [page, setPage] = useState(1)
+  const [lastPage, setLastPage] = useState(1)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<LoanStatus | 'All'>('All')
+  const [counts, setCounts] = useState<Record<string, number>>({ All: 0 })
 
   const [mode, setMode] = useState<'list' | 'detail'>('list')
   const [loan, setLoan] = useState<Loan | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-
-  const refresh = () => {
-    setLoading(true)
-    loansApi.list().then((all) => setRows(all.filter((l) => LIVE_STATUSES.includes(l.status)))).catch(() => setRows([])).finally(() => setLoading(false))
-  }
 
   // Which loan (if any) is open lives in the URL — see the effect below —
   // so a hard refresh on a detail URL reopens the same loan instead of
@@ -43,7 +43,7 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
   const reloadLoan = async () => { if (loan) setLoan(await loansApi.get(loan.id)) }
 
   useEffect(() => {
-    if (!params.id) { setMode('list'); setLoan(null); refresh(); return }
+    if (!params.id) { setMode('list'); setLoan(null); loansApi.statusCounts().then(setCounts).catch(() => {}); return }
     setMode('detail'); setDetailLoading(true)
     loansApi.get(Number(params.id))
       .then(setLoan)
@@ -52,17 +52,28 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id])
 
-  const q = search.trim().toLowerCase()
-  const filtered = rows.filter((l) => {
-    if (statusFilter !== 'All' && l.status !== statusFilter) return false
-    if (!q) return true
-    return [l.code, l.customer?.fullName, l.customer?.code, l.loanDetail?.loanType?.name].some((v) => (v || '').toLowerCase().includes(q))
-  })
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { All: rows.length }
-    for (const l of rows) c[l.status] = (c[l.status] || 0) + 1
-    return c
-  }, [rows])
+  // Search text is debounced so a keystroke doesn't fire a request per
+  // character (see LoanCalculator.tsx for the same debounce-ref shape);
+  // status/page changes refresh immediately, no typing involved.
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [search])
+
+  // A status/search change always jumps back to page 1 — staying on page 5
+  // of a now-different, shorter result set would just show an empty page.
+  useEffect(() => { setPage(1) }, [statusFilter, debouncedSearch])
+
+  useEffect(() => {
+    if (params.id) return
+    setLoading(true)
+    loansApi.browse({ status: statusFilter === 'All' ? undefined : statusFilter, search: debouncedSearch || undefined, page })
+      .then((r) => { setRows(r.data); setLastPage(r.lastPage); setTotal(r.total) })
+      .catch(() => { setRows([]); setLastPage(1); setTotal(0) })
+      .finally(() => setLoading(false))
+  }, [params.id, statusFilter, debouncedSearch, page])
 
   if (mode === 'detail') {
     return (
@@ -70,7 +81,7 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
         <PageHead crumbs="Loan Management / Active Loans" title={detailLoading || !loan ? 'Loading…' : `Loan ${loan.code}`} icon="coins"
           sub={loan ? `${loan.customer?.fullName} — ${loan.loanDetail?.loanType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={back}>← Back to Active Loans</Btn>} />
-        {detailLoading || !loan ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>
+        {detailLoading || !loan ? <LoadingBlock />
           : <LoanDetail loan={loan} me={me} onChanged={reloadLoan} go={go} context="active" />}
       </div>
     )
@@ -78,7 +89,7 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
 
   return (
     <div>
-      <PageHead crumbs="Loan Management" title="Active Loans" icon="coins" sub={`${rows.length} loans`} />
+      <PageHead crumbs="Loan Management" title="Active Loans" icon="coins" sub={`${total} loans`} />
 
       <div className="row gap-2 wrap" style={{ marginBottom: 14 }}>
         {(['All', ...LIVE_STATUSES] as const).map((s) => (
@@ -94,11 +105,11 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx-2)' }}><Icon n="search" s={15} /></span>
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search code, customer, product…" style={{ paddingLeft: 32 }} />
           </div>
-          {q && <span className="t-2" style={{ fontSize: 12 }}>{filtered.length} of {rows.length}</span>}
+          {search.trim() && <span className="t-2" style={{ fontSize: 12 }}>{total} match{total === 1 ? '' : 'es'}</span>}
         </div>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> : <>
         <Table cols={[{ label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Principal' }, { label: 'Outstanding' }, { label: 'Status', align: 'center' }]}
-          rows={filtered}
+          rows={rows}
           empty={LIVE_STATUSES.includes(statusFilter as LoanStatus) || statusFilter === 'All' ? 'No approved or active loans yet — approve one in Loan Applications first.' : 'No loans in this status'}
           onRow={openRow}
           render={(l) => <>
@@ -112,7 +123,9 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
             <Td mono>{money(l.principalAmount)}</Td>
             <Td mono>{l.status === 'Approved' ? '—' : money(num(l.totalDueSum) - num(l.paidSum))}</Td>
             <Td align="center"><Badge tone={statusTone[l.status]} dot>{l.status}</Badge></Td>
-          </>} />}
+          </>} />
+        <Pager page={page} lastPage={lastPage} total={total} onChange={setPage} />
+        </>}
       </Card>
     </div>
   )

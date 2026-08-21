@@ -21,7 +21,7 @@ class BankTransactionController extends Controller
         $query = BankTransaction::with(['bankAccount:id,name,bank_id,account_number', 'bankAccount.bank:id,name', 'creator:id,name'])
             ->orderByDesc('txn_date')->orderByDesc('id');
         if ($request->filled('bank_account_id')) {
-            $query->where('bank_account_id', $request->integer('bank_account_id'));
+            $query->where('bank_account_id', (int) $request->query('bank_account_id'));
         }
 
         return $query->get();

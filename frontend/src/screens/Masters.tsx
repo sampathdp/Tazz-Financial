@@ -5,7 +5,7 @@
    list later is: a table/model/controller on the backend, a resource in
    api.ts, then one more exported screen here + a nav entry + an App.tsx route. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner, LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { expenseCategoriesApi, banksApi, documentCategoriesApi, chargeCategoriesApi, chartOfAccountsApi, type ExpenseCategory, type Bank, type DocumentCategory, type ChargeCategory, type ChartOfAccount, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
@@ -63,7 +63,7 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
       <PageHead crumbs="Masters" title="Expense Categories" icon="tag" sub={`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`}
         actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Expense Category</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Name' }, { label: 'Code' }, { label: 'Posts To' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No expense categories yet"
           rows={rows}
@@ -153,7 +153,7 @@ export function BanksScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
       <PageHead crumbs="Masters" title="Banks" icon="building" sub={`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`}
         actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Bank</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Name' }, { label: 'Code' }, { label: 'Description' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No banks yet"
           rows={rows}
@@ -233,7 +233,7 @@ export function DocumentCategoriesScreen({ user: me }: { go: Go; user?: AuthUser
       <PageHead crumbs="Masters" title="Document Categories" icon="file-text" sub={`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`}
         actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Category</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Name' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No document categories yet"
           rows={rows}
@@ -311,7 +311,7 @@ export function ChargeCategoriesScreen({ user: me }: { go: Go; user?: AuthUser |
       <PageHead crumbs="Masters / Charge Categories" title="Charge Categories" sub={`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`}
         actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Category</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Category Name' }, { label: 'Posts To' }, { label: 'Status', align: 'center' }, { label: 'Sort Order', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No charge categories found."
           rows={rows}

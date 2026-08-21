@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\CashBankReportController;
 use App\Http\Controllers\Api\CashbookEntryController;
 use App\Http\Controllers\Api\CashReconciliationController;
 use App\Http\Controllers\Api\CashTransferController;
+use App\Http\Controllers\Api\CompanyProfileController;
 use App\Http\Controllers\Api\ChartOfAccountController;
 use App\Http\Controllers\Api\CollectionReportController;
 use App\Http\Controllers\Api\CustomerController;
@@ -50,6 +51,11 @@ use App\Http\Controllers\Api\LoanWaiverController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SalesExecutiveCommissionController;
+use App\Http\Controllers\Api\PawningArticleTypeController;
+use App\Http\Controllers\Api\PawningAuctionController;
+use App\Http\Controllers\Api\PawningController;
+use App\Http\Controllers\Api\PawningGoldRateController;
+use App\Http\Controllers\Api\PawningTypeController;
 use App\Http\Controllers\Api\SpeedDraftCollateralController;
 use App\Http\Controllers\Api\SpeedDraftCollateralDocumentController;
 use App\Http\Controllers\Api\SpeedDraftController;
@@ -73,6 +79,10 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('throttle:' . config('ratelimit.login') . ',1')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
 });
+
+// --- Public branding (pre-auth: Login screen, page <title>, <img> can't carry a bearer token) ---
+Route::get('company-profile/branding', [CompanyProfileController::class, 'branding']);
+Route::get('company-profile/logo', [CompanyProfileController::class, 'logo']);
 
 // --- Protected ---
 Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1'])->group(function () {
@@ -121,6 +131,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('permissions', [PermissionController::class, 'index'])->middleware('perm:User Permission,View');
     Route::put('permissions/{user}', [PermissionController::class, 'updateUser'])->middleware('perm:User Permission,Edit');
 
+    // --- Company Profile (branding/identity — see the public branding/logo routes above for the pre-auth half) ---
+    Route::get('company-profile', [CompanyProfileController::class, 'show'])->middleware('perm:Company Profile,View');
+    Route::put('company-profile', [CompanyProfileController::class, 'update'])->middleware('perm:Company Profile,Edit');
+    Route::post('company-profile/logo', [CompanyProfileController::class, 'uploadLogo'])->middleware('perm:Company Profile,Edit');
+
     // --- Customer Management ---
     Route::get('customers', [CustomerController::class, 'index'])->middleware('perm:Customer Management,View');
     Route::get('customers/{customer}', [CustomerController::class, 'show'])->middleware('perm:Customer Management,View');
@@ -143,6 +158,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Document Tracking: generated reference numbers ---
     Route::get('generated-numbers', [GeneratedNumberController::class, 'index'])->middleware('perm:Document Tracking,View');
+    Route::get('generated-numbers-years', [GeneratedNumberController::class, 'years'])->middleware('perm:Document Tracking,View');
 
     // --- Leasing / Loan Calculator: standalone quote, never persists ---
     Route::post('finance-calculator/calculate', [FinanceCalculatorController::class, 'calculate'])->middleware('perm:Loan Calculator,View');
@@ -151,6 +167,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('loans', [LoanController::class, 'index'])->middleware('perm:Loan Applications,View');
     // Flat path (not loans/overdue) so it can never collide with the loans/{loan} route below.
     Route::get('loans-overdue', [LoanController::class, 'overdue'])->middleware('perm:Overdue Loans,View');
+    Route::get('loans-status-counts', [LoanController::class, 'statusCounts'])->middleware('perm:Active Loans,View');
     Route::get('loan-reports/{type}', [LoanReportController::class, 'show'])->middleware('perm:Loan Reports,View');
     Route::get('loan-reports/{type}/pdf', [LoanReportController::class, 'exportPdf'])->middleware('perm:Loan Reports,View');
     Route::get('loans/{loan}', [LoanController::class, 'show'])->middleware('perm:Loan Applications,View');
@@ -167,6 +184,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Loan Management: Active Loans ---
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
+    Route::post('loans/{loan}/write-off', [LoanController::class, 'writeOff'])->middleware('admin');
     Route::patch('loans/{loan}/status-flags', [LoanController::class, 'updateStatusFlags'])->middleware('perm:Active Loans,Edit');
     Route::patch('loans/{loan}/officers', [LoanController::class, 'updateOfficers'])->middleware('perm:Active Loans,Edit');
     // Admin-only — see the frontend's "Loan Adjustments" screen (installment skip / cheque clearance / waivers).
@@ -200,6 +218,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('sales-executive-commissions', [SalesExecutiveCommissionController::class, 'index'])->middleware('perm:Sales Executive Commissions,View');
     // Admin-only, like other one-shot financial-payout actions (clear-cheque, waivers) — bypasses the permission grid entirely.
     Route::post('sales-executive-commissions/{commission}/pay', [SalesExecutiveCommissionController::class, 'pay'])->middleware('admin');
+    Route::post('sales-executive-commissions/{commission}/void', [SalesExecutiveCommissionController::class, 'void'])->middleware('admin');
 
     // --- Loan Management: Charges (Document/Legal/Valuation/Other due-type breakdown) ---
     Route::get('loans/{loan}/charges', [LoanChargeController::class, 'index'])->middleware('perm:Active Loans,View');
@@ -250,6 +269,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('speed-drafts', [SpeedDraftController::class, 'index'])->middleware('perm:Speed Drafts,View');
     // Flat path (not speed-drafts/overdue) so it can never collide with the speed-drafts/{speedDraft} route below.
     Route::get('speed-drafts-overdue', [SpeedDraftController::class, 'overdue'])->middleware('perm:Speed Drafts,View');
+    Route::get('speed-drafts-status-counts', [SpeedDraftController::class, 'statusCounts'])->middleware('perm:Speed Drafts,View');
     Route::get('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'show'])->middleware('perm:Speed Drafts,View');
     Route::post('speed-drafts', [SpeedDraftController::class, 'store'])->middleware('perm:Speed Drafts,Create');
     Route::put('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'update'])->middleware('perm:Speed Drafts,Edit');
@@ -274,6 +294,46 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('speed-drafts/{speedDraft}/next-receipt-no', [SpeedDraftPaymentController::class, 'nextReceiptNo'])->middleware('perm:Speed Draft Payments,Create');
     Route::post('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'store'])->middleware('perm:Speed Draft Payments,Create');
     Route::delete('speed-draft-payments/{payment}', [SpeedDraftPaymentController::class, 'destroy'])->middleware('perm:Speed Draft Payments,Delete');
+
+    // --- Pawning: Types (schemes — rates, LTV, grace/auction-notice days) ---
+    Route::get('pawning-types', [PawningTypeController::class, 'index'])->middleware('perm:Pawning Types,View');
+    Route::post('pawning-types', [PawningTypeController::class, 'store'])->middleware('perm:Pawning Types,Create');
+    Route::put('pawning-types/{pawningType}', [PawningTypeController::class, 'update'])->middleware('perm:Pawning Types,Edit');
+    Route::delete('pawning-types/{pawningType}', [PawningTypeController::class, 'destroy'])->middleware('perm:Pawning Types,Delete');
+
+    // --- Pawning: Article Types (Chain, Ring, Bangle, ...) ---
+    Route::get('pawning-article-types', [PawningArticleTypeController::class, 'index'])->middleware('perm:Pawning Types,View');
+    Route::post('pawning-article-types', [PawningArticleTypeController::class, 'store'])->middleware('perm:Pawning Types,Create');
+    Route::put('pawning-article-types/{pawningArticleType}', [PawningArticleTypeController::class, 'update'])->middleware('perm:Pawning Types,Edit');
+    Route::delete('pawning-article-types/{pawningArticleType}', [PawningArticleTypeController::class, 'destroy'])->middleware('perm:Pawning Types,Delete');
+
+    // --- Pawning: Gold Rates (valuation rate history by karat/branch) ---
+    Route::get('pawning-gold-rates', [PawningGoldRateController::class, 'index'])->middleware('perm:Pawning Types,View');
+    Route::get('pawning-gold-rates/latest', [PawningGoldRateController::class, 'latest'])->middleware('perm:Pawnings,Create');
+    Route::post('pawning-gold-rates', [PawningGoldRateController::class, 'store'])->middleware('perm:Pawning Types,Create');
+    Route::delete('pawning-gold-rates/{pawningGoldRate}', [PawningGoldRateController::class, 'destroy'])->middleware('perm:Pawning Types,Delete');
+
+    // --- Pawning: Tickets (issued+disbursed in one step — appraisal IS the approval) ---
+    Route::get('pawnings', [PawningController::class, 'index'])->middleware('perm:Pawnings,View');
+    // Flat path (not pawnings/overdue) so it can never collide with the pawnings/{pawning} route below.
+    Route::get('pawnings-overdue', [PawningController::class, 'overdue'])->middleware('perm:Pawnings,View');
+    Route::get('pawnings/{pawning}', [PawningController::class, 'show'])->middleware('perm:Pawnings,View');
+    Route::post('pawnings', [PawningController::class, 'store'])->middleware('perm:Pawnings,Create');
+    Route::post('pawnings/{pawning}/renew', [PawningController::class, 'renew'])->middleware('perm:Pawning Payments,Create');
+    Route::post('pawnings/{pawning}/redeem', [PawningController::class, 'redeem'])->middleware('perm:Pawning Payments,Create');
+    Route::post('pawning-payments/{payment}/void', [PawningController::class, 'voidPayment'])->middleware('perm:Pawning Payments,Delete');
+
+    // --- Pawning: Auctions (default handling) ---
+    Route::get('pawning-auctions', [PawningAuctionController::class, 'index'])->middleware('perm:Pawning Auctions,View');
+    Route::get('pawning-auctions-eligible', [PawningAuctionController::class, 'eligible'])->middleware('perm:Pawning Auctions,View');
+    Route::get('pawning-auctions/{pawningAuction}', [PawningAuctionController::class, 'show'])->middleware('perm:Pawning Auctions,View');
+    Route::post('pawning-auctions', [PawningAuctionController::class, 'store'])->middleware('perm:Pawning Auctions,Create');
+    Route::post('pawning-auctions/{pawningAuction}/items', [PawningAuctionController::class, 'addItems'])->middleware('perm:Pawning Auctions,Edit');
+    Route::post('pawning-auctions/{pawningAuction}/complete', [PawningAuctionController::class, 'complete'])->middleware('perm:Pawning Auctions,Edit');
+    Route::post('pawning-auction-items/{pawningAuctionItem}/sale', [PawningAuctionController::class, 'recordSale'])->middleware('perm:Pawning Auctions,Edit');
+    Route::post('pawning-auction-items/{pawningAuctionItem}/unsold', [PawningAuctionController::class, 'markUnsold'])->middleware('perm:Pawning Auctions,Edit');
+    Route::post('pawning-auction-items/{pawningAuctionItem}/settle-surplus', [PawningAuctionController::class, 'settleSurplus'])->middleware('perm:Pawning Auctions,Edit');
+    Route::post('pawning-auction-items/{pawningAuctionItem}/forfeit-surplus', [PawningAuctionController::class, 'forfeitSurplus'])->middleware('perm:Pawning Auctions,Edit');
 
     // --- Bank Management: Bank Accounts ---
     Route::get('bank-accounts', [BankAccountController::class, 'index'])->middleware('perm:Bank Accounts,View');
@@ -308,6 +368,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::put('cash-transfers/{cashTransfer}/approve', [CashTransferController::class, 'approve'])->middleware('perm:Cash Transfers,Approve');
     Route::put('cash-transfers/{cashTransfer}/reject', [CashTransferController::class, 'reject'])->middleware('perm:Cash Transfers,Approve');
     Route::delete('cash-transfers/{cashTransfer}', [CashTransferController::class, 'destroy'])->middleware('perm:Cash Transfers,Delete');
+    Route::post('cash-transfers/{cashTransfer}/void', [CashTransferController::class, 'void'])->middleware('perm:Cash Transfers,Delete');
 
     // --- Cashbook Management: Cash Reconciliation (branch-level daily cash-in-hand entry) ---
     Route::get('cash-reconciliations', [CashReconciliationController::class, 'index'])->middleware('perm:Cash Reconciliation,View');
@@ -360,10 +421,12 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->middleware('perm:Fixed Deposits,Create');
     Route::post('fixed-deposits/{fixedDeposit}/renew', [FixedDepositController::class, 'renew'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fixed-deposits/{fixedDeposit}/withdraw', [FixedDepositController::class, 'withdraw'])->middleware('perm:Fixed Deposits,Edit');
+    Route::post('fixed-deposits/{fixedDeposit}/void-withdrawal', [FixedDepositController::class, 'voidWithdrawal'])->middleware('perm:Fixed Deposits,Delete');
 
     // --- Funding Management: Monthly Interest Payments ---
     Route::get('fixed-deposits/{fixedDeposit}/interest-payments', [FdInterestPaymentController::class, 'index'])->middleware('perm:Fixed Deposits,View');
     Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware('perm:Fixed Deposits,Edit');
+    Route::post('fd-interest-payments/{fdInterestPayment}/void', [FdInterestPaymentController::class, 'void'])->middleware('perm:Fixed Deposits,Delete');
 
     // --- Funding Management: Reports & Dashboard ---
     Route::get('funding-reports/{type}', [FundingReportController::class, 'show'])->middleware('perm:Funding Reports,View');

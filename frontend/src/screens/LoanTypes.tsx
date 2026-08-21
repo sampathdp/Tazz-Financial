@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Loan Types (self-referencing tree: category or product) */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loanTypesApi, type LoanType, type LoanTypeCategory, type LoanFrequency, type InterestMethod, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
@@ -186,7 +186,7 @@ export function LoanTypesScreen({ user: me }: { go: Go; user?: AuthUser | null }
         sub="Organize loan products into categories — e.g. SME → Daily / Micro → Weekly / Monthly."
         actions={<Can user={me} module="Loan Types" action="Create"><Btn variant="primary" icon="plus" onClick={() => openCreate(null)}>Add Loan Type</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
          tree.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-3)' }}>No loan types yet</div> :
          tree.map((n) => <Row key={n.id} node={n} depth={0} me={me} onAddChild={openCreate} onEdit={openEdit} onDelete={remove} />)}
       </Card>

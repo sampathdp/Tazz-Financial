@@ -4,7 +4,7 @@
    once a future feature wires its code in) never needs a code deploy. See
    ApprovalType::isAuthorized() on the backend. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { api, approvalTypesApi, type ApprovalType, type AuthUser } from '../api'
 import { useNotify } from '../components/Notify'
@@ -79,7 +79,7 @@ export function ApprovalTypesScreen({ user: me }: { go: Go; user?: AuthUser | nu
         actions={<Btn variant="primary" icon="plus" onClick={openCreate}>New Approval Type</Btn>} />
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Name' }, { label: 'Code' }, { label: 'Description' }, { label: 'Required', align: 'center' }, { label: 'Approvers' }, { label: '', align: 'right', w: 130 }]}
           rows={rows} empty="No approval types"
           render={(t) => <>

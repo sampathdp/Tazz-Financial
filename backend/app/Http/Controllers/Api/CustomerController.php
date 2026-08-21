@@ -21,9 +21,39 @@ class CustomerController extends Controller
     private const EMPLOYMENT_FIELDS = ['employer_name', 'job_title', 'employer_address', 'employer_phone', 'employment_start_date'];
     private const BUSINESS_FIELDS = ['business_name', 'business_reg_no', 'business_type', 'business_address', 'business_phone'];
 
-    public function index()
+    /**
+     * With no `page` param, returns the full list exactly as before — every
+     * customer picker across the app (Deposits, SpeedDrafts, Pawnings,
+     * FundingReports, LoanApplications, ...) calls customersApi.list() with
+     * no params expecting a flat array for local search, and must keep
+     * working unchanged. `page` opts into server-side search + pagination
+     * for the Customers browse screen.
+     */
+    public function index(Request $request)
     {
-        return Customer::with(['branch:id,name,code', 'employmentDetail', 'businessDetail'])->orderByDesc('id')->get();
+        $query = Customer::with(['branch:id,name,code', 'employmentDetail', 'businessDetail']);
+
+        if (!$request->filled('page')) {
+            return $query->orderByDesc('id')->get();
+        }
+
+        if ($request->filled('search')) {
+            $term = $request->search;
+            $query->where(function ($q) use ($term) {
+                $q->where('full_name', 'like', "%{$term}%")
+                    ->orWhere('surname', 'like', "%{$term}%")
+                    ->orWhere('initials', 'like', "%{$term}%")
+                    ->orWhere('code', 'like', "%{$term}%")
+                    ->orWhere('nic_no', 'like', "%{$term}%")
+                    ->orWhere('passport_no', 'like', "%{$term}%")
+                    ->orWhere('driving_license_no', 'like', "%{$term}%")
+                    ->orWhere('phone', 'like', "%{$term}%")
+                    ->orWhere('email', 'like', "%{$term}%")
+                    ->orWhereHas('branch', fn ($qq) => $qq->where('name', 'like', "%{$term}%"));
+            });
+        }
+
+        return $query->orderByDesc('id')->paginate((int) $request->input('perPage', 25));
     }
 
     public function show(Customer $customer)
@@ -96,8 +126,23 @@ class CustomerController extends Controller
         return $customer->load(['branch:id,name,code', 'employmentDetail', 'businessDetail']);
     }
 
+    /**
+     * Customer uses SoftDeletes, so the credit_facilities.customer_id FK
+     * (plain RESTRICT, no cascade) never actually fires here — a soft
+     * delete is just an UPDATE, not a real DELETE. Without this check a
+     * customer with a live loan/speed-draft/pawning ticket or FD could
+     * vanish from every list/report while their facility keeps running,
+     * silently (every read already guards with ?-> so nothing crashes —
+     * it just quietly loses the customer's name everywhere).
+     */
     public function destroy(Customer $customer)
     {
+        if (DB::table('credit_facilities')->where('customer_id', $customer->id)->exists()) {
+            return response()->json(['message' => 'This customer has loan/speed-draft/pawning facilities on record and cannot be deleted.'], 422);
+        }
+        if (FixedDeposit::where('customer_id', $customer->id)->exists() || FdDeposit::where('customer_id', $customer->id)->exists()) {
+            return response()->json(['message' => 'This customer has fixed deposits on record and cannot be deleted.'], 422);
+        }
         $customer->delete();
 
         return response()->noContent();

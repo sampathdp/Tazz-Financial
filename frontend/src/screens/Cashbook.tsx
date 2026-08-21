@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Cashbook Management (API-backed) */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   branchesApi, cashAccountsApi, cashbookEntriesApi, cashTransfersApi, cashReconciliationsApi,
@@ -123,7 +123,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
       </Card>
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Date' }, { label: 'Account' }, { label: 'Type' }, { label: 'Category' }, { label: 'Description' }, { label: 'Amount', align: 'right' }, { label: 'Balance', align: 'right' }, { label: '', align: 'right', w: 60 }]}
           rows={rows}
           render={(e) => <>
@@ -263,7 +263,14 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
     catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
-  const statusTone = (s?: string) => s === 'Completed' ? 'green' : s === 'Rejected' ? 'red' : 'amber'
+  const voidTransfer = async (t: CashTransfer) => {
+    const reason = await notify.prompt({ title: 'Void this completed transfer?', msg: `Moves ${money(t.amount)} back from ${t.toAccount?.name} to ${t.fromAccount?.name} and reverses its GL entry.`, placeholder: 'Reason (optional)', danger: true, okText: 'Void' })
+    if (reason === null) return
+    try { await cashTransfersApi.void(t.id, reason || undefined); refresh(); notify.success('Transfer voided') }
+    catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
+  }
+
+  const statusTone = (s?: string) => s === 'Completed' ? 'green' : s === 'Rejected' || s === 'Voided' ? 'red' : 'amber'
 
   return (
     <div>
@@ -278,7 +285,7 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
       </Card>
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Date' }, { label: 'From' }, { label: 'To' }, { label: 'Amount', align: 'right' }, { label: 'Description' }, { label: 'Status', align: 'center' }, { label: 'Requested By' }, { label: '', align: 'right', w: 110 }]}
           rows={rows}
           render={(t) => <>
@@ -295,6 +302,7 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
                 <button className="mms-act" title="Reject" onClick={() => reject(t)}><Icon n="x" s={15} /></button>
               </>}
               {t.status === 'Pending' && <Can user={me} module="Cash Transfers" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(t)}><Icon n="trash" s={15} /></button></Can>}
+              {t.status === 'Completed' && <Can user={me} module="Cash Transfers" action="Delete"><button className="mms-act" title="Void" onClick={() => voidTransfer(t)}><Icon n="x" s={15} c="var(--bad)" /></button></Can>}
             </div></Td>
           </>} />}
       </Card>

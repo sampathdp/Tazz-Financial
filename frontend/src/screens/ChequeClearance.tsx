@@ -5,7 +5,7 @@
    lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back to its
    unmapped-route rule (admin role only), same as Loan Adjustments. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Select, Table, Td, DateInput, Modal } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Select, Table, Td, DateInput, Modal , LoadingBlock } from '../components/ui'
 import {
   loanPostDatedChequesApi, loanPaymentsApi,
   type AuthUser, type LoanPostDatedCheque, type ChequeStatus,
@@ -97,7 +97,7 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
       </Card>
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Cheque No' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Branch' }, { label: 'Bank' }, { label: 'Cheque Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 190 }]}
           rows={rows} empty="No cheques found"
           render={(c) => {

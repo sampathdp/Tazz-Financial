@@ -6,23 +6,88 @@ use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\FacilityPayment;
 use App\Models\JournalEntry;
+use App\Models\Loan;
 
 /**
  * Bridges Loan Payments into the general ledger — the GL counterpart of
  * CashbookPoster, triggered from the same places, but answering "what does
  * the business now own/earn" rather than "how much is in the till."
  *
- * Scope, deliberately: only Cash-method receipts and Cheque realizations are
- * wired here. Both have an unambiguous account to debit (the branch's till,
- * or 1030 Cheques/Undeposited Funds). Bank-method loan payments are NOT
- * posted — FacilityPayment.bank_id is only ever set for a cheque, so there is
- * no unambiguous account to debit for Bank, and today's system doesn't move a
- * bank balance for one either; inventing one here would just be a second kind
- * of drift. Same reasoning applies to loan disbursement (no payment method is
- * even captured yet). Both are natural next steps once that data exists.
+ * Scope, deliberately: only Cash-method receipts, Cheque realizations, and
+ * (now) Cash-method disbursements are wired here. Each has an unambiguous
+ * account to move (the branch's till, or 1030 Cheques/Undeposited Funds).
+ * Bank-method loan payments/disbursements are still NOT posted —
+ * FacilityPayment.bank_id is only ever set for a cheque, loan_facility_
+ * details.disbursement_method captures Cash/Bank/Cheque but no
+ * bank_account_id, so there is no unambiguous account to move for Bank
+ * either way; inventing one here would just be a second kind of drift. Same
+ * limitation SpeedDraftLedgerPoster/PawningLedgerPoster already carry for
+ * disbursement — not a new gap, just extended to Loan for consistency.
  */
 class LoanLedgerPoster
 {
+    /** Capital handed to the customer at disbursement — Dr 1100 (principal now outstanding), Cr the branch till. Cash-method only, see class docblock. */
+    public static function postDisbursement(Loan $loan): void
+    {
+        if ($loan->loanDetail?->disbursement_method !== 'Cash') {
+            return;
+        }
+        $till = CashAccount::branchPrimary((int) $loan->branch_id);
+        if (!$till) {
+            return;
+        }
+        $tillAccount = ChartOfAccount::forCashTill($till);
+        $principalAccount = ChartOfAccount::system('1100');
+        $entryDate = optional($loan->disbursed_at)->toDateString() ?? now()->toDateString();
+
+        LedgerPoster::post([
+            ['account_id' => $principalAccount->id, 'debit' => $loan->disbursed_amount, 'credit' => 0],
+            ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $loan->disbursed_amount],
+        ], $entryDate, [
+            'source_type' => 'Loan',
+            'source_id' => $loan->id,
+            'description' => "Loan disbursed - {$loan->code}",
+            'branch_id' => $loan->branch_id,
+            'posted_by' => $loan->approved_by,
+        ]);
+    }
+
+    /**
+     * A bad-debt write-off — Dr 5300 (Loan Loss Expense), Cr 1100 (relieves
+     * the outstanding principal). Direct-write-off method (no prior
+     * provision build-up via 1190 to consume first) since nothing in this
+     * codebase books a periodic provision for Loan — see LoanController::
+     * writeOff(), which posts the loan's outstanding_balance_cache at the
+     * moment it's written off, then zeroes it.
+     */
+    public static function postWriteOff(Loan $loan, float $amount, ?int $userId = null): void
+    {
+        if ($amount <= 0) {
+            return;
+        }
+        LedgerPoster::post([
+            ['account_id' => ChartOfAccount::system('5300')->id, 'debit' => $amount, 'credit' => 0],
+            ['account_id' => ChartOfAccount::system('1100')->id, 'debit' => 0, 'credit' => $amount],
+        ], now()->toDateString(), [
+            'source_type' => 'Loan',
+            'source_id' => $loan->id,
+            'description' => "Loan written off - {$loan->code}",
+            'branch_id' => $loan->branch_id,
+            'posted_by' => $userId,
+        ]);
+    }
+
+    /** Reverses a Loan's disbursement entry — called when an Active-but-unpaid loan is cancelled (LoanController::approveCancelRequest() zeroes disbursed_amount/outstanding_balance_cache for exactly this case; the GL side needs the same undo). No-op if disbursement was never posted (Bank/Cheque method). */
+    public static function reverseDisbursement(Loan $loan, ?int $userId = null): void
+    {
+        JournalEntry::where('source_type', 'Loan')
+            ->where('source_id', $loan->id)
+            ->where('status', 'Posted')
+            ->whereNull('reversal_of_id')
+            ->get()
+            ->each(fn (JournalEntry $entry) => LedgerPoster::reverse($entry, "Cancelled: {$loan->code}", $userId));
+    }
+
     /**
      * Cash received right now — a regular payment (already allocated to the
      * schedule/charges by the caller) or a settlement request (not allocated

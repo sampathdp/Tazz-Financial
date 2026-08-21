@@ -15,7 +15,7 @@ class BankReconciliationController extends Controller
         $query = BankReconciliation::with(['bankAccount:id,name,bank_id,account_number', 'bankAccount.bank:id,name', 'reconciler:id,name'])
             ->orderByDesc('statement_date');
         if ($request->filled('bank_account_id')) {
-            $query->where('bank_account_id', $request->integer('bank_account_id'));
+            $query->where('bank_account_id', (int) $request->query('bank_account_id'));
         }
 
         return $query->get();

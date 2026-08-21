@@ -3,7 +3,7 @@
    deposit, viewed by investor rather than by FD product (that's Funding
    Reports). Same shape as LoanReports.tsx. */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Card, PageHead, Table, Td } from '../components/ui'
+import { Card, PageHead, Table, Td , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { ExportButtons } from '../components/ExportButtons'
 import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
@@ -38,7 +38,7 @@ function TileGrid({ children }: { children: ReactNode }) {
 function ChartCard({ title, children }: { title: string; children: ReactNode }) {
   return <Card style={{ marginBottom: 16 }}><div className="eyebrow" style={{ marginBottom: 14 }}>{title}</div>{children}</Card>
 }
-function Loading() { return <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> }
+function Loading() { return <LoadingBlock /> }
 function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)', whiteSpace: 'pre-line' }}>{msg}</div> }
 
 /* ---------------------------- Summary ---------------------------- */

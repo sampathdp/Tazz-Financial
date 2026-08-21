@@ -119,4 +119,26 @@ class FdLedgerPoster
             'posted_by' => $withdrawal->created_by,
         ]);
     }
+
+    /** Reverses a withdrawal's posting — called when a mistaken FD closure is voided (FixedDepositController::voidWithdrawal()). No-op if nothing was ever posted for it (Bank/Cheque). */
+    public static function reverseWithdrawal(FdWithdrawal $withdrawal, ?int $userId = null): void
+    {
+        JournalEntry::where('source_type', 'FdWithdrawal')
+            ->where('source_id', $withdrawal->id)
+            ->where('status', 'Posted')
+            ->whereNull('reversal_of_id')
+            ->get()
+            ->each(fn (JournalEntry $entry) => LedgerPoster::reverse($entry, "Voided: {$withdrawal->voucher_no}", $userId));
+    }
+
+    /** Reverses an interest payment's posting — called when a mistaken payment is voided (FdInterestPaymentController::void()). No-op if nothing was ever posted for it (Bank/Cheque). */
+    public static function reverseInterestPaid(FdInterestPayment $payment, ?int $userId = null): void
+    {
+        JournalEntry::where('source_type', 'FdInterestPayment')
+            ->where('source_id', $payment->id)
+            ->where('status', 'Posted')
+            ->whereNull('reversal_of_id')
+            ->get()
+            ->each(fn (JournalEntry $entry) => LedgerPoster::reverse($entry, "Voided installment #{$payment->installment_no}", $userId));
+    }
 }

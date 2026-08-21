@@ -4,7 +4,7 @@
    view/void screen over that auto-created record, not a place to raise a
    new one from scratch. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner , LoadingBlock } from '../components/ui'
 import {
   vendorsApi, expensesApi, expenseCategoriesApi, branchesApi, cashAccountsApi, bankAccountsApi, paymentVouchersApi,
   type Vendor, type Expense, type ExpenseStatus, type ExpenseCategory, type Branch, type CashAccount, type BankAccount,
@@ -70,7 +70,7 @@ export function VendorsScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
       <PageHead crumbs="Expense Management" title="Vendors" icon="store" sub={`${rows.length} ${rows.length === 1 ? 'vendor' : 'vendors'}`}
         actions={<Can user={me} module="Vendors" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Vendor</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Name' }, { label: 'Code' }, { label: 'Contact' }, { label: 'Phone' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No vendors yet"
           rows={rows}
@@ -227,7 +227,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
       </Card>
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table
           cols={[{ label: 'Code' }, { label: 'Branch' }, { label: 'Category' }, { label: 'Vendor' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 200 }]}
           empty="No expenses recorded yet" rows={rows}
@@ -356,7 +356,7 @@ export function PaymentVouchersScreen({ user: me }: { go: Go; user?: AuthUser | 
       </Card>
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table
           cols={[{ label: 'Code' }, { label: 'Expense' }, { label: 'Vendor' }, { label: 'Method' }, { label: 'Paid At' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No payment vouchers yet" rows={rows}

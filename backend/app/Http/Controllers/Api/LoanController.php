@@ -15,6 +15,7 @@ use App\Models\SalesExecutiveCommission;
 use App\Services\NumberGenerator;
 use App\Support\AerCalculator;
 use App\Support\LoanAmortizer;
+use App\Support\LoanLedgerPoster;
 use App\Support\LoanSummary;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -28,6 +29,9 @@ class LoanController extends Controller
 {
     private const FREQUENCIES = ['daily', 'weekly', 'monthly'];
     private const COLLATERAL_TYPES = ['Vehicle', 'Jewelry', 'Property', 'Other'];
+
+    /** Matches frontend ActiveLoans.tsx's LIVE_STATUSES — the statuses shown on the Active Loans browse screen. */
+    private const LIVE_STATUSES = ['Approved', 'Active', 'Closed', 'WrittenOff', 'Restructured'];
 
     private const SUMMARY_RELATIONS = [
         'customer:id,full_name,code,nic_no,phone',
@@ -52,6 +56,7 @@ class LoanController extends Controller
         'applier:id,name',
         'approver:id,name',
         'canceller:id,name',
+        'writtenOffBy:id,name',
         'cancelRequests.requester:id,name', 'cancelRequests.firstApprover:id,name', 'cancelRequests.secondApprover:id,name', 'cancelRequests.rejecter:id,name',
         'coApplicants.coApplicant:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
         'guarantors.guarantor:id,full_name,code,nic_no,phone',
@@ -73,12 +78,61 @@ class LoanController extends Controller
         'statusEvents.recordedBy:id,name',
     ];
 
-    public function index()
+    /**
+     * With no `page` param, returns the full list exactly as before — every
+     * loan/customer picker across the app (LoanApplications, LoanAdjustments,
+     * PaymentReceipt, ...) calls loansApi.list() with no params expecting a
+     * flat array for local search, and must keep working unchanged. `page`
+     * opts into server-side status/search filtering + pagination for the
+     * Active Loans browse screen, which can't stay an unbounded full-table
+     * fetch as the portfolio grows.
+     */
+    public function index(Request $request)
     {
-        return Loan::with(self::SUMMARY_RELATIONS)
+        $query = Loan::with(self::SUMMARY_RELATIONS)
             ->withSum('schedules as total_due_sum', 'total_due')
-            ->withSum('schedules as paid_sum', 'paid_amount')
-            ->orderByDesc('id')->get();
+            ->withSum('schedules as paid_sum', 'paid_amount');
+
+        if (!$request->filled('page')) {
+            return $query->orderByDesc('id')->get();
+        }
+
+        // The only current caller of paginated mode is the Active Loans screen,
+        // scoped to LIVE_STATUSES exactly like the old client-side filter was
+        // (approved/active/closed/written-off/restructured — not pending
+        // applications or rejected/cancelled ones).
+        if ($request->filled('status') && $request->status !== 'All') {
+            $query->where('status', $request->status);
+        } else {
+            $query->whereIn('status', self::LIVE_STATUSES);
+        }
+        if ($request->filled('search')) {
+            $term = $request->search;
+            $query->where(function ($q) use ($term) {
+                $q->where('code', 'like', "%{$term}%")
+                    ->orWhereHas('customer', fn ($qq) => $qq->where('full_name', 'like', "%{$term}%")->orWhere('code', 'like', "%{$term}%"))
+                    ->orWhereHas('loanDetail.loanType', fn ($qq) => $qq->where('name', 'like', "%{$term}%"));
+            });
+        }
+
+        return $query->orderByDesc('id')->paginate((int) $request->input('perPage', 25));
+    }
+
+    /**
+     * Per-status counts for the Active Loans screen's filter chips — kept as
+     * its own cheap GROUP BY query rather than derived from a full loan list
+     * on the client (which is exactly the unbounded fetch index() above now
+     * avoids once paginated). Not affected by the current search text, same
+     * as the counts these chips showed before pagination.
+     */
+    public function statusCounts()
+    {
+        $counts = Loan::whereIn('status', self::LIVE_STATUSES)
+            ->selectRaw('status, count(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status');
+
+        return ['All' => (int) $counts->sum(), ...array_map('intval', $counts->all())];
     }
 
     /**
@@ -381,6 +435,7 @@ class LoanController extends Controller
             if ($loan->status === 'Active') {
                 $loan->schedules()->delete();
                 $loan->salesExecutiveCommissions()->delete();
+                LoanLedgerPoster::reverseDisbursement($loan, $request->user()->id);
                 $loan->update(['disbursed_amount' => null, 'disbursed_at' => null, 'outstanding_balance_cache' => 0]);
             }
             $loan->update([
@@ -436,6 +491,7 @@ class LoanController extends Controller
             'disbursed_amount' => 'nullable|numeric|min:0',
             'disbursed_at' => 'nullable|date',
             'first_installment_date' => 'required|date',
+            'disbursement_method' => ['required', Rule::in(['Cash', 'Bank', 'Cheque'])],
         ]);
 
         DB::transaction(function () use ($loan, $detail, $data) {
@@ -446,11 +502,44 @@ class LoanController extends Controller
                 'outstanding_balance_cache' => $financed,
                 'status' => 'Active',
             ]);
-            $detail->update(['first_installment_date' => $data['first_installment_date']]);
+            $detail->update([
+                'first_installment_date' => $data['first_installment_date'],
+                'disbursement_method' => $data['disbursement_method'],
+            ]);
             $rows = LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $data['first_installment_date']);
             $loan->schedules()->insert($rows);
             $this->applyEffectiveRate($detail->fresh(), $rows);
             $this->generateSalesExecutiveCommission($loan->fresh(), $detail);
+            LoanLedgerPoster::postDisbursement($loan->fresh());
+        });
+
+        return $loan->load(self::DETAIL_RELATIONS);
+    }
+
+    /**
+     * Bad-debt write-off — WrittenOff was a listed status (LIVE_STATUSES,
+     * loan report counts) that nothing ever actually set; this is that
+     * missing action. Direct-write-off (Dr 5300 expense, Cr 1100), no
+     * amortized schedule is touched (kept as history, same as a Closed
+     * loan) — only the outstanding balance and status change.
+     */
+    public function writeOff(Request $request, Loan $loan)
+    {
+        if ($loan->status !== 'Active') {
+            return response()->json(['message' => 'Only an active loan can be written off.'], 422);
+        }
+        $data = $request->validate(['reason' => 'required|string|max:255']);
+        $amount = (float) $loan->outstanding_balance_cache;
+
+        DB::transaction(function () use ($loan, $data, $amount, $request) {
+            LoanLedgerPoster::postWriteOff($loan, $amount, $request->user()->id);
+            $loan->update([
+                'status' => 'WrittenOff',
+                'outstanding_balance_cache' => 0,
+                'closed_at' => now(),
+                'written_off_reason' => $data['reason'],
+                'written_off_by' => $request->user()->id,
+            ]);
         });
 
         return $loan->load(self::DETAIL_RELATIONS);

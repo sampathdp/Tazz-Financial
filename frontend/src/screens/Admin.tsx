@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Administration (API-backed) */
 import { useEffect, useRef, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { api, company as companyApi, permissionsApi, branchesApi, rolesApi, type PermissionMatrix, type Branch, type Role, type AuthUser } from '../api'
 import { Can, userCan } from '../lib/permissions'
@@ -61,7 +61,7 @@ export function BranchesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
       <PageHead crumbs="Administration" title="Branch Management" icon="building" sub={`${rows.length} branches`}
         actions={<Can user={me} module="Branch Management" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Branch</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Branch' }, { label: 'Code' }, { label: 'Type' }, { label: 'Phone' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           rows={rows}
           render={(b) => <>
@@ -238,7 +238,7 @@ export function RolesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
 
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, alignItems: 'start' }}>
         <Card pad={0}>
-          {loading ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> : roles.map((r) => (
+          {loading ? <LoadingBlock /> : roles.map((r) => (
             <div key={r.id} onClick={() => setSelectedId(r.id)} data-testid="role-row"
               className="row between" style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid var(--line-soft)', background: selectedId === r.id ? 'var(--ac-dim)' : 'transparent' }}>
               <div>
@@ -270,7 +270,7 @@ export function RolesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
                 System roles have implicit full access and cannot be modified.
               </div>
             )}
-            {gridLoading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+            {gridLoading ? <LoadingBlock /> :
               <PermGridEditor grid={grid} actions={actions} modules={modules} onToggle={toggle} onBulkRow={bulkRow} readOnly={readOnly} />}
           </>}
         </Card>
@@ -362,7 +362,7 @@ export function UsersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
       <PageHead crumbs="Administration" title="User Management" icon="users" sub={`${rows.length} system users`}
         actions={<Can user={me} module="User Management" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add User</Btn></Can>} />
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'User' }, { label: 'Email' }, { label: 'Role', align: 'center' }, { label: 'Branch' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 120 }]}
           rows={rows}
           render={(u) => <>

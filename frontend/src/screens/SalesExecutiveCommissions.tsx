@@ -1,6 +1,6 @@
 /* Tazz Investment & Credit — Sales Executive Commissions */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner , LoadingBlock } from '../components/ui'
 import {
   api, loanTypesApi, salesExecutiveCommissionsApi, cashAccountsApi, bankAccountsApi,
   type AuthUser, type LoanType, type SalesExecutiveCommission, type CommissionStatus, type PaymentMethod,
@@ -64,6 +64,13 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
   const openPay = (c: SalesExecutiveCommission) => { setPayTarget(c); setPayForm(blankPayForm(c)); setErr('') }
   const closePay = () => { setPayTarget(null); setPayForm(null); setErr('') }
 
+  const voidPayment = async (c: SalesExecutiveCommission) => {
+    const ok = await notify.confirm({ title: `Void this commission payment?`, msg: `Reverses ${money(c.commissionAmount)} paid to ${c.salesExecutiveName} and restores the till/bank balance.`, danger: true, okText: 'Void' })
+    if (!ok) return
+    try { await salesExecutiveCommissionsApi.void(c.id); refresh(); notify.success('Payment voided') }
+    catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
+  }
+
   const savePay = async () => {
     if (!payTarget || !payForm) return
     if (!payForm.paymentDate) { setErr('Payment date is required.'); return }
@@ -114,7 +121,7 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
       </Card>
 
       <Card pad={0}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> :
+        {loading ? <LoadingBlock /> :
         <Table
           cols={[
             { label: 'Sales Executive' }, { label: 'Loan Number' }, { label: 'Cycle', align: 'center' }, { label: 'Customer' }, { label: 'Loan Type' },
@@ -138,7 +145,12 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
               {c.commissionStatus === 'Eligible' && me?.role === 'admin' && (
                 <Btn variant="primary" size="sm" icon="check" onClick={() => openPay(c)}>Pay Commission</Btn>
               )}
-              {c.commissionStatus === 'Paid' && <span className="t-2" style={{ fontSize: 12 }}>{c.paidAt?.slice(0, 10)}</span>}
+              {c.commissionStatus === 'Paid' && (
+                <div className="row gap-2" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
+                  <span className="t-2" style={{ fontSize: 12 }}>{c.paidAt?.slice(0, 10)}</span>
+                  {me?.role === 'admin' && <Btn variant="danger" size="sm" icon="x" onClick={() => voidPayment(c)}>Void</Btn>}
+                </div>
+              )}
             </Td>
           </>} />}
       </Card>

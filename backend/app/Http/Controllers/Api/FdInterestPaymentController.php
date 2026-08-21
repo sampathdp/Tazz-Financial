@@ -56,4 +56,34 @@ class FdInterestPaymentController extends Controller
 
         return $fdInterestPayment->fresh(['fixedDeposit:id,fd_number,customer_id', 'payer:id,name']);
     }
+
+    /** Undoes a mistaken interest payment — reverses GL/Cashbook and puts the installment back to Pending. */
+    public function void(Request $request, FdInterestPayment $fdInterestPayment)
+    {
+        if ($fdInterestPayment->status !== 'Paid') {
+            return response()->json(['message' => 'This installment has not been paid.'], 422);
+        }
+        $fdInterestPayment->loadMissing('fixedDeposit');
+        $fd = $fdInterestPayment->fixedDeposit;
+
+        DB::transaction(function () use ($fdInterestPayment, $fd) {
+            FdCashbookPoster::reverseInterestPaid($fdInterestPayment);
+            FdLedgerPoster::reverseInterestPaid($fdInterestPayment);
+            $fdInterestPayment->update([
+                'status' => 'Pending',
+                'paid_amount' => 0,
+                'paid_at' => null,
+                'payment_method' => null,
+                'reference_no' => null,
+                'paid_by' => null,
+            ]);
+            // This installment is Pending again — if it's now the earliest
+            // one, next_interest_date needs to point back at it rather than
+            // whatever installment was next after it.
+            $earliestPending = $fd->interestPayments()->where('status', 'Pending')->orderBy('due_date')->first();
+            $fd->update(['next_interest_date' => $earliestPending?->due_date]);
+        });
+
+        return $fdInterestPayment->fresh(['fixedDeposit:id,fd_number,customer_id', 'payer:id,name']);
+    }
 }

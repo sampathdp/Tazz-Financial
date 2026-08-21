@@ -5,12 +5,13 @@
    client-side off the list endpoints' own rows where the backend doesn't
    already return a series, so no extra API calls are needed. */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Card, PageHead, Badge, Field, Input, Table, Td } from '../components/ui'
+import { Card, PageHead, Badge, Field, Input, Select, Btn, Table, Td, LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { ExportButtons } from '../components/ExportButtons'
 import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
+import { DateRangeSelect } from '../components/DateRangeSelect'
 import { BarChart, Donut, ProgressRow, AreaChart } from '../components/charts'
-import { loanReportsApi, type Loan, type OverdueLoan, type AuthUser } from '../api'
+import { loanReportsApi, loanTypesApi, api, type Loan, type OverdueLoan, type AuthUser, type LoanType, type LoanDetailReportRow, type LoanStatus } from '../api'
 import { getErrorText } from '../lib/apiError'
 import { downloadBlob, exportFlatTableToExcel, exportReportToExcel, type ExcelColumn } from '../lib/export'
 import type { Go } from './types'
@@ -43,7 +44,7 @@ function TileGrid({ children }: { children: ReactNode }) {
 function ChartCard({ title, children }: { title: string; children: ReactNode }) {
   return <Card style={{ marginBottom: 16 }}><div className="eyebrow" style={{ marginBottom: 14 }}>{title}</div>{children}</Card>
 }
-function Loading() { return <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> }
+function Loading() { return <LoadingBlock /> }
 function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)', whiteSpace: 'pre-line' }}>{msg}</div> }
 
 /* ---------------------------- Portfolio Summary ---------------------------- */
@@ -235,6 +236,7 @@ export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
         actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
+          <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
           <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
@@ -326,6 +328,7 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
         actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
+          <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
           <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
@@ -411,6 +414,7 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
         actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
+          <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
           <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
@@ -439,6 +443,221 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
                 <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
                 <Td align="right" mono>{money(l.principalAmount)}</Td>
                 <Td>{dateOnly(l.closedAt)}</Td>
+              </>} />
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ---------------------------- Loan Detail Report ---------------------------- */
+
+const LOAN_STATUSES: LoanStatus[] = ['Pending', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Closed', 'WrittenOff', 'Restructured']
+const DATE_FIELDS: { value: string; label: string }[] = [
+  { value: 'createdAt', label: 'Created Date' },
+  { value: 'applicationDate', label: 'Application Date' },
+  { value: 'disbursedAt', label: 'Disbursed Date' },
+  { value: 'closedAt', label: 'Closed Date' },
+  { value: 'startDate', label: 'Start Date' },
+]
+
+interface LoanDetailFilters {
+  status: LoanStatus | ''
+  loanTypeId: number | ''
+  loanOfficerId: number | ''
+  recoveryOfficerId: number | ''
+  customerSearch: string
+  dateField: string
+  fromDate: string
+  toDate: string
+  minPrincipal: string
+  maxPrincipal: string
+  overdueOnly: boolean
+}
+const EMPTY_DETAIL_FILTERS: LoanDetailFilters = {
+  status: '', loanTypeId: '', loanOfficerId: '', recoveryOfficerId: '', customerSearch: '',
+  dateField: 'createdAt', fromDate: '', toDate: '', minPrincipal: '', maxPrincipal: '', overdueOnly: false,
+}
+
+/** Excel columns for the full export — every field the backend flattens onto
+ *  a loan-detail row (see LoanReportController::loanDetail()), one loan per row. */
+const DETAIL_EXCEL_COLUMNS: ExcelColumn[] = [
+  { label: 'Loan Code', key: 'code' }, { label: 'Status', key: 'status' },
+  { label: 'Branch', key: 'branch' }, { label: 'Branch Code', key: 'branchCode' },
+  { label: 'Customer Code', key: 'customerCode' }, { label: 'Customer Name', key: 'customerName' },
+  { label: 'NIC No', key: 'nicNo' }, { label: 'Passport No', key: 'passportNo' }, { label: 'Phone', key: 'phone' },
+  { label: 'Email', key: 'email' }, { label: 'Address', key: 'address' }, { label: 'Occupation', key: 'occupation' },
+  { label: 'Monthly Income', key: 'monthlyIncome', align: 'right', format: 'money' },
+  { label: 'Loan Type', key: 'loanType' }, { label: 'Loan Category', key: 'loanCategory' },
+  { label: 'Principal', key: 'principal', align: 'right', format: 'money' },
+  { label: 'Interest Rate %', key: 'interestRate', align: 'right', format: 'number' },
+  { label: 'Rate Period', key: 'ratePeriod' }, { label: 'Term (Months)', key: 'termMonths', align: 'right', format: 'number' },
+  { label: 'Frequency', key: 'frequency' }, { label: 'Interest Method', key: 'interestMethod' },
+  { label: 'Down Payment', key: 'downPayment', align: 'right', format: 'money' }, { label: 'Purpose', key: 'purpose' },
+  { label: 'Application Date', key: 'applicationDate' }, { label: 'Approved Date', key: 'approvedAt' }, { label: 'Approved By', key: 'approvedBy' },
+  { label: 'Disbursed Date', key: 'disbursedAt' }, { label: 'Disbursed Amount', key: 'disbursedAmount', align: 'right', format: 'money' },
+  { label: 'First Installment Date', key: 'firstInstallmentDate' }, { label: 'Start Date', key: 'startDate' },
+  { label: 'Maturity Date', key: 'maturityDate' }, { label: 'Closed Date', key: 'closedAt' },
+  { label: 'Loan Officer', key: 'loanOfficer' }, { label: 'Recovery Officer', key: 'recoveryOfficer' },
+  { label: 'Reference Name', key: 'referenceName' }, { label: 'Reference ID No', key: 'referenceIdNo' }, { label: 'Reference Address', key: 'referenceAddress' },
+  { label: 'Vehicle No', key: 'vehicleNo' }, { label: 'Guarantors', key: 'guarantors' }, { label: 'Co-Applicants', key: 'coApplicants' },
+  { label: 'Collateral', key: 'collateral' }, { label: 'Collateral Value', key: 'collateralValue', align: 'right', format: 'money' },
+  { label: 'Insurance Company', key: 'insuranceCompany' }, { label: 'Insurance Policy No', key: 'insurancePolicyNo' },
+  { label: 'Insurance Amount', key: 'insuranceAmount', align: 'right', format: 'money' },
+  { label: 'Charges Due', key: 'chargesDue', align: 'right', format: 'money' }, { label: 'Charges Paid', key: 'chargesPaid', align: 'right', format: 'money' },
+  { label: 'Total Scheduled', key: 'totalScheduled', align: 'right', format: 'money' }, { label: 'Total Paid', key: 'totalPaid', align: 'right', format: 'money' },
+  { label: 'Outstanding Balance', key: 'outstandingBalance', align: 'right', format: 'money' },
+  { label: 'Days Overdue', key: 'daysOverdue', align: 'right', format: 'number' },
+  { label: 'Overdue Amount', key: 'overdueAmount', align: 'right', format: 'money' }, { label: 'Penalty Due', key: 'penaltyDue', align: 'right', format: 'money' },
+  { label: 'Rejected Reason', key: 'rejectedReason' }, { label: 'Cancelled Reason', key: 'cancelledReason' }, { label: 'Cancelled Date', key: 'cancelledAt' },
+  { label: 'Created Date', key: 'createdAt' },
+]
+
+export function LoanDetailReportScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
+  const [rows, setRows] = useState<LoanDetailReportRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const [draft, setDraft] = useState<LoanDetailFilters>(EMPTY_DETAIL_FILTERS)
+  const [applied, setApplied] = useState<LoanDetailFilters>(EMPTY_DETAIL_FILTERS)
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
+  const [loanTypes, setLoanTypes] = useState<LoanType[]>([])
+  const [officers, setOfficers] = useState<{ id: number; name: string }[]>([])
+
+  useEffect(() => {
+    loanTypesApi.list().then((t) => setLoanTypes(t.filter((x) => x.isProduct))).catch(() => setLoanTypes([]))
+    api.users.marketingExecutives().then(setOfficers).catch(() => setOfficers([]))
+  }, [])
+
+  const runReport = (f: LoanDetailFilters, signal?: AbortSignal) => {
+    setLoading(true); setErr(''); setLoaded(true)
+    loanReportsApi.get('loan-detail', {
+      branchId, status: f.status || undefined, loanTypeId: f.loanTypeId || undefined,
+      loanOfficerId: f.loanOfficerId || undefined, recoveryOfficerId: f.recoveryOfficerId || undefined,
+      customerSearch: f.customerSearch || undefined, dateField: f.dateField,
+      from: f.fromDate || undefined, to: f.toDate || undefined,
+      minPrincipal: f.minPrincipal || undefined, maxPrincipal: f.maxPrincipal || undefined,
+      overdueOnly: f.overdueOnly || undefined,
+    }, signal).then((d) => setRows(d || [])).catch((ex) => { if (ex?.code !== 'ERR_CANCELED') setErr(getErrorText(ex, 'Failed to load report')) }).finally(() => { if (!signal?.aborted) setLoading(false) })
+  }
+
+  // This is the heaviest report endpoint (full portfolio, no pagination —
+  // needed whole for Excel export), so a quick branch/filter change while a
+  // request is still in flight cancels it instead of leaving several full
+  // scans running concurrently and racing to set state.
+  useEffect(() => {
+    const controller = new AbortController()
+    runReport(applied, controller.signal)
+    return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applied, branchId])
+
+  const applyFilters = () => setApplied(draft)
+  const resetFilters = () => { setDraft(EMPTY_DETAIL_FILTERS); setApplied(EMPTY_DETAIL_FILTERS); setBranchId(undefined) }
+
+  const totalPrincipal = rows.reduce((a, r) => a + Number(r.principal || 0), 0)
+  const totalOutstanding = rows.reduce((a, r) => a + Number(r.outstandingBalance || 0), 0)
+  const overdueCount = rows.filter((r) => r.daysOverdue > 0).length
+
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Loan Detail Report',
+      meta: `${rows.length} loan(s)${applied.fromDate || applied.toDate ? ` — ${DATE_FIELDS.find((d) => d.value === applied.dateField)?.label}: ${applied.fromDate || '—'} to ${applied.toDate || today()}` : ''}`,
+      columns: DETAIL_EXCEL_COLUMNS,
+      rows: rows as unknown as Record<string, unknown>[],
+      totalRow: { customerName: 'Total', principal: totalPrincipal, outstandingBalance: totalOutstanding },
+      emptyText: 'No loans match the selected filters',
+    }, `loan-detail-report-${today()}.xlsx`)
+  }
+
+  return (
+    <div>
+      <PageHead crumbs="Loan Management / Reports" title="Loan Detail Report" icon="list"
+        actions={loaded && !loading && <ExportButtons onExcel={exportExcel} />} />
+      <Card style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ marginBottom: 14 }}>Loan &amp; Customer</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '16px', marginBottom: 20 }}>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
+          <Field label="Loan Type">
+            <Select value={draft.loanTypeId} onChange={(e) => setDraft((s) => ({ ...s, loanTypeId: e.target.value ? Number(e.target.value) : '' }))}>
+              <option value="">All Loan Types</option>
+              {loanTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Status">
+            <Select value={draft.status} onChange={(e) => setDraft((s) => ({ ...s, status: e.target.value as LoanStatus | '' }))}>
+              <option value="">All Statuses</option>
+              {LOAN_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </Select>
+          </Field>
+          <Field label="Loan Officer">
+            <Select value={draft.loanOfficerId} onChange={(e) => setDraft((s) => ({ ...s, loanOfficerId: e.target.value ? Number(e.target.value) : '' }))}>
+              <option value="">All Officers</option>
+              {officers.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Recovery Officer">
+            <Select value={draft.recoveryOfficerId} onChange={(e) => setDraft((s) => ({ ...s, recoveryOfficerId: e.target.value ? Number(e.target.value) : '' }))}>
+              <option value="">All Officers</option>
+              {officers.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Customer" style={{ gridColumn: 'span 2' }}>
+            <Input value={draft.customerSearch} onChange={(e) => setDraft((s) => ({ ...s, customerSearch: e.target.value }))} placeholder="Name, NIC, phone or code…" />
+          </Field>
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--line)', marginBottom: 20 }} />
+
+        <div className="eyebrow" style={{ marginBottom: 14 }}>Date &amp; Amount Range</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '16px', marginBottom: 20 }}>
+          <Field label="Date Field">
+            <Select value={draft.dateField} onChange={(e) => setDraft((s) => ({ ...s, dateField: e.target.value }))}>
+              {DATE_FIELDS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+            </Select>
+          </Field>
+          <DateRangeSelect from={draft.fromDate} to={draft.toDate} onChange={(f, t) => setDraft((s) => ({ ...s, fromDate: f, toDate: t }))} />
+          <Field label="From"><Input type="date" value={draft.fromDate} onChange={(e) => setDraft((s) => ({ ...s, fromDate: e.target.value }))} /></Field>
+          <Field label="To"><Input type="date" value={draft.toDate} onChange={(e) => setDraft((s) => ({ ...s, toDate: e.target.value }))} /></Field>
+          <Field label="Min Principal"><Input type="number" placeholder="0" value={draft.minPrincipal} onChange={(e) => setDraft((s) => ({ ...s, minPrincipal: e.target.value }))} /></Field>
+          <Field label="Max Principal"><Input type="number" placeholder="No limit" value={draft.maxPrincipal} onChange={(e) => setDraft((s) => ({ ...s, maxPrincipal: e.target.value }))} /></Field>
+        </div>
+
+        <div className="row gap-2" style={{ alignItems: 'center' }}>
+          <Btn variant="primary" size="sm" icon="filter" onClick={applyFilters}>Apply Filters</Btn>
+          <Btn variant="ghost" active={draft.overdueOnly} icon="alert" size="sm" onClick={() => setDraft((s) => ({ ...s, overdueOnly: !s.overdueOnly }))}>
+            Overdue Only
+          </Btn>
+          <Btn variant="plain" size="sm" onClick={resetFilters}>Clear all</Btn>
+        </div>
+      </Card>
+      {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (
+        <>
+          <TileGrid>
+            <Tile icon="coins" label="Loans" value={String(rows.length)} />
+            <Tile icon="wallet" label="Total Principal" value={money(totalPrincipal)} />
+            <Tile icon="wallet" label="Total Outstanding" value={money(totalOutstanding)} tone="amber" />
+            <Tile icon="alert" label="Overdue Loans" value={String(overdueCount)} tone={overdueCount > 0 ? 'red' : 'green'} />
+          </TileGrid>
+          <Card pad={0}>
+            <Table cols={[
+              { label: 'Loan Code' }, { label: 'Customer' }, { label: 'NIC' }, { label: 'Branch' }, { label: 'Loan Type' },
+              { label: 'Officer' }, { label: 'Principal', align: 'right' as const }, { label: 'Outstanding', align: 'right' as const },
+              { label: 'Status', align: 'center' as const }, { label: 'Days Overdue', align: 'right' as const }, { label: 'Disbursed' },
+            ]} rows={rows} empty="No loans match the selected filters"
+              render={(l: LoanDetailReportRow) => <>
+                <Td mono>{l.code}</Td>
+                <Td>{l.customerName || '—'}</Td>
+                <Td mono>{l.nicNo || '—'}</Td>
+                <Td>{l.branch || '—'}</Td>
+                <Td>{l.loanType || '—'}</Td>
+                <Td>{l.loanOfficer || '—'}</Td>
+                <Td align="right" mono>{money(l.principal)}</Td>
+                <Td align="right" mono>{money(l.outstandingBalance)}</Td>
+                <Td align="center"><Badge tone={l.status === 'Active' ? 'green' : l.status === 'Closed' ? 'neutral' : l.daysOverdue > 0 ? 'red' : 'neutral'} dot>{l.status}</Badge></Td>
+                <Td align="right" mono>{l.daysOverdue > 0 ? l.daysOverdue : '—'}</Td>
+                <Td>{dateOnly(l.disbursedAt)}</Td>
               </>} />
           </Card>
         </>

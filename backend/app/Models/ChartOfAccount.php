@@ -130,8 +130,21 @@ class ChartOfAccount extends Model
      *
      * @return \Illuminate\Support\Collection<int, object{account_id:int, total_debit:string, total_credit:string, balance:string}>
      */
+    private static array $balancesCache = [];
+
     public static function balancesAsOf(?string $asOfDate = null, ?string $fromDate = null): \Illuminate\Support\Collection
     {
+        // Per-request memoization — a single Trial Balance/P&L/Balance Sheet/
+        // Cash Flow request calls this with the same (asOfDate, fromDate) pair
+        // several times over (P&L alone calls it 4x for the same range, once
+        // each for cash/accrual figures and cash/accrual waterfall), and each
+        // call is a full journal_lines scan. Safe as a static array: cleared
+        // per PHP-FPM/CLI request, never shared across requests.
+        $key = ($asOfDate ?? '') . '|' . ($fromDate ?? '');
+        if (isset(self::$balancesCache[$key])) {
+            return self::$balancesCache[$key];
+        }
+
         $totals = DB::table('journal_lines')
             ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
             ->where('journal_entries.status', 'Posted')
@@ -142,7 +155,7 @@ class ChartOfAccount extends Model
             ->get()
             ->keyBy('account_id');
 
-        return static::query()->get(['id', 'normal_balance'])->map(function (self $account) use ($totals) {
+        $balances = static::query()->get(['id', 'normal_balance'])->map(function (self $account) use ($totals) {
             $row = $totals->get($account->id);
             $debit = $row->total_debit ?? '0.00';
             $credit = $row->total_credit ?? '0.00';
@@ -150,5 +163,7 @@ class ChartOfAccount extends Model
 
             return (object) ['account_id' => $account->id, 'total_debit' => $debit, 'total_credit' => $credit, 'balance' => $balance];
         })->keyBy('account_id');
+
+        return self::$balancesCache[$key] = $balances;
     }
 }

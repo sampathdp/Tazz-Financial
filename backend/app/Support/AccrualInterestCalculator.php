@@ -33,14 +33,53 @@ class AccrualInterestCalculator
     /** @param string $facilityType 'Loan' or 'SpeedDraft' (matches credit_facilities.facility_type) */
     public static function incomeForPeriod(string $facilityType, ?string $from, ?string $to): string
     {
+        return array_reduce(self::perFacilityIncome($facilityType, $from, $to), fn ($sum, $amount) => bcadd($sum, $amount, 2), '0.00');
+    }
+
+    /**
+     * Same figure as incomeForPeriod('Loan', ...), split by each facility's
+     * loan_types.name (from loan_facility_details — the join path
+     * LoanFacilityDetail::loanType() uses) instead of summed to one total —
+     * for the Income by Loan Product table on the P&L (see
+     * AccountingReportController::incomeByLoanProduct()). Speed Drafts don't
+     * carry a loan_type_id (they have their own SpeedDraftType), so this is
+     * Loan-only; SpeedDraft interest keeps showing as its own 4015 line
+     * instead of forcing it into this grouping.
+     *
+     * @return array<string, string> loan type name (or 'Unclassified') => amount
+     */
+    public static function incomeForPeriodByLoanType(?string $from, ?string $to): array
+    {
+        $perFacility = self::perFacilityIncome('Loan', $from, $to);
+        if (empty($perFacility)) {
+            return [];
+        }
+
+        $loanTypeByFacility = DB::table('loan_facility_details')
+            ->leftJoin('loan_types', 'loan_types.id', '=', 'loan_facility_details.loan_type_id')
+            ->whereIn('loan_facility_details.credit_facility_id', array_keys($perFacility))
+            ->pluck('loan_types.name', 'loan_facility_details.credit_facility_id');
+
+        $totals = [];
+        foreach ($perFacility as $facilityId => $amount) {
+            $name = $loanTypeByFacility[$facilityId] ?? 'Unclassified';
+            $totals[$name] = bcadd($totals[$name] ?? '0.00', $amount, 2);
+        }
+
+        return $totals;
+    }
+
+    /** @return array<int, string> credit_facility_id => amount earned in the period, for both incomeForPeriod() (summed) and incomeForPeriodByLoanType() (grouped) to share. */
+    private static function perFacilityIncome(string $facilityType, ?string $from, ?string $to): array
+    {
         $facilities = DB::table('credit_facilities')
             ->where('facility_type', $facilityType)
             ->pluck('disbursed_at', 'id');
         if ($facilities->isEmpty()) {
-            return '0.00';
+            return [];
         }
 
-        $total = '0.00';
+        $totals = [];
         foreach ($facilities->keys()->chunk(200) as $chunk) {
             $rowsByFacility = DB::table('facility_schedules')
                 ->whereIn('credit_facility_id', $chunk)
@@ -101,11 +140,11 @@ class AccrualInterestCalculator
                     if ($to && $sliceDate > $to) {
                         continue;
                     }
-                    $total = bcadd($total, (string) round($net, 2), 2);
+                    $totals[$facilityId] = bcadd($totals[$facilityId] ?? '0.00', (string) round($net, 2), 2);
                 }
             }
         }
 
-        return $total;
+        return $totals;
     }
 }

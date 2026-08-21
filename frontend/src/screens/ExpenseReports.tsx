@@ -2,10 +2,11 @@
    each its own nav entry and route — no tabs. Same shape as
    LoanReports.tsx. */
 import { useEffect, useState, type ReactNode } from 'react'
-import { Card, PageHead, Badge, Field, Input, Select, Table, Td } from '../components/ui'
+import { Card, PageHead, Badge, Field, Input, Select, Table, Td , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { ExportButtons } from '../components/ExportButtons'
 import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
+import { DateRangeSelect } from '../components/DateRangeSelect'
 import { Donut, ProgressRow } from '../components/charts'
 import { expenseReportsApi, type AuthUser } from '../api'
 import { getErrorText } from '../lib/apiError'
@@ -38,7 +39,7 @@ function TileGrid({ children }: { children: ReactNode }) {
 function ChartCard({ title, children }: { title: string; children: ReactNode }) {
   return <Card style={{ marginBottom: 16 }}><div className="eyebrow" style={{ marginBottom: 14 }}>{title}</div>{children}</Card>
 }
-function Loading() { return <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div> }
+function Loading() { return <LoadingBlock /> }
 function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)', whiteSpace: 'pre-line' }}>{msg}</div> }
 
 /* ---------------------------- Summary ---------------------------- */
@@ -86,6 +87,7 @@ export function ExpenseSummaryScreen({ go: _go, user: me }: { go: Go; user?: Aut
         actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
+          <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
           <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
@@ -152,6 +154,7 @@ export function ExpenseListScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
         actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
+          <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
           <Field label="Status"><Select value={status} onChange={(e) => setStatus(e.target.value)} style={{ maxWidth: 180 }}>
@@ -223,6 +226,7 @@ export function ExpenseByVendorScreen({ go: _go, user: me }: { go: Go; user?: Au
         actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
+          <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
           <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />

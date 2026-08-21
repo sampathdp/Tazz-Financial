@@ -26,6 +26,9 @@ const SalesExecutiveCommissionsScreen = lazy(() => import('./screens/SalesExecut
 const SpeedDraftTypesScreen = lazy(() => import('./screens/SpeedDraftTypes').then((m) => ({ default: m.SpeedDraftTypesScreen })))
 const SpeedDraftsScreen = lazy(() => import('./screens/SpeedDrafts').then((m) => ({ default: m.SpeedDraftsScreen })))
 const SpeedDraftPaymentReceiptScreen = lazy(() => import('./screens/PaymentReceipt').then((m) => ({ default: m.SpeedDraftPaymentReceiptScreen })))
+const PawningTypesScreen = lazy(() => import('./screens/PawningTypes').then((m) => ({ default: m.PawningTypesScreen })))
+const PawningsScreen = lazy(() => import('./screens/Pawnings').then((m) => ({ default: m.PawningsScreen })))
+const PawningAuctionsScreen = lazy(() => import('./screens/PawningAuctions').then((m) => ({ default: m.PawningAuctionsScreen })))
 const FundingDashboardScreen = lazy(() => import('./screens/FundingDashboard').then((m) => ({ default: m.FundingDashboardScreen })))
 const FundingProductsScreen = lazy(() => import('./screens/FundingProducts').then((m) => ({ default: m.FundingProductsScreen })))
 const DepositsScreen = lazy(() => import('./screens/Deposits').then((m) => ({ default: m.DepositsScreen })))
@@ -75,6 +78,7 @@ const LoanParAgingScreen = named(() => import('./screens/LoanReports'), 'LoanPar
 const LoanArrearsScreen = named(() => import('./screens/LoanReports'), 'LoanArrearsScreen')
 const LoanDisbursementScreen = named(() => import('./screens/LoanReports'), 'LoanDisbursementScreen')
 const LoanClosedLoansScreen = named(() => import('./screens/LoanReports'), 'LoanClosedLoansScreen')
+const LoanDetailReportScreen = named(() => import('./screens/LoanReports'), 'LoanDetailReportScreen')
 
 const CollectionDailyCashScreen = named(() => import('./screens/CollectionReports'), 'CollectionDailyCashScreen')
 const CollectionSummaryScreen = named(() => import('./screens/CollectionReports'), 'CollectionSummaryScreen')
@@ -143,6 +147,9 @@ const SCREENS: Record<string, ScreenComp> = {
   'sd/types': SpeedDraftTypesScreen,
   'sd/drafts': SpeedDraftsScreen,
   'sd/payments': SpeedDraftPaymentReceiptScreen,
+  'pawn/types': PawningTypesScreen,
+  'pawn/tickets': PawningsScreen,
+  'pawn/auctions': PawningAuctionsScreen,
   'ad/approvals': ApprovalsScreen,
   'ad/approval-types': ApprovalTypesScreen,
   'ad/branches': BranchesScreen,
@@ -182,6 +189,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'rep/loans-arrears': LoanArrearsScreen,
   'rep/loans-disbursement': LoanDisbursementScreen,
   'rep/loans-closed': LoanClosedLoansScreen,
+  'rep/loans-detail': LoanDetailReportScreen,
   'rep/coll-daily': CollectionDailyCashScreen,
   'rep/coll-summary': CollectionSummaryScreen,
   'rep/coll-officers': CollectionOfficerPerformanceScreen,
@@ -207,7 +215,7 @@ const ROUTE_IDS = Object.keys(flatNav)
 // sibling routes, so which record/form is open lives in the URL — that's
 // what makes a hard refresh land back on the same form instead of the list.
 const FORM_ROUTE_IDS = new Set([
-  'loan/apps', 'loan/active', 'loan/overdue', 'customers', 'sd/drafts',
+  'loan/apps', 'loan/active', 'loan/overdue', 'customers', 'sd/drafts', 'pawn/tickets', 'pawn/auctions',
 ])
 
 // One-off deeper sub-paths (a screen nested inside another screen's record
