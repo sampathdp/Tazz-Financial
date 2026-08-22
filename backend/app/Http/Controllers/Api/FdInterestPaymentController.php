@@ -30,6 +30,9 @@ class FdInterestPaymentController extends Controller
         if ($fd->status !== 'Active') {
             return response()->json(['message' => 'Interest can only be paid on an active FD.'], 422);
         }
+        if (now()->format('Y-m-d') < $fdInterestPayment->due_date) {
+            return response()->json(['message' => 'Interest cannot be paid before the due date.'], 422);
+        }
 
         $data = $request->validate([
             'paid_at' => 'nullable|date',

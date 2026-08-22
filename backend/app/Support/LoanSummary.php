@@ -211,7 +211,7 @@ class LoanSummary
      * Shared by LoanController::overdue() and LoanReportController's
      * 'arrears' report so the two can never disagree about who's overdue.
      */
-    public static function overdueList(Carbon $asOf, ?Carbon $from = null)
+    public static function overdueList(Carbon $asOf, ?Carbon $from = null, ?int $loanTypeId = null, ?int $loanOfficerId = null)
     {
         $scheduleFilter = function ($q) use ($asOf, $from) {
             $q->where('due_date', '<', $asOf)->where('status', '!=', 'Paid');
@@ -222,6 +222,8 @@ class LoanSummary
 
         $loans = Loan::where('status', 'Active')
             ->whereHas('schedules', $scheduleFilter)
+            ->when($loanTypeId, fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $loanTypeId)))
+            ->when($loanOfficerId, fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_officer_id', $loanOfficerId)))
             ->with([
                 'customer:id,full_name,code,nic_no,phone',
                 'coApplicants.coApplicant:id,full_name,code,nic_no,phone',

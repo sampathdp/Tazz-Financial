@@ -543,7 +543,11 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
               <Td align="right">
                 {p.status === 'Pending' && fd.status === 'Active' && (
                   <Can user={me} module="Fixed Deposits" action="Edit">
-                    <Btn size="sm" variant="primary" icon="check" onClick={() => setPayTarget(p)}>Pay</Btn>
+                    {new Date().toISOString().slice(0, 10) >= p.dueDate.slice(0, 10) ? (
+                      <Btn size="sm" variant="primary" icon="check" onClick={() => setPayTarget(p)}>Pay</Btn>
+                    ) : (
+                      <span className="t-2" style={{ fontSize: 11.5 }}>Not due yet</span>
+                    )}
                   </Can>
                 )}
                 {p.status === 'Paid' && (

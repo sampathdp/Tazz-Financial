@@ -56,9 +56,9 @@ class LoanReportController extends Controller
         }
 
         return match ($type) {
-            'portfolio-summary' => $this->portfolioSummary(),
+            'portfolio-summary' => $this->portfolioSummary($request),
             'arrears' => $this->arrears($request),
-            'par-aging' => $this->parAging(),
+            'par-aging' => $this->parAging($request),
             'disbursement' => $this->disbursement($request),
             'closed-loans' => $this->closedLoans($request),
             'loan-detail' => $this->loanDetail($request),
@@ -78,9 +78,9 @@ class LoanReportController extends Controller
         }
 
         [$title, $sections, $meta] = match ($type) {
-            'portfolio-summary' => $this->portfolioSummaryPdf(),
+            'portfolio-summary' => $this->portfolioSummaryPdf($request),
             'arrears' => $this->arrearsPdf($request),
-            'par-aging' => $this->parAgingPdf(),
+            'par-aging' => $this->parAgingPdf($request),
             'disbursement' => $this->disbursementPdf($request),
             'closed-loans' => $this->closedLoansPdf($request),
         };
@@ -88,9 +88,9 @@ class LoanReportController extends Controller
         return ReportExport::pdf($title, $sections, null, $meta)->download(ReportExport::filename($type));
     }
 
-    private function portfolioSummaryPdf(): array
+    private function portfolioSummaryPdf(Request $request): array
     {
-        $d = $this->portfolioSummary();
+        $d = $this->portfolioSummary($request);
         $rows = [
             ['metric' => 'Total Loans', 'value' => $d['totalLoans']],
             ['metric' => 'Active Loans', 'value' => $d['activeLoans']],
@@ -109,9 +109,9 @@ class LoanReportController extends Controller
         return ['Loan Portfolio Summary', $sections, 'As of ' . $d['asOf']];
     }
 
-    private function parAgingPdf(): array
+    private function parAgingPdf(Request $request): array
     {
-        $d = $this->parAging();
+        $d = $this->parAging($request);
         $summaryRows = $this->formattedMetricRows([
             ['metric' => 'Total Active Portfolio', 'value' => $d['totalPortfolio'], 'format' => 'money'],
             ['metric' => 'PAR 30 %', 'value' => $d['par30Pct'], 'format' => 'percent'],
@@ -218,10 +218,13 @@ class LoanReportController extends Controller
     }
 
     /** Loan Portfolio Ratios source data: counts, outstanding, avg size, disbursement growth. */
-    private function portfolioSummary(): array
+    private function portfolioSummary(Request $request): array
     {
-        $counts = Loan::selectRaw('status, count(*) as c')->groupBy('status')->pluck('c', 'status');
-        $active = Loan::where('status', 'Active');
+        $loanTypeId = $request->filled('loanTypeId') ? (int) $request->loanTypeId : null;
+        $byLoanType = fn ($q) => $q->when($loanTypeId, fn ($q2) => $q2->whereHas('loanDetail', fn ($q3) => $q3->where('loan_type_id', $loanTypeId)));
+
+        $counts = $byLoanType(Loan::query())->selectRaw('status, count(*) as c')->groupBy('status')->pluck('c', 'status');
+        $active = $byLoanType(Loan::where('status', 'Active'));
         $totalOutstanding = (clone $active)->sum('outstanding_balance_cache');
         $activeCount = (clone $active)->count();
 
@@ -229,8 +232,8 @@ class LoanReportController extends Controller
         $lastMonthStart = now()->subMonthNoOverflow()->startOfMonth();
         $lastMonthEnd = now()->startOfMonth();
 
-        $thisMonth = Loan::whereNotNull('disbursed_at')->where('disbursed_at', '>=', $monthStart);
-        $lastMonth = Loan::whereNotNull('disbursed_at')->whereBetween('disbursed_at', [$lastMonthStart, $lastMonthEnd]);
+        $thisMonth = $byLoanType(Loan::whereNotNull('disbursed_at')->where('disbursed_at', '>=', $monthStart));
+        $lastMonth = $byLoanType(Loan::whereNotNull('disbursed_at')->whereBetween('disbursed_at', [$lastMonthStart, $lastMonthEnd]));
         $disbursedThisMonth = (clone $thisMonth)->sum('disbursed_amount');
         $disbursedLastMonth = (clone $lastMonth)->sum('disbursed_amount');
 
@@ -256,14 +259,17 @@ class LoanReportController extends Controller
     {
         $today = $request->filled('to') ? Carbon::parse($request->to)->startOfDay() : now()->startOfDay();
         $from = $request->filled('from') ? Carbon::parse($request->from)->startOfDay() : null;
+        $loanTypeId = $request->filled('loanTypeId') ? (int) $request->loanTypeId : null;
+        $loanOfficerId = $request->filled('loanOfficerId') ? (int) $request->loanOfficerId : null;
 
-        return LoanSummary::overdueList($today, $from);
+        return LoanSummary::overdueList($today, $from, $loanTypeId, $loanOfficerId);
     }
 
     /** PAR 30/60/90 aging buckets + NPL% (90+ days), by outstanding balance. */
-    private function parAging(): array
+    private function parAging(Request $request): array
     {
         $today = now()->startOfDay();
+        $loanTypeId = $request->filled('loanTypeId') ? (int) $request->loanTypeId : null;
         // Only daysOverdue (from the oldest unpaid schedule) is needed here —
         // not the money figures LoanSummary::overdueList() also computes
         // (including the per-row penalty calc), so this queries just the
@@ -274,6 +280,10 @@ class LoanReportController extends Controller
             ->where('credit_facilities.status', 'Active')
             ->where('facility_schedules.due_date', '<', $today)
             ->where('facility_schedules.status', '!=', 'Paid')
+            ->when($loanTypeId, function ($q) use ($loanTypeId) {
+                $q->join('loan_details', 'loan_details.credit_facility_id', '=', 'credit_facilities.id')
+                    ->where('loan_details.loan_type_id', $loanTypeId);
+            })
             ->groupBy('facility_schedules.credit_facility_id')
             ->selectRaw('facility_schedules.credit_facility_id as loan_id, MIN(facility_schedules.due_date) as oldest_due_date')
             ->pluck('oldest_due_date', 'loan_id');
@@ -336,6 +346,7 @@ class LoanReportController extends Controller
         return Loan::with(self::LIST_RELATIONS)
             ->whereNotNull('disbursed_at')
             ->whereBetween('disbursed_at', [$from, $to])
+            ->when($request->filled('loanTypeId'), fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $request->loanTypeId)))
             ->orderByDesc('disbursed_at')
             ->get();
     }
@@ -348,6 +359,7 @@ class LoanReportController extends Controller
         return Loan::with(self::LIST_RELATIONS)
             ->where('status', 'Closed')
             ->whereBetween('closed_at', [$from, $to])
+            ->when($request->filled('loanTypeId'), fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $request->loanTypeId)))
             ->orderByDesc('closed_at')
             ->get();
     }
