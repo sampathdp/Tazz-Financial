@@ -286,8 +286,10 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
                       <option value="Jewelry">Jewelry</option><option value="Vehicle">Vehicle</option><option value="Property">Property</option><option value="Other">Other</option>
                     </Select></Field>
                     <Field label="Description" style={{ flex: 1, minWidth: 160 }}><Input value={c.description} onChange={(e) => setCollateral(i, { description: e.target.value })} /></Field>
-                    <Field label="Weight (g)" style={{ width: 100 }}><Input type="number" step="0.001" value={c.weightGrams ?? ''} onChange={(e) => setCollateral(i, { weightGrams: e.target.value })} /></Field>
-                    <Field label="Purity" style={{ width: 90 }}><Input value={c.purity || ''} onChange={(e) => setCollateral(i, { purity: e.target.value })} placeholder="22K" /></Field>
+                    {c.collateralType === 'Jewelry' && (<>
+                      <Field label="Weight (g)" style={{ width: 100 }}><Input type="number" step="0.001" value={c.weightGrams ?? ''} onChange={(e) => setCollateral(i, { weightGrams: e.target.value })} /></Field>
+                      <Field label="Purity" style={{ width: 90 }}><Input value={c.purity || ''} onChange={(e) => setCollateral(i, { purity: e.target.value })} placeholder="22K" /></Field>
+                    </>)}
                     <Field label="Appraised Value" style={{ width: 130 }}><Input type="number" value={c.appraisedValue ?? ''} onChange={(e) => setCollateral(i, { appraisedValue: e.target.value })} /></Field>
                     <button className="mms-act" title="Remove" onClick={() => removeCollateral(i)}><Icon n="trash" s={14} /></button>
                   </div>
