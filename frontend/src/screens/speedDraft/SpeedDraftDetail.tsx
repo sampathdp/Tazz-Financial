@@ -11,9 +11,10 @@ import {
   speedDraftsApi, speedDraftCollateralApi, speedDraftCollateralDocumentsApi, speedDraftPaymentsApi,
   type SpeedDraft, type SpeedDraftPayment, type SpeedDraftCollateralInput, type SpeedDraftCollateralDocument, type AuthUser,
 } from '../../api'
-import { Can } from '../../lib/permissions'
+import { Can, canApprove } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
 import { getErrorText } from '../../lib/apiError'
+import type { Go } from '../types'
 
 const num = (v: unknown) => Number(v ?? 0)
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -43,7 +44,9 @@ const SECTIONS = [
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
 
-export function SpeedDraftDetail({ speedDraft, me, onChanged }: { speedDraft: SpeedDraft; me?: AuthUser | null; onChanged: () => void }) {
+export function SpeedDraftDetail({ speedDraft, me, onChanged, go, onWithdrawn }: {
+  speedDraft: SpeedDraft; me?: AuthUser | null; onChanged: () => void; go?: Go; onWithdrawn?: () => void
+}) {
   const notify = useNotify()
   const [section, setSection] = useState<SectionId>('overview')
   const showCollateral = !!speedDraft.speedDraftDetail?.speedDraftType?.requiresCollateral
@@ -62,7 +65,7 @@ export function SpeedDraftDetail({ speedDraft, me, onChanged }: { speedDraft: Sp
             <Btn key={s.id} size="sm" variant="ghost" icon={s.icon} active={section === s.id} onClick={() => setSection(s.id)}>{s.label}</Btn>
           ))}
         </div>
-        <StatusActions speedDraft={speedDraft} me={me} onChanged={onChanged} />
+        <StatusActions speedDraft={speedDraft} me={me} onChanged={onChanged} go={go} onWithdrawn={onWithdrawn} />
       </div>
 
       {section === 'overview' && <OverviewPanel speedDraft={speedDraft} />}
@@ -167,7 +170,9 @@ function OverviewPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
   )
 }
 
-function StatusActions({ speedDraft: d, me, onChanged }: { speedDraft: SpeedDraft; me?: AuthUser | null; onChanged: () => void }) {
+function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
+  speedDraft: SpeedDraft; me?: AuthUser | null; onChanged: () => void; go?: Go; onWithdrawn?: () => void
+}) {
   const notify = useNotify()
   const [busy, setBusy] = useState(false)
   const [disburseOpen, setDisburseOpen] = useState(false)
@@ -190,6 +195,14 @@ function StatusActions({ speedDraft: d, me, onChanged }: { speedDraft: SpeedDraf
     catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
     finally { setBusy(false) }
   }
+  const withdraw = async () => {
+    const ok = await notify.confirm({ title: `Withdraw Speed Draft ${d.code}?`, msg: 'This deletes the application. This action cannot be undone.', danger: true, okText: 'Withdraw' })
+    if (!ok) return
+    setBusy(true)
+    try { await speedDraftsApi.remove(d.id); notify.success('Application withdrawn', d.code); onWithdrawn?.() }
+    catch (ex: any) { notify.error('Withdraw failed', getErrorText(ex)) }
+    finally { setBusy(false) }
+  }
   const disburse = async () => {
     if (!amount || Number(amount) <= 0) { setErr('Enter the disbursed amount.'); return }
     if (!startDate) { setErr('Start date is required.'); return }
@@ -206,12 +219,20 @@ function StatusActions({ speedDraft: d, me, onChanged }: { speedDraft: SpeedDraf
 
   if (d.status === 'Pending') {
     return (
-      <Can user={me} module="Speed Drafts" action="Approve">
-        <div className="row gap-2">
-          <Btn variant="primary" size="sm" icon="check" onClick={approve} disabled={busy}>Approve</Btn>
-          <Btn variant="danger" size="sm" icon="x" onClick={reject} disabled={busy}>Reject</Btn>
-        </div>
-      </Can>
+      <div className="row gap-2">
+        <Can user={me} module="Speed Drafts" action="Edit">
+          <Btn variant="solid" size="sm" icon="edit" onClick={() => go?.(`sd/drafts/${d.id}/edit`)}>Edit</Btn>
+        </Can>
+        {canApprove(me, 'speed_draft_application') && me?.id !== d.pendingApplicationRequest?.requester?.id && (
+          <>
+            <Btn variant="primary" size="sm" icon="check" onClick={approve} disabled={busy}>Approve</Btn>
+            <Btn variant="danger" size="sm" icon="x" onClick={reject} disabled={busy}>Reject</Btn>
+          </>
+        )}
+        <Can user={me} module="Speed Drafts" action="Delete">
+          <Btn variant="solid" size="sm" icon="trash" onClick={withdraw} disabled={busy}>Withdraw</Btn>
+        </Can>
+      </div>
     )
   }
   if (d.status === 'Approved') {

@@ -105,4 +105,21 @@ class SpeedDraft extends Model
     {
         return $this->hasMany(FacilityPayment::class, 'credit_facility_id')->orderByDesc('paid_at');
     }
+
+    /** Shared approval_requests table, scoped to this draft's 'speed_draft_application'
+     *  rows via subject_id — mirrors Loan::applicationApprovalRequests()/pendingApplicationRequest().
+     *  One per draft, created at store() time, resolved by approve()/reject(). */
+    public function applicationApprovalRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'speed_draft_application'))
+            ->orderByDesc('requested_at');
+    }
+
+    public function pendingApplicationRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'speed_draft_application'))
+            ->where('status', 'PendingApproval');
+    }
 }

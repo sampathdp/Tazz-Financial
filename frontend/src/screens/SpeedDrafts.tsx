@@ -40,7 +40,7 @@ const blankForm = (): FormState => ({ ratePeriod: 'monthly', collateral: [] })
 const blankInsurance = (): Partial<FacilityInsuranceDetail> => ({})
 const ROUTE_BASE = '/sd/drafts'
 
-export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
   const navigate = useNavigate()
   const params = useParams<{ id?: string }>()
@@ -106,13 +106,19 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
   const openCreate = () => navigate(`${ROUTE_BASE}/new`)
   const openRow = (row: SpeedDraft) => navigate(`${ROUTE_BASE}/${row.id}`)
   const back = () => navigate(ROUTE_BASE)
+  // Cancelling/saving an edit returns to the record's approval page rather than
+  // all the way back to the list, since that's where the Edit action was opened from.
+  const backFromForm = () => navigate(editing ? `${ROUTE_BASE}/${editing.id}` : ROUTE_BASE)
   const reloadDetail = async () => { if (detail) setDetail(await speedDraftsApi.get(detail.id)) }
+
+  const isEdit = !!params.id && location.pathname === `${ROUTE_BASE}/${params.id}/edit`
 
   const loadCreate = () => { setEditing(null); setForm(blankForm()); setErr(''); setMode('form') }
   const loadRow = async (id: number) => {
     try {
       const full = await speedDraftsApi.get(id)
-      if (full.status === 'Pending') {
+      if (isEdit) {
+        if (full.status !== 'Pending') { notify.error('Only a Pending Speed Draft can be edited'); navigate(`${ROUTE_BASE}/${id}`, { replace: true }); return }
         setEditing(full)
         setForm({
           customerId: full.customerId, speedDraftTypeId: full.speedDraftDetail?.speedDraftTypeId,
@@ -180,32 +186,11 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
     try {
       if (editing) await speedDraftsApi.update(editing.id, body as any)
       else await speedDraftsApi.create(body as any)
-      back()
+      backFromForm()
       notify.success(editing ? 'Speed Draft updated' : 'Speed Draft application submitted', customer?.fullName)
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
-  }
-
-  const remove = async (d: SpeedDraft) => {
-    const ok = await notify.confirm({ title: 'Withdraw this Speed Draft application?', msg: 'This action cannot be undone.', danger: true, okText: 'Withdraw' })
-    if (!ok) return
-    try { await speedDraftsApi.remove(d.id); refresh(); refreshCounts(); notify.success('Application withdrawn', d.code) }
-    catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
-  }
-
-  const approve = async (d: SpeedDraft) => {
-    const ok = await notify.confirm({ title: `Approve Speed Draft ${d.code}?`, msg: `${d.customer?.fullName} — ${money(d.principalAmount)}`, okText: 'Approve' })
-    if (!ok) return
-    try { await speedDraftsApi.approve(d.id); refresh(); refreshCounts(); notify.success('Speed Draft approved', d.code) }
-    catch (ex: any) { notify.error('Approve failed', getErrorText(ex)) }
-  }
-
-  const reject = async (d: SpeedDraft) => {
-    const reason = await notify.prompt({ title: `Reject Speed Draft ${d.code}?`, msg: 'Give a reason — this is shown to branch staff.', placeholder: 'Reason for rejection', required: true, danger: true, okText: 'Reject' })
-    if (!reason) return
-    try { await speedDraftsApi.reject(d.id, reason); refresh(); refreshCounts(); notify.success('Speed Draft rejected', d.code) }
-    catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
   }
 
   if (mode === 'detail') {
@@ -215,7 +200,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
           sub={detail ? `${detail.customer?.fullName} — ${detail.speedDraftDetail?.speedDraftType?.name}` : undefined}
           actions={<Btn variant="solid" onClick={back}>← Back to Speed Drafts</Btn>} />
         {detailLoading || !detail ? <LoadingBlock />
-          : <SpeedDraftDetail speedDraft={detail} me={me} onChanged={reloadDetail} />}
+          : <SpeedDraftDetail speedDraft={detail} me={me} onChanged={reloadDetail} go={go} onWithdrawn={back} />}
       </div>
     )
   }
@@ -224,7 +209,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
     return (
       <div>
         <PageHead crumbs="Speed Drafts" title={editing ? `Edit ${editing.code}` : 'New Speed Draft'} icon="coins"
-          actions={<Btn variant="solid" onClick={back}>← Back to Speed Drafts</Btn>} />
+          actions={<Btn variant="solid" onClick={backFromForm}>{editing ? `← Back to ${editing.code}` : '← Back to Speed Drafts'}</Btn>} />
         <Card style={{ maxWidth: 720 }}>
           <ErrorBanner error={err} />
           <div className="col gap-4">
@@ -299,7 +284,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
 
             <div className="row gap-2">
               <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving…' : (editing ? 'Save Changes' : 'Submit Application')}</Btn>
-              <Btn variant="solid" onClick={back}>Cancel</Btn>
+              <Btn variant="solid" onClick={backFromForm}>Cancel</Btn>
             </div>
           </div>
         </Card>
@@ -329,7 +314,7 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
           {search.trim() && <span className="t-2" style={{ fontSize: 12 }}>{total} match{total === 1 ? '' : 'es'}</span>}
         </div>
         {loading ? <LoadingBlock /> : <>
-        <Table cols={[{ label: 'Draft' }, { label: 'Customer' }, { label: 'Type' }, { label: 'Capital' }, { label: 'Outstanding Capital' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 110 }]}
+        <Table cols={[{ label: 'Draft' }, { label: 'Customer' }, { label: 'Type' }, { label: 'Capital' }, { label: 'Outstanding Capital' }, { label: 'Status', align: 'center' }]}
           rows={rows}
           empty="No Speed Drafts yet"
           onRow={openRow}
@@ -340,19 +325,6 @@ export function SpeedDraftsScreen({ user: me }: { go: Go; user?: AuthUser | null
             <Td mono>{money(d.principalAmount)}</Td>
             <Td mono>{d.status === 'Active' || d.status === 'Closed' ? money(d.outstandingBalanceCache) : '—'}</Td>
             <Td align="center"><Badge tone={statusTone[d.status]} dot>{d.status}</Badge></Td>
-            <Td align="right">
-              {d.status === 'Pending' && (
-                <div className="row gap-1" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                  <Can user={me} module="Speed Drafts" action="Approve">
-                    <button className="mms-act" title="Approve" onClick={() => approve(d)}><Icon n="check" s={14} c="var(--ok)" /></button>
-                    <button className="mms-act" title="Reject" onClick={() => reject(d)}><Icon n="x" s={14} c="var(--bad)" /></button>
-                  </Can>
-                  <Can user={me} module="Speed Drafts" action="Delete">
-                    <button className="mms-act" title="Withdraw" onClick={() => remove(d)}><Icon n="trash" s={14} /></button>
-                  </Can>
-                </div>
-              )}
-            </Td>
           </>} />
         <Pager page={page} lastPage={lastPage} total={total} onChange={setPage} />
         </>}

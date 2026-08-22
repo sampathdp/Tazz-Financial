@@ -186,4 +186,21 @@ class Loan extends Model
     {
         return $this->hasMany(SalesExecutiveCommission::class, 'credit_facility_id');
     }
+
+    /** Same shared-table pattern as cancelRequests()/pendingCancelRequest() above,
+     *  scoped to this loan's 'loan_application' rows — one per loan, created at
+     *  store() time, resolved by approve()/reject(). */
+    public function applicationApprovalRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_application'))
+            ->orderByDesc('requested_at');
+    }
+
+    public function pendingApplicationRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_application'))
+            ->where('status', 'PendingApproval');
+    }
 }

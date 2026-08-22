@@ -174,8 +174,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('loans', [LoanController::class, 'store'])->middleware('perm:Loan Applications,Create');
     Route::put('loans/{loan}', [LoanController::class, 'update'])->middleware('perm:Loan Applications,Edit');
     Route::delete('loans/{loan}', [LoanController::class, 'destroy'])->middleware('perm:Loan Applications,Delete');
-    Route::post('loans/{loan}/approve', [LoanController::class, 'approve'])->middleware('perm:Loan Applications,Approve');
-    Route::post('loans/{loan}/reject', [LoanController::class, 'reject'])->middleware('perm:Loan Applications,Approve');
+    // approve/reject gated inline by ApprovalType::isAuthorized('loan_application', ...) — see LoanController —
+    // not the module permission grid, so who may approve an application is admin-manageable data, same as loan_cancel below.
+    Route::post('loans/{loan}/approve', [LoanController::class, 'approve']);
+    Route::post('loans/{loan}/reject', [LoanController::class, 'reject']);
     Route::post('loans/{loan}/cancel-request', [LoanController::class, 'cancelRequest'])->middleware('perm:Loan Applications,Delete');
     // approve/reject gated inline by ApprovalType::isAuthorized('loan_cancel', ...) — see LoanController — not
     // the module permission grid, so who may approve is admin-manageable data, not a hardcoded permission module.
@@ -274,8 +276,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('speed-drafts', [SpeedDraftController::class, 'store'])->middleware('perm:Speed Drafts,Create');
     Route::put('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'update'])->middleware('perm:Speed Drafts,Edit');
     Route::delete('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'destroy'])->middleware('perm:Speed Drafts,Delete');
-    Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve'])->middleware('perm:Speed Drafts,Approve');
-    Route::post('speed-drafts/{speedDraft}/reject', [SpeedDraftController::class, 'reject'])->middleware('perm:Speed Drafts,Approve');
+    // approve/reject gated inline by ApprovalType::isAuthorized('speed_draft_application', ...) — see SpeedDraftController —
+    // not the module permission grid, so who may approve is admin-manageable data, same as loan_application above.
+    Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve']);
+    Route::post('speed-drafts/{speedDraft}/reject', [SpeedDraftController::class, 'reject']);
     Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware('perm:Speed Drafts,Approve');
 
     // --- Speed Drafts: Collateral (Gold Pawning / Lease asset records) ---

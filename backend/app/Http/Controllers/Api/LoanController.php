@@ -58,6 +58,7 @@ class LoanController extends Controller
         'canceller:id,name',
         'writtenOffBy:id,name',
         'cancelRequests.requester:id,name', 'cancelRequests.firstApprover:id,name', 'cancelRequests.secondApprover:id,name', 'cancelRequests.rejecter:id,name',
+        'pendingApplicationRequest.requester:id,name',
         'coApplicants.coApplicant:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
         'guarantors.guarantor:id,full_name,code,nic_no,phone',
         'collateral.vehicleDetail',
@@ -262,6 +263,15 @@ class LoanController extends Controller
                 $this->createCollateral($loan, $c);
             }
 
+            $type = ApprovalType::where('code', 'loan_application')->firstOrFail();
+            ApprovalRequest::create([
+                'approval_type_id' => $type->id,
+                'subject_id' => $loan->id,
+                'requested_by' => $request->user()->id,
+                'requested_at' => now(),
+                'required_approvals' => $type->required_approvals,
+            ]);
+
             return $loan;
         });
 
@@ -326,24 +336,67 @@ class LoanController extends Controller
             return response()->json(['message' => 'Only pending applications can be withdrawn.'], 422);
         }
         $data = $request->validate(['rejected_reason' => 'required|string|max:255']);
-        $loan->update(['status' => 'Rejected', 'rejected_reason' => $data['rejected_reason']]);
+
+        DB::transaction(function () use ($loan, $data, $request) {
+            $loan->update(['status' => 'Rejected', 'rejected_reason' => $data['rejected_reason']]);
+            if ($appRequest = $loan->pendingApplicationRequest) {
+                $appRequest->update([
+                    'status' => 'Rejected',
+                    'rejected_by' => $request->user()->id,
+                    'rejected_at' => now(),
+                    'reject_reason' => $data['rejected_reason'],
+                ]);
+            }
+        });
 
         return response()->noContent();
     }
 
+    /** Applies once the associated approval_requests row (created at store() time,
+     *  code 'loan_application') has collected enough distinct approvals — see the
+     *  loan_cancel trio above for the reference pattern this mirrors. Authorization
+     *  is entirely via ApprovalType::isAuthorized('loan_application') now — no
+     *  route-level permission gate (see routes/api.php). */
     public function approve(Request $request, Loan $loan)
     {
         if ($loan->status !== 'Pending') {
             return response()->json(['message' => 'Only pending applications can be approved.'], 422);
         }
-        $loan->update([
-            'status' => 'Approved',
-            'approved_by' => $request->user()->id,
-            'approved_at' => now(),
-            'rejected_reason' => null,
-        ]);
+        $appRequest = $loan->pendingApplicationRequest;
+        if (!$appRequest) {
+            return response()->json(['message' => 'No pending approval request found for this application.'], 422);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'loan_application')) {
+            return response()->json(['message' => 'You are not authorized to approve loan applications.'], 403);
+        }
+        if ($appRequest->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own application.'], 422);
+        }
+        if ($appRequest->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
 
-        return $loan->load(self::DETAIL_RELATIONS);
+        DB::transaction(function () use ($appRequest, $loan, $request) {
+            if (!$appRequest->first_approved_by) {
+                $appRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $appRequest->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($appRequest->fresh()->approvalsCount() < $appRequest->required_approvals) {
+                return;
+            }
+
+            $loan->update([
+                'status' => 'Approved',
+                'approved_by' => $request->user()->id,
+                'approved_at' => now(),
+                'rejected_reason' => null,
+            ]);
+            $appRequest->update(['status' => 'Approved']);
+        });
+
+        return $loan->fresh()->load(self::DETAIL_RELATIONS);
     }
 
     public function reject(Request $request, Loan $loan)
@@ -351,15 +404,34 @@ class LoanController extends Controller
         if ($loan->status !== 'Pending') {
             return response()->json(['message' => 'Only pending applications can be rejected.'], 422);
         }
+        $appRequest = $loan->pendingApplicationRequest;
+        if (!$appRequest) {
+            return response()->json(['message' => 'No pending approval request found for this application.'], 422);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'loan_application')) {
+            return response()->json(['message' => 'You are not authorized to reject loan applications.'], 403);
+        }
+        if ($appRequest->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot reject your own application — withdraw it instead.'], 422);
+        }
         $data = $request->validate(['rejected_reason' => 'required|string|max:255']);
-        $loan->update([
-            'status' => 'Rejected',
-            'approved_by' => $request->user()->id,
-            'approved_at' => now(),
-            'rejected_reason' => $data['rejected_reason'],
-        ]);
 
-        return $loan->load(self::DETAIL_RELATIONS);
+        DB::transaction(function () use ($appRequest, $loan, $request, $data) {
+            $appRequest->update([
+                'status' => 'Rejected',
+                'rejected_by' => $request->user()->id,
+                'rejected_at' => now(),
+                'reject_reason' => $data['rejected_reason'],
+            ]);
+            $loan->update([
+                'status' => 'Rejected',
+                'approved_by' => $request->user()->id,
+                'approved_at' => now(),
+                'rejected_reason' => $data['rejected_reason'],
+            ]);
+        });
+
+        return $loan->fresh()->load(self::DETAIL_RELATIONS);
     }
 
     /** Submits a request to cancel a loan — either Approved-but-not-yet-

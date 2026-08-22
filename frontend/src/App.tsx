@@ -223,6 +223,8 @@ const FORM_ROUTE_IDS = new Set([
 const EXTRA_ROUTES: { path: string; forId: string }[] = [
   { path: 'customers/:id/edit', forId: 'customers' },
   { path: 'customers/:id/loan/:loanId', forId: 'customers' },
+  { path: 'sd/drafts/:id/edit', forId: 'sd/drafts' },
+  { path: 'loan/apps/:id/edit', forId: 'loan/apps' },
 ]
 
 function AppShell() {

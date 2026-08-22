@@ -58,6 +58,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
   const notify = useNotify()
   const [statusModal, setStatusModal] = useState(false)
   const [tab, setTab] = useState(SECTIONS[0].id)
+  const [busy, setBusy] = useState(false)
 
   if (loan.status === 'Approved' && context === 'active') {
     return <DisburseForm loan={loan} me={me} onChanged={onChanged} notify={notify} />
@@ -69,6 +70,29 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
   // disbursement doesn't imply being trusted to approve cancelling one.
   const cancelModule = context === 'active' ? 'Active Loans' : 'Loan Applications'
   const pendingCancel = loan.pendingCancelRequest
+
+  const approveApplication = async () => {
+    setBusy(true)
+    try { await loansApi.approve(loan.id); notify.success('Loan approved', loan.code); onChanged() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+    finally { setBusy(false) }
+  }
+  const rejectApplication = async () => {
+    const reason = await notify.prompt({ title: `Reject loan ${loan.code}?`, msg: 'Give a reason — this is shown to branch staff.', placeholder: 'Reason for rejection', required: true, danger: true, okText: 'Reject' })
+    if (!reason) return
+    setBusy(true)
+    try { await loansApi.reject(loan.id, reason); notify.success('Loan rejected', loan.code); onChanged() }
+    catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
+    finally { setBusy(false) }
+  }
+  const withdrawApplication = async () => {
+    const reason = await notify.prompt({ title: `Withdraw application ${loan.code}?`, msg: 'Give a reason — the application stays on record, marked Rejected.', placeholder: 'Reason for withdrawal', required: true, danger: true, okText: 'Withdraw' })
+    if (!reason) return
+    setBusy(true)
+    try { await loansApi.remove(loan.id, reason); notify.success('Application withdrawn', loan.code); onChanged() }
+    catch (ex: any) { notify.error('Withdraw failed', getErrorText(ex)) }
+    finally { setBusy(false) }
+  }
 
   const cancelLoan = async () => {
     const msg = loan.status === 'Active'
@@ -120,14 +144,32 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           {loan.status === 'WrittenOff' && loan.writtenOffReason && <span className="t-2" style={{ fontSize: 12 }}>Reason: {loan.writtenOffReason}{loan.writtenOffBy ? ` — ${loan.writtenOffBy.name}` : ''}</span>}
         </div>
         <div className="row gap-2 wrap">
+          {loan.status === 'Pending' && context === 'applications' && (
+            <>
+              <Can user={me} module="Loan Applications" action="Edit">
+                <Btn size="sm" variant="solid" icon="edit" onClick={() => go?.(`loan/apps/${loan.id}/edit`)}>Edit</Btn>
+              </Can>
+              {canApprove(me, 'loan_application') && me?.id !== loan.pendingApplicationRequest?.requester?.id && (
+                <>
+                  <Btn size="sm" variant="primary" icon="check" onClick={approveApplication} disabled={busy}>Approve</Btn>
+                  <Btn size="sm" variant="danger" icon="x" onClick={rejectApplication} disabled={busy}>Reject</Btn>
+                </>
+              )}
+              <Can user={me} module="Loan Applications" action="Delete">
+                <Btn size="sm" variant="solid" icon="trash" onClick={withdrawApplication} disabled={busy}>Withdraw</Btn>
+              </Can>
+            </>
+          )}
           {!pendingCancel && (loan.status === 'Approved' || (loan.status === 'Active' && !loan.payments?.length)) && (
             <Can user={me} module={cancelModule} action="Delete">
               <Btn size="sm" variant="danger" icon="x" onClick={cancelLoan}>Cancel Loan</Btn>
             </Can>
           )}
-          <Can user={me} module="Active Loans" action="Edit">
-            <Btn size="sm" variant="solid" icon="flag" onClick={() => setStatusModal(true)}>Contract Status Change</Btn>
-          </Can>
+          {loan.status !== 'Pending' && (
+            <Can user={me} module="Active Loans" action="Edit">
+              <Btn size="sm" variant="solid" icon="flag" onClick={() => setStatusModal(true)}>Contract Status Change</Btn>
+            </Can>
+          )}
           {loan.status === 'Active' && me?.role === 'admin' && (
             <Btn size="sm" variant="danger" icon="alert" onClick={writeOffLoan}>Write Off</Btn>
           )}

@@ -65,6 +65,12 @@ class ApprovalRequest extends Model
         return $this->belongsTo(FacilityPayment::class, 'subject_id');
     }
 
+    /** Only meaningful/eager-loadable for the speed_draft_application bucket — see loan()/payment() above. */
+    public function speedDraft()
+    {
+        return $this->belongsTo(SpeedDraft::class, 'subject_id');
+    }
+
     public function approvalsCount(): int
     {
         return ($this->first_approved_by ? 1 : 0) + ($this->second_approved_by ? 1 : 0);

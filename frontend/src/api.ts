@@ -396,6 +396,8 @@ export interface Loan {
   writtenOffReason?: string | null;
   /** The one cancel request awaiting approval right now, if any — see loansApi.requestCancel(). */
   pendingCancelRequest?: LoanCancelRequest | null;
+  /** The approval_requests row (code 'loan_application') created at submission time — only present while status is Pending. */
+  pendingApplicationRequest?: LoanCancelRequest | null;
   cancelRequests?: LoanCancelRequest[];
   disbursedAmount?: number | string | null;
   disbursedAt?: string | null;
@@ -991,6 +993,12 @@ export const loanPaymentsApi = {
 
 /** Admin-only consolidated inbox — see ApprovalController::index(). */
 export interface ApprovalsInbox {
+  loanApplicationRequests: (LoanCancelRequest & {
+    loan?: { id: number; code: string; principalAmount: number | string; status: LoanStatus; customer?: { id: number; fullName: string }; loanDetail?: { loanType?: { id: number; name: string } | null } | null } | null
+  })[]
+  speedDraftApplicationRequests: (LoanCancelRequest & {
+    speedDraft?: { id: number; code: string; principalAmount: number | string; status: SpeedDraftStatus; customer?: { id: number; fullName: string }; speedDraftDetail?: { speedDraftType?: { id: number; name: string } | null } | null } | null
+  })[]
   loanCancelRequests: (LoanCancelRequest & {
     loan?: { id: number; code: string; principalAmount: number | string; status: LoanStatus; customer?: { id: number; fullName: string } } | null
   })[]
@@ -1254,6 +1262,8 @@ export interface SpeedDraft {
   approvedAt?: string | null;
   rejectedReason?: string | null;
   closedAt?: string | null;
+  /** The approval_requests row (code 'speed_draft_application') created at submission time — only present while status is Pending. */
+  pendingApplicationRequest?: LoanCancelRequest | null;
 
   /** SpeedDraft-specific fields, nested — see SpeedDraftFacilityDetail. Always present on a real SpeedDraft. */
   speedDraftDetail?: SpeedDraftFacilityDetail | null;

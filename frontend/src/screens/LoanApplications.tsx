@@ -142,6 +142,11 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const openCreate = () => navigate(`${ROUTE_BASE}/new`)
   const openRow = (row: Loan) => navigate(`${ROUTE_BASE}/${row.id}`)
   const back = () => navigate(ROUTE_BASE)
+  // Cancelling/saving an edit returns to the application's approval page rather
+  // than all the way back to the list, since that's where Edit was opened from.
+  const backFromForm = () => navigate(editing ? `${ROUTE_BASE}/${editing.id}` : ROUTE_BASE)
+
+  const isEdit = !!params.id && location.pathname === `${ROUTE_BASE}/${params.id}/edit`
 
   const loadCreate = () => { setEditing(null); setViewing(null); setForm(blankForm()); setCollateralFiles([]); setBackDated(false); setErr(''); setMode('form') }
   const loadRow = async (id: number) => {
@@ -149,7 +154,8 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     // collateral, officer/applier/approver names) before showing the form or view.
     try {
       const loan = await loansApi.get(id)
-      if (loan.status === 'Pending') {
+      if (isEdit) {
+        if (loan.status !== 'Pending') { notify.error('Only a Pending application can be edited'); navigate(`${ROUTE_BASE}/${id}`, { replace: true }); return }
         setEditing(loan); setViewing(null)
         const applicationDate = loan.loanDetail?.applicationDate || (loan.createdAt || '').slice(0, 10) || todayIso()
         setForm({
@@ -252,40 +258,12 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           catch { uploadFailures++ }
         }
       }
-      back(); refresh()
+      backFromForm(); refresh()
       notify.success(editing ? 'Application updated' : 'Application submitted', customer?.fullName)
       if (uploadFailures) notify.error('Some attachments failed to upload', `${uploadFailures} file(s) — re-attach them from the application.`)
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
-  }
-
-  const remove = async (loan: Loan) => {
-    const reason = await notify.prompt({ title: `Withdraw application ${loan.code}?`, msg: 'Give a reason — the application stays on record, marked Rejected.', placeholder: 'Reason for withdrawal', required: true, danger: true, okText: 'Withdraw' })
-    if (!reason) return
-    try { await loansApi.remove(loan.id, reason); refresh(); notify.success('Application withdrawn', loan.code) }
-    catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
-  }
-
-  const approve = async (loan: Loan) => {
-    const ok = await notify.confirm({ title: `Approve loan ${loan.code}?`, msg: `${loan.customer?.fullName} — ${Number(loan.principalAmount).toLocaleString()}`, okText: 'Approve' })
-    if (!ok) return
-    try { await loansApi.approve(loan.id); refresh(); notify.success('Loan approved', loan.code) }
-    catch (ex: any) { notify.error('Approve failed', getErrorText(ex)) }
-  }
-
-  const reject = async (loan: Loan) => {
-    const reason = await notify.prompt({ title: `Reject loan ${loan.code}?`, msg: 'Give a reason — this is shown to branch staff.', placeholder: 'Reason for rejection', required: true, danger: true, okText: 'Reject' })
-    if (!reason) return
-    try { await loansApi.reject(loan.id, reason); refresh(); notify.success('Loan rejected', loan.code) }
-    catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
-  }
-
-  const cancel = async (loan: Loan) => {
-    const reason = await notify.prompt({ title: `Request cancel for loan ${loan.code}?`, msg: 'Already approved but not yet disbursed — give a reason. Needs a second person to approve before it takes effect.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Send Request' })
-    if (!reason) return
-    try { await loansApi.requestCancel(loan.id, reason); refresh(); notify.success('Cancel request sent', 'Awaiting approval') }
-    catch (ex: any) { notify.error('Request failed', getErrorText(ex)) }
   }
 
   const addGuarantor = () => setForm((s) => ({ ...s, guarantors: [...s.guarantors, { guarantorCustomerId: 0, guaranteedAmount: '' }] }))
@@ -369,7 +347,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
         <PageHead crumbs="Loan Management / Loan Applications" title={editing ? 'Edit Application' : 'New Loan Application'} icon="doc"
           sub={editing ? editing.code : 'Pick a customer and product, enter terms, attach guarantors/collateral.'}
           actions={<>
-            <Btn variant="solid" onClick={back}>Cancel</Btn>
+            <Btn variant="solid" onClick={backFromForm}>Cancel</Btn>
             <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Submit Application')}</Btn>
           </>} />
 
@@ -639,7 +617,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           {q && <span className="t-2" style={{ fontSize: 12 }}>{filtered.length} of {rows.length}</span>}
         </div>
         {loading ? <LoadingBlock /> :
-        <Table cols={[{ label: 'Application' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Amount' }, { label: 'Term' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 130 }]}
+        <Table cols={[{ label: 'Application' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Amount' }, { label: 'Term' }, { label: 'Status', align: 'center' }]}
           rows={filtered}
           empty="No loan applications"
           onRow={openRow}
@@ -653,25 +631,9 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             <Td>{l.loanDetail?.loanType?.name}</Td>
             <Td mono>{Number(l.principalAmount).toLocaleString()}</Td>
             <Td>{l.termMonths}mo</Td>
-            <Td align="center"><Badge tone={statusTone[l.status]} dot>{l.status}</Badge></Td>
-            <Td align="right">
-              <div className="row gap-1" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                {l.status === 'Pending' && (
-                  <Can user={me} module="Loan Applications" action="Approve">
-                    <button className="mms-act" title="Approve" onClick={() => approve(l)}><Icon n="check" s={15} c="var(--ok)" /></button>
-                    <button className="mms-act" title="Reject" onClick={() => reject(l)}><Icon n="x" s={15} c="var(--bad)" /></button>
-                  </Can>
-                )}
-                {l.status === 'Pending' && (
-                  <Can user={me} module="Loan Applications" action="Delete">
-                    <button className="mms-act" title="Withdraw" onClick={() => remove(l)}><Icon n="trash" s={15} /></button>
-                  </Can>
-                )}
-                {l.status === 'Approved' && !l.pendingCancelRequest && (
-                  <Can user={me} module="Loan Applications" action="Delete">
-                    <button className="mms-act" title="Request Cancel" onClick={() => cancel(l)}><Icon n="x" s={15} c="var(--bad)" /></button>
-                  </Can>
-                )}
+            <Td align="center">
+              <div className="row gap-1" style={{ justifyContent: 'center' }}>
+                <Badge tone={statusTone[l.status]} dot>{l.status}</Badge>
                 {l.status === 'Approved' && !!l.pendingCancelRequest && <Badge tone="amber" dot>Cancel Pending</Badge>}
               </div>
             </Td>

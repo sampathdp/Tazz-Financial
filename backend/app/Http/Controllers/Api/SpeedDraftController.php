@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApprovalRequest;
+use App\Models\ApprovalType;
 use App\Models\Branch;
 use App\Models\FacilitySchedule;
 use App\Models\SpeedDraft;
@@ -30,6 +32,7 @@ class SpeedDraftController extends Controller
         'speedDraftDetail.speedDraftType', 'insurance', 'applier:id,name', 'approver:id,name', 'creator:id,name',
         'collateral.jewelryDetail', 'collateral.vehicleDetail', 'collateral.documents',
         'schedules.allocations', 'payments.receiver:id,name', 'payments.voider:id,name',
+        'pendingApplicationRequest.requester:id,name',
     ];
 
     /**
@@ -137,6 +140,15 @@ class SpeedDraftController extends Controller
                 $this->createCollateral($draft, $item);
             }
 
+            $type = ApprovalType::where('code', 'speed_draft_application')->firstOrFail();
+            ApprovalRequest::create([
+                'approval_type_id' => $type->id,
+                'subject_id' => $draft->id,
+                'requested_by' => $request->user()->id,
+                'requested_at' => now(),
+                'required_approvals' => $type->required_approvals,
+            ]);
+
             return $draft;
         });
 
@@ -174,19 +186,54 @@ class SpeedDraftController extends Controller
         if ($speedDraft->status !== 'Pending') {
             return response()->json(['message' => 'Only a Pending Speed Draft can be deleted.'], 422);
         }
+        if ($appRequest = $speedDraft->pendingApplicationRequest) {
+            $appRequest->delete();
+        }
         $speedDraft->delete();
 
         return response()->noContent();
     }
 
+    /** Applies once the associated approval_requests row (created at store() time,
+     *  code 'speed_draft_application') has collected enough distinct approvals —
+     *  mirrors LoanController::approve()'s 'loan_application' flow. Authorization
+     *  is entirely via ApprovalType::isAuthorized('speed_draft_application') now —
+     *  no route-level permission gate (see routes/api.php). */
     public function approve(Request $request, SpeedDraft $speedDraft)
     {
         if ($speedDraft->status !== 'Pending') {
             return response()->json(['message' => 'Only a Pending Speed Draft can be approved.'], 422);
         }
-        $speedDraft->update(['status' => 'Approved', 'approved_by' => $request->user()->id, 'approved_at' => now()]);
+        $appRequest = $speedDraft->pendingApplicationRequest;
+        if (!$appRequest) {
+            return response()->json(['message' => 'No pending approval request found for this draft.'], 422);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'speed_draft_application')) {
+            return response()->json(['message' => 'You are not authorized to approve Speed Drafts.'], 403);
+        }
+        if ($appRequest->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own application.'], 422);
+        }
+        if ($appRequest->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
 
-        return $speedDraft->load(self::DETAIL_RELATIONS);
+        DB::transaction(function () use ($appRequest, $speedDraft, $request) {
+            if (!$appRequest->first_approved_by) {
+                $appRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $appRequest->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($appRequest->fresh()->approvalsCount() < $appRequest->required_approvals) {
+                return;
+            }
+
+            $speedDraft->update(['status' => 'Approved', 'approved_by' => $request->user()->id, 'approved_at' => now()]);
+            $appRequest->update(['status' => 'Approved']);
+        });
+
+        return $speedDraft->fresh()->load(self::DETAIL_RELATIONS);
     }
 
     public function reject(Request $request, SpeedDraft $speedDraft)
@@ -194,10 +241,29 @@ class SpeedDraftController extends Controller
         if ($speedDraft->status !== 'Pending') {
             return response()->json(['message' => 'Only a Pending Speed Draft can be rejected.'], 422);
         }
+        $appRequest = $speedDraft->pendingApplicationRequest;
+        if (!$appRequest) {
+            return response()->json(['message' => 'No pending approval request found for this draft.'], 422);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'speed_draft_application')) {
+            return response()->json(['message' => 'You are not authorized to reject Speed Drafts.'], 403);
+        }
+        if ($appRequest->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot reject your own application — withdraw it instead.'], 422);
+        }
         $data = $request->validate(['rejected_reason' => 'nullable|string|max:255']);
-        $speedDraft->update(['status' => 'Rejected', 'rejected_reason' => $data['rejected_reason'] ?? null]);
 
-        return $speedDraft->load(self::DETAIL_RELATIONS);
+        DB::transaction(function () use ($appRequest, $speedDraft, $request, $data) {
+            $appRequest->update([
+                'status' => 'Rejected',
+                'rejected_by' => $request->user()->id,
+                'rejected_at' => now(),
+                'reject_reason' => $data['rejected_reason'] ?? null,
+            ]);
+            $speedDraft->update(['status' => 'Rejected', 'rejected_reason' => $data['rejected_reason'] ?? null]);
+        });
+
+        return $speedDraft->fresh()->load(self::DETAIL_RELATIONS);
     }
 
     /** Hands the capital to the customer and generates the interest-only schedule. */

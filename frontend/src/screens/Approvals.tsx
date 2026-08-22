@@ -23,14 +23,16 @@ function progressLabel(requiredApprovals: number, firstApprover?: { name: string
     : `Needs ${remaining} approval${remaining === 1 ? '' : 's'}`
 }
 
-export function ApprovalsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+const EMPTY_INBOX: ApprovalsInbox = { loanApplicationRequests: [], speedDraftApplicationRequests: [], loanCancelRequests: [], paymentVoidRequests: [], allocationRequests: [] }
+
+export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
-  const [data, setData] = useState<ApprovalsInbox>({ loanCancelRequests: [], paymentVoidRequests: [], allocationRequests: [] })
+  const [data, setData] = useState<ApprovalsInbox>(EMPTY_INBOX)
   const [loading, setLoading] = useState(true)
 
   const refresh = () => {
     setLoading(true)
-    approvalsApi.list().then(setData).catch(() => setData({ loanCancelRequests: [], paymentVoidRequests: [], allocationRequests: [] })).finally(() => setLoading(false))
+    approvalsApi.list().then(setData).catch(() => setData(EMPTY_INBOX)).finally(() => setLoading(false))
   }
   useEffect(() => { refresh() }, [])
 
@@ -69,11 +71,40 @@ export function ApprovalsScreen({ user: me }: { go: Go; user?: AuthUser | null }
     catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
-  const total = data.loanCancelRequests.length + data.paymentVoidRequests.length + data.allocationRequests.length
+  const total = data.loanApplicationRequests.length + data.speedDraftApplicationRequests.length
+    + data.loanCancelRequests.length + data.paymentVoidRequests.length + data.allocationRequests.length
 
   return (
     <div>
       <PageHead crumbs="Administration" title="Approvals" icon="shield" sub={`${total} request${total === 1 ? '' : 's'} awaiting approval`} />
+
+      <Card pad={0} style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Loan Applications</div>
+        <Table cols={[{ label: 'Application' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Amount', align: 'right' }, { label: 'Applied' }]}
+          rows={data.loanApplicationRequests} empty={loading ? 'Loading…' : 'No loan applications pending.'}
+          onRow={(r) => r.loan && go(`loan/apps/${r.loan.id}`)}
+          render={(r) => <>
+            <Td mono style={{ fontWeight: 600 }}>{r.loan?.code || '—'}</Td>
+            <Td>{r.loan?.customer?.fullName || '—'}</Td>
+            <Td>{r.loan?.loanDetail?.loanType?.name || '—'}</Td>
+            <Td mono align="right">{r.loan ? money(r.loan.principalAmount) : '—'}</Td>
+            <Td>{dateOnly(r.requestedAt)}</Td>
+          </>} />
+      </Card>
+
+      <Card pad={0} style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Speed Drafts</div>
+        <Table cols={[{ label: 'Draft' }, { label: 'Customer' }, { label: 'Type' }, { label: 'Capital', align: 'right' }, { label: 'Applied' }]}
+          rows={data.speedDraftApplicationRequests} empty={loading ? 'Loading…' : 'No Speed Drafts pending.'}
+          onRow={(r) => r.speedDraft && go(`sd/drafts/${r.speedDraft.id}`)}
+          render={(r) => <>
+            <Td mono style={{ fontWeight: 600 }}>{r.speedDraft?.code || '—'}</Td>
+            <Td>{r.speedDraft?.customer?.fullName || '—'}</Td>
+            <Td>{r.speedDraft?.speedDraftDetail?.speedDraftType?.name || '—'}</Td>
+            <Td mono align="right">{r.speedDraft ? money(r.speedDraft.principalAmount) : '—'}</Td>
+            <Td>{dateOnly(r.requestedAt)}</Td>
+          </>} />
+      </Card>
 
       <Card pad={0} style={{ marginBottom: 16 }}>
         <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Loan Cancellations</div>
