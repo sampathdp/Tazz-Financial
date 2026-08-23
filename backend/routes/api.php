@@ -426,6 +426,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('fixed-deposits/{fixedDeposit}/renew', [FixedDepositController::class, 'renew'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fixed-deposits/{fixedDeposit}/withdraw', [FixedDepositController::class, 'withdraw'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fixed-deposits/{fixedDeposit}/void-withdrawal', [FixedDepositController::class, 'voidWithdrawal'])->middleware('perm:Fixed Deposits,Delete');
+    Route::post('fixed-deposits/{fixedDeposit}/part-payment', [FixedDepositController::class, 'partPayment'])->middleware('perm:Fixed Deposits,Edit');
+    Route::post('fd-part-payments/{fdPartPayment}/void', [FixedDepositController::class, 'voidPartPayment'])->middleware('perm:Fixed Deposits,Delete');
 
     // --- Funding Management: Monthly Interest Payments ---
     Route::get('fixed-deposits/{fixedDeposit}/interest-payments', [FdInterestPaymentController::class, 'index'])->middleware('perm:Fixed Deposits,View');

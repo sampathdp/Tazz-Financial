@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\FdDeposit;
+use App\Models\FdPartPayment;
 use App\Models\FdRenewal;
 use App\Models\FdWithdrawal;
 use App\Models\FixedDeposit;
@@ -33,6 +34,7 @@ class FixedDepositController extends Controller
         'deposits.bank:id,name',
         'interestPayments.payer:id,name',
         'withdrawal',
+        'partPayments.creator:id,name',
         'renewedFrom:id,fd_number',
         'renewedTo:id,fd_number',
     ];
@@ -292,6 +294,189 @@ class FixedDepositController extends Controller
         });
 
         return $fixedDeposit->fresh()->load(self::DETAIL_RELATIONS);
+    }
+
+    /**
+     * Premature partial withdrawal — pays out part of the principal before
+     * maturity while keeping the FD open on the reduced balance, following
+     * the standard Sri Lankan LFC/bank convention: the withdrawn portion
+     * earns interest at the product's own (reduced) premature-withdrawal
+     * rate for the days it was actually held, not the full contracted rate/
+     * term — see FundingProduct::premature_withdrawal_rate_percent. If a
+     * monthly-method FD already paid out more on that portion than it's now
+     * entitled to, the excess is clawed back from the principal returned
+     * (mirrors bank T&Cs: "penalty may have to be deducted from capital if
+     * interest has been paid monthly"). The remaining FD is recalculated
+     * forward from today at the product's normal rate — past/paid interest
+     * is left untouched.
+     */
+    public function partPayment(Request $request, FixedDeposit $fixedDeposit)
+    {
+        if ($fixedDeposit->status !== 'Active') {
+            return response()->json(['message' => 'Only an active FD can be part-paid.'], 422);
+        }
+        $fixedDeposit->loadMissing(['branch', 'fundingProduct']);
+        $product = $fixedDeposit->fundingProduct;
+        if ($product->premature_withdrawal_rate_percent === null) {
+            return response()->json(['message' => 'This funding product has no premature withdrawal rate configured — set one on Funding Products before allowing part payments.'], 422);
+        }
+
+        $data = $request->validate([
+            'amount' => 'required|numeric|min:0.01',
+            'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
+            'reference_no' => 'nullable|string|max:64',
+            'notes' => 'nullable|string',
+            'paid_at' => 'nullable|date',
+        ]);
+
+        $withdrawAmount = round((float) $data['amount'], 2);
+        $principal = (float) $fixedDeposit->principal_amount;
+        if ($withdrawAmount >= $principal) {
+            throw ValidationException::withMessages(['amount' => 'A part payment must be less than the full principal — use Withdraw to close the FD instead.']);
+        }
+        $remaining = round($principal - $withdrawAmount, 2);
+        if ($remaining < (float) $product->min_deposit_amount) {
+            throw ValidationException::withMessages(['amount' => "The remaining balance ({$remaining}) would fall below this product's minimum deposit of {$product->min_deposit_amount}."]);
+        }
+
+        $partPayment = DB::transaction(function () use ($fixedDeposit, $product, $data, $withdrawAmount, $principal, $remaining, $request) {
+            $paidAt = $data['paid_at'] ?? now()->format('Y-m-d');
+            $heldDays = max(1, Carbon::parse($fixedDeposit->start_date)->diffInDays(Carbon::parse($paidAt)));
+            $rate = (float) $product->premature_withdrawal_rate_percent;
+            $entitlement = round($withdrawAmount * ($rate / 100) * ($heldDays / 365), 2);
+
+            $interestPaid = 0.0;
+            $clawback = 0.0;
+            if ($fixedDeposit->interest_payment_method === 'monthly') {
+                // Prior monthly payouts were made against the whole principal, not
+                // any one part of it — apportion the withdrawn share of what's
+                // already been paid, pro-rata by amount, to compare against what
+                // that share is actually entitled to at the reduced rate.
+                $paidSoFar = (float) $fixedDeposit->interestPayments()->where('status', 'Paid')->sum('paid_amount');
+                $attributed = round($paidSoFar * ($withdrawAmount / $principal), 2);
+                $clawback = max(0.0, round($attributed - $entitlement, 2));
+            } else {
+                $interestPaid = $entitlement;
+            }
+            $netAmount = round($withdrawAmount + $interestPaid - $clawback, 2);
+
+            $voucherNo = NumberGenerator::next('fd_part_payment', [
+                'branch_id' => $fixedDeposit->branch_id,
+                'branch_code' => $fixedDeposit->branch->code,
+                'user_id' => $request->user()->id,
+            ]);
+
+            $partPayment = FdPartPayment::create([
+                'fixed_deposit_id' => $fixedDeposit->id,
+                'voucher_no' => $voucherNo,
+                'principal_amount' => $withdrawAmount,
+                'rate_percent' => $rate,
+                'held_days' => $heldDays,
+                'interest_entitlement' => $entitlement,
+                'interest_paid' => $interestPaid,
+                'clawback_amount' => $clawback,
+                'net_amount_paid' => $netAmount,
+                'payment_method' => $data['payment_method'],
+                'reference_no' => $data['reference_no'] ?? null,
+                'notes' => $data['notes'] ?? null,
+                'paid_at' => $paidAt,
+                'principal_before' => $principal,
+                'monthly_interest_before' => $fixedDeposit->monthly_interest_amount,
+                'total_interest_before' => $fixedDeposit->total_interest_amount,
+                'maturity_amount_before' => $fixedDeposit->maturity_amount,
+                'created_by' => $request->user()->id,
+            ]);
+            NumberGenerator::attach($voucherNo, $partPayment);
+
+            $this->recalculateAfterPartPayment($fixedDeposit, $remaining, $paidAt);
+
+            $partPayment->setRelation('fixedDeposit', $fixedDeposit);
+            FdCashbookPoster::postPartPayment($partPayment);
+            FdLedgerPoster::postPartPayment($partPayment);
+
+            return $partPayment;
+        });
+
+        return response()->json($partPayment->load(['fixedDeposit' => fn ($q) => $q->with(self::DETAIL_RELATIONS)]), 201);
+    }
+
+    /**
+     * Undoes a mistaken part payment — reverses GL/Cashbook and restores the
+     * FD's principal/interest figures from the *_before snapshot taken at the
+     * time of that part payment. Only ever allowed on an FD's most recent
+     * part payment, so that snapshot is guaranteed to still match reality
+     * (an earlier one's snapshot could otherwise be stale once a later part
+     * payment has recalculated the FD again on top of it).
+     */
+    public function voidPartPayment(Request $request, FdPartPayment $fdPartPayment)
+    {
+        $fixedDeposit = $fdPartPayment->fixedDeposit;
+        $latest = $fixedDeposit->partPayments()->orderByDesc('id')->first();
+        if (!$latest || $latest->id !== $fdPartPayment->id) {
+            return response()->json(['message' => 'Void the more recent part payment(s) on this FD first.'], 422);
+        }
+
+        DB::transaction(function () use ($fixedDeposit, $fdPartPayment) {
+            FdCashbookPoster::reversePartPayment($fdPartPayment);
+            FdLedgerPoster::reversePartPayment($fdPartPayment);
+
+            $fixedDeposit->update([
+                'principal_amount' => $fdPartPayment->principal_before,
+                'monthly_interest_amount' => $fdPartPayment->monthly_interest_before,
+                'total_interest_amount' => $fdPartPayment->total_interest_before,
+                'maturity_amount' => $fdPartPayment->maturity_amount_before,
+            ]);
+            if ($fixedDeposit->interest_payment_method === 'monthly') {
+                $fixedDeposit->interestPayments()->where('status', 'Pending')->update(['amount' => $fdPartPayment->monthly_interest_before]);
+            }
+
+            $fdPartPayment->delete();
+        });
+
+        return $fixedDeposit->fresh()->load(self::DETAIL_RELATIONS);
+    }
+
+    /**
+     * Applies a part payment's reduced principal to the FD going forward.
+     * Past/paid interest is left exactly as it was; only what's still ahead
+     * — remaining monthly installments, or the still-to-accrue slice of a
+     * maturity-method FD's interest — is recalculated on the new principal
+     * at the product's normal (not premature) rate, same simple-interest
+     * 365-day basis used to price the part payment itself.
+     */
+    private function recalculateAfterPartPayment(FixedDeposit $fixedDeposit, float $newPrincipal, string $asOfDate): void
+    {
+        $rate = (float) $fixedDeposit->interest_rate_percent;
+
+        if ($fixedDeposit->interest_payment_method === 'monthly') {
+            $newMonthly = round($newPrincipal * ($rate / 12 / 100), 2);
+            $paidSoFar = (float) $fixedDeposit->interestPayments()->where('status', 'Paid')->sum('paid_amount');
+            $remainingCount = $fixedDeposit->interestPayments()->where('status', 'Pending')->count();
+            $fixedDeposit->interestPayments()->where('status', 'Pending')->update(['amount' => $newMonthly]);
+            $fixedDeposit->update([
+                'principal_amount' => $newPrincipal,
+                'monthly_interest_amount' => $newMonthly,
+                'total_interest_amount' => round($paidSoFar + $newMonthly * $remainingCount, 2),
+                'maturity_amount' => $newPrincipal,
+            ]);
+
+            return;
+        }
+
+        // Interest-at-maturity: what's already silently accrued (on the OLD
+        // principal, up to today) stays; only the remaining term's accrual
+        // switches to the NEW, reduced principal.
+        $oldPrincipal = (float) $fixedDeposit->principal_amount;
+        $elapsedDays = Carbon::parse($fixedDeposit->start_date)->diffInDays(Carbon::parse($asOfDate));
+        $remainingDays = max(0, Carbon::parse($asOfDate)->diffInDays(Carbon::parse($fixedDeposit->maturity_date), false));
+        $accrued = round($oldPrincipal * ($rate / 100) * ($elapsedDays / 365), 2);
+        $future = round($newPrincipal * ($rate / 100) * ($remainingDays / 365), 2);
+
+        $fixedDeposit->update([
+            'principal_amount' => $newPrincipal,
+            'total_interest_amount' => $accrued + $future,
+            'maturity_amount' => round($newPrincipal + $accrued + $future, 2),
+        ]);
     }
 
     /** Value the customer chose (only allowed if the product permits a choice) or the product's fixed default. */

@@ -70,6 +70,11 @@ class FixedDeposit extends Model
         return $this->hasOne(FdWithdrawal::class);
     }
 
+    public function partPayments()
+    {
+        return $this->hasMany(FdPartPayment::class)->orderByDesc('id');
+    }
+
     public function renewedFrom()
     {
         return $this->belongsTo(FixedDeposit::class, 'renewed_from_id');

@@ -1363,6 +1363,8 @@ export interface FundingProduct {
   /** Auto = annualRatePercent/12 unless rateIsManual. */
   monthlyRatePercent?: number | string | null;
   rateIsManual?: boolean;
+  /** Reduced rate applied to a premature part-payment (see fixedDepositsApi.partPayment). Null = part-payment blocked for this product until set. */
+  prematureWithdrawalRatePercent?: number | string | null;
   allowedTermsMonths: number[];
   allowCustomTerm?: boolean;
   minDepositAmount: number | string;
@@ -1404,6 +1406,21 @@ export interface FdWithdrawal {
   creator?: { id: number; name: string } | null;
 }
 
+/** A premature partial withdrawal — the FD stays open on the reduced principal (unlike FdWithdrawal, which always closes it). See backend FixedDepositController::partPayment(). */
+export interface FdPartPayment {
+  id: number; fixedDepositId: number; voucherNo: string;
+  principalAmount: number | string; ratePercent: number | string; heldDays: number;
+  interestEntitlement: number | string;
+  /** Cash interest paid out on this transaction — only nonzero for an interest-at-maturity FD. */
+  interestPaid: number | string;
+  /** Deducted from the principal returned when a monthly-method FD's prior payouts exceeded the reduced entitlement. */
+  clawbackAmount: number | string;
+  netAmountPaid: number | string;
+  paymentMethod: FdPaymentMethod; referenceNo?: string | null; notes?: string | null;
+  paidAt: string;
+  creator?: { id: number; name: string } | null;
+}
+
 export interface FdRenewal {
   id: number;
   oldFixedDepositId: number; oldFixedDeposit?: { id: number; fdNumber: string; customer?: { id: number; fullName: string; code: string } } | null;
@@ -1436,6 +1453,7 @@ export interface FixedDeposit {
   deposits?: FdDeposit[];
   interestPayments?: FdInterestPayment[];
   withdrawal?: FdWithdrawal | null;
+  partPayments?: FdPartPayment[];
   createdAt?: string;
 }
 
@@ -1472,6 +1490,11 @@ export const fixedDepositsApi = {
     http.post(`/fixed-deposits/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
   /** Undoes a mistaken closure — reverses GL/Cashbook and reopens the FD (see backend FixedDepositController::voidWithdrawal). */
   voidWithdrawal: (id: number) => http.post(`/fixed-deposits/${id}/void-withdrawal`).then((r) => camelize(r.data) as FixedDeposit),
+  /** Premature partial withdrawal — FD stays open on the reduced principal (see backend FixedDepositController::partPayment). */
+  partPayment: (id: number, body: { amount: number | string; paymentMethod: FdPaymentMethod; referenceNo?: string; notes?: string; paidAt?: string }) =>
+    http.post(`/fixed-deposits/${id}/part-payment`, snakeize(body)).then((r) => camelize(r.data) as FdPartPayment & { fixedDeposit: FixedDeposit }),
+  /** Undoes a mistaken part payment — only allowed on the FD's most recent one (see backend FixedDepositController::voidPartPayment). */
+  voidPartPayment: (partPaymentId: number) => http.post(`/fd-part-payments/${partPaymentId}/void`).then((r) => camelize(r.data) as FixedDeposit),
 }
 
 export interface FinanceCalcCharge { label?: string; amount: number | string; financed?: boolean }

@@ -6,6 +6,7 @@ use App\Models\CashAccount;
 use App\Models\CashbookEntry;
 use App\Models\FdDeposit;
 use App\Models\FdInterestPayment;
+use App\Models\FdPartPayment;
 use App\Models\FdWithdrawal;
 use Illuminate\Support\Facades\DB;
 
@@ -157,6 +158,55 @@ class FdCashbookPoster
     public static function reverseInterestPaid(FdInterestPayment $payment): void
     {
         $entry = CashbookEntry::where('source_type', 'FdInterestPayment')->where('source_id', $payment->id)->first();
+        if (!$entry) {
+            return;
+        }
+        DB::transaction(function () use ($entry) {
+            $account = CashAccount::lockForUpdate()->find($entry->cash_account_id);
+            if ($account) {
+                $account->update(['current_balance' => bcadd((string) $account->current_balance, (string) $entry->amount, 2)]);
+            }
+            $entry->delete();
+        });
+    }
+
+    /** A Cash-method premature part-payment leaves the till for net_amount_paid (principal + interest paid, less any clawback) when it's recorded. */
+    public static function postPartPayment(FdPartPayment $partPayment): void
+    {
+        if ($partPayment->payment_method !== 'Cash') {
+            return;
+        }
+        $fd = $partPayment->fixedDeposit;
+        $account = CashAccount::branchPrimary((int) $fd->branch_id);
+        if (!$account) {
+            return;
+        }
+
+        DB::transaction(function () use ($account, $partPayment, $fd) {
+            $account = CashAccount::lockForUpdate()->find($account->id);
+            $newBalance = bcsub((string) $account->current_balance, (string) $partPayment->net_amount_paid, 2);
+            $account->update(['current_balance' => $newBalance]);
+
+            CashbookEntry::create([
+                'branch_id' => $account->branch_id,
+                'cash_account_id' => $account->id,
+                'entry_date' => $partPayment->paid_at,
+                'direction' => 'Out',
+                'category' => 'Other',
+                'amount' => $partPayment->net_amount_paid,
+                'balance_after' => $newBalance,
+                'source_type' => 'FdPartPayment',
+                'source_id' => $partPayment->id,
+                'description' => "FD part payment - {$fd->fd_number} ({$partPayment->voucher_no})",
+                'created_by' => $partPayment->created_by,
+            ]);
+        });
+    }
+
+    /** Unwinds the Cashbook entry for a part payment being voided — reverses the till balance and deletes the entry. No-op if it never had one (Bank/Cheque). */
+    public static function reversePartPayment(FdPartPayment $partPayment): void
+    {
+        $entry = CashbookEntry::where('source_type', 'FdPartPayment')->where('source_id', $partPayment->id)->first();
         if (!$entry) {
             return;
         }

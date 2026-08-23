@@ -116,6 +116,10 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
             </label>
           </Field>
           <Field label="Annual Rate (%)"><Input type="number" step="0.01" value={form.annualRatePercent ?? ''} onChange={(e) => set({ annualRatePercent: e.target.value })} /></Field>
+          <Field label="Premature Withdrawal Rate (%, optional)">
+            <Input type="number" step="0.01" value={form.prematureWithdrawalRatePercent ?? ''} onChange={(e) => set({ prematureWithdrawalRatePercent: e.target.value || null })} placeholder="Reduced rate for an early part payment" />
+            <div className="t-2" style={{ fontSize: 11, marginTop: 4 }}>Left blank, part payments are disabled for this product.</div>
+          </Field>
           <Field label="Monthly Rate (%)">
             <Input type="number" step="0.001" value={form.rateIsManual ? (form.monthlyRatePercent ?? '') : (form.annualRatePercent ? (Number(form.annualRatePercent) / 12).toFixed(3) : '')}
               disabled={!form.rateIsManual} onChange={(e) => set({ monthlyRatePercent: e.target.value })} placeholder="Auto = Annual ÷ 12" />

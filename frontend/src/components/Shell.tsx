@@ -56,6 +56,7 @@ export const NAV: NavNode[] = [
     { id: 'fund/products', label: 'Funding Products', icon: 'layers' },
     { id: 'fund/deposits', label: 'Deposits', icon: 'wallet' },
     { id: 'fund/fds', label: 'Fixed Deposits', icon: 'coins' },
+    { id: 'fund/deposit-payment', label: 'Deposit Payment', icon: 'receipt' },
     { id: 'fund/reports', label: 'Funding Reports', icon: 'chart' },
   ] },
 

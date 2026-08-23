@@ -6,6 +6,7 @@ use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\FdDeposit;
 use App\Models\FdInterestPayment;
+use App\Models\FdPartPayment;
 use App\Models\FdWithdrawal;
 use App\Models\JournalEntry;
 
@@ -140,5 +141,57 @@ class FdLedgerPoster
             ->whereNull('reversal_of_id')
             ->get()
             ->each(fn (JournalEntry $entry) => LedgerPoster::reverse($entry, "Voided installment #{$payment->installment_no}", $userId));
+    }
+
+    /**
+     * A Cash-method premature part-payment — Dr 2010 (principal returned, liability
+     * settled for that portion) [+ Dr 5100 if this is a maturity-method FD's premature-
+     * rate interest for the amount withdrawn], Cr 5100 for any clawback (a monthly-method
+     * FD's prior interest payouts turning out to exceed the reduced entitlement — see
+     * FixedDepositController::partPayment()), Cr the branch till for the net cash paid.
+     */
+    public static function postPartPayment(FdPartPayment $partPayment): void
+    {
+        if ($partPayment->payment_method !== 'Cash') {
+            return;
+        }
+        $fd = $partPayment->fixedDeposit;
+        $till = CashAccount::branchPrimary((int) $fd->branch_id);
+        if (!$till) {
+            return;
+        }
+        $tillAccount = ChartOfAccount::forCashTill($till);
+        $payable = ChartOfAccount::system('2010');
+        $expense = ChartOfAccount::system('5100');
+
+        $lines = [
+            ['account_id' => $payable->id, 'debit' => $partPayment->principal_amount, 'credit' => 0],
+        ];
+        if ((float) $partPayment->interest_paid > 0) {
+            $lines[] = ['account_id' => $expense->id, 'debit' => $partPayment->interest_paid, 'credit' => 0];
+        }
+        if ((float) $partPayment->clawback_amount > 0) {
+            $lines[] = ['account_id' => $expense->id, 'debit' => 0, 'credit' => $partPayment->clawback_amount];
+        }
+        $lines[] = ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $partPayment->net_amount_paid];
+
+        LedgerPoster::post($lines, $partPayment->paid_at, [
+            'source_type' => 'FdPartPayment',
+            'source_id' => $partPayment->id,
+            'description' => "FD part payment - {$fd->fd_number} ({$partPayment->voucher_no})",
+            'branch_id' => $fd->branch_id,
+            'posted_by' => $partPayment->created_by,
+        ]);
+    }
+
+    /** Reverses a part payment's posting — called when a mistaken part payment is voided (FixedDepositController::voidPartPayment()). No-op if nothing was ever posted for it (Bank/Cheque). */
+    public static function reversePartPayment(FdPartPayment $partPayment, ?int $userId = null): void
+    {
+        JournalEntry::where('source_type', 'FdPartPayment')
+            ->where('source_id', $partPayment->id)
+            ->where('status', 'Posted')
+            ->whereNull('reversal_of_id')
+            ->get()
+            ->each(fn (JournalEntry $entry) => LedgerPoster::reverse($entry, "Voided: {$partPayment->voucher_no}", $userId));
     }
 }

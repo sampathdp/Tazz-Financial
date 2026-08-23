@@ -45,6 +45,7 @@ class NumberGenerator
         // redundant, so it's dropped in favor of the calendar month.
         'fixed_deposit' => '{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:6}',
         'fd_withdrawal' => '{BRANCH}-FDV-{YEAR:2}-{SEQ:5}',
+        'fd_part_payment' => '{BRANCH}-FDP-{YEAR:2}-{SEQ:5}',
         // One company-wide series, no {BRANCH} — a journal entry isn't tied to a
         // single branch the way a receipt is (see LedgerPoster).
         'journal' => 'JV-{YEAR:2}-{SEQ:6}',
