@@ -881,6 +881,34 @@ export const expenseCategoriesApi = resource<ExpenseCategory>('expense-categorie
 
 export const documentCategoriesApi = resource<DocumentCategory>('document-categories')
 
+export type SubscriptionType = 'Domain' | 'Hosting' | 'Software License' | 'Legal Document' | 'Insurance' | 'Other'
+
+/** A recurring subscription (domain, hosting, software license) or a
+ *  legal/compliance document with a hard expiry date — reminderDaysBefore
+ *  drives when it starts showing up in the NotificationBell (see
+ *  subscriptionsApi.dueSoon() and Notify.tsx's loadSystemAlerts()). */
+export interface Subscription {
+  id: number; name: string;
+  type: SubscriptionType;
+  provider?: string | null;
+  referenceNo?: string | null;
+  cost?: number | string | null;
+  currency?: string;
+  startDate?: string | null;
+  expiryDate: string;
+  reminderDaysBefore?: number;
+  status?: 'Active' | 'Inactive' | 'Cancelled';
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  notes?: string | null;
+  createdBy?: number | null; creator?: { id: number; name: string } | null;
+}
+
+export const subscriptionsApi = {
+  ...resource<Subscription>('subscriptions'),
+  /** Active items inside their own reminder window (already-expired items too) — feeds the NotificationBell. */
+  dueSoon: () => http.get('/subscriptions/due-soon').then((r) => camelize(r.data) as Subscription[]),
+}
+
 export interface GeneratedNumber {
   id: number; module: string; number: string;
   branchId?: number | null; branch?: { id: number; name: string; code: string } | null;

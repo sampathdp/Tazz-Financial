@@ -61,6 +61,7 @@ use App\Http\Controllers\Api\SpeedDraftCollateralDocumentController;
 use App\Http\Controllers\Api\SpeedDraftController;
 use App\Http\Controllers\Api\SpeedDraftPaymentController;
 use App\Http\Controllers\Api\SpeedDraftTypeController;
+use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\VendorController;
 use Illuminate\Support\Facades\Route;
@@ -489,4 +490,13 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('petty-cash-vouchers', [PettyCashVoucherController::class, 'index'])->middleware('perm:Petty Cash,View');
     Route::post('petty-cash-vouchers', [PettyCashVoucherController::class, 'store'])->middleware('perm:Petty Cash,Create');
     Route::delete('petty-cash-vouchers/{pettyCashVoucher}', [PettyCashVoucherController::class, 'destroy'])->middleware('perm:Petty Cash,Delete');
+
+    // --- Subscriptions & Document Expiry: domains, hosting, licenses, legal
+    // documents with an expiry date + reminder lead time. due-soon feeds the
+    // NotificationBell (see Notify.tsx's loadSystemAlerts()). ---
+    Route::get('subscriptions', [SubscriptionController::class, 'index'])->middleware('perm:Subscriptions,View');
+    Route::get('subscriptions/due-soon', [SubscriptionController::class, 'dueSoon'])->middleware('perm:Subscriptions,View');
+    Route::post('subscriptions', [SubscriptionController::class, 'store'])->middleware('perm:Subscriptions,Create');
+    Route::put('subscriptions/{subscription}', [SubscriptionController::class, 'update'])->middleware('perm:Subscriptions,Edit');
+    Route::delete('subscriptions/{subscription}', [SubscriptionController::class, 'destroy'])->middleware('perm:Subscriptions,Delete');
 });

@@ -100,6 +100,8 @@ const ExpenseSummaryScreen = named(() => import('./screens/ExpenseReports'), 'Ex
 const ExpenseListScreen = named(() => import('./screens/ExpenseReports'), 'ExpenseListScreen')
 const ExpenseByVendorScreen = named(() => import('./screens/ExpenseReports'), 'ExpenseByVendorScreen')
 
+const SubscriptionsScreen = named(() => import('./screens/Subscriptions'), 'SubscriptionsScreen')
+
 type ScreenComp = ComponentType<ScreenProps & { setBrand?: (v: { name: string, tagline: string }) => void }>
 
 // Shown only for the split-second a screen chunk is downloading on first visit.
@@ -206,6 +208,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'rep/exp-summary': ExpenseSummaryScreen,
   'rep/exp-list': ExpenseListScreen,
   'rep/exp-vendor': ExpenseByVendorScreen,
+  'subs/list': SubscriptionsScreen,
 }
 
 // Every nav entry (built screens + "soon" placeholders) gets a real route, so

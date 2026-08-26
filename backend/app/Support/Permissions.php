@@ -58,6 +58,7 @@ class Permissions
         'Expenses',
         'Payment Vouchers',
         'Petty Cash',
+        'Subscriptions',
     ];
 
     public const ACTIONS = ['View', 'Create', 'Edit', 'Delete', 'Approve', 'Export'];

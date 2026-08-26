@@ -105,6 +105,8 @@ export const NAV: NavNode[] = [
     { id: 'masters/charge-categories', label: 'Charge Categories', icon: 'tag' },
   ] },
 
+  { id: 'subs/list', label: 'Subscriptions & Renewals', icon: 'calendar' },
+
   { section: 'Reports', icon: 'chart', items: [
     { group: 'Loan Reports', icon: 'coins', items: [
       { id: 'rep/loans-summary', label: 'Portfolio Summary', icon: 'coins' },

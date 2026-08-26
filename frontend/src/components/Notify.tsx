@@ -11,7 +11,7 @@ import {
 import type { CSSProperties, ReactNode } from 'react'
 import { Icon } from './Icon'
 import { Btn, Input } from './ui'
-import { api } from '../api'
+import { api, subscriptionsApi } from '../api'
 
 export type AlertKind = 'success' | 'error' | 'warning' | 'info'
 
@@ -62,6 +62,14 @@ let _id = 1
 const nextId = () => _id++
 
 /* ---------- generate live system alerts from the API ---------- */
+
+/** Whole calendar days from today to `isoDate` (negative once past). */
+const daysUntil = (isoDate: string) => {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const target = new Date(isoDate + 'T00:00:00')
+  return Math.round((target.getTime() - today.getTime()) / 86400000)
+}
+
 async function loadSystemAlerts(): Promise<Omit<AppNotice, 'id' | 'at'>[]> {
   const out: Omit<AppNotice, 'id' | 'at'>[] = []
   try {
@@ -70,6 +78,22 @@ async function loadSystemAlerts(): Promise<Omit<AppNotice, 'id' | 'at'>[]> {
     if (k.outOfStock > 0) out.push({ kind: 'error', title: 'Out of stock', msg: `${k.outOfStock} items at zero`, route: 'st/live', source: 'stock' })
     if (k.lowStock > 0) out.push({ kind: 'warning', title: 'Low stock', msg: `${k.lowStock} items below reorder`, route: 'st/live', source: 'stock' })
     if (d?.pendingReturns > 0) out.push({ kind: 'warning', title: 'Returns awaiting approval', msg: `${d.pendingReturns} pending`, route: 'dc/return', source: 'return' })
+  } catch { /* ignore */ }
+  // Subscriptions / document expiry — items inside their own reminder
+  // window (or already expired). Silently skipped for users without the
+  // Subscriptions permission (the request 403s and is swallowed below).
+  try {
+    const due = await subscriptionsApi.dueSoon()
+    for (const s of due) {
+      const days = daysUntil(s.expiryDate)
+      out.push({
+        kind: days < 0 ? 'error' : 'warning',
+        title: s.name,
+        msg: days < 0 ? `Expired ${Math.abs(days)} day(s) ago` : `Expires in ${days} day(s)`,
+        route: 'subs/list',
+        source: 'subscription',
+      })
+    }
   } catch { /* ignore */ }
   return out
 }

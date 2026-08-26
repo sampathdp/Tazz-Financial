@@ -90,7 +90,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
         <Table cols={[
           { label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Days Overdue', align: 'center' },
           { label: 'Installments', align: 'center' }, { label: 'Overdue Amount', align: 'right' }, { label: 'OD / Penalty', align: 'right' },
-          { label: 'Outstanding', align: 'right' }, { label: 'Recovery Officer' },
+          { label: 'Total Arrears', align: 'right' }, { label: 'Outstanding', align: 'right' }, { label: 'Recovery Officer' },
         ]}
           rows={filtered} empty="No overdue loans — every active loan is up to date."
           onRow={openRow}
@@ -106,6 +106,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
             <Td align="center">{l.overdueInstallments.toFixed(2)}</Td>
             <Td mono align="right">{money(l.overdueAmount)}</Td>
             <Td mono align="right">{money(l.penaltyDue)}</Td>
+            <Td mono align="right" style={{ fontWeight: 600 }}>{money(num(l.overdueAmount) + num(l.penaltyDue))}</Td>
             <Td mono align="right">{money(num(l.totalDueSum) - num(l.paidSum))}</Td>
             <Td>{l.loanDetail?.recoveryOfficer?.name || '—'}</Td>
           </>} />}

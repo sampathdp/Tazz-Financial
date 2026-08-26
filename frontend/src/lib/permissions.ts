@@ -103,6 +103,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'fund/fds': 'Fixed Deposits',
   'fund/deposit-payment': 'Fixed Deposits',
   'fund/reports': 'Funding Reports',
+  'subs/list': 'Subscriptions',
 }
 
 export function canAccessRoute(user: AuthUser | null | undefined, routeId: string): boolean {
