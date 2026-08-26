@@ -325,12 +325,13 @@ function CollateralPanel({ speedDraft: d, me, onChanged }: { speedDraft: SpeedDr
   }
   const viewDoc = async (doc: SpeedDraftCollateralDocument) => {
     if (!editing?.id) return
+    const win = window.open('', '_blank')
     try {
       const blob = await speedDraftCollateralDocumentsApi.download(editing.id, doc.id)
       const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      if (win) win.location.href = url; else window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { notify.error('Could not open attachment') }
+    } catch { win?.close(); notify.error('Could not open attachment') }
   }
 
   return (

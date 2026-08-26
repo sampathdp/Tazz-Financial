@@ -519,12 +519,13 @@ function SecurityPanel({ loan }: { loan: Loan }) {
   const notify = useNotify()
   const hasReference = !!(loan.loanDetail?.referenceName || loan.loanDetail?.referenceIdNo || loan.loanDetail?.referenceAddress)
   const viewDoc = async (collateralId: number, doc: LoanCollateralDocument) => {
+    const win = window.open('', '_blank')
     try {
       const blob = await loanCollateralDocumentsApi.download(loan.id, collateralId, doc.id)
       const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      if (win) win.location.href = url; else window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { notify.error('Could not open attachment') }
+    } catch { win?.close(); notify.error('Could not open attachment') }
   }
   const insurance = loan.insurance
   return (
@@ -801,12 +802,13 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
     finally { setUploading(false) }
   }
   const view = async (d: LoanDocument) => {
+    const win = window.open('', '_blank')
     try {
       const blob = await loanDocumentsApi.download(loan.id, d.id)
       const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      if (win) win.location.href = url; else window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { notify.error('Could not open document') }
+    } catch { win?.close(); notify.error('Could not open document') }
   }
   const remove = async (d: LoanDocument) => {
     const ok = await notify.confirm({ title: 'Delete this document?', danger: true, okText: 'Delete' })

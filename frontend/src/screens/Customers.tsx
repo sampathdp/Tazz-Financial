@@ -93,12 +93,13 @@ function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser 
   }
 
   const view = async (d: CustomerDocument) => {
+    const win = window.open('', '_blank')
     try {
       const blob = await customerDocumentsApi.download(customerId, d.id)
       const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      if (win) win.location.href = url; else window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { notify.error('Could not open document') }
+    } catch { win?.close(); notify.error('Could not open document') }
   }
 
   const remove = async (d: CustomerDocument) => {

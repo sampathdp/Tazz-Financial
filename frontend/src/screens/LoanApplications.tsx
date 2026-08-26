@@ -309,12 +309,13 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const viewCollateralDoc = async (i: number, doc: LoanCollateralDocument) => {
     const c = form.collateral[i]
     if (!editing || !c.id) return
+    const win = window.open('', '_blank')
     try {
       const blob = await loanCollateralDocumentsApi.download(editing.id, c.id, doc.id)
       const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      if (win) win.location.href = url; else window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { notify.error('Could not open attachment') }
+    } catch { win?.close(); notify.error('Could not open attachment') }
   }
 
   const q = search.trim().toLowerCase()
