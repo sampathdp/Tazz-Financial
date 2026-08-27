@@ -173,7 +173,13 @@ class AccountingReportController extends Controller
         $netProfitBeforeTaxImpairment = bcsub($profitBeforeHoAbsorption, $hoExpAbsorption, 2);
 
         $provisioningForImpairment = $bal('5300');
-        $netProfitAfterImpairment = bcsub($netProfitBeforeTaxImpairment, $provisioningForImpairment, 2);
+        // Cash collected against an already-provisioned loan — see
+        // LoanLedgerPoster::postProvisionAdjustment(), which credits this
+        // instead of reversing straight back into 5300, so a recovery reads
+        // as its own P&L gain right next to the impairment charge it offsets,
+        // not just a smaller expense number.
+        $badDebtRecovery = $bal('4050');
+        $netProfitAfterImpairment = bcadd(bcsub($netProfitBeforeTaxImpairment, $provisioningForImpairment, 2), $badDebtRecovery, 2);
 
         $vatNbt = $bal('5500');
         $incomeTax = $bal('5600');
@@ -195,6 +201,7 @@ class AccountingReportController extends Controller
             'ho_exp_absorption' => $hoExpAbsorption,
             'net_profit_before_tax_impairment' => $netProfitBeforeTaxImpairment,
             'provisioning_for_impairment' => $provisioningForImpairment,
+            'bad_debt_recovery' => $badDebtRecovery,
             'net_profit_after_impairment' => $netProfitAfterImpairment,
             'vat_nbt' => $vatNbt,
             'income_tax' => $incomeTax,
@@ -353,6 +360,7 @@ class AccountingReportController extends Controller
         ['ho_exp_absorption', 'HO Exp Absorption', 0],
         ['net_profit_before_tax_impairment', 'Net Profit Before Tax & Impairment', 0],
         ['provisioning_for_impairment', 'Provisioning for Impairment', 0],
+        ['bad_debt_recovery', 'Bad Debt Recovery Income', 0],
         ['net_profit_after_impairment', 'Net Profit After Provision for Impairment', 0],
         ['vat_nbt', 'VAT & NBT on Finance Services', 0],
         ['income_tax', 'Income Tax', 0],

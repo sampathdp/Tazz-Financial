@@ -428,10 +428,11 @@ function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInter
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')
   const [refNo, setRefNo] = useState('')
   const [paidAt, setPaidAt] = useState(todayIso())
+  const [backDated, setBackDated] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (open) { setMethod('Cash'); setRefNo(''); setPaidAt(todayIso()); setErr('') } }, [open])
+  useEffect(() => { if (open) { setMethod('Cash'); setRefNo(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
   if (!payment) return null
 
   const save = async () => {
@@ -456,7 +457,17 @@ function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInter
         <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as FdPaymentMethod)}>
           {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
         </Select></Field>
-        <Field label="Date"><DateInput value={paidAt} onChange={setPaidAt} /></Field>
+        <Field label="Date">
+          <DateInput value={paidAt} disabled={!backDated} onChange={setPaidAt} />
+          <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>
+            <input type="checkbox" checked={backDated} onChange={(e) => {
+              const checked = e.target.checked
+              setBackDated(checked)
+              if (!checked) setPaidAt(todayIso())
+            }} />
+            <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
+          </label>
+        </Field>
         <Field label="Reference No" full><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
       </div>
     </Modal>

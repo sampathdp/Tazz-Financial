@@ -122,4 +122,16 @@ class SpeedDraft extends Model
             ->whereHas('approvalType', fn ($q) => $q->where('code', 'speed_draft_application'))
             ->where('status', 'PendingApproval');
     }
+
+    /** The renewal row that closed THIS draft into a new one — present once this draft has been renewed. */
+    public function renewedTo()
+    {
+        return $this->hasOne(SpeedDraftRenewal::class, 'old_credit_facility_id');
+    }
+
+    /** The renewal row that created THIS draft from an older, now-closed one — present when this draft is itself a renewal. */
+    public function renewedFrom()
+    {
+        return $this->hasOne(SpeedDraftRenewal::class, 'new_credit_facility_id');
+    }
 }

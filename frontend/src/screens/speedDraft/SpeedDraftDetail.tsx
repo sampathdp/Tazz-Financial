@@ -9,7 +9,7 @@ import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, ErrorBanner, 
 import { Icon } from '../../components/Icon'
 import {
   speedDraftsApi, speedDraftCollateralApi, speedDraftCollateralDocumentsApi, speedDraftPaymentsApi,
-  type SpeedDraft, type SpeedDraftPayment, type SpeedDraftCollateralInput, type SpeedDraftCollateralDocument, type AuthUser,
+  type SpeedDraft, type SpeedDraftPayment, type SpeedDraftCollateralInput, type SpeedDraftCollateralDocument, type AuthUser, type PaymentMethod,
 } from '../../api'
 import { Can, canApprove } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
@@ -17,6 +17,7 @@ import { getErrorText } from '../../lib/apiError'
 import type { Go } from '../types'
 
 const num = (v: unknown) => Number(v ?? 0)
+const round2 = (v: number) => Math.round(v * 100) / 100
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
 const todayIso = () => new Date().toISOString().slice(0, 10)
@@ -153,6 +154,7 @@ function OverviewPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
           <Kpi label="Capital Paid" value={money(s.totalCapitalPaid)} />
           <Kpi label="Interest Paid" value={money(s.totalInterestPaid)} />
           <Kpi label="Outstanding Interest" value={money(s.outstandingInterest)} tone={s.outstandingInterest > 0 ? 'var(--bad)' : 'var(--ok)'} />
+          {s.penaltyDue > 0 && <Kpi label="Penalty Due" value={money(s.penaltyDue)} tone="var(--bad)" />}
           <Kpi label="Amount to Settle Today" value={money(s.amountToSettleToday)} />
           <Kpi label="Next Due" value={s.nextDueDate ? `${dateOnly(s.nextDueDate)} — ${money(s.nextDueAmount)}` : '—'} />
           {s.overdueInstallments > 0 && <Kpi label="Overdue Installments" value={`${s.overdueInstallments} (${s.daysOverdue}d)`} tone="var(--bad)" />}
@@ -180,6 +182,16 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
   const [amount, setAmount] = useState(String(d.principalAmount))
   const [startDate, setStartDate] = useState(todayIso())
   const [err, setErr] = useState('')
+
+  const [renewOpen, setRenewOpen] = useState(false)
+  const [renewTermMonths, setRenewTermMonths] = useState(d.termMonths)
+  const [renewPayNow, setRenewPayNow] = useState(false)
+  const [renewAmount, setRenewAmount] = useState('')
+  const [renewMethod, setRenewMethod] = useState<PaymentMethod>('Cash')
+  const [renewPaidAt, setRenewPaidAt] = useState(todayIso())
+  const [renewReceiptNo, setRenewReceiptNo] = useState('')
+  const [renewNotes, setRenewNotes] = useState('')
+  const [renewErr, setRenewErr] = useState('')
 
   const approve = async () => {
     setBusy(true)
@@ -216,6 +228,37 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
       setErr(getErrorText(ex, 'Disbursement failed'))
     } finally { setBusy(false) }
   }
+
+  const openRenew = () => {
+    setRenewTermMonths(d.termMonths); setRenewPayNow(false); setRenewAmount('')
+    setRenewMethod('Cash'); setRenewPaidAt(todayIso()); setRenewReceiptNo(''); setRenewNotes(''); setRenewErr('')
+    setRenewOpen(true)
+  }
+  const renew = async () => {
+    if (!renewTermMonths || renewTermMonths <= 0) { setRenewErr('Enter the new term in months.'); return }
+    if (renewPayNow && (!renewAmount || Number(renewAmount) <= 0)) { setRenewErr('Enter the payment amount, or turn off "Record a payment now".'); return }
+    setBusy(true); setRenewErr('')
+    try {
+      const res = await speedDraftsApi.renew(d.id, {
+        termMonths: renewTermMonths,
+        notes: renewNotes || undefined,
+        payment: renewPayNow ? {
+          amount: renewAmount, paymentMethod: renewMethod, paidAt: renewPaidAt,
+          receiptNo: renewReceiptNo || undefined, notes: undefined,
+        } : undefined,
+      })
+      setRenewOpen(false)
+      notify.success('Speed Draft renewed', `New draft ${res.speedDraft.code}`)
+      onChanged()
+    } catch (ex: any) {
+      setRenewErr(getErrorText(ex, 'Renewal failed'))
+    } finally { setBusy(false) }
+  }
+  const renewDueToClear = round2(num(d.summary?.outstandingInterest) + num(d.summary?.penaltyDue))
+  const renewCollected = renewPayNow ? Math.min(Number(renewAmount) || 0, renewDueToClear) : 0
+  const renewCapitalized = round2(renewDueToClear - renewCollected)
+  const renewCapitalPayment = renewPayNow ? Math.max(0, (Number(renewAmount) || 0) - renewDueToClear) : 0
+  const renewNewPrincipal = round2(num(d.summary?.outstandingCapital) - renewCapitalPayment + renewCapitalized)
 
   if (d.status === 'Pending') {
     return (
@@ -257,6 +300,55 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
             </div>
             <div className="t-2" style={{ fontSize: 11.5 }}>
               Generates a {d.termMonths}-month interest-only schedule from the start date — interest is due monthly on the outstanding capital, with the full capital falling due at maturity.
+            </div>
+          </div>
+        </Modal>
+      </>
+    )
+  }
+  if (d.status === 'Active') {
+    return (
+      <>
+        <Can user={me} module="Speed Draft Payments" action="Create">
+          <Btn variant="solid" size="sm" icon="swap" onClick={openRenew}>Renew</Btn>
+        </Can>
+        <Modal open={renewOpen} onClose={() => setRenewOpen(false)} title="Renew Speed Draft" sub={d.code} width={560}
+          footer={<>
+            <Btn variant="solid" onClick={() => setRenewOpen(false)}>Cancel</Btn>
+            <Btn variant="primary" icon="check" onClick={renew} disabled={busy}>{busy ? 'Renewing…' : 'Renew'}</Btn>
+          </>}>
+          <div className="col gap-3">
+            <ErrorBanner error={renewErr} style={{ marginBottom: 0 }} />
+            <div className="t-2" style={{ fontSize: 11.5 }}>
+              Closes this draft and opens a new one under the same product for a fresh term. Any interest/penalty not covered by a payment below is added to the new principal — the books still recognize that income now, just financed by the loan instead of cash.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Field label="New Term (months)"><Input type="number" min={1} value={renewTermMonths} onChange={(e) => setRenewTermMonths(Number(e.target.value))} /></Field>
+            </div>
+
+            <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={renewPayNow} onChange={(e) => setRenewPayNow(e.target.checked)} />
+              <span style={{ fontSize: 13 }}>Record a payment now</span>
+            </label>
+            {renewPayNow && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Field label="Amount"><Input type="number" value={renewAmount} onChange={(e) => setRenewAmount(e.target.value)} /></Field>
+                <Field label="Payment Method"><Select value={renewMethod} onChange={(e) => setRenewMethod(e.target.value as PaymentMethod)}>
+                  <option value="Cash">Cash</option><option value="Bank">Bank</option><option value="Cheque">Cheque</option>
+                </Select></Field>
+                <Field label="Date"><Input type="date" value={renewPaidAt} max={todayIso()} onChange={(e) => setRenewPaidAt(e.target.value)} /></Field>
+                {renewMethod !== 'Cash' && <Field label="Reference No."><Input value={renewReceiptNo} onChange={(e) => setRenewReceiptNo(e.target.value)} /></Field>}
+              </div>
+            )}
+            <Field label="Notes"><Input value={renewNotes} onChange={(e) => setRenewNotes(e.target.value)} placeholder="Optional" /></Field>
+
+            <div style={{ padding: 12, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)', fontSize: 12.5 }}>
+              <div className="row between" style={{ marginBottom: 4 }}><span className="t-2">Outstanding Capital</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(d.summary?.outstandingCapital)}</span></div>
+              <div className="row between" style={{ marginBottom: 4 }}><span className="t-2">Interest + Penalty Due</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(renewDueToClear)}</span></div>
+              {renewPayNow && <div className="row between" style={{ marginBottom: 4 }}><span className="t-2">Collected Now</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(renewCollected)}</span></div>}
+              {renewCapitalized > 0 && <div className="row between" style={{ marginBottom: 4 }}><span className="t-2">Capitalized into New Principal</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(renewCapitalized)}</span></div>}
+              {renewCapitalPayment > 0 && <div className="row between" style={{ marginBottom: 4 }}><span className="t-2">Extra Reduces Capital</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(renewCapitalPayment)}</span></div>}
+              <div className="row between" style={{ fontWeight: 700, paddingTop: 6, borderTop: '1px solid var(--line)' }}><span>New Principal</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(renewNewPrincipal)}</span></div>
             </div>
           </div>
         </Modal>

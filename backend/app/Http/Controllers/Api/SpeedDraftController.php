@@ -6,11 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\ApprovalRequest;
 use App\Models\ApprovalType;
 use App\Models\Branch;
+use App\Models\FacilityPayment;
 use App\Models\FacilitySchedule;
 use App\Models\SpeedDraft;
+use App\Models\SpeedDraftRenewal;
 use App\Models\SpeedDraftType;
 use App\Services\NumberGenerator;
 use App\Support\SpeedDraftLedgerPoster;
+use App\Support\SpeedDraftPaymentAllocator;
 use App\Support\SpeedDraftScheduler;
 use App\Support\SpeedDraftSummary;
 use Carbon\Carbon;
@@ -25,14 +28,15 @@ class SpeedDraftController extends Controller
 
     private const SUMMARY_RELATIONS = [
         'branch:id,name,code', 'customer:id,full_name,code,nic_no,phone',
-        'speedDraftDetail.speedDraftType:id,name,code,category,grace_period_days',
+        'speedDraftDetail.speedDraftType:id,name,code,category,grace_period_days,default_charge_rate_percent',
     ];
     private const DETAIL_RELATIONS = [
         'branch:id,name,code', 'customer:id,full_name,code,nic_no,phone',
         'speedDraftDetail.speedDraftType', 'insurance', 'applier:id,name', 'approver:id,name', 'creator:id,name',
         'collateral.jewelryDetail', 'collateral.vehicleDetail', 'collateral.documents',
-        'schedules.allocations', 'payments.receiver:id,name', 'payments.voider:id,name',
+        'schedules.allocations', 'schedules.activeAllocations', 'payments.receiver:id,name', 'payments.voider:id,name',
         'pendingApplicationRequest.requester:id,name',
+        'renewedTo.renewedBy:id,name', 'renewedFrom.renewedBy:id,name',
     ];
 
     /**
@@ -77,22 +81,28 @@ class SpeedDraftController extends Controller
         $today = Carbon::today();
 
         return SpeedDraft::where('status', 'Active')
-            ->with(array_merge(self::SUMMARY_RELATIONS, ['schedules.allocations']))
+            ->with(array_merge(self::SUMMARY_RELATIONS, ['schedules.activeAllocations']))
             ->get()
             ->map(function (SpeedDraft $draft) use ($today) {
-                $graceDays = (int) ($draft->speedDraftDetail?->speedDraftType?->grace_period_days ?? 5);
+                $type = $draft->speedDraftDetail?->speedDraftType;
+                $graceDays = (int) ($type?->grace_period_days ?? 5);
+                $chargeRate = (float) ($type?->default_charge_rate_percent ?? 0);
                 $overdueRows = $draft->schedules->filter(fn ($s) => SpeedDraftSummary::isOverdue($s, $graceDays, $today));
                 if ($overdueRows->isEmpty()) {
                     return null;
                 }
                 $oldest = $overdueRows->min('due_date');
                 $overdueInterest = round((float) $overdueRows->sum(
-                    fn ($s) => max(0, (float) $s->interest_due - (float) $s->allocations->sum('interest_applied'))
+                    fn ($s) => max(0, (float) $s->interest_due - (float) $s->activeAllocations->sum('interest_applied'))
+                ), 2);
+                $penaltyDue = round((float) $overdueRows->sum(
+                    fn ($s) => max(0, SpeedDraftSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $today) - (float) $s->activeAllocations->sum('penalty_applied'))
                 ), 2);
                 $draft->setAttribute('oldestOverdueDate', $oldest);
                 $draft->setAttribute('daysOverdue', (int) $today->diffInDays($oldest));
                 $draft->setAttribute('overdueInstallments', $overdueRows->count());
                 $draft->setAttribute('overdueInterest', $overdueInterest);
+                $draft->setAttribute('penaltyDue', $penaltyDue);
 
                 return $draft;
             })
@@ -297,6 +307,183 @@ class SpeedDraftController extends Controller
         });
 
         return $speedDraft->load(self::DETAIL_RELATIONS);
+    }
+
+    /**
+     * Renews a matured Speed Draft under the same product for a new term —
+     * closes this draft and creates a new one (mirrors
+     * FixedDepositController::renew()'s new-account-close-old shape, not
+     * Pawning's in-place extension — see SpeedDraftRenewal's docblock).
+     * Whatever of the outstanding interest/penalty isn't covered by an
+     * optional cash payment is capitalized into the new principal, and the
+     * books post as if it had been collected (see
+     * SpeedDraftLedgerPoster::postCapitalizedRenewalIncome) — income is
+     * recognized now, financed by a larger loan instead of cash, rather than
+     * silently disappearing when the customer can't pay in cash.
+     */
+    public function renew(Request $request, SpeedDraft $speedDraft)
+    {
+        if ($speedDraft->status !== 'Active') {
+            return response()->json(['message' => 'Only an active Speed Draft can be renewed.'], 422);
+        }
+        if (!$speedDraft->maturity_date || Carbon::today()->lessThan($speedDraft->maturity_date)) {
+            return response()->json(['message' => 'This Speed Draft has not matured yet and cannot be renewed.'], 422);
+        }
+
+        $speedDraft->loadMissing(['speedDraftDetail.speedDraftType', 'branch', 'schedules.activeAllocations']);
+        $type = $speedDraft->speedDraftDetail?->speedDraftType;
+
+        $data = $request->validate([
+            'term_months' => 'required|integer|min:1',
+            'notes' => 'nullable|string|max:255',
+            'payment' => 'nullable|array',
+            'payment.amount' => 'required_with:payment|numeric|min:0.01',
+            'payment.payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
+            'payment.paid_at' => 'nullable|date',
+            'payment.receipt_no' => 'nullable|string|max:32',
+            'payment.notes' => 'nullable|string|max:255',
+        ]);
+        $min = (int) ($type?->min_period_months ?? 0);
+        $max = (int) ($type?->max_period_months ?? 0);
+        if (($min && $data['term_months'] < $min) || ($max && $data['term_months'] > $max)) {
+            throw ValidationException::withMessages(['term_months' => 'This term is not offered by '.($type?->name ?? 'this Speed Draft Type').'.']);
+        }
+
+        $asOf = isset($data['payment']['paid_at']) ? Carbon::parse($data['payment']['paid_at']) : Carbon::today();
+        $capitalBefore = (float) $speedDraft->outstanding_balance_cache;
+        $interestDue = SpeedDraftPaymentAllocator::outstandingInterest($speedDraft);
+        $penaltyDue = SpeedDraftPaymentAllocator::outstandingPenalty($speedDraft, $asOf);
+
+        $paymentAmount = round((float) ($data['payment']['amount'] ?? 0), 2);
+        $dueToClear = round($interestDue + $penaltyDue, 2);
+        $collected = min($paymentAmount, $dueToClear);
+        $capitalPayment = round(max(0, $paymentAmount - $dueToClear), 2);
+        // Same penalty-first order real payments already collect in — see SpeedDraftPaymentAllocator::applyInterestPayment.
+        $penaltyCollected = round(min($collected, $penaltyDue), 2);
+        $interestCollected = round($collected - $penaltyCollected, 2);
+        $interestCapitalized = round($interestDue - $interestCollected, 2);
+        $penaltyCapitalized = round($penaltyDue - $penaltyCollected, 2);
+
+        $newPrincipal = round($capitalBefore - $capitalPayment + $interestCapitalized + $penaltyCapitalized, 2);
+        if ($newPrincipal <= 0) {
+            return response()->json(['message' => 'The renewal payment cannot exceed the outstanding capital, interest, and penalty combined.'], 422);
+        }
+
+        [$newDraft, $renewal] = DB::transaction(function () use (
+            $speedDraft, $type, $data, $asOf, $capitalBefore, $interestDue, $interestCollected,
+            $penaltyDue, $penaltyCollected, $capitalPayment, $newPrincipal, $paymentAmount, $collected, $request
+        ) {
+            $branch = $speedDraft->branch;
+            $code = NumberGenerator::next('speed_draft', [
+                'branch_id' => $branch->id,
+                'branch_code' => $branch->code,
+                'user_id' => $request->user()->id,
+            ]);
+            $startDate = Carbon::parse($speedDraft->maturity_date);
+            $newDraft = SpeedDraft::create([
+                'branch_id' => $speedDraft->branch_id,
+                'code' => $code,
+                'customer_id' => $speedDraft->customer_id,
+                'principal_amount' => $newPrincipal,
+                // Re-priced from the product's current rate, same as a fresh
+                // application — not carried forward from the old draft
+                // (mirrors FixedDepositController::createFixedDeposit(), which
+                // always reads $product->annual_rate_percent fresh).
+                'interest_rate_percent' => $type?->interest_rate_percent ?? $speedDraft->interest_rate_percent,
+                'rate_period' => $type?->rate_period ?? $speedDraft->rate_period,
+                'term_months' => $data['term_months'],
+                'start_date' => $startDate->format('Y-m-d'),
+                'maturity_date' => $startDate->copy()->addMonthsNoOverflow($data['term_months'])->format('Y-m-d'),
+                'disbursed_amount' => $newPrincipal,
+                'disbursed_at' => $asOf,
+                'outstanding_balance_cache' => $newPrincipal,
+                'status' => 'Active',
+                'applied_by' => $request->user()->id,
+                'created_by' => $request->user()->id,
+            ]);
+            NumberGenerator::attach($code, $newDraft);
+            $newDraft->speedDraftDetail()->create([
+                'speed_draft_type_id' => $type?->id,
+                'payment_frequency' => $speedDraft->speedDraftDetail?->payment_frequency,
+                'disbursement_method' => $speedDraft->speedDraftDetail?->disbursement_method,
+                'vehicle_no' => $speedDraft->speedDraftDetail?->vehicle_no,
+            ]);
+            FacilitySchedule::insert(SpeedDraftScheduler::generate($newDraft->fresh()));
+
+            // No postDisbursement() here — this capital is rolling forward from
+            // the old draft, not fresh cash out (same reasoning FdLedgerPoster's
+            // docblock gives for FD principal rollover at renewal).
+            $payment = null;
+            if ($paymentAmount > 0) {
+                $method = $data['payment']['payment_method'] ?? 'Cash';
+                $paymentCode = NumberGenerator::next('speed_draft_payment', [
+                    'branch_id' => $branch->id,
+                    'branch_code' => $branch->code,
+                    'type_code' => 'REN',
+                    'user_id' => $request->user()->id,
+                ]);
+                $payment = FacilityPayment::create([
+                    'code' => $paymentCode,
+                    'credit_facility_id' => $speedDraft->id,
+                    'branch_id' => $speedDraft->branch_id,
+                    'amount' => $paymentAmount,
+                    'payment_type' => 'Regular',
+                    'payment_method' => $method,
+                    'received_by' => $request->user()->id,
+                    'paid_at' => $asOf,
+                    'receipt_no' => $data['payment']['receipt_no'] ?? null,
+                    'notes' => $data['payment']['notes'] ?? 'Speed Draft renewal payment',
+                ]);
+                NumberGenerator::attach($paymentCode, $payment);
+
+                if ($collected > 0) {
+                    SpeedDraftPaymentAllocator::applyInterestPayment($speedDraft, $payment, $collected, $asOf);
+                }
+                if ($capitalPayment > 0) {
+                    SpeedDraftPaymentAllocator::applyCapitalReduction($speedDraft->fresh(), $payment, $capitalPayment, $asOf);
+                }
+
+                SpeedDraftLedgerPoster::postPenaltyReceipt($payment);
+                SpeedDraftLedgerPoster::postInterestReceipt($payment);
+                SpeedDraftLedgerPoster::postCapitalReceipt($payment);
+            }
+
+            $speedDraft->fresh()->update(['status' => 'Closed', 'closed_at' => $asOf]);
+
+            $renewal = SpeedDraftRenewal::create([
+                'old_credit_facility_id' => $speedDraft->id,
+                'new_credit_facility_id' => $newDraft->id,
+                'capital_before' => $capitalBefore,
+                'interest_due' => $interestDue,
+                'interest_collected' => $interestCollected,
+                'penalty_due' => $penaltyDue,
+                'penalty_collected' => $penaltyCollected,
+                'capital_payment' => $capitalPayment,
+                'capital_after' => $newPrincipal,
+                'new_term_months' => $data['term_months'],
+                'facility_payment_id' => $payment?->id,
+                'renewed_by' => $request->user()->id,
+                'renewed_at' => $asOf,
+                'notes' => $data['notes'] ?? null,
+            ]);
+
+            $interestCapitalized = round($interestDue - $interestCollected, 2);
+            $penaltyCapitalized = round($penaltyDue - $penaltyCollected, 2);
+            if ($interestCapitalized > 0 || $penaltyCapitalized > 0) {
+                SpeedDraftLedgerPoster::postCapitalizedRenewalIncome(
+                    $newDraft->fresh(), $interestCapitalized, $penaltyCapitalized,
+                    $asOf->toDateString(), $request->user()->id, $renewal->id
+                );
+            }
+
+            return [$newDraft, $renewal];
+        });
+
+        return response()->json([
+            'speed_draft' => $newDraft->load(self::DETAIL_RELATIONS),
+            'old_speed_draft' => $speedDraft->fresh()->load(self::DETAIL_RELATIONS),
+            'renewal' => $renewal,
+        ], 201);
     }
 
     private function createCollateral(SpeedDraft $draft, array $c): void

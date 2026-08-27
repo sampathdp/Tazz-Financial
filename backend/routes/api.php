@@ -45,6 +45,7 @@ use App\Http\Controllers\Api\LoanDiaryNoteController;
 use App\Http\Controllers\Api\LoanDocumentController;
 use App\Http\Controllers\Api\LoanPaymentController;
 use App\Http\Controllers\Api\LoanPostDatedChequeController;
+use App\Http\Controllers\Api\LoanProvisionController;
 use App\Http\Controllers\Api\LoanReportController;
 use App\Http\Controllers\Api\LoanTypeController;
 use App\Http\Controllers\Api\LoanWaiverController;
@@ -188,6 +189,13 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Loan Management: Active Loans ---
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
     Route::post('loans/{loan}/write-off', [LoanController::class, 'writeOff'])->middleware('admin');
+
+    // --- Loan Management: Impairment / NPL Provisioning ---
+    // Flat path (not loans/provisions) so it can never collide with loans/{loan} below.
+    Route::get('loans-provisions', [LoanProvisionController::class, 'index'])->middleware('perm:Loan Provisioning,View');
+    Route::post('loans/{loan}/post-provision', [LoanProvisionController::class, 'post'])->middleware('perm:Loan Provisioning,Edit');
+    Route::get('loans/{loan}/provisions', [LoanProvisionController::class, 'history'])->middleware('perm:Loan Provisioning,View');
+    Route::post('loans/{loan}/close', [LoanController::class, 'close'])->middleware('perm:Active Loans,Edit');
     Route::patch('loans/{loan}/status-flags', [LoanController::class, 'updateStatusFlags'])->middleware('perm:Active Loans,Edit');
     Route::patch('loans/{loan}/officers', [LoanController::class, 'updateOfficers'])->middleware('perm:Active Loans,Edit');
     // Admin-only — see the frontend's "Loan Adjustments" screen (installment skip / cheque clearance / waivers).
@@ -282,6 +290,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve']);
     Route::post('speed-drafts/{speedDraft}/reject', [SpeedDraftController::class, 'reject']);
     Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware('perm:Speed Drafts,Approve');
+    Route::post('speed-drafts/{speedDraft}/renew', [SpeedDraftController::class, 'renew'])->middleware('perm:Speed Draft Payments,Create');
 
     // --- Speed Drafts: Collateral (Gold Pawning / Lease asset records) ---
     Route::get('speed-drafts/{speedDraft}/collateral', [SpeedDraftCollateralController::class, 'index'])->middleware('perm:Speed Drafts,View');

@@ -72,6 +72,67 @@ class SpeedDraftLedgerPoster
         ], $entryDate, self::meta($payment, "Speed Draft interest received - {$payment->code}"));
     }
 
+    /** A penalty payment received in cash — Dr till, Cr 4030 (Penalty Income — shared with Loan, not a Speed-Draft-specific account). */
+    public static function postPenaltyReceipt(FacilityPayment $payment): void
+    {
+        if ($payment->payment_method !== 'Cash') {
+            return;
+        }
+        $penalty = (float) $payment->allocations()->sum('penalty_applied');
+        if ($penalty <= 0) {
+            return;
+        }
+        $till = CashAccount::branchPrimary((int) $payment->branch_id);
+        if (!$till) {
+            return;
+        }
+        $tillAccount = ChartOfAccount::forCashTill($till);
+        $income = ChartOfAccount::system('4030');
+        $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
+
+        LedgerPoster::post([
+            ['account_id' => $tillAccount->id, 'debit' => $penalty, 'credit' => 0],
+            ['account_id' => $income->id, 'debit' => 0, 'credit' => $penalty],
+        ], $entryDate, self::meta($payment, "Speed Draft penalty received - {$payment->code}"));
+    }
+
+    /**
+     * Non-cash income recognition for whatever interest/penalty a renewal
+     * capitalized into the new draft's principal instead of collecting in
+     * cash (see SpeedDraftController::renew()) — Dr 1110 (the new draft's
+     * capital just grew by this much), Cr 4015/4030. Unlike every other
+     * poster here, this has no FacilityPayment to source from (nothing was
+     * actually paid) — it's what makes the books "proceed as if the interest
+     * was collected" per the renewal requirement, rather than that income
+     * silently vanishing when a customer can't pay in cash.
+     */
+    public static function postCapitalizedRenewalIncome(SpeedDraft $newDraft, float $interestAmount, float $penaltyAmount, string $entryDate, ?int $postedBy, int $renewalId): void
+    {
+        $capitalAccount = ChartOfAccount::system('1110');
+        $lines = [];
+        if ($interestAmount > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('4015')->id, 'debit' => 0, 'credit' => $interestAmount];
+        }
+        if ($penaltyAmount > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('4030')->id, 'debit' => 0, 'credit' => $penaltyAmount];
+        }
+        if (empty($lines)) {
+            return;
+        }
+        $total = round($interestAmount + $penaltyAmount, 2);
+
+        LedgerPoster::post([
+            ['account_id' => $capitalAccount->id, 'debit' => $total, 'credit' => 0],
+            ...$lines,
+        ], $entryDate, [
+            'source_type' => 'SpeedDraftRenewal',
+            'source_id' => $renewalId,
+            'description' => "Speed Draft renewal - capitalized interest/penalty - {$newDraft->code}",
+            'branch_id' => $newDraft->branch_id,
+            'posted_by' => $postedBy,
+        ]);
+    }
+
     /** A capital-reduction (or the capital portion of a settlement) received in cash — Dr till, Cr 1110. */
     public static function postCapitalReceipt(FacilityPayment $payment): void
     {

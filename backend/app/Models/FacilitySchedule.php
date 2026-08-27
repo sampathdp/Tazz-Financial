@@ -33,6 +33,23 @@ class FacilitySchedule extends Model
         return $this->hasMany(FacilityPaymentAllocation::class, 'facility_schedule_id');
     }
 
+    /**
+     * Same as allocations() but excluding rows whose parent payment was
+     * voided — a void keeps the allocation row for history (see
+     * SpeedDraftPaymentController::destroy()/LoanPaymentController's
+     * equivalent) but its principal/interest/penalty must stop counting as
+     * "already applied" once voided. Interest's own paid_amount/status are
+     * decremented directly on void so they self-correct either way, but
+     * penalty has no persisted column (see SpeedDraftSummary's docblock) —
+     * every penalty balance is netted straight off this relation, so it MUST
+     * exclude voided payments or a voided penalty payment looks permanently
+     * collected.
+     */
+    public function activeAllocations()
+    {
+        return $this->allocations()->whereHas('payment', fn ($q) => $q->where('status', '!=', 'Voided'));
+    }
+
     public function getBalanceAttribute(): float
     {
         return round((float) $this->total_due - (float) $this->paid_amount, 2);

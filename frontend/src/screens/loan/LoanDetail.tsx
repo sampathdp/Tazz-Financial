@@ -125,6 +125,21 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
     catch (ex: any) { notify.error('Write-off failed', getErrorText(ex)) }
   }
 
+  // The auto-close on payoff (LoanPaymentAllocator) checks each installment's
+  // own bucket split, not just the aggregate due-type totals shown in the Due
+  // Type Breakdown card — an early settlement that overpays one installment's
+  // interest while underpaying its principal by the same amount nets to 0
+  // here but not there, leaving a fully-settled loan stuck Active. This mirrors
+  // that same aggregate check so the button only appears when it'll succeed.
+  const dueBalance = (loan.summary?.dueBreakdown || []).reduce((a, r) => a + r.balance, 0)
+  const canCloseLoan = loan.status === 'Active' && Math.round(dueBalance * 100) / 100 <= 0.01
+  const closeLoan = async () => {
+    const ok = await notify.confirm({ title: `Close loan ${loan.code}?`, msg: 'This loan is fully settled but did not auto-close. Marks it Closed.', okText: 'Close Loan' })
+    if (!ok) return
+    try { await loansApi.close(loan.id); notify.success('Loan closed', loan.code); onChanged() }
+    catch (ex: any) { notify.error('Close failed', getErrorText(ex)) }
+  }
+
   const eventOf = (type: FacilityStatusEventType) => (loan.statusEvents || []).find((e) => e.eventType === type)
   const flags: { label: string; on?: boolean; at?: string | null }[] = [
     { label: 'Terminated', on: !!eventOf('Terminated'), at: eventOf('Terminated')?.eventDate },
@@ -170,9 +185,23 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
               <Btn size="sm" variant="solid" icon="flag" onClick={() => setStatusModal(true)}>Contract Status Change</Btn>
             </Can>
           )}
-          {loan.status === 'Active' && me?.role === 'admin' && (
-            <Btn size="sm" variant="danger" icon="alert" onClick={writeOffLoan}>Write Off</Btn>
+          {canCloseLoan && (
+            <Can user={me} module="Active Loans" action="Edit">
+              <Btn size="sm" variant="solid" icon="check" onClick={closeLoan}>Close Loan</Btn>
+            </Can>
           )}
+          {loan.status === 'Active' && me?.role === 'admin' && (() => {
+            // Backend also gates this (LoanController::writeOff — see LoanProvisioning) and
+            // returns a 422 either way; disabling here is just a UX nicety so the cashier
+            // sees why before clicking, not the source of truth.
+            const needsProvision = loan.provisionRequiredPct === 100 && num(loan.provisionPostedAmount) < num(loan.provisionRequiredAmount) - 0.01
+            return (
+              <Btn size="sm" variant="danger" icon="alert" disabled={needsProvision} onClick={writeOffLoan}
+                title={needsProvision ? 'Post the full impairment provision on the Loan Provisioning screen before writing off this loan.' : undefined}>
+                Write Off
+              </Btn>
+            )
+          })()}
           {context === 'applications' && go && ACTIVE_STAGE_STATUSES.includes(loan.status) && (
             <Btn size="sm" variant="solid" icon="coins" onClick={() => go('loan/active')}>Open in Active Loans</Btn>
           )}

@@ -40,6 +40,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'loan/apps': 'Loan Applications',
   'loan/active': 'Active Loans',
   'loan/overdue': 'Overdue Loans',
+  'loan/provisions': 'Loan Provisioning',
   'rep/loans-summary': 'Loan Reports',
   'rep/loans-par': 'Loan Reports',
   'rep/loans-arrears': 'Loan Reports',

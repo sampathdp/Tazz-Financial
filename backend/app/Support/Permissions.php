@@ -25,6 +25,7 @@ class Permissions
         'Loan Applications',
         'Active Loans',
         'Loan Payments',
+        'Loan Provisioning',
         'Sales Executive Commissions',
         'Overdue Loans',
         'Loan Reports',

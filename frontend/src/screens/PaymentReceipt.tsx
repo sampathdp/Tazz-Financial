@@ -319,6 +319,10 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   // automatic waterfall; held PendingApproval until a top-level user approves it
   // (see LoanPaymentController::approveAllocationRequest()).
   const [allocationMode, setAllocationMode] = useState<'auto' | 'manual'>('auto')
+  // When on, the four bucket inputs below hold a percentage of the payment amount
+  // instead of a direct figure — converted to amount via pctToAmt() before it's
+  // compared to due or sent to the server (the server only ever sees amounts).
+  const [allocByPercent, setAllocByPercent] = useState(false)
   const [allocInterest, setAllocInterest] = useState('')
   const [allocCapital, setAllocCapital] = useState('')
   const [allocOdCharge, setAllocOdCharge] = useState('')
@@ -419,7 +423,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
   const resetPayForm = () => {
     setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
-    setAllocationMode('auto'); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges('')
+    setAllocationMode('auto'); setAllocByPercent(false); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges('')
   }
   const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleRefNo(''); setSettleBankId(undefined); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
   const resetChequeForm = () => { setChequeOpen(false); setChequeNo(''); setRcBankId(undefined); setRcChequeDate(todayIso()); setChequeAmount(''); setChequeErr('') }
@@ -440,11 +444,16 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
   const openPay = () => {
     setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
-    setAllocationMode('auto'); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges(''); setAllocDue(null)
+    setAllocationMode('auto'); setAllocByPercent(false); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges(''); setAllocDue(null)
   }
 
-  const allocSplit = { interest: num(allocInterest), capital: num(allocCapital), odCharge: num(allocOdCharge), otherCharges: num(allocOtherCharges) }
+  const allocTarget = Number(amount || 0)
+  const pctToAmt = (v: string) => allocByPercent ? (num(v) / 100) * allocTarget : num(v)
+  const allocSplit = { interest: pctToAmt(allocInterest), capital: pctToAmt(allocCapital), odCharge: pctToAmt(allocOdCharge), otherCharges: pctToAmt(allocOtherCharges) }
   const allocTotal = allocSplit.interest + allocSplit.capital + allocSplit.odCharge + allocSplit.otherCharges
+  const toggleAllocUnit = (pct: boolean) => {
+    setAllocByPercent(pct); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges('')
+  }
   const allocRows: { key: string; label: string; due: number; value: string; set: (v: string) => void }[] = [
     { key: 'interest', label: 'Interest', due: allocDue?.interest ?? 0, value: allocInterest, set: setAllocInterest },
     { key: 'capital', label: 'Capital', due: allocDue?.capital ?? 0, value: allocCapital, set: setAllocCapital },
@@ -900,21 +909,32 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             </div>
           </Field>
           {allocationMode === 'manual' && (() => {
-            const target = Number(amount || 0)
+            const target = allocTarget
             const balanced = Math.abs(allocTotal - target) <= 0.01
-            return (
+            return (<>
+              <div className="row gap-3" style={{ alignItems: 'center', marginBottom: 8 }}>
+                <span className="t-2" style={{ fontSize: 11.5 }}>Enter as:</span>
+                <label className="row gap-1" style={{ alignItems: 'center', cursor: 'pointer' }}>
+                  <input type="radio" checked={!allocByPercent} onChange={() => toggleAllocUnit(false)} /> <span style={{ fontSize: 12.5 }}>Amount</span>
+                </label>
+                <label className="row gap-1" style={{ alignItems: 'center', cursor: 'pointer' }}>
+                  <input type="radio" checked={allocByPercent} onChange={() => toggleAllocUnit(true)} /> <span style={{ fontSize: 12.5 }}>Percentage (%)</span>
+                </label>
+              </div>
               <div style={{ border: '1px solid var(--line)', borderRadius: 'var(--r-s)', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
                     <tr>
                       <th style={{ textAlign: 'left', padding: '9px 12px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>Bucket</th>
                       <th style={{ textAlign: 'right', padding: '9px 12px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>Due</th>
-                      <th style={{ textAlign: 'right', padding: '9px 12px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)', width: 150 }}>Amount</th>
+                      <th style={{ textAlign: 'right', padding: '9px 12px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)', width: 130 }}>{allocByPercent ? '%' : 'Amount'}</th>
+                      {allocByPercent && <th style={{ textAlign: 'right', padding: '9px 12px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)', width: 130 }}>Amount</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {allocRows.map((row) => {
-                      const over = allocDue !== null && num(row.value) > row.due
+                      const computedAmt = pctToAmt(row.value)
+                      const over = allocDue !== null && computedAmt > row.due
                       return (
                         <tr key={row.key}>
                           <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--line-soft)' }}>{row.label}</td>
@@ -923,13 +943,18 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                             <Input type="number" value={row.value} onChange={(e) => row.set(e.target.value)}
                               style={{ textAlign: 'right', ...(over ? { color: 'var(--bad)', borderColor: 'var(--bad)' } : {}) }} />
                           </td>
+                          {allocByPercent && (
+                            <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--line-soft)', textAlign: 'right', fontFamily: 'JetBrains Mono', color: over ? 'var(--bad)' : 'var(--tx-2)' }}>
+                              {money(computedAmt)}
+                            </td>
+                          )}
                         </tr>
                       )
                     })}
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={2} style={{ padding: '9px 12px', fontWeight: 600, background: 'var(--bg-2)' }}>Split Total</td>
+                      <td colSpan={allocByPercent ? 3 : 2} style={{ padding: '9px 12px', fontWeight: 600, background: 'var(--bg-2)' }}>Split Total</td>
                       <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'JetBrains Mono', fontWeight: 700, background: 'var(--bg-2)', color: balanced ? 'var(--ok)' : 'var(--bad)' }}>
                         {money(allocTotal)} / {money(target)}
                       </td>
@@ -937,7 +962,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                   </tfoot>
                 </table>
               </div>
-            )
+            </>)
           })()}
           <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} backDated={payBackDated} setBackDated={setPayBackDated} refNo={refNo} setRefNo={setRefNo} nextReceipt={nextReceipt}
             bankId={payBankId} setBankId={setPayBankId} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes} />
@@ -1203,6 +1228,7 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState<PaymentMethod>('Cash')
   const [paidAt, setPaidAt] = useState(todayIso())
+  const [payBackDated, setPayBackDated] = useState(false)
   const [receiptNo, setReceiptNo] = useState('')
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1211,6 +1237,7 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
   const [settleOpen, setSettleOpen] = useState(false)
   const [settleMethod, setSettleMethod] = useState<PaymentMethod>('Cash')
   const [settlePaidAt, setSettlePaidAt] = useState(todayIso())
+  const [settleBackDated, setSettleBackDated] = useState(false)
   const [settleReceiptNo, setSettleReceiptNo] = useState('')
   const [settleNotes, setSettleNotes] = useState('')
   const [settleBusy, setSettleBusy] = useState(false)
@@ -1246,8 +1273,8 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
     : scheduleTab === 'unpaid' ? schedules.filter((s) => s.status !== 'Paid')
     : schedules
 
-  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setReceiptNo(''); setNotes(''); setErr('') }
-  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleReceiptNo(''); setSettleNotes(''); setSettleErr('') }
+  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setReceiptNo(''); setNotes(''); setErr('') }
+  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleReceiptNo(''); setSettleNotes(''); setSettleErr('') }
 
   const pickDraft = async (_n: string, opt?: SpeedDraft) => {
     resetPayForm(); resetSettleForm(); setScheduleTab('unpaid'); setPanelTab('history')
@@ -1258,7 +1285,7 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
     finally { setLoadingDraft(false) }
   }
 
-  const openPay = (type: SpeedDraftPaymentType) => { setPayType(type); setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setReceiptNo(''); setNotes(''); setErr('') }
+  const openPay = (type: SpeedDraftPaymentType) => { setPayType(type); setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setReceiptNo(''); setNotes(''); setErr('') }
 
   const record = async () => {
     if (!selected) return
@@ -1471,7 +1498,17 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
             <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
               {SD_METHOD_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </Select></Field>
-            <Field label="Date"><Input type="date" value={paidAt} max={todayIso()} onChange={(e) => setPaidAt(e.target.value)} /></Field>
+            <Field label="Date">
+              <Input type="date" value={paidAt} max={todayIso()} disabled={!payBackDated} onChange={(e) => setPaidAt(e.target.value)} />
+              <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>
+                <input type="checkbox" checked={payBackDated} onChange={(e) => {
+                  const checked = e.target.checked
+                  setPayBackDated(checked)
+                  if (!checked) setPaidAt(todayIso())
+                }} />
+                <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
+              </label>
+            </Field>
             {method === 'Cash'
               ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
               : <Field label="Reference No."><Input value={receiptNo} onChange={(e) => setReceiptNo(e.target.value)} /></Field>}
@@ -1492,7 +1529,17 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
             <Field label="Payment Method"><Select value={settleMethod} onChange={(e) => setSettleMethod(e.target.value as PaymentMethod)}>
               {SD_METHOD_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </Select></Field>
-            <Field label="Date"><Input type="date" value={settlePaidAt} max={todayIso()} onChange={(e) => setSettlePaidAt(e.target.value)} /></Field>
+            <Field label="Date">
+              <Input type="date" value={settlePaidAt} max={todayIso()} disabled={!settleBackDated} onChange={(e) => setSettlePaidAt(e.target.value)} />
+              <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>
+                <input type="checkbox" checked={settleBackDated} onChange={(e) => {
+                  const checked = e.target.checked
+                  setSettleBackDated(checked)
+                  if (!checked) setSettlePaidAt(todayIso())
+                }} />
+                <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
+              </label>
+            </Field>
             {settleMethod === 'Cash'
               ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
               : <Field label="Reference No."><Input value={settleReceiptNo} onChange={(e) => setSettleReceiptNo(e.target.value)} /></Field>}

@@ -33,25 +33,19 @@ class LoanPaymentAllocator
      *  principal+interest, unpaid penalty/OD (live estimate as of that date,
      *  same formula as the Contract Status tab), and unpaid Document/Legal/
      *  Valuation/Other charges — net of any waivers (write-offs; see
-     *  FacilityWaiver), so a loan waived down to zero can still close on its own,
-     *  the same way the Contract Status tab's Amount To Be Collected already
-     *  nets waivers off (see LoanSummary::build). */
+     *  FacilityWaiver and waivedByRow()), so a loan waived down to zero can
+     *  still close on its own, the same way the Contract Status tab's Amount
+     *  To Be Collected already nets waivers off (see LoanSummary::build). */
     public static function outstandingBalance(Loan $loan, ?Carbon $asOf = null): float
     {
         $schedules = $loan->schedules()->with('allocations.payment:id,status,approval_status')->get();
-        $scheduleBalance = $schedules->where('status', '!=', 'Paid')
-            ->sum(fn ($s) => (float) $s->total_due - (float) $s->paid_amount);
-
         [$graceDays, $chargeRate] = self::penaltyTerms($loan);
         $asOf ??= Carbon::today();
-        $penaltyBalance = $chargeRate > 0
-            ? $schedules->sum(function ($s) use ($graceDays, $chargeRate, $asOf) {
-                $due = LoanSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $asOf);
-                $paid = LoanSummary::activePenaltyPaid($s);
 
-                return max(0, round($due - $paid, 2));
-            })
-            : 0.0;
+        $activeApplied = fn ($row, string $column) => (float) $row->allocations
+            ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
+            ->sum($column);
+        $penaltyDueForRow = fn ($row) => $chargeRate > 0 ? LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf) : 0.0;
 
         // Queried fresh every time (not the cached $loan->charges/$loan->waivers
         // property) — this method runs more than once against the same $loan
@@ -60,10 +54,107 @@ class LoanPaymentAllocator
         // method's own post-allocation call inside applyAllocation() below), and
         // a cached collection from the first call would silently ignore charge
         // payments the second call needs to see.
-        $chargesBalance = (float) $loan->charges()->get()->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
-        $waived = (float) $loan->waivers()->sum('amount');
+        $charges = $loan->charges()->get();
+        $waived = self::waivedByRow($loan, $schedules, $charges, $activeApplied, $penaltyDueForRow);
 
-        return max(0, round($scheduleBalance + $penaltyBalance + $chargesBalance - $waived, 2));
+        $scheduleBalance = $schedules->where('status', '!=', 'Paid')
+            ->sum(fn ($s) => (float) $s->total_due - (float) $s->paid_amount - ($waived['interest'][$s->id] ?? 0) - ($waived['principal'][$s->id] ?? 0));
+
+        $penaltyBalance = $chargeRate > 0
+            ? $schedules->sum(function ($s) use ($graceDays, $chargeRate, $asOf, $waived) {
+                $due = LoanSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $asOf);
+                $paid = LoanSummary::activePenaltyPaid($s);
+
+                return max(0, round($due - $paid - ($waived['penalty'][$s->id] ?? 0), 2));
+            })
+            : 0.0;
+
+        $chargesBalance = (float) $charges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount - ($waived['charge'][$c->id] ?? 0)));
+
+        return max(0, round($scheduleBalance + $penaltyBalance + $chargesBalance, 2));
+    }
+
+    /**
+     * This loan's loan-level waivers (FacilityWaiver: Interest/Penalty/Charge/
+     * Principal — not linked to a specific installment/charge, see its
+     * migration) distributed across $schedules/$charges oldest-first, each
+     * capped at what's actually still due there after real payments already
+     * applied ($activeApplied) — the same floor and the same order a real
+     * payment uses.
+     *
+     * Every method below that answers "what does this row/charge still owe"
+     * (outstandingBalance, settlementQuote, outstandingByBucket) and every
+     * method that actually collects money (applyAllocation,
+     * applyManualAllocation) must net this same result, or a payment sized
+     * against the waived-down total under-funds the row-by-row walk by
+     * exactly the waived amount — the shortfall then silently lands on
+     * whichever bucket is processed last for the last row (principal,
+     * normally), while an earlier bucket collects its full un-waived due.
+     * Never persisted (unlike applySettlementWaiver()'s accrual-interest
+     * forgiveness) — always recomputed fresh from $loan->waivers(), which
+     * makes it self-correcting as real payments land, and idempotent: capping
+     * every row/charge at its own remaining due means calling this again
+     * after a waiver's already been absorbed elsewhere just finds nothing
+     * left to take, instead of double-counting it.
+     *
+     * @param callable $activeApplied (row, 'interest_applied'|'principal_applied'|'penalty_applied') => float already collected
+     * @param callable $penaltyDueForRow (row) => float live penalty due as of the caller's $asOf (0 if the loan type has no default-charge rate)
+     * @return array{interest: array<int,float>, principal: array<int,float>, penalty: array<int,float>, charge: array<int,float>}
+     *   each keyed by facility_schedules.id (charge by facility_charges.id)
+     */
+    private static function waivedByRow(Loan $loan, $schedules, $charges, callable $activeApplied, callable $penaltyDueForRow): array
+    {
+        $byType = $loan->waivers()->get()->groupBy('waiver_type');
+        $pool = [
+            'interest' => (float) ($byType->get('Interest')?->sum('amount') ?? 0),
+            'principal' => (float) ($byType->get('Principal')?->sum('amount') ?? 0),
+            'penalty' => (float) ($byType->get('Penalty')?->sum('amount') ?? 0),
+        ];
+        $chargePool = (float) ($byType->get('Charge')?->sum('amount') ?? 0);
+
+        $out = ['interest' => [], 'principal' => [], 'penalty' => [], 'charge' => []];
+
+        foreach ($schedules as $row) {
+            if ($pool['interest'] > 0) {
+                $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2));
+                if ($due > 0) {
+                    $take = min($pool['interest'], $due);
+                    $out['interest'][$row->id] = $take;
+                    $pool['interest'] -= $take;
+                }
+            }
+            if ($pool['penalty'] > 0) {
+                $due = max(0, round($penaltyDueForRow($row) - $activeApplied($row, 'penalty_applied'), 2));
+                if ($due > 0) {
+                    $take = min($pool['penalty'], $due);
+                    $out['penalty'][$row->id] = $take;
+                    $pool['penalty'] -= $take;
+                }
+            }
+            if ($pool['principal'] > 0) {
+                $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2));
+                if ($due > 0) {
+                    $take = min($pool['principal'], $due);
+                    $out['principal'][$row->id] = $take;
+                    $pool['principal'] -= $take;
+                }
+            }
+        }
+
+        foreach ($charges as $charge) {
+            if ($chargePool <= 0) {
+                break;
+            }
+            $due = max(0, round((float) $charge->due_amount - (float) $charge->paid_amount, 2));
+            if ($due <= 0) {
+                continue;
+            }
+            $take = min($chargePool, $due);
+            $out['charge'][$charge->id] = $take;
+            $chargePool -= $take;
+        }
+
+        return $out;
     }
 
     /**
@@ -83,48 +174,74 @@ class LoanPaymentAllocator
         $schedules = $loan->schedules()->orderBy('installment_no')
             ->with('allocations.payment:id,status,approval_status')->get();
 
-        $activeInterestPaid = fn ($row) => (float) $row->allocations
+        $activeApplied = fn ($row, string $column) => (float) $row->allocations
             ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
-            ->sum('interest_applied');
+            ->sum($column);
 
+        // Pass 1: the settlement's own rule, independent of any loan-level
+        // waiver — each unpaid row's interest is capped at what's actually
+        // accrued by $asOf.
         $periodStart = $loan->disbursed_at ? Carbon::parse($loan->disbursed_at) : null;
-        $waivedInterest = [];
-        $scheduleBalance = 0.0;
+        $accrualWaive = [];
         foreach ($schedules as $row) {
             $dueDate = $row->due_date instanceof Carbon ? $row->due_date : Carbon::parse($row->due_date);
             $start = $periodStart ?? $dueDate->copy();
             $periodStart = $dueDate;
-
             if ($row->status === 'Paid') {
                 continue;
             }
-
             $interestDue = (float) $row->interest_due;
             $accrued = InterestAccrualSchedule::accruedThrough($start, $dueDate, $interestDue, $asOf);
             // Never waive interest that's already been collected on this row.
-            $floor = max($accrued, $activeInterestPaid($row));
-            $waive = max(0, round($interestDue - $floor, 2));
-            if ($waive > 0) {
-                $waivedInterest[$row->id] = $waive;
-            }
-
-            $scheduleBalance += (float) $row->total_due - $waive - (float) $row->paid_amount;
+            $floor = max($accrued, $activeApplied($row, 'interest_applied'));
+            $accrualWaive[$row->id] = max(0, round($interestDue - $floor, 2));
         }
 
+        // Pass 2: any loan-level waiver (see waivedByRow()) forgives on top of
+        // that for SIZING the settlement amount only — composed via an
+        // "already accounted for" closure that folds pass 1's accrual waive
+        // into the interest floor, so the waiver pool isn't asked to re-forgive
+        // interest accrual already forgave. Deliberately NOT folded into
+        // $waivedInterest below (what applySettlementWaiver() will persist):
+        // the loan-level waiver is never consumed/deleted from facility_waivers,
+        // so applyAllocation() nets the exact same live pool again moments
+        // later when it actually collects the payment — persisting it here too
+        // would forgive it twice. Baking in pass 1's accrual waive is safe
+        // because that IS persisted here and nowhere else.
         [$graceDays, $chargeRate] = self::penaltyTerms($loan);
+        $penaltyDueForRow = fn ($row) => $chargeRate > 0 ? LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf) : 0.0;
+        $accountedFor = fn ($row, string $column) => $column === 'interest_applied'
+            ? $activeApplied($row, $column) + ($accrualWaive[$row->id] ?? 0)
+            : $activeApplied($row, $column);
+        $charges = $loan->charges()->get();
+        $waived = self::waivedByRow($loan, $schedules->where('status', '!=', 'Paid'), $charges, $accountedFor, $penaltyDueForRow);
+
+        $waivedInterest = [];
+        $scheduleBalance = 0.0;
+        foreach ($schedules as $row) {
+            if ($row->status === 'Paid') {
+                continue;
+            }
+            $persistWaive = round($accrualWaive[$row->id] ?? 0, 2);
+            if ($persistWaive > 0) {
+                $waivedInterest[$row->id] = $persistWaive;
+            }
+            $sizingWaive = round($persistWaive + ($waived['interest'][$row->id] ?? 0), 2);
+            $scheduleBalance += (float) $row->total_due - $sizingWaive - ($waived['principal'][$row->id] ?? 0) - (float) $row->paid_amount;
+        }
+
         $penaltyBalance = $chargeRate > 0
-            ? $schedules->sum(function ($s) use ($graceDays, $chargeRate, $asOf) {
+            ? $schedules->sum(function ($s) use ($graceDays, $chargeRate, $asOf, $waived) {
                 $due = LoanSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $asOf);
                 $paid = LoanSummary::activePenaltyPaid($s);
 
-                return max(0, round($due - $paid, 2));
+                return max(0, round($due - $paid - ($waived['penalty'][$s->id] ?? 0), 2));
             })
             : 0.0;
 
-        $chargesBalance = (float) $loan->charges()->get()->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
-        $waived = (float) $loan->waivers()->sum('amount');
+        $chargesBalance = (float) $charges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount - ($waived['charge'][$c->id] ?? 0)));
 
-        $outstanding = max(0, round($scheduleBalance + $penaltyBalance + $chargesBalance - $waived, 2));
+        $outstanding = max(0, round($scheduleBalance + $penaltyBalance + $chargesBalance, 2));
 
         return ['outstanding' => $outstanding, 'waivedInterest' => $waivedInterest];
     }
@@ -197,7 +314,16 @@ class LoanPaymentAllocator
         $remaining = $amount;
         $charges = $loan->charges()->orderBy('charged_at')->get();
 
-        $payCharges = function () use (&$remaining, $charges, $payment) {
+        // Any loan-level waiver (see waivedByRow()) must be netted off the same
+        // "due" this loop collects against — outstandingBalance()/
+        // settlementQuote() size the incoming payment against the waived-down
+        // total, so collecting the raw un-waived due here would run this
+        // payment short by exactly the waived amount, and the shortfall would
+        // silently land on whichever bucket/row is processed last.
+        $penaltyDueForRow = fn ($row) => $chargeRate > 0 ? LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf) : 0.0;
+        $waived = self::waivedByRow($loan, $schedules, $charges, $activeApplied, $penaltyDueForRow);
+
+        $payCharges = function () use (&$remaining, $charges, $payment, $waived) {
             if ($remaining <= 0) {
                 return;
             }
@@ -205,7 +331,7 @@ class LoanPaymentAllocator
                 if ($remaining <= 0) {
                     break;
                 }
-                $due = max(0, round((float) $charge->due_amount - (float) $charge->paid_amount, 2));
+                $due = max(0, round((float) $charge->due_amount - (float) $charge->paid_amount - ($waived['charge'][$charge->id] ?? 0), 2));
                 if ($due <= 0) {
                     continue;
                 }
@@ -221,9 +347,9 @@ class LoanPaymentAllocator
             if ($remaining <= 0) {
                 break;
             }
-            
+
             // 1) Interest
-            $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2));
+            $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied') - ($waived['interest'][$row->id] ?? 0), 2));
             if ($due > 0) {
                 $pay = min($remaining, $due);
                 $touch($row->id, 'interest', $pay);
@@ -233,7 +359,7 @@ class LoanPaymentAllocator
             // 2) OD / penalty
             if ($remaining > 0 && $chargeRate > 0) {
                 $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf);
-                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied'), 2));
+                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied') - ($waived['penalty'][$row->id] ?? 0), 2));
                 if ($due > 0) {
                     $pay = min($remaining, $due);
                     $touch($row->id, 'penalty', $pay);
@@ -246,7 +372,7 @@ class LoanPaymentAllocator
 
             // 4) Principal
             if ($remaining > 0) {
-                $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2));
+                $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied') - ($waived['principal'][$row->id] ?? 0), 2));
                 if ($due > 0) {
                     $pay = min($remaining, $due);
                     $touch($row->id, 'principal', $pay);
@@ -284,6 +410,14 @@ class LoanPaymentAllocator
             ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
             ->sum($column);
 
+        $charges = $loan->charges()->orderBy('charged_at')->get();
+        // See waivedByRow()'s docblock (applyAllocation() above) — the cashier's
+        // chosen bucket amounts were validated against outstandingByBucket(),
+        // which nets the same waivers, so this loop must too or it'll try to
+        // collect more than what's actually left owing in a bucket.
+        $penaltyDueForRow = fn ($row) => $chargeRate > 0 ? LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf) : 0.0;
+        $waived = self::waivedByRow($loan, $schedules, $charges, $activeApplied, $penaltyDueForRow);
+
         $applied = [];
         $touch = function (int $scheduleId, string $bucket, float $amt) use (&$applied) {
             if ($amt <= 0) {
@@ -300,7 +434,7 @@ class LoanPaymentAllocator
 
         foreach ($schedules as $row) {
             if ($interestRemaining > 0) {
-                $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2));
+                $due = max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied') - ($waived['interest'][$row->id] ?? 0), 2));
                 if ($due > 0) {
                     $pay = min($interestRemaining, $due);
                     $touch($row->id, 'interest', $pay);
@@ -310,7 +444,7 @@ class LoanPaymentAllocator
 
             if ($penaltyRemaining > 0 && $chargeRate > 0) {
                 $penaltyDue = LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf);
-                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied'), 2));
+                $due = max(0, round($penaltyDue - $activeApplied($row, 'penalty_applied') - ($waived['penalty'][$row->id] ?? 0), 2));
                 if ($due > 0) {
                     $pay = min($penaltyRemaining, $due);
                     $touch($row->id, 'penalty', $pay);
@@ -319,7 +453,7 @@ class LoanPaymentAllocator
             }
 
             if ($principalRemaining > 0) {
-                $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2));
+                $due = max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied') - ($waived['principal'][$row->id] ?? 0), 2));
                 if ($due > 0) {
                     $pay = min($principalRemaining, $due);
                     $touch($row->id, 'principal', $pay);
@@ -329,12 +463,11 @@ class LoanPaymentAllocator
         }
 
         if ($chargeRemaining > 0) {
-            $charges = $loan->charges()->orderBy('charged_at')->get();
             foreach ($charges as $charge) {
                 if ($chargeRemaining <= 0) {
                     break;
                 }
-                $due = max(0, round((float) $charge->due_amount - (float) $charge->paid_amount, 2));
+                $due = max(0, round((float) $charge->due_amount - (float) $charge->paid_amount - ($waived['charge'][$charge->id] ?? 0), 2));
                 if ($due <= 0) {
                     continue;
                 }
@@ -387,6 +520,12 @@ class LoanPaymentAllocator
         if ($loan->status === 'Active' && $outstanding <= 0) {
             $loan->update(['status' => 'Closed', 'closed_at' => $asOf]);
         }
+
+        // A payment can move a loan across an NPL/provisioning slab (or clear
+        // it entirely) the moment it lands, not just at tomorrow's daily
+        // recompute — see LoanProvisioning. Re-fetches status fresh off
+        // $loan since the update() calls above already mutated this instance.
+        LoanProvisioning::refreshCache($loan);
     }
 
     /**
@@ -409,18 +548,24 @@ class LoanPaymentAllocator
         $activeApplied = fn ($row, string $column) => (float) $row->allocations
             ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
             ->sum($column);
+        $penaltyDueForRow = fn ($row) => $chargeRate > 0 ? LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf) : 0.0;
+        $charges = $loan->charges()->get();
+        // Netted the same way applyManualAllocation() will actually collect
+        // (see waivedByRow()) — otherwise a cashier could be shown a bucket cap
+        // that includes an amount the loan has already forgiven.
+        $waived = self::waivedByRow($loan, $schedules, $charges, $activeApplied, $penaltyDueForRow);
 
-        $interest = $schedules->sum(fn ($row) => max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied'), 2)));
-        $capital = $schedules->sum(fn ($row) => max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied'), 2)));
+        $interest = $schedules->sum(fn ($row) => max(0, round((float) $row->interest_due - $activeApplied($row, 'interest_applied') - ($waived['interest'][$row->id] ?? 0), 2)));
+        $capital = $schedules->sum(fn ($row) => max(0, round((float) $row->principal_due - $activeApplied($row, 'principal_applied') - ($waived['principal'][$row->id] ?? 0), 2)));
         $odCharge = $chargeRate > 0
-            ? $schedules->sum(function ($row) use ($graceDays, $chargeRate, $asOf) {
+            ? $schedules->sum(function ($row) use ($graceDays, $chargeRate, $asOf, $waived) {
                 $due = LoanSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf);
                 $paid = LoanSummary::activePenaltyPaid($row);
 
-                return max(0, round($due - $paid, 2));
+                return max(0, round($due - $paid - ($waived['penalty'][$row->id] ?? 0), 2));
             })
             : 0.0;
-        $otherCharges = (float) $loan->charges()->get()->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
+        $otherCharges = (float) $charges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount - ($waived['charge'][$c->id] ?? 0)));
 
         return [
             'interest' => round($interest, 2),

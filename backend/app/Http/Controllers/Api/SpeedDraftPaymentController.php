@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\FacilityPayment;
 use App\Models\SpeedDraft;
+use App\Models\SpeedDraftRenewal;
 use App\Services\NumberGenerator;
 use App\Support\SpeedDraftLedgerPoster;
 use App\Support\SpeedDraftPaymentAllocator;
@@ -53,19 +54,20 @@ class SpeedDraftPaymentController extends Controller
             'notes' => 'nullable|string|max:255',
         ]);
         $type = $data['payment_type'];
+        $asOf = isset($data['paid_at']) ? Carbon::parse($data['paid_at']) : Carbon::today();
 
         if ($type === 'Interest') {
-            $outstanding = SpeedDraftPaymentAllocator::outstandingInterest($speedDraft);
+            $outstanding = round(SpeedDraftPaymentAllocator::outstandingInterest($speedDraft) + SpeedDraftPaymentAllocator::outstandingPenalty($speedDraft, $asOf), 2);
             if ($outstanding <= 0) {
-                return response()->json(['message' => 'There is no outstanding interest to pay on this Speed Draft.'], 422);
+                return response()->json(['message' => 'There is no outstanding interest or penalty to pay on this Speed Draft.'], 422);
             }
             if ($data['amount'] > $outstanding) {
-                return response()->json(['message' => "Amount exceeds the outstanding interest ({$outstanding})."], 422);
+                return response()->json(['message' => "Amount exceeds the outstanding interest and penalty ({$outstanding})."], 422);
             }
         } elseif ($type === 'CapitalReduction') {
-            $outstandingInterest = SpeedDraftPaymentAllocator::outstandingInterest($speedDraft);
+            $outstandingInterest = round(SpeedDraftPaymentAllocator::outstandingInterest($speedDraft) + SpeedDraftPaymentAllocator::outstandingPenalty($speedDraft, $asOf), 2);
             if ($outstandingInterest > 0) {
-                return response()->json(['message' => "Settle the outstanding interest ({$outstandingInterest}) before making a capital payment."], 422);
+                return response()->json(['message' => "Settle the outstanding interest and penalty ({$outstandingInterest}) before making a capital payment."], 422);
             }
             $outstanding = (float) $speedDraft->outstanding_balance_cache;
             if ($outstanding <= 0) {
@@ -75,7 +77,7 @@ class SpeedDraftPaymentController extends Controller
                 return response()->json(['message' => "Amount exceeds the outstanding capital ({$outstanding})."], 422);
             }
         } else {
-            $outstanding = SpeedDraftPaymentAllocator::outstandingBalance($speedDraft);
+            $outstanding = SpeedDraftPaymentAllocator::outstandingBalance($speedDraft, $asOf);
             if ($outstanding <= 0) {
                 return response()->json(['message' => 'This Speed Draft has no outstanding balance.'], 422);
             }
@@ -116,8 +118,9 @@ class SpeedDraftPaymentController extends Controller
 
             // Each poster only writes an entry for the bucket it actually finds
             // allocated (see SpeedDraftLedgerPoster) — a Settlement payment
-            // typically has both, so both fire; Interest/CapitalReduction only
-            // ever populate the matching bucket.
+            // typically has more than one, so all three fire; Interest/
+            // CapitalReduction only ever populate their matching bucket(s).
+            SpeedDraftLedgerPoster::postPenaltyReceipt($payment);
             SpeedDraftLedgerPoster::postInterestReceipt($payment);
             SpeedDraftLedgerPoster::postCapitalReceipt($payment);
 
@@ -131,6 +134,15 @@ class SpeedDraftPaymentController extends Controller
     {
         if ($payment->status === 'Voided') {
             return response()->json(['message' => 'This payment is already voided.'], 422);
+        }
+        // A renewal payment belongs to the OLD (now Closed) draft, but the money
+        // it recorded is what sized the NEW draft's principal (see
+        // SpeedDraftController::renew()). Voiding it the normal way would reopen
+        // the old draft while the new one silently keeps assuming that money was
+        // collected — a real double-booking, not just a display glitch — so it's
+        // blocked here rather than left reachable with no reversal flow behind it.
+        if (SpeedDraftRenewal::where('facility_payment_id', $payment->id)->exists()) {
+            return response()->json(['message' => 'This payment was part of a Speed Draft renewal and cannot be voided on its own — reversing a renewal isn\'t supported yet.'], 422);
         }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
         $payment->load('allocations.schedule');

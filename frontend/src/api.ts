@@ -394,6 +394,13 @@ export interface Loan {
   cancelledReason?: string | null;
   writtenOffBy?: { id: number; name: string } | null;
   writtenOffReason?: string | null;
+  /** Impairment/NPL provisioning cache — kept fresh by the daily loans:recompute-provisioning
+   *  command and after every payment (LoanPaymentAllocator). provisionPostedAmount is the one
+   *  authoritative (not cached) field — it only moves when a user posts via loanProvisionsApi.post(). */
+  nplFlag?: boolean;
+  provisionRequiredPct?: number;
+  provisionRequiredAmount?: number | string;
+  provisionPostedAmount?: number | string;
   /** The one cancel request awaiting approval right now, if any — see loansApi.requestCancel(). */
   pendingCancelRequest?: LoanCancelRequest | null;
   /** The approval_requests row (code 'loan_application') created at submission time — only present while status is Pending. */
@@ -630,6 +637,29 @@ export interface OverdueLoan extends Loan {
   overdueAmount: number;
   /** Default/OD interest accrued on the overdue installments. */
   penaltyDue: number;
+}
+
+/** One Active loan currently NPL or with a required/posted provision mismatch — see loanProvisionsApi.list(). */
+export interface LoanProvisionRow {
+  id: number; code: string;
+  customer?: { id: number; fullName: string; code: string; nicNo?: string | null } | null;
+  branch?: { id: number; name: string; code: string } | null;
+  loanType?: { id: number; name: string; code: string } | null;
+  nplFlag: boolean;
+  provisionRequiredPct: number;
+  provisionRequiredAmount: number;
+  provisionPostedAmount: number;
+  provisionDelta: number;
+  provisionLastEvaluatedAt?: string | null;
+}
+
+/** One Post/Reverse booking against a loan's provision — see loanProvisionsApi.history(). */
+export interface LoanProvisionEntry {
+  id: number; creditFacilityId: number; action: 'Post' | 'Recover';
+  overdueInstallmentsAtAction: number; slabPct: number;
+  baseAmount: number; amount: number; balanceAfter: number;
+  postedBy?: { id: number; name: string } | null;
+  notes?: string | null; createdAt: string;
 }
 
 export interface LoanDueTypeRow {
@@ -954,6 +984,8 @@ export const loansApi = {
   rejectCancelRequest: (requestId: number, reason?: string) => http.post(`/loan-cancel-requests/${requestId}/reject`, snakeize({ rejectReason: reason })).then((r) => camelize(r.data) as LoanCancelRequest),
   /** Admin-only (see backend LoanController::writeOff) — direct bad-debt write-off, posts the outstanding balance as a loss and closes the loan. */
   writeOff: (id: number, reason: string) => http.post(`/loans/${id}/write-off`, { reason }).then((r) => camelize(r.data) as Loan),
+  /** Manual close for a loan that's fully settled but didn't auto-close — see backend LoanController::close(). */
+  close: (id: number) => http.post(`/loans/${id}/close`).then((r) => camelize(r.data) as Loan),
   disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque' }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>
@@ -962,6 +994,15 @@ export const loansApi = {
     http.patch(`/loans/${id}/officers`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   overdue: (params?: { from?: string; to?: string }) =>
     http.get('/loans-overdue', { params }).then((r) => camelize(r.data) as OverdueLoan[]),
+}
+
+export const loanProvisionsApi = {
+  /** Every Active loan currently NPL or with a required/posted provision mismatch — see LoanProvisionController::index(). */
+  list: () => http.get('/loans-provisions').then((r) => camelize(r.data) as LoanProvisionRow[]),
+  /** Books the delta between required and posted for this one loan — posted:false means it was already in sync, nothing booked. */
+  post: (loanId: number) =>
+    http.post(`/loans/${loanId}/post-provision`).then((r) => camelize(r.data) as { posted: boolean; loan: Pick<LoanProvisionRow, 'id' | 'code' | 'nplFlag' | 'provisionRequiredPct' | 'provisionRequiredAmount' | 'provisionPostedAmount' | 'provisionDelta'> }),
+  history: (loanId: number) => http.get(`/loans/${loanId}/provisions`).then((r) => camelize(r.data) as LoanProvisionEntry[]),
 }
 
 /** One due date shared by unpaid installments across a loan type's active loans —
@@ -1183,8 +1224,10 @@ export interface SpeedDraftType {
   maxAmount?: number | string | null;
   minPeriodMonths?: number | null;
   maxPeriodMonths?: number | null;
-  /** Days after an interest installment's due date before it's shown as Overdue — display-only, no penalty interest is computed. */
+  /** Days after an interest installment's due date before it's shown as Overdue, and before defaultChargeRatePercent starts accruing. */
   gracePeriodDays?: number;
+  /** Monthly penalty rate applied to an overdue installment's unpaid balance once past gracePeriodDays — see SpeedDraftSummary.penaltyDue. Null/0 = no penalty. */
+  defaultChargeRatePercent?: number | string | null;
   /** Gold Pawning / Lease typically pledge an asset — see SpeedDraft.collateral. */
   requiresCollateral?: boolean;
   sortOrder?: number;
@@ -1249,11 +1292,26 @@ export interface SpeedDraftPayment {
 export interface SpeedDraftSummary {
   principalAmount: number; outstandingCapital: number; totalCapitalPaid: number;
   totalInterestDue: number; totalInterestPaid: number; outstandingInterest: number;
-  /** Full outstanding interest + full outstanding capital — what a "Settle Full Balance" action would collect today. */
+  /** Live-estimated penalty on overdue installments — see SpeedDraftType.defaultChargeRatePercent. Never persisted, recalculated fresh. */
+  penaltyDue: number;
+  /** Full outstanding interest + penalty + full outstanding capital — what a "Settle Full Balance" action would collect today. */
   amountToSettleToday: number;
   nextDueDate: string | null; nextDueAmount: number | null;
   daysOverdue: number; overdueInstallments: number;
   totalInstallments: number; paidInstallments: number;
+}
+
+/** Audit/link row for speedDraftsApi.renew() — mirrors FdRenewal's new-account-close-old shape. */
+export interface SpeedDraftRenewal {
+  id: number; oldCreditFacilityId: number; newCreditFacilityId: number;
+  capitalBefore: number | string;
+  interestDue: number | string; interestCollected: number | string;
+  penaltyDue: number | string; penaltyCollected: number | string;
+  capitalPayment: number | string; capitalAfter: number | string;
+  newTermMonths: number;
+  facilityPaymentId?: number | null;
+  renewedBy?: { id: number; name: string } | null; renewedAt: string;
+  notes?: string | null;
 }
 
 /** SpeedDraft-specific fields (speed_draft_facility_details, a 1:1 extension of
@@ -1292,6 +1350,10 @@ export interface SpeedDraft {
   closedAt?: string | null;
   /** The approval_requests row (code 'speed_draft_application') created at submission time — only present while status is Pending. */
   pendingApplicationRequest?: LoanCancelRequest | null;
+  /** Present once this draft has been renewed into a new one — see speedDraftsApi.renew(). */
+  renewedTo?: SpeedDraftRenewal | null;
+  /** Present when this draft was itself created by renewing an older, now-Closed one. */
+  renewedFrom?: SpeedDraftRenewal | null;
 
   /** SpeedDraft-specific fields, nested — see SpeedDraftFacilityDetail. Always present on a real SpeedDraft. */
   speedDraftDetail?: SpeedDraftFacilityDetail | null;
@@ -1341,6 +1403,13 @@ export const speedDraftsApi = {
   disburse: (id: number, body: { disbursementMethod: 'Cash' | 'Bank'; disbursedAmount?: number | string; startDate: string }) =>
     http.post(`/speed-drafts/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as SpeedDraft),
   overdue: () => http.get('/speed-drafts-overdue').then((r) => camelize(r.data) as OverdueSpeedDraft[]),
+  /** Renews a matured Speed Draft under the same product for a new term — closes this draft, creates a new one.
+   *  Any interest/penalty not covered by `payment` is capitalized into the new principal (see backend SpeedDraftController::renew()). */
+  renew: (id: number, body: {
+    termMonths: number; notes?: string;
+    payment?: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; notes?: string };
+  }) =>
+    http.post(`/speed-drafts/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { speedDraft: SpeedDraft; oldSpeedDraft: SpeedDraft; renewal: SpeedDraftRenewal }),
 }
 
 export const speedDraftCollateralApi = {
@@ -1721,7 +1790,7 @@ export interface PLWaterfall {
   netIncomeExOther: string; documentationIncome: string; realEstateProfit: string; refundsOnWriteOffs: string; netIncome: string;
   staffCost: { salary: string; allowances: string; total: string };
   otherOperatingExpenses: string; profitBeforeHoAbsorption: string; hoExpAbsorption: string;
-  netProfitBeforeTaxImpairment: string; provisioningForImpairment: string; netProfitAfterImpairment: string;
+  netProfitBeforeTaxImpairment: string; provisioningForImpairment: string; badDebtRecovery: string; netProfitAfterImpairment: string;
   vatNbt: string; incomeTax: string; netProfitAfterTax: string; netProfitBeforeInterZonal: string;
 }
 export interface PLProductRow {

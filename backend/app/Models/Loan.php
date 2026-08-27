@@ -31,6 +31,7 @@ class Loan extends Model
         'disbursed_amount', 'disbursed_at', 'outstanding_balance_cache',
         'status', 'applied_by', 'approved_by', 'approved_at', 'rejected_reason', 'closed_at', 'created_by',
         'cancelled_reason', 'cancelled_by', 'cancelled_at', 'written_off_reason', 'written_off_by',
+        'npl_flag', 'provision_required_pct', 'provision_required_amount', 'provision_posted_amount', 'provision_last_evaluated_at',
     ];
 
     protected $casts = [
@@ -45,6 +46,11 @@ class Loan extends Model
         'approved_at' => 'datetime',
         'closed_at' => 'datetime',
         'cancelled_at' => 'datetime',
+        'npl_flag' => 'boolean',
+        'provision_required_pct' => 'integer',
+        'provision_required_amount' => 'decimal:2',
+        'provision_posted_amount' => 'decimal:2',
+        'provision_last_evaluated_at' => 'datetime',
     ];
 
     protected static function booted(): void
@@ -161,6 +167,12 @@ class Loan extends Model
     public function payments()
     {
         return $this->hasMany(FacilityPayment::class, 'credit_facility_id')->orderByDesc('paid_at');
+    }
+
+    /** Impairment provision Post/Reverse audit trail — see LoanProvisioning. */
+    public function provisions()
+    {
+        return $this->hasMany(LoanProvision::class, 'credit_facility_id')->orderByDesc('created_at');
     }
 
     /** Shared approval_requests table, scoped to this loan's 'loan_cancel'

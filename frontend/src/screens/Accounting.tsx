@@ -339,6 +339,7 @@ const WATERFALL_ROWS: { key: string; label: string; indent?: boolean; bold?: boo
   { key: 'hoExpAbsorption', label: 'HO Exp Absorption' },
   { key: 'netProfitBeforeTaxImpairment', label: 'Net Profit Before Tax & Impairment', bold: true },
   { key: 'provisioningForImpairment', label: 'Provisioning for Impairment' },
+  { key: 'badDebtRecovery', label: 'Bad Debt Recovery Income' },
   { key: 'netProfitAfterImpairment', label: 'Net Profit After Provision for Impairment', bold: true },
   { key: 'vatNbt', label: 'VAT & NBT on Finance Services' },
   { key: 'incomeTax', label: 'Income Tax' },

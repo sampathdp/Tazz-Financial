@@ -37,6 +37,7 @@ export const NAV: NavNode[] = [
      *  unmapped-route rule (admin role only), not the permission system. */
     { id: 'loan/cheques', label: 'Cheque Clearance', icon: 'cheque' },
     { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert' },
+    { id: 'loan/provisions', label: 'Loan Provisioning', icon: 'shield' },
     { id: 'loan/doc-tracking', label: 'Document Tracking', icon: 'tag' },
     { id: 'loan/commissions', label: 'Sales Executive Commissions', icon: 'target' },
     /** Admin-only — installment skip / waivers. Intentionally left out of

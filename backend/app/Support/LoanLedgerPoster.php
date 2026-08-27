@@ -53,25 +53,74 @@ class LoanLedgerPoster
     }
 
     /**
-     * A bad-debt write-off — Dr 5300 (Loan Loss Expense), Cr 1100 (relieves
-     * the outstanding principal). Direct-write-off method (no prior
-     * provision build-up via 1190 to consume first) since nothing in this
-     * codebase books a periodic provision for Loan — see LoanController::
-     * writeOff(), which posts the loan's outstanding_balance_cache at the
-     * moment it's written off, then zeroes it.
+     * A bad-debt write-off — allowance method: relieves whatever's already
+     * been provisioned via 1190 first (Dr 1190/Cr 1100), since that portion
+     * was already expensed when the provision was posted (see
+     * LoanProvisioning::post()) and hitting 5300 again here would double-
+     * count it. Only the uncovered remainder (e.g. not-yet-due installments,
+     * which the arrears-based provision base never included) is expensed
+     * directly (Dr 5300/Cr 1100), same as this method used to do for the
+     * whole amount before provisioning existed. LoanController::writeOff()
+     * gates on the provision already being fully posted before calling this.
      */
     public static function postWriteOff(Loan $loan, float $amount, ?int $userId = null): void
     {
         if ($amount <= 0) {
             return;
         }
-        LedgerPoster::post([
-            ['account_id' => ChartOfAccount::system('5300')->id, 'debit' => $amount, 'credit' => 0],
-            ['account_id' => ChartOfAccount::system('1100')->id, 'debit' => 0, 'credit' => $amount],
-        ], now()->toDateString(), [
+        $fromProvision = min((float) $loan->provision_posted_amount, $amount);
+        $direct = round($amount - $fromProvision, 2);
+
+        $lines = [];
+        if ($fromProvision > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('1190')->id, 'debit' => $fromProvision, 'credit' => 0];
+        }
+        if ($direct > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('5300')->id, 'debit' => $direct, 'credit' => 0];
+        }
+        $lines[] = ['account_id' => ChartOfAccount::system('1100')->id, 'debit' => 0, 'credit' => $amount];
+
+        LedgerPoster::post($lines, now()->toDateString(), [
             'source_type' => 'Loan',
             'source_id' => $loan->id,
             'description' => "Loan written off - {$loan->code}",
+            'branch_id' => $loan->branch_id,
+            'posted_by' => $userId,
+        ]);
+    }
+
+    /**
+     * Builds up (delta > 0: Dr 5300 Provision Expense / Cr 1190 contra-asset)
+     * or releases (delta < 0: Dr 1190 / Cr 4050 Bad Debt Recovery Income) the
+     * impairment provision — see LoanProvisioning::post(), the only caller.
+     * A release deliberately does NOT credit back into 5300: the loan's
+     * arrears dropping (always because a payment landed — see
+     * LoanPaymentAllocator::finalizeApplied()) is a cash recovery against
+     * an already-expensed balance, which the business books as its own P&L
+     * gain (4050) rather than a smaller net provision expense, so recoveries
+     * stay visible next to the impairment charge they offset instead of
+     * silently shrinking it.
+     */
+    public static function postProvisionAdjustment(Loan $loan, float $delta, ?int $userId = null): void
+    {
+        if (abs($delta) <= 0.01) {
+            return;
+        }
+        $amount = abs($delta);
+        $contraAsset = ChartOfAccount::system('1190')->id;
+
+        if ($delta > 0) {
+            $expense = ChartOfAccount::system('5300')->id;
+            $lines = [['account_id' => $expense, 'debit' => $amount, 'credit' => 0], ['account_id' => $contraAsset, 'debit' => 0, 'credit' => $amount]];
+        } else {
+            $recoveryIncome = ChartOfAccount::system('4050')->id;
+            $lines = [['account_id' => $contraAsset, 'debit' => $amount, 'credit' => 0], ['account_id' => $recoveryIncome, 'debit' => 0, 'credit' => $amount]];
+        }
+
+        LedgerPoster::post($lines, now()->toDateString(), [
+            'source_type' => 'LoanProvision',
+            'source_id' => $loan->id,
+            'description' => ($delta > 0 ? 'Provision posted' : 'Bad debt recovery') . " - {$loan->code}",
             'branch_id' => $loan->branch_id,
             'posted_by' => $userId,
         ]);

@@ -10,7 +10,7 @@ class SpeedDraftType extends Model
         'name', 'code', 'category', 'reference_format',
         'interest_rate_percent', 'rate_period',
         'min_amount', 'max_amount', 'min_period_months', 'max_period_months',
-        'grace_period_days', 'requires_collateral',
+        'grace_period_days', 'default_charge_rate_percent', 'requires_collateral',
         'sort_order', 'status',
     ];
 
@@ -21,6 +21,7 @@ class SpeedDraftType extends Model
         'min_period_months' => 'integer',
         'max_period_months' => 'integer',
         'grace_period_days' => 'integer',
+        'default_charge_rate_percent' => 'decimal:3',
         'requires_collateral' => 'boolean',
         'sort_order' => 'integer',
     ];

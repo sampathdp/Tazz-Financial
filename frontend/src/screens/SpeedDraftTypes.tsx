@@ -126,13 +126,14 @@ export function SpeedDraftTypesScreen({ user: me }: { go: Go; user?: AuthUser | 
               <option value="monthly">Monthly</option><option value="annual">Annual</option><option value="daily">Daily</option>
             </Select></Field>
             <Field label="Grace Period (Days)"><Input type="number" min={0} value={form.gracePeriodDays ?? 5} onChange={(e) => set('gracePeriodDays', Number(e.target.value) as any)} /></Field>
+            <Field label="Penalty Rate % (Monthly)"><Input type="number" step="0.001" min={0} value={form.defaultChargeRatePercent ?? ''} onChange={(e) => set('defaultChargeRatePercent', e.target.value as any)} placeholder="0 = no penalty" /></Field>
             <Field label="Min Amount"><Input type="number" value={form.minAmount ?? ''} onChange={(e) => set('minAmount', e.target.value as any)} /></Field>
             <Field label="Max Amount"><Input type="number" value={form.maxAmount ?? ''} onChange={(e) => set('maxAmount', e.target.value as any)} /></Field>
             <Field label="Min Period (months)"><Input type="number" value={form.minPeriodMonths ?? ''} onChange={(e) => set('minPeriodMonths', Number(e.target.value) as any)} /></Field>
             <Field label="Max Period (months)"><Input type="number" value={form.maxPeriodMonths ?? ''} onChange={(e) => set('maxPeriodMonths', Number(e.target.value) as any)} /></Field>
           </div>
           <div className="t-2" style={{ fontSize: 11.5, marginTop: 8 }}>
-            The customer pays only interest each month on the outstanding capital; the full capital falls due at maturity. Interest recalculates automatically whenever a partial capital payment is made.
+            The customer pays only interest each month on the outstanding capital; the full capital falls due at maturity. Interest recalculates automatically whenever a partial capital payment is made. Once an installment is past its grace period, the penalty rate accrues daily on that installment's unpaid balance until it's paid or the draft is renewed.
           </div>
 
           <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 14 }}>

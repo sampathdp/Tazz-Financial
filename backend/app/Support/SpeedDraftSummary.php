@@ -9,8 +9,11 @@ use Carbon\Carbon;
  * Read-only figures for the Speed Draft detail page, derived entirely from
  * already-persisted schedule rows/allocations/outstanding_capital — nothing
  * here is stored, so it can never drift from the ledger it summarizes.
- * Expects $draft eager-loaded with schedules.allocations, speedDraftType
- * (see SpeedDraftController::DETAIL_RELATIONS).
+ * Expects $draft eager-loaded with schedules.activeAllocations, speedDraftType
+ * (see SpeedDraftController::DETAIL_RELATIONS). Uses activeAllocations, not
+ * allocations, everywhere a balance is netted against what's been collected —
+ * a voided payment's allocation row is kept for history but must stop
+ * counting as collected (see FacilitySchedule::activeAllocations).
  */
 class SpeedDraftSummary
 {
@@ -18,7 +21,9 @@ class SpeedDraftSummary
     {
         $today = Carbon::today();
         $schedules = $draft->schedules;
-        $graceDays = (int) ($draft->speedDraftDetail?->speedDraftType?->grace_period_days ?? 5);
+        $type = $draft->speedDraftDetail?->speedDraftType;
+        $graceDays = (int) ($type?->grace_period_days ?? 5);
+        $chargeRate = (float) ($type?->default_charge_rate_percent ?? 0);
 
         $totalInterestDue = round((float) $schedules->sum('interest_due'), 2);
         $totalInterestPaid = round((float) $schedules->sum('paid_amount'), 2);
@@ -30,6 +35,11 @@ class SpeedDraftSummary
         $overdueRows = $schedules->filter(fn ($s) => self::isOverdue($s, $graceDays, $today));
         $oldestOverdueDate = $overdueRows->min('due_date');
         $daysOverdue = $oldestOverdueDate ? (int) $today->diffInDays($oldestOverdueDate) : 0;
+        // Net off penalty already collected on each row (see FacilityPaymentAllocation.penalty_applied) —
+        // penaltyDueForRow() alone is the gross theoretical figure, same distinction Loan's paidPenalty draws.
+        $penaltyDue = round((float) $overdueRows->sum(
+            fn ($s) => max(0, self::penaltyDueForRow($s, $graceDays, $chargeRate, $today) - (float) $s->activeAllocations->sum('penalty_applied'))
+        ), 2);
 
         $nextDue = $schedules->where('status', '!=', 'Paid')->sortBy('due_date')->first();
 
@@ -40,9 +50,10 @@ class SpeedDraftSummary
             'totalInterestDue' => $totalInterestDue,
             'totalInterestPaid' => $totalInterestPaid,
             'outstandingInterest' => $outstandingInterest,
-            'amountToSettleToday' => round($outstandingInterest + $outstandingCapital, 2),
+            'penaltyDue' => $penaltyDue,
+            'amountToSettleToday' => round($outstandingInterest + $penaltyDue + $outstandingCapital, 2),
             'nextDueDate' => $nextDue?->due_date,
-            'nextDueAmount' => $nextDue ? max(0, round((float) $nextDue->interest_due - (float) $nextDue->allocations->sum('interest_applied'), 2)) : null,
+            'nextDueAmount' => $nextDue ? max(0, round((float) $nextDue->interest_due - (float) $nextDue->activeAllocations->sum('interest_applied'), 2)) : null,
             'daysOverdue' => $daysOverdue,
             'overdueInstallments' => $overdueRows->count(),
             'totalInstallments' => $schedules->count(),
@@ -56,5 +67,43 @@ class SpeedDraftSummary
         $today = $asOf ?? Carbon::today();
 
         return $schedule->status !== 'Paid' && $schedule->due_date->copy()->addDays($graceDays)->lessThan($today);
+    }
+
+    /**
+     * Live-estimated penalty owed on one overdue installment as of $asOf —
+     * direct adaptation of LoanSummary::penaltyDueForRow for facility_schedules.
+     * Never persisted to facility_schedules.penalty_due (see that migration's
+     * docblock) — recomputed fresh everywhere it's needed (display here, real
+     * payment allocation in SpeedDraftPaymentAllocator) so the two can never
+     * disagree. default_charge_rate_percent is a MONTHLY rate, prorated to a
+     * daily rate using each calendar month's actual day count, applied per
+     * exact day elapsed since the grace period ended.
+     */
+    public static function penaltyDueForRow($schedule, int $graceDays, float $chargeRate, ?Carbon $asOf = null): float
+    {
+        $today = $asOf ?? Carbon::today();
+        $overdueBalance = max(0, (float) $schedule->principal_due + (float) $schedule->interest_due - (float) $schedule->paid_amount);
+        if ($overdueBalance <= 0 || $chargeRate <= 0 || !$schedule->due_date->lessThan($today)) {
+            return 0.0;
+        }
+        $chargeStart = $schedule->due_date->copy()->addDays($graceDays);
+        if (!$today->greaterThan($chargeStart)) {
+            return 0.0;
+        }
+
+        $dailyBase = $overdueBalance * ($chargeRate / 100);
+        $penalty = 0.0;
+        $cursor = $chargeStart->copy();
+        while ($cursor->lessThan($today)) {
+            $segmentEnd = $cursor->copy()->addMonthNoOverflow()->startOfMonth();
+            if ($segmentEnd->greaterThan($today)) {
+                $segmentEnd = $today->copy();
+            }
+            $days = $cursor->diffInDays($segmentEnd);
+            $penalty += $dailyBase / $cursor->daysInMonth * $days;
+            $cursor = $segmentEnd;
+        }
+
+        return round($penalty, 2);
     }
 }

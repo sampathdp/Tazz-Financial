@@ -600,6 +600,14 @@ class LoanController extends Controller
         if ($loan->status !== 'Active') {
             return response()->json(['message' => 'Only an active loan can be written off.'], 422);
         }
+        // NPL loans must be fully provisioned before write-off — see
+        // LoanProvisioning and LoanLedgerPoster::postWriteOff(), which
+        // relieves the posted provision first rather than expensing the
+        // whole amount fresh. A loan that never reached the 100% slab (e.g.
+        // written off early for another reason) isn't blocked here.
+        if ((int) $loan->provision_required_pct === 100 && (float) $loan->provision_posted_amount < (float) $loan->provision_required_amount - 0.01) {
+            return response()->json(['message' => 'Post the full impairment provision before writing off this loan.'], 422);
+        }
         $data = $request->validate(['reason' => 'required|string|max:255']);
         $amount = (float) $loan->outstanding_balance_cache;
 
@@ -611,8 +619,40 @@ class LoanController extends Controller
                 'closed_at' => now(),
                 'written_off_reason' => $data['reason'],
                 'written_off_by' => $request->user()->id,
+                'npl_flag' => false,
+                'provision_required_pct' => 0,
+                'provision_required_amount' => 0,
+                'provision_posted_amount' => 0,
             ]);
         });
+
+        return $loan->load(self::DETAIL_RELATIONS);
+    }
+
+    /**
+     * Manual close for a loan that's actually fully settled but didn't
+     * auto-close (LoanPaymentAllocator::finalizeApplied fires only when
+     * outstandingBalance() — a per-installment, per-bucket figure — nets to
+     * exactly 0; an early settlement that overpays one installment's interest
+     * while underpaying its principal by the same amount can leave that
+     * schedule row's own bucket split unbalanced even though every due-type
+     * total across the loan already nets to 0). Eligibility here is checked
+     * the same way the Due Type Breakdown card sums to zero on screen — total
+     * due minus total paid, across all rows — rather than repeating the
+     * stricter per-row check that's why the loan is stuck Active.
+     */
+    public function close(Request $request, Loan $loan)
+    {
+        if ($loan->status !== 'Active') {
+            return response()->json(['message' => 'Only an active loan can be closed.'], 422);
+        }
+        $loan->load(['schedules.allocations.payment:id,status,approval_status', 'charges', 'waivers']);
+        $balance = collect(LoanSummary::build($loan)['dueBreakdown'])->sum('balance');
+        if (round($balance, 2) > 0.01) {
+            return response()->json(['message' => 'This loan still has an outstanding balance and cannot be closed.'], 422);
+        }
+
+        $loan->update(['status' => 'Closed', 'outstanding_balance_cache' => 0, 'closed_at' => now()]);
 
         return $loan->load(self::DETAIL_RELATIONS);
     }
