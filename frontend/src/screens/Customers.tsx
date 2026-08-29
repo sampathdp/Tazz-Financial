@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, Pager, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type FdDeposit, type FixedDeposit, type AuthUser } from '../api'
+import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, customerCribApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type FdDeposit, type FixedDeposit, type CribReport, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
+import { downloadBlob } from '../lib/export'
 import { LoanDetail } from './loan/LoanDetail'
 import type { Go } from './types'
 
@@ -65,6 +66,75 @@ const validateEmail = (v: string): string | undefined => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) ? undefined : 'Enter valid email address'
 }
 const FieldError = ({ msg }: { msg?: string }) => msg ? <span style={{ fontSize: 11, color: 'var(--bad)' }}>{msg}</span> : null
+
+/** Customer profile photo with a fallback icon. The image route is auth-protected,
+ *  so it's fetched as a blob rather than set as a plain <img src>. */
+function CustomerAvatar({ customerId, hasPhoto, size = 96 }: { customerId: number; hasPhoto?: boolean; size?: number }) {
+  const [url, setUrl] = useState('')
+  useEffect(() => {
+    if (!hasPhoto) { setUrl(''); return }
+    let objUrl = ''
+    customersApi.photo(customerId)
+      .then((blob) => { objUrl = URL.createObjectURL(blob); setUrl(objUrl) })
+      .catch(() => setUrl(''))
+    return () => { if (objUrl) URL.revokeObjectURL(objUrl) }
+  }, [customerId, hasPhoto])
+
+  return (
+    <div style={{ width: size, height: size, borderRadius: 'var(--r-m)', overflow: 'hidden', flexShrink: 0,
+      background: 'var(--bg-0)', border: '1px solid var(--line)', display: 'grid', placeItems: 'center' }}>
+      {url
+        ? <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : <Icon n="users" s={Math.round(size * 0.4)} />}
+    </div>
+  )
+}
+
+/** Upload / replace / remove one customer's profile photo. Edit-mode only —
+ *  needs a saved customer id. */
+function PhotoPanel({ customer, me }: { customer: Customer; me?: AuthUser | null }) {
+  const notify = useNotify()
+  const [hasPhoto, setHasPhoto] = useState(!!customer.hasPhoto)
+  const [busy, setBusy] = useState(false)
+  const [bump, setBump] = useState(0)
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setBusy(true)
+    try {
+      await customersApi.uploadPhoto(customer.id, file)
+      setHasPhoto(true); setBump((n) => n + 1)
+      notify.success('Photo updated')
+    } catch (ex: any) { notify.error('Upload failed', getErrorText(ex)) }
+    finally { setBusy(false) }
+  }
+
+  const remove = async () => {
+    const ok = await notify.confirm({ title: 'Remove profile photo?', msg: 'This action cannot be undone.', danger: true, okText: 'Remove' })
+    if (!ok) return
+    try { await customersApi.removePhoto(customer.id); setHasPhoto(false); setBump((n) => n + 1) }
+    catch (ex: any) { notify.error('Remove failed', getErrorText(ex)) }
+  }
+
+  return (
+    <div className="row gap-3" style={{ alignItems: 'center' }}>
+      <CustomerAvatar key={bump} customerId={customer.id} hasPhoto={hasPhoto} size={96} />
+      <Can user={me} module="Customer Management" action="Edit">
+        <div className="col gap-2" style={{ alignItems: 'flex-start' }}>
+          <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" onChange={pick} style={{ display: 'none' }} />
+          <Btn variant="solid" icon="upload" size="sm" onClick={() => fileInput.current?.click()} disabled={busy}>
+            {busy ? 'Uploading…' : hasPhoto ? 'Replace Photo' : 'Upload Photo'}
+          </Btn>
+          {hasPhoto && <Btn variant="ghost" icon="trash" size="sm" onClick={remove}>Remove</Btn>}
+          <span className="t-2" style={{ fontSize: 11 }}>JPG, PNG or WebP · max 5 MB</span>
+        </div>
+      </Can>
+    </div>
+  )
+}
 
 /** Upload/view/delete KYC documents for one customer. Its own panel since it
  *  needs a customer id to exist first — only shown once editing a saved record. */
@@ -221,6 +291,154 @@ function FundingHistoryPanel({ customerId }: { customerId: number }) {
   )
 }
 
+/* ---- Internal CRIB-style credit report ---- */
+
+const gradeTone: Record<string, 'green' | 'amber' | 'red'> = { A: 'green', B: 'green', C: 'amber', D: 'red', E: 'red' }
+
+/** Colour band for a Number-of-Days-in-Arrears cell in the payment-profile grid. */
+function ndiaCell(n: number | null): { bg: string; fg: string; text: string } {
+  if (n === null) return { bg: 'transparent', fg: 'var(--tx-3)', text: '–' }
+  if (n === 0) return { bg: 'var(--ok-dim)', fg: 'var(--ok)', text: '0' }
+  if (n <= 30) return { bg: 'var(--warn-dim)', fg: 'var(--warn)', text: String(n) }
+  if (n <= 90) return { bg: 'rgba(230,130,20,0.18)', fg: '#e68214', text: String(n) }
+  return { bg: 'var(--bad-dim)', fg: 'var(--bad)', text: String(n) }
+}
+
+function StatRow({ label, value }: { label: string; value: string | number }) {
+  return <div><span className="t-2">{label}: </span><b>{value}</b></div>
+}
+
+/** Read-only internal credit report for one customer — CRIB-report layout, this
+ *  company's own facilities only. Fetched lazily; PDF export mirrors the screen. */
+function CreditReportPanel({ customerId, me }: { customerId: number; me?: AuthUser | null }) {
+  const notify = useNotify()
+  const [data, setData] = useState<CribReport | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [downloading, setDownloading] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    customerCribApi.get(customerId).then(setData).catch(() => setData(null)).finally(() => setLoading(false))
+  }, [customerId])
+
+  const downloadPdf = async () => {
+    setDownloading(true)
+    try { downloadBlob(await customerCribApi.pdf(customerId), `credit-report-${data?.customer.code || customerId}.pdf`) }
+    catch (ex: any) { notify.error('Export failed', getErrorText(ex)) }
+    finally { setDownloading(false) }
+  }
+
+  if (loading) return <div className="t-2" style={{ fontSize: 12.5 }}>Loading credit report…</div>
+  if (!data) return <div className="t-2" style={{ fontSize: 12.5 }}>Credit report unavailable.</div>
+
+  const s = data.paymentProfileStatus
+  const sc = data.scoring
+
+  return (
+    <div className="col gap-3">
+      <div className="row between wrap gap-2" style={{ alignItems: 'flex-start' }}>
+        <div className="row gap-3" style={{ alignItems: 'center' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="num" style={{ fontSize: 30, fontWeight: 700, fontFamily: 'Saira', lineHeight: 1 }}>{sc.score}</div>
+            <div className="t-2" style={{ fontSize: 10.5 }}>{sc.scale.min}–{sc.scale.max}</div>
+          </div>
+          <div className="col gap-1">
+            <Badge tone={gradeTone[sc.riskGrade]} dot>{sc.riskGrade} — {sc.riskLabel}</Badge>
+            <span className="t-2" style={{ fontSize: 10.5, maxWidth: 420 }}>{data.disclaimer}</span>
+          </div>
+        </div>
+        <Btn variant="solid" icon="download" size="sm" onClick={downloadPdf} disabled={downloading}>{downloading ? 'Preparing…' : 'Download PDF'}</Btn>
+      </div>
+
+      <div style={{ padding: 12, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)',
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px 20px', fontSize: 12.5 }}>
+        <StatRow label="Open Credit Facilities" value={s.openCreditFacilities} />
+        <StatRow label="Closed Credit Facilities" value={s.closedCreditFacilities} />
+        <StatRow label="Written-off Facilities" value={s.writtenOffCreditFacilities} />
+        <StatRow label="Total Granted (open)" value={money(s.totalAmountGrantedOpen)} />
+        <StatRow label="Total Current Balance (open)" value={money(s.totalCurrentBalanceOpen)} />
+        <StatRow label="Total Installment (open)" value={money(s.totalInstallmentAmountOpen)} />
+        <StatRow label="Total Amount in Arrears" value={money(s.totalAmountInArrears)} />
+        <StatRow label="Highest Current NDIA" value={`${s.highestCurrentNdia} days`} />
+        <StatRow label="Highest NDIA in 12 Months" value={`${s.highestNdia12Months} days`} />
+        <StatRow label="Inquiries (6 / 12 months)" value={`${data.inquiries.last6Months} / ${data.inquiries.last12Months}`} />
+      </div>
+
+      {data.paymentProfileGrid.rows.length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>Payment Profile — Days in Arrears by Month</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', fontSize: 11.5, minWidth: '100%' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--tx-2)', fontWeight: 600 }}>Facility</th>
+                  {data.paymentProfileGrid.months.map((m) => (
+                    <th key={m} style={{ padding: '4px 6px', color: 'var(--tx-2)', fontWeight: 600, whiteSpace: 'nowrap' }}>{m}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.paymentProfileGrid.rows.map((r) => (
+                  <tr key={r.code}>
+                    <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>
+                      <b>{r.code}</b> <span className="t-2">{r.product}</span>
+                    </td>
+                    {r.cells.map((c, i) => {
+                      const cc = ndiaCell(c.ndia)
+                      return <td key={i} style={{ padding: '3px 6px', textAlign: 'center' }}>
+                        <span style={{ display: 'inline-block', minWidth: 22, padding: '1px 4px', borderRadius: 4, background: cc.bg, color: cc.fg, fontWeight: 600 }}>{cc.text}</span>
+                      </td>
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="eyebrow" style={{ marginBottom: 8 }}>Credit Facilities</div>
+        <Table cols={[
+          { label: 'Code' }, { label: 'Product' }, { label: 'Status', align: 'center' as const },
+          { label: 'Granted', align: 'right' as const }, { label: 'Balance', align: 'right' as const }, { label: 'Arrears', align: 'right' as const },
+          { label: 'Installment', align: 'right' as const }, { label: 'NDIA', align: 'right' as const }, { label: 'Disbursed' }, { label: 'Maturity' },
+        ]} rows={data.creditFacilities} empty="No credit facilities on record"
+          render={(f) => <>
+            <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{f.code}</Td>
+            <Td>{f.product}</Td>
+            <Td align="center"><Badge tone={f.status === 'Active' ? 'green' : f.status === 'WrittenOff' ? 'red' : 'neutral'} dot>{f.status}</Badge></Td>
+            <Td align="right" mono>{money(f.amountGranted)}</Td>
+            <Td align="right" mono>{money(f.currentBalance)}</Td>
+            <Td align="right" mono>{f.amountInArrears > 0 ? <span style={{ color: 'var(--bad)' }}>{money(f.amountInArrears)}</span> : money(f.amountInArrears)}</Td>
+            <Td align="right" mono>{money(f.installmentAmount)}</Td>
+            <Td align="right" mono>{f.currentNdia === null ? '–' : f.currentNdia}</Td>
+            <Td>{dateOnly(f.firstDisbursementDate)}</Td>
+            <Td>{dateOnly(f.maturityDate)}</Td>
+          </>} />
+      </div>
+
+      {data.guarantorFacilities.length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>Facilities Guaranteed by this Customer</div>
+          <Table cols={[
+            { label: 'Code' }, { label: 'Borrower' }, { label: 'Status', align: 'center' as const },
+            { label: 'Granted', align: 'right' as const }, { label: 'Balance', align: 'right' as const }, { label: 'Guaranteed', align: 'right' as const },
+          ]} rows={data.guarantorFacilities} empty=""
+            render={(g) => <>
+              <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{g.code}</Td>
+              <Td>{g.borrowerName || '—'}</Td>
+              <Td align="center"><Badge tone={g.status === 'Active' ? 'green' : 'neutral'} dot>{g.status}</Badge></Td>
+              <Td align="right" mono>{money(g.amountGranted)}</Td>
+              <Td align="right" mono>{money(g.currentBalance)}</Td>
+              <Td align="right" mono>{g.guaranteedAmount == null ? '—' : money(g.guaranteedAmount)}</Td>
+            </>} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer; me?: AuthUser | null; onEdit: () => void; onOpenLoan: (loanId: number) => void }) {
   const [borrowerLoans, setBorrowerLoans] = useState<Loan[]>([])
   const [guarantorLoans, setGuarantorLoans] = useState<Loan[]>([])
@@ -242,6 +460,13 @@ function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <Card>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Personal Details</div>
+          <div className="row gap-3" style={{ alignItems: 'flex-start', marginBottom: 12 }}>
+            <CustomerAvatar customerId={customer.id} hasPhoto={customer.hasPhoto} size={84} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{customer.fullName}</div>
+              <div className="t-2" style={{ fontSize: 12 }}>{customer.code}</div>
+            </div>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', fontSize: 12.5 }}>
             <div><span className="t-2">Full Name: </span><b>{customer.fullName}</b></div>
             <div><span className="t-2">Branch: </span><b>{customer.branch?.name || '—'}</b></div>
@@ -303,6 +528,11 @@ function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer
 
       <Card style={{ marginBottom: 16 }} pad={0}>
         <FundingHistoryPanel customerId={customer.id} />
+      </Card>
+
+      <Card style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Credit Report (Internal — CRIB-style)</div>
+        <CreditReportPanel customerId={customer.id} me={me} />
       </Card>
 
       <Card>
@@ -570,6 +800,13 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
 
         <Card style={{ marginBottom: 16 }}>
           <Field label="Notes" full><textarea value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
+        </Card>
+
+        <Card style={{ marginBottom: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Profile Photo</div>
+          {editing
+            ? <PhotoPanel customer={editing} me={me} />
+            : <div className="t-2" style={{ fontSize: 12.5, fontStyle: 'italic' }}>Save the customer first to attach a photo.</div>}
         </Card>
 
         <Card>

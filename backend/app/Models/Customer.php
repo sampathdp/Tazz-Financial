@@ -24,10 +24,15 @@ class Customer extends Model
         'is_guarantor' => 'boolean',
     ];
 
-    // Generated column backing customers_nic_no_active_unique — an
-    // implementation detail of the soft-delete-safe NIC constraint, not data
-    // callers should ever read (see the create_customers_table migration).
-    protected $hidden = ['nic_no_active'];
+    // photo_path is an internal storage key — callers fetch the image from the
+    // customers/{id}/photo route (auth-protected) and only need to know whether
+    // one exists, which has_photo answers.
+    protected $appends = ['has_photo'];
+
+    // nic_no_active: generated column backing customers_nic_no_active_unique, an
+    // implementation detail of the soft-delete-safe NIC constraint (see the
+    // create_customers_table migration). photo_path: see $appends above.
+    protected $hidden = ['nic_no_active', 'photo_path'];
 
     protected static function booted(): void
     {
@@ -40,6 +45,11 @@ class Customer extends Model
                 ])));
             }
         });
+    }
+
+    public function getHasPhotoAttribute(): bool
+    {
+        return !empty($this->photo_path);
     }
 
     public function branch()

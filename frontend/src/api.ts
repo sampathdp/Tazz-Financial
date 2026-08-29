@@ -151,6 +151,8 @@ export interface Customer {
   /** Label, not a restriction — any customer can still be picked as a loan guarantor regardless. */
   isGuarantor?: boolean;
   notes?: string | null;
+  /** True when a profile photo is on file — fetch the image itself via customersApi.photo(id). */
+  hasPhoto?: boolean;
 }
 
 export type CustomerDocType = 'NIC' | 'Passport' | 'DrivingLicense' | 'UtilityBill' | 'Photo' | 'Other'
@@ -717,6 +719,14 @@ export const customersApi = {
    *  and still used everywhere a picker needs the full list for local search. */
   browse: (params: { search?: string; page: number; perPage?: number }) =>
     http.get('/customers', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<Customer>),
+  /** Profile photo — auth-protected, so fetched as a blob rather than a plain <img src>. */
+  photo: (id: number) => http.get(`/customers/${id}/photo`, { responseType: 'blob' }).then((r) => r.data as Blob),
+  uploadPhoto: (id: number, file: File) => {
+    const form = new FormData()
+    form.append('photo', file)
+    return http.post(`/customers/${id}/photo`, form).then((r) => r.data as { hasPhoto: boolean })
+  },
+  removePhoto: (id: number) => http.delete(`/customers/${id}/photo`).then((r) => r.data),
 }
 export const loanTypesApi = resource<LoanType>('loan-types')
 
@@ -1756,6 +1766,42 @@ export const customerFundingApi = {
   /** Every deposit and Fixed Deposit this customer holds. */
   list: (customerId: number) =>
     http.get(`/customers/${customerId}/funding`).then((r) => camelize(r.data) as { deposits: FdDeposit[]; fixedDeposits: FixedDeposit[] }),
+}
+
+/** Internal, CRIB-style credit report for one customer — computed only from this
+ *  company's own facilities. NOT a Credit Information Bureau report. See CribReport.php. */
+export interface CribReport {
+  customer: { id: number; code: string; fullName: string; nicNo?: string | null; phone?: string | null }
+  generatedAt: string
+  asOf: string
+  disclaimer: string
+  scoring: { score: number; riskGrade: 'A' | 'B' | 'C' | 'D' | 'E'; riskLabel: string; scale: { min: number; max: number } }
+  paymentProfileStatus: {
+    openCreditFacilities: number; closedCreditFacilities: number; writtenOffCreditFacilities: number
+    totalAmountGrantedOpen: number; totalCurrentBalanceOpen: number; totalInstallmentAmountOpen: number
+    totalAmountInArrears: number; highestCurrentNdia: number; highestNdia12Months: number
+  }
+  paymentProfileGrid: {
+    months: string[]
+    rows: { code: string; product: string; status: string; cells: { month: string; ndia: number | null }[] }[]
+  }
+  creditFacilities: {
+    code: string; type: string; product: string; status: string; ownership: string
+    amountGranted: number; currentBalance: number; amountInArrears: number; installmentAmount: number
+    currentNdia: number | null; highestNdia12m: number
+    firstDisbursementDate?: string | null; lastPaymentDate?: string | null; maturityDate?: string | null; writtenOff: boolean
+  }[]
+  guarantorFacilities: {
+    code: string; status: string; borrowerName?: string | null
+    amountGranted: number; currentBalance: number; guaranteedAmount?: number | null
+  }[]
+  inquiries: { last6Months: number; last12Months: number }
+}
+
+export const customerCribApi = {
+  get: (customerId: number) => http.get(`/customers/${customerId}/crib-report`).then((r) => camelize(r.data) as CribReport),
+  pdf: (customerId: number) =>
+    http.get(`/customers/${customerId}/crib-report/pdf`, { responseType: 'blob' }).then((r) => r.data as Blob),
 }
 
 /* ============================================================

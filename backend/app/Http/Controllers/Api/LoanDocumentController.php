@@ -33,6 +33,20 @@ class LoanDocumentController extends Controller
 
     public function show(Loan $loan, FacilityDocument $document): StreamedResponse
     {
+        $absPath = storage_path('app/public/'.$document->file_path);
+        \Log::info('doc.show', [
+            'loan_id' => $loan->id,
+            'document_id' => $document->id,
+            'credit_facility_id' => $document->credit_facility_id,
+            'parent_matches' => $document->credit_facility_id === $loan->id,
+            'file_path' => $document->file_path,
+            'disk_root' => config('filesystems.disks.public.root'),
+            'storage_exists' => Storage::disk('public')->exists($document->file_path),
+            'php_file_exists' => file_exists($absPath),
+            'is_readable' => @is_readable($absPath),
+            'abs_path' => $absPath,
+        ]);
+
         abort_if($document->credit_facility_id !== $loan->id, 404);
         abort_unless(Storage::disk('public')->exists($document->file_path), 404);
 

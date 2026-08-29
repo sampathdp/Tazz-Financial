@@ -18,7 +18,9 @@ use App\Http\Controllers\Api\CompanyProfileController;
 use App\Http\Controllers\Api\ChartOfAccountController;
 use App\Http\Controllers\Api\CollectionReportController;
 use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\CustomerCribReportController;
 use App\Http\Controllers\Api\CustomerDocumentController;
+use App\Http\Controllers\Api\CustomerPhotoController;
 use App\Http\Controllers\Api\CustomerReportController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ExpenseCategoryController;
@@ -146,6 +148,15 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('customers', [CustomerController::class, 'store'])->middleware('perm:Customer Management,Create');
     Route::put('customers/{customer}', [CustomerController::class, 'update'])->middleware('perm:Customer Management,Edit');
     Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->middleware('perm:Customer Management,Delete');
+
+    // --- Customer Credit Report (internal CRIB-style report, per customer) ---
+    Route::get('customers/{customer}/crib-report', [CustomerCribReportController::class, 'show'])->middleware('perm:Customer Management,View');
+    Route::get('customers/{customer}/crib-report/pdf', [CustomerCribReportController::class, 'exportPdf'])->middleware('perm:Customer Management,View');
+
+    // --- Customer Photo (profile image on customers.photo_path) ---
+    Route::get('customers/{customer}/photo', [CustomerPhotoController::class, 'show'])->middleware('perm:Customer Management,View');
+    Route::post('customers/{customer}/photo', [CustomerPhotoController::class, 'store'])->middleware('perm:Customer Management,Edit');
+    Route::delete('customers/{customer}/photo', [CustomerPhotoController::class, 'destroy'])->middleware('perm:Customer Management,Edit');
 
     // --- Customer Documents ---
     Route::get('customers/{customer}/documents/{document}/file', [CustomerDocumentController::class, 'show'])->middleware('perm:Customer Management,View');
