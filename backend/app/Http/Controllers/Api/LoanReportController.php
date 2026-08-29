@@ -232,8 +232,9 @@ class LoanReportController extends Controller
         $lastMonthStart = now()->subMonthNoOverflow()->startOfMonth();
         $lastMonthEnd = now()->startOfMonth();
 
-        $thisMonth = $byLoanType(Loan::whereNotNull('disbursed_at')->where('disbursed_at', '>=', $monthStart));
-        $lastMonth = $byLoanType(Loan::whereNotNull('disbursed_at')->whereBetween('disbursed_at', [$lastMonthStart, $lastMonthEnd]));
+        // whereNull('restructured_from_id') — a reschedule is not a new disbursement.
+        $thisMonth = $byLoanType(Loan::whereNotNull('disbursed_at')->whereNull('restructured_from_id')->where('disbursed_at', '>=', $monthStart));
+        $lastMonth = $byLoanType(Loan::whereNotNull('disbursed_at')->whereNull('restructured_from_id')->whereBetween('disbursed_at', [$lastMonthStart, $lastMonthEnd]));
         $disbursedThisMonth = (clone $thisMonth)->sum('disbursed_amount');
         $disbursedLastMonth = (clone $lastMonth)->sum('disbursed_amount');
 
@@ -345,6 +346,9 @@ class LoanReportController extends Controller
 
         return Loan::with(self::LIST_RELATIONS)
             ->whereNotNull('disbursed_at')
+            // A rescheduled loan carries a disbursed_at/disbursed_amount for its
+            // schedule math but moves no new money — exclude it from disbursement figures.
+            ->whereNull('restructured_from_id')
             ->whereBetween('disbursed_at', [$from, $to])
             ->when($request->filled('loanTypeId'), fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $request->loanTypeId)))
             ->orderByDesc('disbursed_at')

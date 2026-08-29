@@ -405,6 +405,7 @@ CREATE TABLE `credit_facilities` (
   `disbursed_at` datetime DEFAULT NULL,
   `outstanding_balance_cache` decimal(15,2) NOT NULL DEFAULT '0.00',
   `status` enum('Pending','Approved','Rejected','Cancelled','Active','Closed','Restructured','WrittenOff') DEFAULT 'Pending',
+  `restructured_from_id` bigint unsigned DEFAULT NULL,
   `applied_by` bigint unsigned DEFAULT NULL,
   `approved_by` bigint unsigned DEFAULT NULL,
   `approved_at` datetime DEFAULT NULL,
@@ -437,8 +438,10 @@ CREATE TABLE `credit_facilities` (
   KEY `credit_facilities_disbursed_at_index` (`disbursed_at`),
   KEY `credit_facilities_status_closed_at_index` (`status`,`closed_at`),
   KEY `credit_facilities_written_off_by_foreign` (`written_off_by`),
+  KEY `credit_facilities_restructured_from_id_foreign` (`restructured_from_id`),
+  CONSTRAINT `credit_facilities_restructured_from_id_foreign` FOREIGN KEY (`restructured_from_id`) REFERENCES `credit_facilities` (`id`) ON DELETE SET NULL,
   CONSTRAINT `credit_facilities_written_off_by_foreign` FOREIGN KEY (`written_off_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=58 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=62 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `customer_business_details`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -564,7 +567,7 @@ CREATE TABLE `document_number_log` (
   KEY `fk_dnl_generated_by` (`generated_by`),
   CONSTRAINT `fk_dnl_generated_by` FOREIGN KEY (`generated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_dnl_sequence` FOREIGN KEY (`number_sequence_id`) REFERENCES `number_sequences` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=372 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=375 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `expense_categories`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -653,7 +656,7 @@ CREATE TABLE `facility_charges` (
   KEY `facility_charges_created_by_foreign` (`created_by`),
   KEY `facility_charges_charge_category_id_foreign` (`charge_category_id`),
   KEY `facility_charges_credit_facility_id_charge_category_id_index` (`credit_facility_id`,`charge_category_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `facility_co_applicants`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -905,6 +908,48 @@ CREATE TABLE `facility_post_dated_cheques` (
   KEY `facility_post_dated_cheques_credit_facility_id_status_index` (`credit_facility_id`,`status`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `facility_reschedules`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `facility_reschedules` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `credit_facility_id` bigint unsigned NOT NULL,
+  `new_credit_facility_id` bigint unsigned DEFAULT NULL,
+  `branch_id` bigint unsigned NOT NULL,
+  `as_of_date` date NOT NULL,
+  `capital_outstanding` decimal(15,2) NOT NULL,
+  `unpaid_interest` decimal(15,2) NOT NULL,
+  `overdue_interest` decimal(15,2) NOT NULL,
+  `default_charges` decimal(15,2) NOT NULL,
+  `other_charges` decimal(15,2) NOT NULL,
+  `interest_deduction` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `capitalised_interest` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `interest_written_off` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `default_charges_action` enum('retain','waive') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `retained_default_charges` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `other_charges_rolled` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `added_charges_total` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `added_charges` json DEFAULT NULL,
+  `new_principal` decimal(15,2) NOT NULL,
+  `new_interest_rate_percent` decimal(6,3) NOT NULL,
+  `new_term_months` smallint unsigned NOT NULL,
+  `new_interest_method` enum('flat','reducing_balance') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `new_installment_frequency` enum('daily','weekly','monthly') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_by` bigint unsigned DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `facility_reschedules_new_credit_facility_id_foreign` (`new_credit_facility_id`),
+  KEY `facility_reschedules_branch_id_foreign` (`branch_id`),
+  KEY `facility_reschedules_created_by_foreign` (`created_by`),
+  KEY `facility_reschedules_credit_facility_id_index` (`credit_facility_id`),
+  CONSTRAINT `facility_reschedules_branch_id_foreign` FOREIGN KEY (`branch_id`) REFERENCES `branches` (`id`),
+  CONSTRAINT `facility_reschedules_created_by_foreign` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `facility_reschedules_credit_facility_id_foreign` FOREIGN KEY (`credit_facility_id`) REFERENCES `credit_facilities` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `facility_reschedules_new_credit_facility_id_foreign` FOREIGN KEY (`new_credit_facility_id`) REFERENCES `credit_facilities` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `facility_schedules`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
@@ -927,7 +972,7 @@ CREATE TABLE `facility_schedules` (
   UNIQUE KEY `facility_schedules_credit_facility_id_installment_no_unique` (`credit_facility_id`,`installment_no`),
   KEY `facility_schedules_status_due_date_index` (`status`,`due_date`),
   KEY `facility_schedules_due_date_index` (`due_date`)
-) ENGINE=InnoDB AUTO_INCREMENT=72 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=132 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `facility_status_events`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1183,7 +1228,7 @@ CREATE TABLE `journal_entries` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `code` varchar(24) COLLATE utf8mb4_unicode_ci NOT NULL,
   `entry_date` date NOT NULL,
-  `source_type` enum('Loan','Customer','LoanPayment','LoanProvision','SpeedDraft','SpeedDraftPayment','SpeedDraftRenewal','Pawning','PawningPayment','PawningAuctionItem','FdDeposit','FixedDeposit','FdWithdrawal','FdInterestPayment','FdRenewal','CashTransfer','Expense','PaymentVoucher','PettyCashReplenishment','PettyCashVoucher','SalesExecutiveCommission','ManualAdjustment','OpeningBalance') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source_type` enum('Loan','Customer','LoanPayment','LoanProvision','LoanReschedule','SpeedDraft','SpeedDraftPayment','SpeedDraftRenewal','Pawning','PawningPayment','PawningAuctionItem','FdDeposit','FixedDeposit','FdWithdrawal','FdInterestPayment','FdRenewal','CashTransfer','Expense','PaymentVoucher','PettyCashReplenishment','PettyCashVoucher','SalesExecutiveCommission','ManualAdjustment','OpeningBalance') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `source_id` bigint unsigned DEFAULT NULL,
   `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `branch_id` bigint unsigned DEFAULT NULL,
@@ -1201,7 +1246,7 @@ CREATE TABLE `journal_entries` (
   KEY `ix_journal_entries_posted_by` (`posted_by`),
   KEY `ix_journal_entries_reversal_of` (`reversal_of_id`),
   KEY `journal_entries_branch_id_status_entry_date_index` (`branch_id`,`status`,`entry_date`)
-) ENGINE=InnoDB AUTO_INCREMENT=106 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=109 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `journal_lines`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1219,7 +1264,7 @@ CREATE TABLE `journal_lines` (
   PRIMARY KEY (`id`),
   KEY `ix_journal_lines_account_date` (`account_id`,`entry_date`),
   KEY `ix_journal_lines_journal_entry` (`journal_entry_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=226 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=233 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `loan_facility_details`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1317,7 +1362,7 @@ CREATE TABLE `migrations` (
   `migration` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `batch` int NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=180 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=184 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `number_sequences`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1341,7 +1386,7 @@ CREATE TABLE `number_sequences` (
   KEY `ix_number_sequences_branch` (`branch_id`),
   KEY `ix_number_sequences_loan_type` (`loan_type_id`),
   KEY `ix_number_sequences_funding_product` (`funding_product_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=374 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=377 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `password_reset_tokens`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

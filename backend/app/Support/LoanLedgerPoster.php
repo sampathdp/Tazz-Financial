@@ -126,6 +126,67 @@ class LoanLedgerPoster
         ]);
     }
 
+    /**
+     * The GL side of a loan reschedule (see LoanController::reschedule()).
+     * No cash moves: the old loan's capital already sits in 1100 and simply
+     * carries to the new loan, so there is no disbursement entry.
+     *
+     * The one entry posted here recognises the amounts capitalised into the
+     * new loan's principal — but ONLY amounts that are already EARNED, keeping
+     * to this ledger's "interest recognised as collected" rule:
+     *   - $capitalisedInterest is the earned/overdue slice of the old
+     *     schedule's unpaid interest (the caller writes off the unearned
+     *     future portion — no entry, same as any interest waiver here);
+     *   - retained OD and unpaid charges are for penalties incurred / services
+     *     rendered, i.e. also already earned.
+     * Recognising them now is a catch-up: they were contractually due and are
+     * now a firm, re-documented receivable.
+     *
+     *   Dr 1100  (capitalised interest + retained OD + rolled/added charges)
+     *   Cr 4010  capitalised earned interest
+     *   Cr 4030  retained default charges (OD)
+     *   Cr 4020  other charges rolled in + manually added charges
+     *
+     * If nothing is being capitalised (a pure term extension with everything
+     * waived), there is nothing to post.
+     */
+    public static function postRescheduleRollover(
+        Loan $oldLoan,
+        Loan $newLoan,
+        float $capitalisedInterest,
+        float $retainedOd,
+        float $rolledAndAddedCharges,
+        string $entryDate,
+        ?int $userId = null
+    ): void {
+        $capitalisedInterest = round(max(0, $capitalisedInterest), 2);
+        $retainedOd = round(max(0, $retainedOd), 2);
+        $rolledAndAddedCharges = round(max(0, $rolledAndAddedCharges), 2);
+        $total = round($capitalisedInterest + $retainedOd + $rolledAndAddedCharges, 2);
+        if ($total <= 0.01) {
+            return;
+        }
+
+        $lines = [['account_id' => ChartOfAccount::system('1100')->id, 'debit' => $total, 'credit' => 0]];
+        if ($capitalisedInterest > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('4010')->id, 'debit' => 0, 'credit' => $capitalisedInterest];
+        }
+        if ($retainedOd > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('4030')->id, 'debit' => 0, 'credit' => $retainedOd];
+        }
+        if ($rolledAndAddedCharges > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('4020')->id, 'debit' => 0, 'credit' => $rolledAndAddedCharges];
+        }
+
+        LedgerPoster::post($lines, $entryDate, [
+            'source_type' => 'LoanReschedule',
+            'source_id' => $newLoan->id,
+            'description' => "Loan rescheduled - {$oldLoan->code} to {$newLoan->code}",
+            'branch_id' => $newLoan->branch_id,
+            'posted_by' => $userId,
+        ]);
+    }
+
     /** Reverses a Loan's disbursement entry — called when an Active-but-unpaid loan is cancelled (LoanController::approveCancelRequest() zeroes disbursed_amount/outstanding_balance_cache for exactly this case; the GL side needs the same undo). No-op if disbursement was never posted (Bank/Cheque method). */
     public static function reverseDisbursement(Loan $loan, ?int $userId = null): void
     {

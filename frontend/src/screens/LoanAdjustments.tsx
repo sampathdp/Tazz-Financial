@@ -9,8 +9,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td , LoadingBlock } from '../components/ui'
 import {
   loansApi, loanSchedulesApi, loanWaiversApi, loanChargesApi, loanTypesApi, chargeCategoriesApi,
+  loanPaymentsApi, financeCalculatorApi,
   type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type ChargeCategory,
   type AuthUser, type LoanType, type SkipDateOption,
+  type InterestMethod, type LoanFrequency, type PaymentAllocationSplit, type FinanceCalcResult, type RescheduleInput,
 } from '../api'
 import { Icon } from '../components/Icon'
 import { useNotify } from '../components/Notify'
@@ -441,14 +443,280 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   )
 }
 
+/* ============================== Reschedule ============================== */
+type AddedCharge = { chargeCategoryId: number | ''; amount: string; notes: string }
+
+function RescheduleSection({ notify, go }: { notify: ReturnType<typeof useNotify>; go: Go }) {
+  const [loans, setLoans] = useState<Loan[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<Loan | null>(null)
+  const [loadingLoan, setLoadingLoan] = useState(false)
+  const [bucket, setBucket] = useState<PaymentAllocationSplit | null>(null)
+  const [categories, setCategories] = useState<ChargeCategory[]>([])
+  const [busy, setBusy] = useState(false)
+
+  const [form, setForm] = useState({
+    asOfDate: todayIso(),
+    interestDeductionType: 'percent' as 'percent' | 'amount',
+    interestDeductionValue: '0',
+    defaultChargesAction: 'waive' as 'retain' | 'waive',
+    interestRatePercent: '',
+    interestMethod: 'flat' as InterestMethod,
+    termMonths: '',
+    installmentFrequency: 'monthly' as LoanFrequency,
+    firstInstallmentDate: todayIso(),
+    reason: '',
+  })
+  const [added, setAdded] = useState<AddedCharge[]>([])
+  const [preview, setPreview] = useState<FinanceCalcResult | null>(null)
+
+  useEffect(() => {
+    loansApi.list().then((all) => setLoans(all.filter((l) => l.status === 'Active'))).catch(() => setLoans([])).finally(() => setLoading(false))
+    chargeCategoriesApi.list().then((res) => setCategories(res.filter((c) => c.status === 'Active'))).catch(() => setCategories([]))
+  }, [])
+
+  const pickLoan = async (_n: string, opt?: Loan) => {
+    setPreview(null); setBucket(null); setAdded([])
+    if (!opt) { setSelected(null); return }
+    setLoadingLoan(true)
+    try {
+      const full = await loansApi.get(opt.id)
+      setSelected(full)
+      setForm((s) => ({
+        ...s,
+        interestRatePercent: String(full.interestRatePercent ?? full.loanDetail?.loanType?.interestRatePercent ?? ''),
+        interestMethod: (full.loanDetail?.interestMethod as InterestMethod) || 'flat',
+        installmentFrequency: full.loanDetail?.installmentFrequency || 'monthly',
+        termMonths: String(full.termMonths ?? ''),
+      }))
+      const b = await loanPaymentsApi.outstandingByBucket(opt.id, form.asOfDate)
+      setBucket(b)
+    } catch {
+      setSelected(opt)
+    } finally { setLoadingLoan(false) }
+  }
+
+  const addedTotal = useMemo(() => added.reduce((s, c) => s + num(c.amount), 0), [added])
+  // Unpaid interest splits into earned (on installments already overdue) and
+  // unearned future interest. Only the earned slice is carried + recognised;
+  // future interest is always written off. The deduction waives extra earned
+  // interest on top of that. Mirrors LoanController::reschedule().
+  const unpaidInterest = num(bucket?.interest)
+  const futureInterest = num(selected?.summary?.arrears?.futureInterest)
+  const earnedInterest = Math.max(0, unpaidInterest - futureInterest)
+  const deduction = Math.min(
+    Math.max(0, form.interestDeductionType === 'percent' ? unpaidInterest * num(form.interestDeductionValue) / 100 : num(form.interestDeductionValue)),
+    unpaidInterest,
+  )
+  const capitalisedInterest = Math.max(0, Math.min(unpaidInterest - deduction, earnedInterest))
+  const interestWrittenOff = unpaidInterest - capitalisedInterest
+  const retainedOd = form.defaultChargesAction === 'retain' ? num(bucket?.odCharge) : 0
+  const newPrincipal = bucket
+    ? num(bucket.capital) + capitalisedInterest + retainedOd + num(bucket.otherCharges) + addedTotal
+    : 0
+
+  // Server-side amortization preview — the app has no client-side schedule math.
+  useEffect(() => {
+    if (!bucket || newPrincipal <= 0 || !num(form.termMonths) || form.interestRatePercent === '') { setPreview(null); return }
+    const t = setTimeout(() => {
+      financeCalculatorApi.calculate({
+        loanAmount: newPrincipal,
+        termMonths: num(form.termMonths),
+        interestMethod: form.interestMethod,
+        interestRatePercent: num(form.interestRatePercent),
+        ratePeriod: selected?.ratePeriod || 'monthly',
+        installmentFrequency: form.installmentFrequency,
+        firstInstallmentDate: form.firstInstallmentDate || undefined,
+      }).then(setPreview).catch(() => setPreview(null))
+    }, 400)
+    return () => clearTimeout(t)
+  }, [bucket, newPrincipal, form.termMonths, form.interestRatePercent, form.interestMethod, form.installmentFrequency, form.firstInstallmentDate, selected])
+
+  const setF = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((s) => ({ ...s, [k]: v }))
+
+  const submit = async () => {
+    if (!selected || !bucket) return
+    if (newPrincipal <= 0) { notify.error('Nothing to reschedule', 'The rescheduled amount works out to zero or less.'); return }
+    if (!num(form.termMonths) || form.interestRatePercent === '' || !form.firstInstallmentDate) {
+      notify.error('Missing details', 'Enter the new rate, term and first installment date.'); return
+    }
+    const badCharge = added.some((c) => !c.chargeCategoryId || num(c.amount) <= 0)
+    if (badCharge) { notify.error('Check the added charges', 'Each line needs a category and an amount.'); return }
+
+    const base = selected.code.replace(/-R\d+$/, '')
+    const m = selected.code.match(/-R(\d+)$/)
+    const newCode = `${base}-R${m ? Number(m[1]) + 1 : 1}`
+
+    const ok = await notify.confirm({
+      title: `Reschedule ${selected.code}?`,
+      msg: `This closes ${selected.code} as Restructured and creates ${newCode} for ${money(newPrincipal)} over ${form.termMonths} month(s) at ${form.interestRatePercent}%. This cannot be undone.`,
+      okText: 'Reschedule',
+    })
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      const body: RescheduleInput = {
+        asOfDate: form.asOfDate || undefined,
+        interestDeductionType: form.interestDeductionType,
+        interestDeductionValue: form.interestDeductionValue || 0,
+        defaultChargesAction: form.defaultChargesAction,
+        charges: added.map((c) => ({ chargeCategoryId: c.chargeCategoryId as number, amount: c.amount, notes: c.notes || undefined })),
+        interestRatePercent: form.interestRatePercent,
+        interestMethod: form.interestMethod,
+        termMonths: num(form.termMonths),
+        installmentFrequency: form.installmentFrequency,
+        firstInstallmentDate: form.firstInstallmentDate,
+        reason: form.reason || undefined,
+      }
+      const created = await loansApi.reschedule(selected.id, body)
+      notify.success('Loan rescheduled', `${selected.code} → ${created.code}`)
+      go(`loan/active/${created.id}`)
+    } catch (ex: any) {
+      notify.error('Reschedule failed', getErrorText(ex))
+    } finally { setBusy(false) }
+  }
+
+  const cell = (label: string, value: unknown, strong?: boolean) => (
+    <div style={{ padding: '10px 12px', background: strong ? 'var(--ac-dim)' : 'var(--bg-0)', border: `1px solid ${strong ? 'var(--ac-bright)' : 'var(--line)'}`, borderRadius: 'var(--r-s)' }}>
+      <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 14, color: strong ? 'var(--ac-bright)' : undefined }}>{money(value)}</div>
+    </div>
+  )
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Find Loan</div>
+        <SearchSelect
+          value={selected ? `${selected.code} — ${selected.customer?.fullName}` : ''}
+          onChange={(_n, opt) => pickLoan(_n, opt)}
+          options={loans}
+          getLabel={(l: Loan) => `${l.code} — ${l.customer?.fullName}`}
+          getSub={(l: Loan) => [l.customer?.nicNo, l.customer?.phone].filter(Boolean).join(' · ')}
+          placeholder={loading ? 'Loading loans…' : 'Search by NIC, Loan ID, or customer name…'}
+          disabled={loading}
+        />
+      </Card>
+
+      {loadingLoan && <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-2)' }}>Loading loan…</div>}
+
+      {selected && !loadingLoan && bucket && (
+        <>
+          <Card style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 12 }}>Outstanding — {selected.code} (as of {form.asOfDate})</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+              {cell('Capital', bucket.capital)}
+              {cell('Overdue Interest (earned)', earnedInterest)}
+              {cell('Future Interest (unearned)', futureInterest)}
+              {cell('Default Charges (OD)', bucket.odCharge)}
+              {cell('Other Charges', bucket.otherCharges)}
+            </div>
+          </Card>
+
+          <Card style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 12 }}>Deductions</div>
+            <div className="row gap-2 wrap" style={{ alignItems: 'flex-end' }}>
+              <Field label="As-of date"><Input type="date" value={form.asOfDate} onChange={(e) => setF('asOfDate', e.target.value)} /></Field>
+              <Field label="Reduce interest by">
+                <Select value={form.interestDeductionType} onChange={(e) => setF('interestDeductionType', e.target.value as 'percent' | 'amount')}>
+                  <option value="percent">Percentage</option>
+                  <option value="amount">Fixed amount</option>
+                </Select>
+              </Field>
+              <Field label={form.interestDeductionType === 'percent' ? 'Percent (%)' : 'Amount'}>
+                <Input type="number" value={form.interestDeductionValue} onChange={(e) => setF('interestDeductionValue', e.target.value)} style={{ maxWidth: 130 }} />
+              </Field>
+              <Field label="Default charges (OD)">
+                <Select value={form.defaultChargesAction} onChange={(e) => setF('defaultChargesAction', e.target.value as 'retain' | 'waive')}>
+                  <option value="waive">Waive</option>
+                  <option value="retain">Retain (roll in)</option>
+                </Select>
+              </Field>
+            </div>
+            <div className="t-2" style={{ fontSize: 11.5, marginTop: 8 }}>
+              Future interest ({money(futureInterest)}) is always written off. This reduction waives a further <strong>{money(Math.max(0, deduction - futureInterest))}</strong> of earned interest.
+              Carried forward: <strong>{money(capitalisedInterest)}</strong> · written off: <strong>{money(interestWrittenOff)}</strong>.
+            </div>
+          </Card>
+
+          <Card style={{ marginBottom: 16 }}>
+            <div className="row between" style={{ marginBottom: 12 }}>
+              <div className="eyebrow">Add Charges</div>
+              <Btn size="sm" variant="solid" icon="plus" onClick={() => setAdded((a) => [...a, { chargeCategoryId: '', amount: '', notes: '' }])}>Add line</Btn>
+            </div>
+            {added.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No charges added.</div> :
+              <div className="col gap-2">
+                {added.map((c, i) => (
+                  <div key={i} className="row gap-2 wrap" style={{ alignItems: 'center' }}>
+                    <Select value={c.chargeCategoryId} onChange={(e) => setAdded((a) => a.map((x, j) => j === i ? { ...x, chargeCategoryId: e.target.value ? Number(e.target.value) : '' } : x))} style={{ maxWidth: 150 }}>
+                      <option value="">Type…</option>
+                      {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                    </Select>
+                    <Input type="number" placeholder="Amount" value={c.amount} onChange={(e) => setAdded((a) => a.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))} style={{ maxWidth: 120 }} />
+                    <Input placeholder="Notes" value={c.notes} onChange={(e) => setAdded((a) => a.map((x, j) => j === i ? { ...x, notes: e.target.value } : x))} style={{ flex: 1, minWidth: 140 }} />
+                    <button className="mms-act" title="Remove" onClick={() => setAdded((a) => a.filter((_, j) => j !== i))}><Icon n="trash" s={14} /></button>
+                  </div>
+                ))}
+              </div>}
+          </Card>
+
+          <Card style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 12 }}>New Contract</div>
+            <div className="row gap-2 wrap" style={{ alignItems: 'flex-end' }}>
+              <Field label="Interest rate (%)"><Input type="number" value={form.interestRatePercent} onChange={(e) => setF('interestRatePercent', e.target.value)} style={{ maxWidth: 120 }} /></Field>
+              <Field label="Interest method">
+                <Select value={form.interestMethod} onChange={(e) => setF('interestMethod', e.target.value as InterestMethod)}>
+                  <option value="flat">Flat</option>
+                  <option value="reducing_balance">Reducing balance</option>
+                </Select>
+              </Field>
+              <Field label="Term (months)"><Input type="number" value={form.termMonths} onChange={(e) => setF('termMonths', e.target.value)} style={{ maxWidth: 110 }} /></Field>
+              <Field label="Frequency">
+                <Select value={form.installmentFrequency} onChange={(e) => setF('installmentFrequency', e.target.value as LoanFrequency)}>
+                  <option value="monthly">Monthly</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="daily">Daily</option>
+                </Select>
+              </Field>
+              <Field label="First installment"><Input type="date" value={form.firstInstallmentDate} onChange={(e) => setF('firstInstallmentDate', e.target.value)} /></Field>
+            </div>
+            <Field label="Reason" style={{ marginTop: 10 }}><Input value={form.reason} onChange={(e) => setF('reason', e.target.value)} placeholder="Why is this loan being rescheduled?" /></Field>
+          </Card>
+
+          <Card>
+            <div className="eyebrow" style={{ marginBottom: 12 }}>New Loan Preview</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 12 }}>
+              {cell('Capital', bucket.capital)}
+              {cell('+ Interest capitalised', capitalisedInterest)}
+              {cell('+ Retained OD', retainedOd)}
+              {cell('+ Other charges', bucket.otherCharges)}
+              {cell('+ Added charges', addedTotal)}
+              {cell('New Principal', newPrincipal, true)}
+              {cell('Interest written off', interestWrittenOff)}
+              {preview && cell('Installment', preview.monthlyRental)}
+              {preview && cell('Total interest', preview.totalInterest)}
+              {preview && cell('Total payable', preview.totalPayable, true)}
+            </div>
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <Btn variant="primary" icon="check" disabled={busy || newPrincipal <= 0} onClick={submit}>{busy ? 'Rescheduling…' : 'Reschedule Loan'}</Btn>
+            </div>
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
 /* ================================ Screen ================================= */
 const TABS = [
   { id: 'skip', label: 'Installment Skip', icon: 'clock' },
   { id: 'waivers', label: 'Waivers', icon: 'refund' },
   { id: 'charges', label: 'Charges', icon: 'tag' },
+  { id: 'reschedule', label: 'Loan Reschedule', icon: 'swap' },
 ] as const
 
-export function LoanAdjustmentsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+export function LoanAdjustmentsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('skip')
 
@@ -469,6 +737,7 @@ export function LoanAdjustmentsScreen({ user: me }: { go: Go; user?: AuthUser | 
       {tab === 'skip' && <SkipSection notify={notify} />}
       {tab === 'waivers' && <WaiversSection notify={notify} />}
       {tab === 'charges' && <ChargesSection notify={notify} />}
+      {tab === 'reschedule' && <RescheduleSection notify={notify} go={go} />}
     </div>
   )
 }

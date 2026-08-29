@@ -7,6 +7,7 @@ use App\Models\ApprovalRequest;
 use App\Models\ApprovalType;
 use App\Models\Branch;
 use App\Models\FacilityCollateralVehicleDetail;
+use App\Models\FacilityReschedule;
 use App\Models\FacilitySchedule;
 use App\Models\Loan;
 use App\Models\LoanFacilityDetail;
@@ -16,6 +17,7 @@ use App\Services\NumberGenerator;
 use App\Support\AerCalculator;
 use App\Support\LoanAmortizer;
 use App\Support\LoanLedgerPoster;
+use App\Support\LoanPaymentAllocator;
 use App\Support\LoanSummary;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -77,6 +79,8 @@ class LoanController extends Controller
         'diaryNotes.creator:id,name',
         'waivers.approver:id,name',
         'statusEvents.recordedBy:id,name',
+        'restructuredFrom:id,code,status',
+        'restructuredTo:id,code,status,restructured_from_id',
     ];
 
     /**
@@ -627,6 +631,300 @@ class LoanController extends Controller
         });
 
         return $loan->load(self::DETAIL_RELATIONS);
+    }
+
+    /**
+     * Reschedule (restructure) an Active loan onto a fresh contract — the
+     * finance-department action for a borrower who can't service the loan as
+     * it stands. The old loan is closed as 'Restructured' (its schedule /
+     * receipts kept as history) and a NEW linked loan is created, its code
+     * the original with an -R1 / -R2 … suffix.
+     *
+     * New principal = remaining capital
+     *               + capitalised interest (the EARNED / overdue slice of the
+     *                 unpaid interest, less any extra the user chooses to waive)
+     *               + retained default charges (OD), if not waived
+     *               + outstanding other charges (Document/Legal/…)
+     *               + any manually added charge lines
+     * A new interest rate + term are entered (the rate is usually raised, the
+     * same override already allowed on a normal application) and the new
+     * amount is re-amortised via the standard LoanAmortizer.
+     *
+     * Accounting policy: this ledger recognises interest income only as it is
+     * collected (see LoanLedgerPoster). A reschedule keeps to that — the only
+     * interest capitalised and recognised here is the slice already EARNED
+     * (interest on installments already past due, which the customer was
+     * already contractually due to pay); the unearned future-interest portion
+     * of the old schedule is written off, exactly like any interest waiver in
+     * this system (no GL entry — it was never booked). OD penalties and unpaid
+     * charges are likewise already-earned amounts, so retaining them is a
+     * catch-up recognition, not new income. No cash moves, so there is no
+     * disbursement entry — the old loan's capital simply carries in 1100.
+     * See LoanLedgerPoster::postRescheduleRollover().
+     *
+     * Admin-only (routes/api.php) — no approval workflow, same as the other
+     * Loan Adjustments actions.
+     */
+    public function reschedule(Request $request, Loan $loan)
+    {
+        if ($loan->status !== 'Active') {
+            return response()->json(['message' => 'Only an active loan can be rescheduled.'], 422);
+        }
+        if ($loan->payments()->whereIn('payment_type', ['Settlement', 'ManualAllocation'])->where('approval_status', 'PendingApproval')->exists()) {
+            return response()->json(['message' => 'This loan has a settlement or manual allocation still awaiting approval — resolve it first.'], 422);
+        }
+        if ($loan->payments()->whereHas('voidRequests', fn ($q) => $q->where('status', 'PendingApproval'))->exists()) {
+            return response()->json(['message' => 'This loan has a payment void request still awaiting approval — resolve it first.'], 422);
+        }
+        if ($loan->payments()->where('payment_method', 'Cheque')->where('clearance_status', 'Pending')->exists()
+            || $loan->postDatedCheques()->whereIn('status', ['Pending', 'Handed'])->exists()) {
+            return response()->json(['message' => 'This loan has an unrealised cheque — realize or bounce it before rescheduling.'], 422);
+        }
+
+        $data = $request->validate([
+            'as_of_date' => 'nullable|date',
+            // An EXTRA write-off of earned interest, on top of the automatic
+            // write-off of the unearned future-interest portion. A % is of the
+            // whole unpaid interest figure shown to the user.
+            'interest_deduction_type' => ['required', Rule::in(['percent', 'amount'])],
+            'interest_deduction_value' => 'required|numeric|min:0',
+            'default_charges_action' => ['required', Rule::in(['retain', 'waive'])],
+            'charges' => 'array',
+            'charges.*.charge_category_id' => 'required|exists:charge_categories,id',
+            'charges.*.amount' => 'required|numeric|min:0.01',
+            'charges.*.notes' => 'nullable|string|max:255',
+            'interest_rate_percent' => 'required|numeric|min:0|max:999',
+            'interest_method' => ['required', Rule::in(['flat', 'reducing_balance'])],
+            'term_months' => 'required|integer|min:1',
+            'installment_frequency' => ['required', Rule::in(self::FREQUENCIES)],
+            'first_installment_date' => 'required|date',
+            'loan_officer_id' => 'nullable|exists:users,id',
+            'recovery_officer_id' => 'nullable|exists:users,id',
+            'reason' => 'nullable|string|max:255',
+        ]);
+
+        $asOf = $data['as_of_date'] ?? now()->toDateString();
+        $oldDetail = $loan->loanDetail()->with('loanType')->firstOrFail();
+        $loanType = $oldDetail->loanType;
+
+        $asOfC = Carbon::parse($asOf);
+        $bucket = LoanPaymentAllocator::outstandingByBucket($loan, $asOfC);
+        $capital = round((float) $bucket['capital'], 2);
+        $unpaidInterest = round((float) $bucket['interest'], 2);
+        $odCharges = round((float) $bucket['od_charge'], 2);
+        $otherCharges = round((float) $bucket['other_charges'], 2);
+        // The actual charge balances that get rolled forward and marked settled on
+        // the old loan — drives both the new principal and the GL line, so the two
+        // can't disagree (the bucket figure above nets Charge-type waivers and is
+        // kept only for the audit snapshot).
+        $otherChargesRolled = round((float) $loan->charges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount)), 2);
+
+        // Earned interest = interest on installments already past due (net of what
+        // was collected against them). Only this may be capitalised + recognised;
+        // the rest of the unpaid interest is unearned and gets written off.
+        $earnedInterest = round((float) $loan->schedules()
+            ->where('status', '!=', 'Paid')
+            ->where('due_date', '<', $asOfC->toDateString())
+            ->with('allocations.payment:id,status,approval_status')
+            ->get()
+            ->sum(function ($s) {
+                $paid = (float) $s->allocations
+                    ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
+                    ->sum('interest_applied');
+
+                return max(0, (float) $s->interest_due - $paid);
+            }), 2);
+        $earnedInterest = min($earnedInterest, $unpaidInterest);
+
+        $deduction = $data['interest_deduction_type'] === 'percent'
+            ? round($unpaidInterest * (float) $data['interest_deduction_value'] / 100, 2)
+            : round((float) $data['interest_deduction_value'], 2);
+        $deduction = min(max(0.0, $deduction), $unpaidInterest);
+        // Capitalise the earned slice, less any extra the user waived — never more.
+        $capitalisedInterest = round(max(0.0, min($unpaidInterest - $deduction, $earnedInterest)), 2);
+        $interestWrittenOff = round($unpaidInterest - $capitalisedInterest, 2);
+        $retainedOd = $data['default_charges_action'] === 'retain' ? $odCharges : 0.0;
+
+        $addedLines = collect($data['charges'] ?? [])->map(fn ($c) => [
+            'charge_category_id' => (int) $c['charge_category_id'],
+            'amount' => round((float) $c['amount'], 2),
+            'notes' => $c['notes'] ?? null,
+        ])->values();
+        $addedTotal = round((float) $addedLines->sum('amount'), 2);
+
+        $newPrincipal = round($capital + $capitalisedInterest + $retainedOd + $otherChargesRolled + $addedTotal, 2);
+        if ($newPrincipal <= 0) {
+            return response()->json(['message' => 'The rescheduled amount works out to zero or less — nothing to reschedule.'], 422);
+        }
+
+        $newLoan = DB::transaction(function () use (
+            $request, $loan, $oldDetail, $loanType, $data, $asOf,
+            $capital, $unpaidInterest, $earnedInterest, $odCharges, $otherCharges, $otherChargesRolled,
+            $deduction, $capitalisedInterest, $interestWrittenOff, $retainedOd, $addedLines, $addedTotal, $newPrincipal
+        ) {
+            $uid = $request->user()->id;
+
+            // -R1, then -R2 on a subsequent reschedule of the chain, ...
+            $n = preg_match('/^(.*)-R(\d+)$/', $loan->code, $m) ? ((int) $m[2] + 1) : 1;
+            $base = isset($m[1]) ? $m[1] : $loan->code;
+            $newCode = "{$base}-R{$n}";
+
+            $newLoan = Loan::create([
+                'branch_id' => $loan->branch_id,
+                'code' => $newCode,
+                'customer_id' => $loan->customer_id,
+                'principal_amount' => $newPrincipal,
+                'interest_rate_percent' => $data['interest_rate_percent'],
+                'rate_period' => $loanType->rate_period,
+                'term_months' => $data['term_months'],
+                'start_date' => $asOf,
+                'disbursed_amount' => $newPrincipal,
+                'disbursed_at' => $asOf,
+                'outstanding_balance_cache' => 0,
+                'status' => 'Active',
+                'applied_by' => $uid,
+                'created_by' => $uid,
+                'approved_by' => $uid,
+                'approved_at' => now(),
+                'restructured_from_id' => $loan->id,
+            ]);
+            NumberGenerator::attach($newCode, $newLoan);
+
+            $newLoan->loanDetail()->create([
+                'loan_type_id' => $oldDetail->loan_type_id,
+                'vehicle_no' => $oldDetail->vehicle_no,
+                'down_payment' => 0,
+                'disbursement_method' => $oldDetail->disbursement_method,
+                'interest_method' => $data['interest_method'],
+                'installment_frequency' => $data['installment_frequency'],
+                'purpose' => 'Reschedule of ' . $loan->code,
+                'application_date' => $asOf,
+                'reference_name' => $oldDetail->reference_name,
+                'reference_id_no' => $oldDetail->reference_id_no,
+                'reference_address' => $oldDetail->reference_address,
+                'loan_officer_id' => $data['loan_officer_id'] ?? $oldDetail->loan_officer_id,
+                'recovery_officer_id' => $data['recovery_officer_id'] ?? $oldDetail->recovery_officer_id,
+                'first_installment_date' => $data['first_installment_date'],
+            ]);
+
+            // Carry the security/parties across unchanged.
+            foreach ($loan->guarantors as $g) {
+                $newLoan->guarantors()->create($g->only(['guarantor_customer_id', 'guaranteed_amount']));
+            }
+            foreach ($loan->coApplicants as $ca) {
+                $newLoan->coApplicants()->create($ca->only(['co_applicant_customer_id', 'share_percent']));
+            }
+            foreach ($loan->collateral()->with(['vehicleDetail', 'jewelryDetail'])->get() as $c) {
+                $row = $newLoan->collateral()->create($c->only(['collateral_type', 'collateral_category', 'description', 'estimated_value']));
+                if ($c->vehicleDetail) {
+                    $row->vehicleDetail()->create($c->vehicleDetail->only([
+                        'vehicle_type', 'make_model', 'registration_no', 'chassis_no', 'engine_no', 'year_of_manufacture',
+                    ]));
+                }
+                if ($c->jewelryDetail) {
+                    $row->jewelryDetail()->create($c->jewelryDetail->only(['weight_grams', 'purity', 'appraised_value']));
+                }
+            }
+            if ($loan->insurance) {
+                $newLoan->insurance()->create($loan->insurance->only([
+                    'insurance_company', 'policy_no', 'amount', 'contact_person', 'coverage', 'remarks',
+                ]));
+            }
+
+            // Fresh schedule at the new rate/term via the standard amortizer.
+            $newDetail = $newLoan->loanDetail()->with('loanType')->first();
+            $rows = LoanAmortizer::generate($newLoan->fresh(), $newDetail, $data['first_installment_date']);
+            $newLoan->schedules()->insert($rows);
+            $this->applyEffectiveRate($newDetail->fresh(), $rows);
+
+            // Manually added charge lines — rolled into the new principal (above)
+            // AND recorded as real charges on the new loan so finance can still
+            // see the itemised breakdown. paid_amount = due_amount because their
+            // value is already financed into the schedule, not collected on top.
+            foreach ($addedLines as $line) {
+                $newLoan->charges()->create([
+                    'branch_id' => $newLoan->branch_id,
+                    'charge_category_id' => $line['charge_category_id'],
+                    'due_amount' => $line['amount'],
+                    'paid_amount' => $line['amount'],
+                    'charged_at' => $asOf,
+                    'notes' => trim('Financed into reschedule ' . $newCode . ($line['notes'] ? ' — ' . $line['notes'] : '')),
+                    'created_by' => $uid,
+                ]);
+            }
+
+            // The old loan's still-unpaid other charges ($otherChargesRolled,
+            // computed above) have been rolled into the new principal — settle
+            // them on the old loan so it nets to zero and they aren't counted twice.
+            foreach ($loan->charges as $charge) {
+                if (round((float) $charge->due_amount - (float) $charge->paid_amount, 2) <= 0) {
+                    continue;
+                }
+                $charge->update([
+                    'paid_amount' => $charge->due_amount,
+                    'notes' => trim(($charge->notes ? $charge->notes . ' | ' : '') . 'Rolled into reschedule ' . $newCode),
+                ]);
+            }
+
+            LoanLedgerPoster::postRescheduleRollover(
+                $loan, $newLoan->fresh(), $capitalisedInterest, $retainedOd,
+                round($otherChargesRolled + $addedTotal, 2), $asOf, $uid
+            );
+
+            // Release any impairment provision posted against the old loan — it
+            // is no longer an Active NPL (mirrors writeOff()).
+            if ((float) $loan->provision_posted_amount > 0.01) {
+                LoanLedgerPoster::postProvisionAdjustment($loan, -(float) $loan->provision_posted_amount, $uid);
+            }
+
+            $loan->update([
+                'status' => 'Restructured',
+                'outstanding_balance_cache' => 0,
+                'closed_at' => now(),
+                'npl_flag' => false,
+                'provision_required_pct' => 0,
+                'provision_required_amount' => 0,
+                'provision_posted_amount' => 0,
+            ]);
+
+            $newLoan->update([
+                'outstanding_balance_cache' => LoanPaymentAllocator::outstandingBalance($newLoan->fresh()),
+            ]);
+
+            FacilityReschedule::create([
+                'credit_facility_id' => $loan->id,
+                'new_credit_facility_id' => $newLoan->id,
+                'branch_id' => $loan->branch_id,
+                'as_of_date' => $asOf,
+                'capital_outstanding' => $capital,
+                'unpaid_interest' => $unpaidInterest,
+                'overdue_interest' => $earnedInterest,
+                'default_charges' => $odCharges,
+                'other_charges' => $otherCharges,
+                'interest_deduction' => $deduction,
+                'capitalised_interest' => $capitalisedInterest,
+                'interest_written_off' => $interestWrittenOff,
+                'default_charges_action' => $data['default_charges_action'],
+                'retained_default_charges' => $retainedOd,
+                'other_charges_rolled' => $otherChargesRolled,
+                'added_charges_total' => $addedTotal,
+                'added_charges' => $addedLines->all() ?: null,
+                'new_principal' => $newPrincipal,
+                'new_interest_rate_percent' => $data['interest_rate_percent'],
+                'new_term_months' => $data['term_months'],
+                'new_interest_method' => $data['interest_method'],
+                'new_installment_frequency' => $data['installment_frequency'],
+                'reason' => $data['reason'] ?? null,
+                'created_by' => $uid,
+            ]);
+
+            // Sales-executive commission is NOT restarted — a reschedule is a
+            // workout, not new business.
+
+            return $newLoan;
+        });
+
+        return $this->show($newLoan->fresh());
     }
 
     /**

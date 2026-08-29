@@ -32,6 +32,7 @@ class Loan extends Model
         'status', 'applied_by', 'approved_by', 'approved_at', 'rejected_reason', 'closed_at', 'created_by',
         'cancelled_reason', 'cancelled_by', 'cancelled_at', 'written_off_reason', 'written_off_by',
         'npl_flag', 'provision_required_pct', 'provision_required_amount', 'provision_posted_amount', 'provision_last_evaluated_at',
+        'restructured_from_id',
     ];
 
     protected $casts = [
@@ -197,6 +198,26 @@ class Loan extends Model
     public function salesExecutiveCommissions()
     {
         return $this->hasMany(SalesExecutiveCommission::class, 'credit_facility_id');
+    }
+
+    /** The loan this one replaced when it was rescheduled — null for an
+     *  original (never-rescheduled) loan. See LoanController::reschedule(). */
+    public function restructuredFrom()
+    {
+        return $this->belongsTo(Loan::class, 'restructured_from_id');
+    }
+
+    /** The replacement loan created when this one was rescheduled — set once
+     *  this loan's status is 'Restructured'. */
+    public function restructuredTo()
+    {
+        return $this->hasOne(Loan::class, 'restructured_from_id');
+    }
+
+    /** Reschedule audit rows where this loan was the one rescheduled. */
+    public function reschedules()
+    {
+        return $this->hasMany(FacilityReschedule::class, 'credit_facility_id')->orderByDesc('created_at');
     }
 
     /** Same shared-table pattern as cancelRequests()/pendingCancelRequest() above,

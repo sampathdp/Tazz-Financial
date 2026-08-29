@@ -447,6 +447,11 @@ export interface Loan {
   waivers?: LoanWaiver[];
   /** History log of Terminated/Legal/SeizingOrderIssued/Repossessed occurrences — replaces the old boolean flags. */
   statusEvents?: FacilityStatusEvent[];
+  /** Set on a loan created by rescheduling — the loan it replaced. See loansApi.reschedule(). */
+  restructuredFromId?: number | null;
+  restructuredFrom?: { id: number; code: string; status: LoanStatus } | null;
+  /** Set on a 'Restructured' loan — the replacement loan created for it. */
+  restructuredTo?: { id: number; code: string; status: LoanStatus } | null;
   summary?: LoanSummary;
   /** From index()'s withSum — total scheduled vs paid across all installments, for a cheap outstanding-balance column. */
   totalDueSum?: number | string | null;
@@ -962,6 +967,24 @@ export interface Paginated<T> {
   data: T[]; currentPage: number; lastPage: number; perPage: number; total: number
 }
 
+/** Payload for loansApi.reschedule() — see backend LoanController::reschedule().
+ *  New principal = remaining capital + (future interest − deduction) + retained
+ *  OD + outstanding other charges + added charge lines; then the new rate/term
+ *  is amortised normally. */
+export interface RescheduleInput {
+  asOfDate?: string
+  interestDeductionType: 'percent' | 'amount'
+  interestDeductionValue: number | string
+  defaultChargesAction: 'retain' | 'waive'
+  charges?: { chargeCategoryId: number; amount: number | string; notes?: string }[]
+  interestRatePercent: number | string
+  interestMethod: InterestMethod
+  termMonths: number
+  installmentFrequency: LoanFrequency
+  firstInstallmentDate: string
+  reason?: string
+}
+
 export const loansApi = {
   list: () => http.get('/loans').then((r) => camelize(r.data) as Loan[]),
   /** Server-paginated + searched — powers the Active Loans browse screen so it
@@ -986,6 +1009,10 @@ export const loansApi = {
   writeOff: (id: number, reason: string) => http.post(`/loans/${id}/write-off`, { reason }).then((r) => camelize(r.data) as Loan),
   /** Manual close for a loan that's fully settled but didn't auto-close — see backend LoanController::close(). */
   close: (id: number) => http.post(`/loans/${id}/close`).then((r) => camelize(r.data) as Loan),
+  /** Admin-only (see backend LoanController::reschedule) — closes this loan as
+   *  'Restructured' and returns the new linked loan (code {original}-R1, -R2 …). */
+  reschedule: (id: number, body: RescheduleInput) =>
+    http.post(`/loans/${id}/reschedule`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque' }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>

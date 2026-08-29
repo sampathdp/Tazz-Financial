@@ -208,6 +208,23 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
         </div>
       </div>
 
+      {(loan.restructuredFrom || loan.restructuredTo) && (
+        <div className="row gap-2 wrap" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
+          {loan.restructuredFrom && (
+            <span>Rescheduled from{' '}
+              <button className="mms-act" style={{ color: 'var(--ac-bright)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}
+                onClick={() => go?.(`loan/active/${loan.restructuredFrom!.id}`)}>{loan.restructuredFrom.code}</button>
+            </span>
+          )}
+          {loan.restructuredTo && (
+            <span>Rescheduled — replaced by{' '}
+              <button className="mms-act" style={{ color: 'var(--ac-bright)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}
+                onClick={() => go?.(`loan/active/${loan.restructuredTo!.id}`)}>{loan.restructuredTo.code}</button>
+            </span>
+          )}
+        </div>
+      )}
+
       {pendingCancel && (
         <div className="row between wrap gap-2" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
           <div style={{ fontSize: 12.5 }}>
