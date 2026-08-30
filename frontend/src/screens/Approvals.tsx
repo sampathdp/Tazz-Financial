@@ -7,7 +7,7 @@
    just to bounce off the 422. */
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Table, Td } from '../components/ui'
-import { approvalsApi, loansApi, loanPaymentsApi, type ApprovalsInbox, type AuthUser } from '../api'
+import { approvalsApi, loansApi, loanPaymentsApi, cashTransfersApi, expensesApi, type ApprovalsInbox, type AuthUser } from '../api'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -23,7 +23,7 @@ function progressLabel(requiredApprovals: number, firstApprover?: { name: string
     : `Needs ${remaining} approval${remaining === 1 ? '' : 's'}`
 }
 
-const EMPTY_INBOX: ApprovalsInbox = { loanApplicationRequests: [], speedDraftApplicationRequests: [], loanCancelRequests: [], paymentVoidRequests: [], allocationRequests: [] }
+const EMPTY_INBOX: ApprovalsInbox = { loanApplicationRequests: [], speedDraftApplicationRequests: [], loanCancelRequests: [], loanWriteOffRequests: [], paymentVoidRequests: [], allocationRequests: [], settlementRequests: [], cashTransferRequests: [], expenseRequests: [] }
 
 export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -49,6 +49,16 @@ export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     try { await loansApi.rejectCancelRequest(id, reason || undefined); notify.success('Rejected', code); refresh() }
     catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
+  const approveWriteOff = async (id: number, code: string) => {
+    try { await loansApi.approveWriteOffRequest(id); notify.success('Approved', code); refresh() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+  const rejectWriteOff = async (id: number, code: string) => {
+    const reason = await notify.prompt({ title: `Reject write-off request for ${code}?`, msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await loansApi.rejectWriteOffRequest(id, reason || undefined); notify.success('Rejected', code); refresh() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
+  }
   const approvePayment = async (id: number, code: string) => {
     try { await loanPaymentsApi.approveVoidRequest(id); notify.success('Approved', code); refresh() }
     catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
@@ -71,8 +81,40 @@ export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
+  const approveSettlement = async (id: number, code: string) => {
+    try { await loanPaymentsApi.approveSettlement(id); notify.success('Approved', code); refresh() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+  const rejectSettlement = async (id: number, code: string) => {
+    const reason = await notify.prompt({ title: `Reject settlement request for ${code}?`, msg: 'Give a reason — the cashier can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await loanPaymentsApi.rejectSettlement(id, reason || undefined); notify.success('Rejected', code); refresh() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
+  }
+  const approveTransfer = async (id: number, code: string) => {
+    try { await cashTransfersApi.approve(id); notify.success('Approved', code); refresh() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+  const rejectTransfer = async (id: number, code: string) => {
+    const reason = await notify.prompt({ title: `Reject transfer ${code}?`, msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await cashTransfersApi.reject(id, reason || undefined); notify.success('Rejected', code); refresh() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
+  }
+  const approveExpense = async (id: number, code: string) => {
+    try { await expensesApi.approve(id); notify.success('Approved', code); refresh() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+  const rejectExpense = async (id: number, code: string) => {
+    const reason = await notify.prompt({ title: `Reject expense ${code}?`, msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await expensesApi.reject(id, reason || undefined); notify.success('Rejected', code); refresh() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
+  }
+
   const total = data.loanApplicationRequests.length + data.speedDraftApplicationRequests.length
-    + data.loanCancelRequests.length + data.paymentVoidRequests.length + data.allocationRequests.length
+    + data.loanCancelRequests.length + data.loanWriteOffRequests.length + data.paymentVoidRequests.length + data.allocationRequests.length
+    + data.settlementRequests.length + data.cashTransferRequests.length + data.expenseRequests.length
 
   return (
     <div>
@@ -128,6 +170,28 @@ export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
           </>} />
       </Card>
 
+      <Card pad={0} style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Loan Write-offs</div>
+        <Table cols={[{ label: 'Loan' }, { label: 'Customer' }, { label: 'Outstanding', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
+          rows={data.loanWriteOffRequests} empty={loading ? 'Loading…' : 'No loan write-off requests pending.'}
+          render={(r) => <>
+            <Td mono style={{ fontWeight: 600 }}>{r.loan?.code || '—'}</Td>
+            <Td>{r.loan?.customer?.fullName || '—'}</Td>
+            <Td mono align="right">{r.loan ? money(r.loan.outstandingBalanceCache ?? r.loan.principalAmount) : '—'}</Td>
+            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
+            <Td>{r.reason}</Td>
+            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
+            <Td align="right">
+              {canAct(r) ? (
+                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveWriteOff(r.id, r.loan?.code || '')}>Approve</Btn>
+                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectWriteOff(r.id, r.loan?.code || '')}>Reject</Btn>
+                </div>
+              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
+            </Td>
+          </>} />
+      </Card>
+
       <Card pad={0}>
         <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Payment Receipt Cancellations</div>
         <Table cols={[{ label: 'Receipt' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Amount', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
@@ -172,6 +236,74 @@ export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
                 <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
                   <Btn size="sm" variant="primary" icon="check" onClick={() => approveAllocation(r.id, r.payment?.code || '')}>Approve</Btn>
                   <Btn size="sm" variant="danger" icon="x" onClick={() => rejectAllocation(r.id, r.payment?.code || '')}>Reject</Btn>
+                </div>
+              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
+            </Td>
+          </>} />
+      </Card>
+
+      <Card pad={0} style={{ marginTop: 16 }}>
+        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Loan Payment Settlements</div>
+        <Table cols={[{ label: 'Receipt' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Amount', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
+          rows={data.settlementRequests} empty={loading ? 'Loading…' : 'No settlement requests pending.'}
+          render={(r) => <>
+            <Td mono style={{ fontWeight: 600 }}>{r.payment?.code || '—'}</Td>
+            <Td mono>{r.payment?.facility?.code || '—'}</Td>
+            <Td>{r.payment?.facility?.customer?.fullName || '—'}</Td>
+            <Td mono align="right">{r.payment ? money(r.payment.amount) : '—'}</Td>
+            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
+            <Td>{r.reason || '—'}</Td>
+            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
+            <Td align="right">
+              {canAct(r) ? (
+                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveSettlement(r.id, r.payment?.code || '')}>Approve</Btn>
+                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectSettlement(r.id, r.payment?.code || '')}>Reject</Btn>
+                </div>
+              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
+            </Td>
+          </>} />
+      </Card>
+
+      <Card pad={0} style={{ marginTop: 16 }}>
+        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Cash Transfers</div>
+        <Table cols={[{ label: 'From → To' }, { label: 'Amount', align: 'right' }, { label: 'Date' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
+          rows={data.cashTransferRequests} empty={loading ? 'Loading…' : 'No cash transfer requests pending.'}
+          render={(r) => <>
+            <Td>{r.cashTransfer?.fromAccount?.name || '—'} → {r.cashTransfer?.toAccount?.name || '—'}</Td>
+            <Td mono align="right">{r.cashTransfer ? money(r.cashTransfer.amount) : '—'}</Td>
+            <Td>{dateOnly(r.cashTransfer?.transferDate)}</Td>
+            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
+            <Td>{r.reason || '—'}</Td>
+            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
+            <Td align="right">
+              {canAct(r) ? (
+                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveTransfer(r.id, `#${r.cashTransfer?.id ?? ''}`)}>Approve</Btn>
+                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectTransfer(r.id, `#${r.cashTransfer?.id ?? ''}`)}>Reject</Btn>
+                </div>
+              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
+            </Td>
+          </>} />
+      </Card>
+
+      <Card pad={0} style={{ marginTop: 16 }}>
+        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Expenses</div>
+        <Table cols={[{ label: 'Expense' }, { label: 'Branch' }, { label: 'Category' }, { label: 'Amount', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
+          rows={data.expenseRequests} empty={loading ? 'Loading…' : 'No expense requests pending.'}
+          render={(r) => <>
+            <Td mono style={{ fontWeight: 600 }}>{r.expense?.code || '—'}</Td>
+            <Td>{r.expense?.branch?.name || '—'}</Td>
+            <Td>{r.expense?.category?.name || '—'}</Td>
+            <Td mono align="right">{r.expense ? money(r.expense.amount) : '—'}</Td>
+            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
+            <Td>{r.reason || '—'}</Td>
+            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
+            <Td align="right">
+              {canAct(r) ? (
+                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveExpense(r.id, r.expense?.code || '')}>Approve</Btn>
+                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectExpense(r.id, r.expense?.code || '')}>Reject</Btn>
                 </div>
               ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
             </Td>

@@ -30,6 +30,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Allow destructive "clean transaction data" maintenance action
+    |--------------------------------------------------------------------------
+    |
+    | SystemMaintenanceController::cleanTransactions() wipes every operational
+    | table. It is always allowed outside production; in production it is
+    | refused unless this flag is explicitly turned on.
+    |
+    */
+
+    'db_clean_enabled' => env('DB_CLEAN_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Debug Mode
     |--------------------------------------------------------------------------
     |

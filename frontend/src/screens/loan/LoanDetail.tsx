@@ -71,6 +71,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
   // disbursement doesn't imply being trusted to approve cancelling one.
   const cancelModule = context === 'active' ? 'Active Loans' : 'Loan Applications'
   const pendingCancel = loan.pendingCancelRequest
+  const pendingWriteOff = loan.pendingWriteOffRequest
 
   const approveApplication = async () => {
     setBusy(true)
@@ -120,10 +121,24 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
   }
 
   const writeOffLoan = async () => {
-    const reason = await notify.prompt({ title: `Write off loan ${loan.code}?`, msg: `Bad debt — posts ${money(loan.outstandingBalanceCache)} as a loss and closes the loan. This cannot be undone from the UI.`, placeholder: 'Reason for write-off', required: true, danger: true, okText: 'Write Off' })
+    const reason = await notify.prompt({ title: `Request write-off for loan ${loan.code}?`, msg: `Bad debt — once approved this posts ${money(loan.outstandingBalanceCache)} as a loss and closes the loan. Needs a second person to approve before it takes effect.`, placeholder: 'Reason for write-off', required: true, danger: true, okText: 'Send Request' })
     if (!reason) return
-    try { await loansApi.writeOff(loan.id, reason); notify.success('Loan written off', loan.code); onChanged() }
-    catch (ex: any) { notify.error('Write-off failed', getErrorText(ex)) }
+    try { await loansApi.requestWriteOff(loan.id, reason); notify.success('Write-off request sent', 'Awaiting approval'); onChanged() }
+    catch (ex: any) { notify.error('Request failed', getErrorText(ex)) }
+  }
+
+  const approveWriteOff = async () => {
+    if (!pendingWriteOff) return
+    try { await loansApi.approveWriteOffRequest(pendingWriteOff.id); notify.success('Approved'); onChanged() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+
+  const rejectWriteOff = async () => {
+    if (!pendingWriteOff) return
+    const reason = await notify.prompt({ title: 'Reject this write-off request?', msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await loansApi.rejectWriteOffRequest(pendingWriteOff.id, reason || undefined); notify.success('Write-off request rejected'); onChanged() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
   // The auto-close on payoff (LoanPaymentAllocator) checks each installment's
@@ -191,16 +206,18 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
               <Btn size="sm" variant="solid" icon="check" onClick={closeLoan}>Close Loan</Btn>
             </Can>
           )}
-          {loan.status === 'Active' && me?.role === 'admin' && (() => {
-            // Backend also gates this (LoanController::writeOff — see LoanProvisioning) and
-            // returns a 422 either way; disabling here is just a UX nicety so the cashier
+          {loan.status === 'Active' && !pendingWriteOff && (() => {
+            // Backend also gates this (LoanController::writeOffRequest — see LoanProvisioning)
+            // and returns a 422 either way; disabling here is just a UX nicety so the user
             // sees why before clicking, not the source of truth.
             const needsProvision = loan.provisionRequiredPct === 100 && num(loan.provisionPostedAmount) < num(loan.provisionRequiredAmount) - 0.01
             return (
-              <Btn size="sm" variant="danger" icon="alert" disabled={needsProvision} onClick={writeOffLoan}
-                title={needsProvision ? 'Post the full impairment provision on the Loan Provisioning screen before writing off this loan.' : undefined}>
-                Write Off
-              </Btn>
+              <Can user={me} module="Active Loans" action="Delete">
+                <Btn size="sm" variant="danger" icon="alert" disabled={needsProvision} onClick={writeOffLoan}
+                  title={needsProvision ? 'Post the full impairment provision on the Loan Provisioning screen before writing off this loan.' : undefined}>
+                  Request Write-off
+                </Btn>
+              </Can>
             )
           })()}
           {context === 'applications' && go && ACTIVE_STAGE_STATUSES.includes(loan.status) && (
@@ -239,6 +256,24 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
             <div className="row gap-2">
               <Btn size="sm" variant="primary" icon="check" onClick={approveCancel}>Approve</Btn>
               <Btn size="sm" variant="danger" icon="x" onClick={rejectCancel}>Reject</Btn>
+            </div>
+          )}
+        </div>
+      )}
+
+      {pendingWriteOff && (
+        <div className="row between wrap gap-2" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
+          <div style={{ fontSize: 12.5 }}>
+            <b>Write-off request pending</b> — {pendingWriteOff.requester?.name || '—'} · {pendingWriteOff.reason}
+            <div className="t-2" style={{ fontSize: 11.5, marginTop: 2 }}>
+              {pendingWriteOff.firstApprover ? `Approved by ${pendingWriteOff.firstApprover.name}, ` : ''}
+              needs {pendingWriteOff.requiredApprovals - (pendingWriteOff.firstApprover ? 1 : 0)} more approval{pendingWriteOff.requiredApprovals - (pendingWriteOff.firstApprover ? 1 : 0) === 1 ? '' : 's'}
+            </div>
+          </div>
+          {canApprove(me, 'loan_write_off') && me?.id !== pendingWriteOff.requester?.id && me?.id !== pendingWriteOff.firstApprover?.id && (
+            <div className="row gap-2">
+              <Btn size="sm" variant="primary" icon="check" onClick={approveWriteOff}>Approve</Btn>
+              <Btn size="sm" variant="danger" icon="x" onClick={rejectWriteOff}>Reject</Btn>
             </div>
           )}
         </div>
@@ -568,7 +603,7 @@ function SecurityPanel({ loan }: { loan: Loan }) {
   const hasReference = !!(loan.loanDetail?.referenceName || loan.loanDetail?.referenceIdNo || loan.loanDetail?.referenceAddress)
   const viewDoc = async (collateralId: number, doc: LoanCollateralDocument) => {
     try { preview.open(await loanCollateralDocumentsApi.download(loan.id, collateralId, doc.id), doc.filePath) }
-    catch { notify.error('Could not open attachment') }
+    catch (ex: any) { notify.error('Could not open attachment', getErrorText(ex)) }
   }
   const insurance = loan.insurance
   return (
@@ -849,7 +884,7 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
   }
   const view = async (d: LoanDocument) => {
     try { preview.open(await loanDocumentsApi.download(loan.id, d.id), d.filePath, d.category?.name || 'Document') }
-    catch { notify.error('Could not open document') }
+    catch (ex: any) { notify.error('Could not open document', getErrorText(ex)) }
   }
   const remove = async (d: LoanDocument) => {
     const ok = await notify.confirm({ title: 'Delete this document?', danger: true, okText: 'Delete' })

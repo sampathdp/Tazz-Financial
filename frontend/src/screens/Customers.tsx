@@ -166,7 +166,7 @@ function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser 
 
   const view = async (d: CustomerDocument) => {
     try { preview.open(await customerDocumentsApi.download(customerId, d.id), d.filePath, DOC_TYPE_OPTIONS.find((o) => o.value === d.docType)?.label || d.docType) }
-    catch { notify.error('Could not open document') }
+    catch (ex: any) { notify.error('Could not open document', getErrorText(ex)) }
   }
 
   const remove = async (d: CustomerDocument) => {
@@ -516,7 +516,7 @@ function CreditReportPanel({ customerId, me }: { customerId: number; me?: AuthUs
   )
 }
 
-function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer; me?: AuthUser | null; onEdit: () => void; onOpenLoan: (loanId: number) => void }) {
+function CustomerView({ customer, me, onEdit, onOpenLoan, onOpenCredit }: { customer: Customer; me?: AuthUser | null; onEdit: () => void; onOpenLoan: (loanId: number) => void; onOpenCredit: () => void }) {
   const [borrowerLoans, setBorrowerLoans] = useState<Loan[]>([])
   const [guarantorLoans, setGuarantorLoans] = useState<Loan[]>([])
   const [loansLoading, setLoansLoading] = useState(true)
@@ -608,8 +608,13 @@ function CustomerView({ customer, me, onEdit, onOpenLoan }: { customer: Customer
       </Card>
 
       <Card style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>Credit Report (Internal — CRIB-style)</div>
-        <CreditReportPanel customerId={customer.id} me={me} />
+        <div className="row between wrap" style={{ gap: 12, alignItems: 'center' }}>
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 4 }}>Credit Report (Internal — CRIB-style)</div>
+            <div className="t-2" style={{ fontSize: 12.5 }}>Payment profile, credit facilities and internal indicative score for this customer.</div>
+          </div>
+          <Btn variant="primary" icon="chart" onClick={onOpenCredit}>Open Credit Report</Btn>
+        </div>
       </Card>
 
       <Card>
@@ -643,7 +648,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [mode, setMode] = useState<'list' | 'view' | 'form' | 'loan'>('list')
+  const [mode, setMode] = useState<'list' | 'view' | 'form' | 'loan' | 'credit'>('list')
   const [editing, setEditing] = useState<Customer | null>(null)
   const [viewing, setViewing] = useState<Customer | null>(null)
   const [viewLoading, setViewLoading] = useState(false)
@@ -702,11 +707,13 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const back = () => navigate(ROUTE_BASE)
 
   const openLoan = (loanId: number) => navigate(`${ROUTE_BASE}/${params.id}/loan/${loanId}`)
+  const openCredit = (c: Customer) => navigate(`${ROUTE_BASE}/${c.id}/credit-report`)
   const backToCustomer = () => navigate(`${ROUTE_BASE}/${params.id}`)
   const reloadLoan = async () => { if (viewingLoan) setViewingLoan(await loansApi.get(viewingLoan.id)) }
 
   const isNew = location.pathname === `${ROUTE_BASE}/new`
   const isEdit = !!params.id && location.pathname === `${ROUTE_BASE}/${params.id}/edit`
+  const isCredit = !!params.id && location.pathname === `${ROUTE_BASE}/${params.id}/credit-report`
   const isLoan = !!params.loanId
 
   useEffect(() => {
@@ -727,6 +734,8 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
       } else if (isLoan) {
         setMode('loan'); setLoanLoading(true)
         loansApi.get(Number(params.loanId)).then((l) => { if (!cancelled) setViewingLoan(l) }).catch(() => { if (!cancelled) setViewingLoan(null) }).finally(() => { if (!cancelled) setLoanLoading(false) })
+      } else if (isCredit) {
+        setMode('credit')
       } else {
         setMode('view')
       }
@@ -737,7 +746,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     }).finally(() => { if (!cancelled) setViewLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id, params.loanId, isNew, isEdit])
+  }, [params.id, params.loanId, isNew, isEdit, isCredit])
 
   const save = async () => {
     if (!form.title || !form.surname || !form.initials) { setErr('Title, Surname and Initial are required.'); return }
@@ -771,7 +780,19 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
           sub={viewing ? `${viewing.code} — ${viewing.branch?.name || ''}` : undefined}
           actions={<Btn variant="solid" onClick={back}>← Back to Customers</Btn>} />
         {viewLoading || !viewing ? <LoadingBlock />
-          : <CustomerView customer={viewing} me={me} onEdit={() => openEdit(viewing)} onOpenLoan={openLoan} />}
+          : <CustomerView customer={viewing} me={me} onEdit={() => openEdit(viewing)} onOpenLoan={openLoan} onOpenCredit={() => openCredit(viewing)} />}
+      </div>
+    )
+  }
+
+  if (mode === 'credit') {
+    return (
+      <div>
+        <PageHead crumbs={`Customers / ${viewing?.fullName || ''}`} title="Credit Report" icon="chart"
+          sub={viewing ? `${viewing.code} — Internal, CRIB-style` : 'Internal, CRIB-style'}
+          actions={<Btn variant="solid" onClick={backToCustomer}>← Back to Customer</Btn>} />
+        {viewLoading || !viewing ? <LoadingBlock />
+          : <Card><CreditReportPanel customerId={viewing.id} me={me} /></Card>}
       </div>
     )
   }

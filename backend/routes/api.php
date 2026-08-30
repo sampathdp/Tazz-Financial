@@ -65,6 +65,7 @@ use App\Http\Controllers\Api\SpeedDraftController;
 use App\Http\Controllers\Api\SpeedDraftPaymentController;
 use App\Http\Controllers\Api\SpeedDraftTypeController;
 use App\Http\Controllers\Api\SubscriptionController;
+use App\Http\Controllers\Api\SystemMaintenanceController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\VendorController;
 use Illuminate\Support\Facades\Route;
@@ -199,7 +200,12 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Loan Management: Active Loans ---
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
-    Route::post('loans/{loan}/write-off', [LoanController::class, 'writeOff'])->middleware('admin');
+    // Write-off is maker-checker (shared approval_requests table, code 'loan_write_off'),
+    // same pattern as loan_cancel below. Submitting needs the module permission; who may
+    // approve/reject is admin-manageable data via ApprovalType::isAuthorized('loan_write_off').
+    Route::post('loans/{loan}/write-off-request', [LoanController::class, 'writeOffRequest'])->middleware('perm:Active Loans,Delete');
+    Route::post('loan-write-off-requests/{writeOffRequest}/approve', [LoanController::class, 'approveWriteOffRequest']);
+    Route::post('loan-write-off-requests/{writeOffRequest}/reject', [LoanController::class, 'rejectWriteOffRequest']);
     // Loan reschedule (restructure) — closes the loan as 'Restructured' and creates a
     // new linked loan. Admin-only, no approval workflow, same as the other Loan Adjustments actions.
     Route::post('loans/{loan}/reschedule', [LoanController::class, 'reschedule'])->middleware('admin');
@@ -231,8 +237,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // approve/reject gated inline by ApprovalType::isAuthorized('payment_manual_allocation', ...) — see LoanPaymentController.
     Route::post('loan-payment-allocation-requests/{allocationRequest}/approve', [LoanPaymentController::class, 'approveAllocationRequest']);
     Route::post('loan-payment-allocation-requests/{allocationRequest}/reject', [LoanPaymentController::class, 'rejectAllocationRequest']);
-    Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement'])->middleware('perm:Loan Payments,Approve');
-    Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement'])->middleware('perm:Loan Payments,Approve');
+    // approve/reject gated inline by ApprovalType::isAuthorized('payment_settlement', ...) — see LoanPaymentController —
+    // not the module permission grid, same maker-checker pattern as payment_void above.
+    Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement']);
+    Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement']);
     // Admin-only — realizing/bouncing a cheque is a Loan Adjustments action, not a regular Loan Payments one.
     Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('admin');
 
@@ -393,8 +401,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Cashbook Management: Cash Transfers (between cash accounts, requires approval) ---
     Route::get('cash-transfers', [CashTransferController::class, 'index'])->middleware('perm:Cash Transfers,View');
     Route::post('cash-transfers', [CashTransferController::class, 'store'])->middleware('perm:Cash Transfers,Create');
-    Route::put('cash-transfers/{cashTransfer}/approve', [CashTransferController::class, 'approve'])->middleware('perm:Cash Transfers,Approve');
-    Route::put('cash-transfers/{cashTransfer}/reject', [CashTransferController::class, 'reject'])->middleware('perm:Cash Transfers,Approve');
+    // approve/reject gated inline by ApprovalType::isAuthorized('cash_transfer', ...) — see CashTransferController —
+    // not the module permission grid, same maker-checker pattern as loan_cancel.
+    Route::put('cash-transfers/{cashTransfer}/approve', [CashTransferController::class, 'approve']);
+    Route::put('cash-transfers/{cashTransfer}/reject', [CashTransferController::class, 'reject']);
     Route::delete('cash-transfers/{cashTransfer}', [CashTransferController::class, 'destroy'])->middleware('perm:Cash Transfers,Delete');
     Route::post('cash-transfers/{cashTransfer}/void', [CashTransferController::class, 'void'])->middleware('perm:Cash Transfers,Delete');
 
@@ -454,6 +464,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('fd-part-payments/{fdPartPayment}/void', [FixedDepositController::class, 'voidPartPayment'])->middleware('perm:Fixed Deposits,Delete');
 
     // --- Funding Management: Monthly Interest Payments ---
+    Route::get('fd-interest-payments/due', [FdInterestPaymentController::class, 'due'])->middleware('perm:Fixed Deposits,View');
     Route::get('fixed-deposits/{fixedDeposit}/interest-payments', [FdInterestPaymentController::class, 'index'])->middleware('perm:Fixed Deposits,View');
     Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fd-interest-payments/{fdInterestPayment}/void', [FdInterestPaymentController::class, 'void'])->middleware('perm:Fixed Deposits,Delete');
@@ -490,8 +501,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Expense Management: Expenses (request -> approve/reject -> pay) ---
     Route::get('expenses', [ExpenseController::class, 'index'])->middleware('perm:Expenses,View');
     Route::post('expenses', [ExpenseController::class, 'store'])->middleware('perm:Expenses,Create');
-    Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve'])->middleware('perm:Expenses,Approve');
-    Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject'])->middleware('perm:Expenses,Approve');
+    // approve/reject gated inline by ApprovalType::isAuthorized('expense_approval', ...) — see ExpenseController —
+    // not the module permission grid, same maker-checker pattern as loan_cancel.
+    Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve']);
+    Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject']);
     Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware('perm:Expenses,Edit');
 
     // --- Expense Management: Payment Vouchers (auto-created by ExpenseController::pay — view/void only, see PaymentVoucherController) ---
@@ -522,4 +535,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('subscriptions', [SubscriptionController::class, 'store'])->middleware('perm:Subscriptions,Create');
     Route::put('subscriptions/{subscription}', [SubscriptionController::class, 'update'])->middleware('perm:Subscriptions,Edit');
     Route::delete('subscriptions/{subscription}', [SubscriptionController::class, 'destroy'])->middleware('perm:Subscriptions,Delete');
+
+    // --- System Maintenance: "start fresh" — wipe all transactional data + its
+    // uploaded files, keep every master/config table + customers. Admin-only,
+    // password + typed-phrase gated, blocked in production unless DB_CLEAN_ENABLED. ---
+    Route::post('system/clean-transactions', [SystemMaintenanceController::class, 'cleanTransactions'])->middleware('admin');
 });

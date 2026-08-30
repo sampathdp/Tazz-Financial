@@ -7,7 +7,7 @@ import {
   type Branch, type AuthUser, type CashAccount, type CashbookEntry, type CashEntryType, type CashEntryCategory,
   type CashTransfer, type CashReconciliation, type CashReconciliationSummary, type Denominations, DENOMINATION_VALUES,
 } from '../api'
-import { Can, userCan } from '../lib/permissions'
+import { Can, canApprove } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -250,11 +250,18 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
   }
 
   const reject = async (t: CashTransfer) => {
-    const ok = await notify.confirm({ title: 'Reject this transfer?', danger: true, okText: 'Reject' })
-    if (!ok) return
-    try { await cashTransfersApi.reject(t.id); refresh(); notify.success('Transfer rejected') }
+    const reason = await notify.prompt({ title: 'Reject this transfer?', msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await cashTransfersApi.reject(t.id, reason || undefined); refresh(); notify.success('Transfer rejected') }
     catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
   }
+
+  // Approve/reject is maker-checker (approval_types code 'cash_transfer') — the
+  // requester and anyone who already approved can't sign off (backend also 422s).
+  const canApproveTransfer = (t: CashTransfer) =>
+    canApprove(me, 'cash_transfer')
+    && me?.id !== t.pendingApprovalRequest?.requester?.id
+    && me?.id !== t.pendingApprovalRequest?.firstApprover?.id
 
   const remove = async (t: CashTransfer) => {
     const ok = await notify.confirm({ title: 'Delete this transfer request?', danger: true, okText: 'Delete' })
@@ -294,10 +301,17 @@ export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: Auth
             <Td>{t.toAccount?.name || '—'}</Td>
             <Td align="right" mono>{money(t.amount)}</Td>
             <Td c="var(--tx-2)" style={{ fontSize: 12.5, whiteSpace: 'normal' }}>{t.description || '—'}</Td>
-            <Td align="center"><Badge tone={statusTone(t.status)} dot>{t.status || 'Pending'}</Badge></Td>
+            <Td align="center">
+              <Badge tone={statusTone(t.status)} dot>{t.status || 'Pending'}</Badge>
+              {t.status === 'Pending' && t.pendingApprovalRequest && (t.pendingApprovalRequest.requiredApprovals - (t.pendingApprovalRequest.firstApprover ? 1 : 0)) > 0 && (
+                <div className="t-2" style={{ fontSize: 10.5, marginTop: 2 }}>
+                  needs {t.pendingApprovalRequest.requiredApprovals - (t.pendingApprovalRequest.firstApprover ? 1 : 0)} approval{t.pendingApprovalRequest.requiredApprovals - (t.pendingApprovalRequest.firstApprover ? 1 : 0) === 1 ? '' : 's'}
+                </div>
+              )}
+            </Td>
             <Td>{t.requester?.name || '—'}</Td>
             <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-              {t.status === 'Pending' && userCan(me, 'Cash Transfers', 'Approve') && <>
+              {t.status === 'Pending' && canApproveTransfer(t) && <>
                 <button className="mms-act" title="Approve" onClick={() => approve(t)}><Icon n="check" s={15} /></button>
                 <button className="mms-act" title="Reject" onClick={() => reject(t)}><Icon n="x" s={15} /></button>
               </>}

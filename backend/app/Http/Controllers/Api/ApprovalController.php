@@ -48,6 +48,14 @@ class ApprovalController extends Controller
         ])->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_cancel'))
             ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
 
+        $writeOffRequests = ApprovalRequest::with([
+            'requester:id,name',
+            'firstApprover:id,name',
+            'loan:id,code,principal_amount,outstanding_balance_cache,status,customer_id',
+            'loan.customer:id,full_name',
+        ])->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_write_off'))
+            ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
+
         $voidRequests = ApprovalRequest::with([
             'requester:id,name',
             'firstApprover:id,name',
@@ -66,12 +74,44 @@ class ApprovalController extends Controller
         ])->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_manual_allocation'))
             ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
 
+        $settlementRequests = ApprovalRequest::with([
+            'requester:id,name',
+            'firstApprover:id,name',
+            'payment:id,code,amount,payment_type,credit_facility_id',
+            'payment.facility:id,code,customer_id',
+            'payment.facility.customer:id,full_name',
+        ])->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_settlement'))
+            ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
+
+        $cashTransferRequests = ApprovalRequest::with([
+            'requester:id,name',
+            'firstApprover:id,name',
+            'cashTransfer:id,amount,transfer_date,status,from_cash_account_id,to_cash_account_id',
+            'cashTransfer.fromAccount:id,name',
+            'cashTransfer.toAccount:id,name',
+        ])->whereHas('approvalType', fn ($q) => $q->where('code', 'cash_transfer'))
+            ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
+
+        $expenseRequests = ApprovalRequest::with([
+            'requester:id,name',
+            'firstApprover:id,name',
+            'expense:id,code,amount,status,branch_id,expense_category_id,vendor_id',
+            'expense.branch:id,name',
+            'expense.category:id,name',
+            'expense.vendor:id,name',
+        ])->whereHas('approvalType', fn ($q) => $q->where('code', 'expense_approval'))
+            ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
+
         return [
             'loanApplicationRequests' => $loanApplicationRequests,
             'speedDraftApplicationRequests' => $speedDraftApplicationRequests,
             'loanCancelRequests' => $cancelRequests,
+            'loanWriteOffRequests' => $writeOffRequests,
             'paymentVoidRequests' => $voidRequests,
             'allocationRequests' => $allocationRequests,
+            'settlementRequests' => $settlementRequests,
+            'cashTransferRequests' => $cashTransferRequests,
+            'expenseRequests' => $expenseRequests,
         ];
     }
 }

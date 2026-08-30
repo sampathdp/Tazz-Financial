@@ -42,6 +42,7 @@ class LoanController extends Controller
         'loanDetail.loanType:id,name,code',
         'loanDetail.loanOfficer:id,name',
         'pendingCancelRequest:id,approval_type_id,subject_id,status,required_approvals',
+        'pendingWriteOffRequest:id,approval_type_id,subject_id,status,required_approvals',
     ];
 
     private const DETAIL_RELATIONS = [
@@ -60,6 +61,7 @@ class LoanController extends Controller
         'canceller:id,name',
         'writtenOffBy:id,name',
         'cancelRequests.requester:id,name', 'cancelRequests.firstApprover:id,name', 'cancelRequests.secondApprover:id,name', 'cancelRequests.rejecter:id,name',
+        'pendingWriteOffRequest.requester:id,name', 'pendingWriteOffRequest.firstApprover:id,name',
         'pendingApplicationRequest.requester:id,name',
         'coApplicants.coApplicant:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
         'guarantors.guarantor:id,full_name,code,nic_no,phone',
@@ -72,6 +74,7 @@ class LoanController extends Controller
         'payments.bank:id,name',
         'payments.pendingVoidRequest.requester:id,name',
         'payments.pendingAllocationRequest.requester:id,name',
+        'payments.pendingSettlementRequest.requester:id,name', 'payments.pendingSettlementRequest.firstApprover:id,name',
         'charges.creator:id,name', 'charges.category:id,name',
         'postDatedCheques.creator:id,name',
         'postDatedCheques.bank:id,name',
@@ -592,17 +595,13 @@ class LoanController extends Controller
         return $loan->load(self::DETAIL_RELATIONS);
     }
 
-    /**
-     * Bad-debt write-off — WrittenOff was a listed status (LIVE_STATUSES,
-     * loan report counts) that nothing ever actually set; this is that
-     * missing action. Direct-write-off (Dr 5300 expense, Cr 1100), no
-     * amortized schedule is touched (kept as history, same as a Closed
-     * loan) — only the outstanding balance and status change.
-     */
-    public function writeOff(Request $request, Loan $loan)
+    /** Common guard for both writeOffRequest() and approveWriteOffRequest():
+     *  the loan must still be write-off-able. Returns an error message string,
+     *  or null when it's clear to proceed. */
+    private function writeOffBlockReason(Loan $loan): ?string
     {
         if ($loan->status !== 'Active') {
-            return response()->json(['message' => 'Only an active loan can be written off.'], 422);
+            return 'Only an active loan can be written off.';
         }
         // NPL loans must be fully provisioned before write-off — see
         // LoanProvisioning and LoanLedgerPoster::postWriteOff(), which
@@ -610,27 +609,124 @@ class LoanController extends Controller
         // whole amount fresh. A loan that never reached the 100% slab (e.g.
         // written off early for another reason) isn't blocked here.
         if ((int) $loan->provision_required_pct === 100 && (float) $loan->provision_posted_amount < (float) $loan->provision_required_amount - 0.01) {
-            return response()->json(['message' => 'Post the full impairment provision before writing off this loan.'], 422);
+            return 'Post the full impairment provision before writing off this loan.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Submits a request to write a loan off as bad debt — doesn't write it off
+     * itself. Maker-checker, exactly like cancelRequest(): a row in the shared
+     * approval_requests table (code 'loan_write_off') that only takes effect
+     * once approveWriteOffRequest() has collected enough distinct approvals
+     * (approval_types.required_approvals, snapshotted here). See
+     * approveWriteOffRequest() for the actual ledger posting / status change.
+     */
+    public function writeOffRequest(Request $request, Loan $loan)
+    {
+        if ($block = $this->writeOffBlockReason($loan)) {
+            return response()->json(['message' => $block], 422);
+        }
+        if ($loan->writeOffRequests()->where('status', 'PendingApproval')->exists()) {
+            return response()->json(['message' => 'A write-off request is already pending approval for this loan.'], 422);
         }
         $data = $request->validate(['reason' => 'required|string|max:255']);
-        $amount = (float) $loan->outstanding_balance_cache;
+        $type = ApprovalType::where('code', 'loan_write_off')->firstOrFail();
 
-        DB::transaction(function () use ($loan, $data, $amount, $request) {
+        $writeOffRequest = ApprovalRequest::create([
+            'approval_type_id' => $type->id,
+            'subject_id' => $loan->id,
+            'requested_by' => $request->user()->id,
+            'requested_at' => now(),
+            'reason' => $data['reason'],
+            'required_approvals' => $type->required_approvals,
+        ]);
+
+        return response()->json($writeOffRequest->load('requester:id,name'), 201);
+    }
+
+    /** Applies the write-off once enough distinct approvals are in — mirrors
+     *  approveCancelRequest(). Direct-write-off (Dr 5300 expense / relieve
+     *  provision, Cr 1100), the amortized schedule is kept as history (same as
+     *  a Closed loan); only the outstanding balance and status change. */
+    public function approveWriteOffRequest(Request $request, ApprovalRequest $writeOffRequest)
+    {
+        if ($writeOffRequest->approvalType->code !== 'loan_write_off') {
+            abort(404);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'loan_write_off')) {
+            return response()->json(['message' => 'You are not an approver for loan write-offs.'], 403);
+        }
+        if ($writeOffRequest->status !== 'PendingApproval') {
+            return response()->json(['message' => 'This request is not pending approval.'], 422);
+        }
+        if ($writeOffRequest->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own write-off request.'], 422);
+        }
+        if ($writeOffRequest->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
+        $loan = Loan::findOrFail($writeOffRequest->subject_id);
+        // Re-check nothing changed since the request was submitted — the loan
+        // could have been closed, or slipped into the 100% provision slab
+        // without the provision being posted, in the meantime.
+        if ($block = $this->writeOffBlockReason($loan)) {
+            $writeOffRequest->update(['status' => 'Rejected', 'rejected_by' => $request->user()->id, 'rejected_at' => now(), 'reject_reason' => $block]);
+
+            return response()->json(['message' => $block . ' The request has been auto-rejected.'], 422);
+        }
+
+        DB::transaction(function () use ($writeOffRequest, $loan, $request) {
+            if (!$writeOffRequest->first_approved_by) {
+                $writeOffRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $writeOffRequest->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($writeOffRequest->fresh()->approvalsCount() < $writeOffRequest->required_approvals) {
+                return;
+            }
+
+            $amount = (float) $loan->outstanding_balance_cache;
             LoanLedgerPoster::postWriteOff($loan, $amount, $request->user()->id);
             $loan->update([
                 'status' => 'WrittenOff',
                 'outstanding_balance_cache' => 0,
                 'closed_at' => now(),
-                'written_off_reason' => $data['reason'],
-                'written_off_by' => $request->user()->id,
+                'written_off_reason' => $writeOffRequest->reason,
+                'written_off_by' => $writeOffRequest->requested_by,
                 'npl_flag' => false,
                 'provision_required_pct' => 0,
                 'provision_required_amount' => 0,
                 'provision_posted_amount' => 0,
             ]);
+            $writeOffRequest->update(['status' => 'Approved']);
         });
 
-        return $loan->load(self::DETAIL_RELATIONS);
+        return $writeOffRequest->fresh()->load('requester:id,name', 'firstApprover:id,name', 'secondApprover:id,name');
+    }
+
+    public function rejectWriteOffRequest(Request $request, ApprovalRequest $writeOffRequest)
+    {
+        if ($writeOffRequest->approvalType->code !== 'loan_write_off') {
+            abort(404);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'loan_write_off')) {
+            return response()->json(['message' => 'You are not an approver for loan write-offs.'], 403);
+        }
+        if ($writeOffRequest->status !== 'PendingApproval') {
+            return response()->json(['message' => 'This request is not pending approval.'], 422);
+        }
+        $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);
+        $writeOffRequest->update([
+            'status' => 'Rejected',
+            'rejected_by' => $request->user()->id,
+            'rejected_at' => now(),
+            'reject_reason' => $data['reject_reason'] ?? null,
+        ]);
+
+        return $writeOffRequest->fresh()->load('requester:id,name', 'rejecter:id,name');
     }
 
     /**

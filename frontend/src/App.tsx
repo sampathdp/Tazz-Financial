@@ -35,6 +35,7 @@ const FundingProductsScreen = lazy(() => import('./screens/FundingProducts').the
 const DepositsScreen = lazy(() => import('./screens/Deposits').then((m) => ({ default: m.DepositsScreen })))
 const FixedDepositsScreen = lazy(() => import('./screens/FixedDeposits').then((m) => ({ default: m.FixedDepositsScreen })))
 const DepositPaymentScreen = lazy(() => import('./screens/DepositPayment').then((m) => ({ default: m.DepositPaymentScreen })))
+const FdInterestDueScreen = lazy(() => import('./screens/FdInterestDue').then((m) => ({ default: m.FdInterestDueScreen })))
 const FundingReportsScreen = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingReportsScreen })))
 const named = <M, K extends keyof M>(loader: () => Promise<M>, key: K) =>
   lazy(() => loader().then((m) => ({ default: m[key] as unknown as ComponentType<any> })))
@@ -47,6 +48,7 @@ const RolesScreen = named(() => import('./screens/Admin'), 'RolesScreen')
 const UsersScreen = named(() => import('./screens/Admin'), 'UsersScreen')
 const PermScreen = named(() => import('./screens/Admin'), 'PermScreen')
 const CompanyScreen = named(() => import('./screens/Admin'), 'CompanyScreen')
+const MaintenanceScreen = named(() => import('./screens/Maintenance'), 'MaintenanceScreen')
 
 const CashbookScreen = named(() => import('./screens/Cashbook'), 'CashbookScreen')
 const CashTransfersScreen = named(() => import('./screens/Cashbook'), 'CashTransfersScreen')
@@ -89,6 +91,7 @@ const CollectionTrendScreen = named(() => import('./screens/CollectionReports'),
 
 const CustomerSummaryScreen = named(() => import('./screens/CustomerReports'), 'CustomerSummaryScreen')
 const CustomerActivityScreen = named(() => import('./screens/CustomerReports'), 'CustomerActivityScreen')
+const CustomerCreditReportScreen = named(() => import('./screens/CustomerReports'), 'CustomerCreditReportScreen')
 
 const InvestorSummaryScreen = named(() => import('./screens/InvestorReports'), 'InvestorSummaryScreen')
 const InvestorDirectoryScreen = named(() => import('./screens/InvestorReports'), 'InvestorDirectoryScreen')
@@ -162,6 +165,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'ad/users': UsersScreen,
   'ad/perm': PermScreen,
   'ad/company': CompanyScreen,
+  'ad/maintenance': MaintenanceScreen,
   'cash/book': CashbookScreen,
   'cash/transfers': CashTransfersScreen,
   'cash/recon': CashReconciliationScreen,
@@ -189,6 +193,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'fund/deposits': DepositsScreen,
   'fund/fds': FixedDepositsScreen,
   'fund/deposit-payment': DepositPaymentScreen,
+  'fund/interest-due': FdInterestDueScreen,
   'fund/reports': FundingReportsScreen,
   'rep/loans-summary': LoanPortfolioSummaryScreen,
   'rep/loans-par': LoanParAgingScreen,
@@ -202,6 +207,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'rep/coll-trend': CollectionTrendScreen,
   'rep/cust-summary': CustomerSummaryScreen,
   'rep/cust-activity': CustomerActivityScreen,
+  'rep/cust-credit': CustomerCreditReportScreen,
   'rep/inv-summary': InvestorSummaryScreen,
   'rep/inv-directory': InvestorDirectoryScreen,
   'rep/cb-position': CashBankPositionScreen,
@@ -229,6 +235,7 @@ const FORM_ROUTE_IDS = new Set([
 // view) that don't fit the flat /new + /:id shape above.
 const EXTRA_ROUTES: { path: string; forId: string }[] = [
   { path: 'customers/:id/edit', forId: 'customers' },
+  { path: 'customers/:id/credit-report', forId: 'customers' },
   { path: 'customers/:id/loan/:loanId', forId: 'customers' },
   { path: 'sd/drafts/:id/edit', forId: 'sd/drafts' },
   { path: 'loan/apps/:id/edit', forId: 'loan/apps' },

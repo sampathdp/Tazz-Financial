@@ -10,7 +10,7 @@ import {
   type Vendor, type Expense, type ExpenseStatus, type ExpenseCategory, type Branch, type CashAccount, type BankAccount,
   type PaymentMethod, type PaymentVoucher, type VoucherStatus, type AuthUser,
 } from '../api'
-import { Can } from '../lib/permissions'
+import { Can, canApprove } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -183,11 +183,20 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
     catch (ex: any) { notify.error('Approve failed', getErrorText(ex)) }
   }
   const reject = async (e: Expense) => {
-    const ok = await notify.confirm({ title: `Reject ${e.code}?`, msg: 'This expense will not be paid.', danger: true, okText: 'Reject' })
-    if (!ok) return
-    try { await expensesApi.reject(e.id); refresh(); notify.success('Expense rejected', e.code) }
+    const reason = await notify.prompt({ title: `Reject ${e.code}?`, msg: 'This expense will not be paid. Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+    if (reason === null) return
+    try { await expensesApi.reject(e.id, reason || undefined); refresh(); notify.success('Expense rejected', e.code) }
     catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
   }
+
+  // Approve/reject is maker-checker (approval_types code 'expense_approval') —
+  // the requester and anyone who already approved can't sign off.
+  const canApproveExpense = (e: Expense) =>
+    canApprove(me, 'expense_approval')
+    && me?.id !== e.pendingApprovalRequest?.requester?.id
+    && me?.id !== e.pendingApprovalRequest?.firstApprover?.id
+  const approvalsLeft = (e: Expense) =>
+    e.pendingApprovalRequest ? e.pendingApprovalRequest.requiredApprovals - (e.pendingApprovalRequest.firstApprover ? 1 : 0) : 0
 
   const openPay = (e: Expense) => { setPayTarget(e); setPayForm(blankPayForm()); setErr('') }
   const closePay = () => { setPayTarget(null); setErr('') }
@@ -238,11 +247,16 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
             <Td>{e.vendor?.name || '—'}</Td>
             <Td>{dateOnly(e.expenseDate)}</Td>
             <Td align="right" mono>{money(e.amount)}</Td>
-            <Td align="center"><Badge tone={statusTone(e.status)} dot>{e.status}</Badge></Td>
+            <Td align="center">
+              <Badge tone={statusTone(e.status)} dot>{e.status}</Badge>
+              {e.status === 'Pending' && approvalsLeft(e) > 0 && (
+                <div className="t-2" style={{ fontSize: 10.5, marginTop: 2 }}>needs {approvalsLeft(e)} approval{approvalsLeft(e) === 1 ? '' : 's'}</div>
+              )}
+            </Td>
             <Td align="right">
-              {e.status === 'Pending' && <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-                <Can user={me} module="Expenses" action="Approve"><Btn variant="ghost" size="sm" onClick={() => reject(e)}>Reject</Btn></Can>
-                <Can user={me} module="Expenses" action="Approve"><Btn variant="primary" size="sm" icon="check" onClick={() => approve(e)}>Approve</Btn></Can>
+              {e.status === 'Pending' && canApproveExpense(e) && <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+                <Btn variant="ghost" size="sm" onClick={() => reject(e)}>Reject</Btn>
+                <Btn variant="primary" size="sm" icon="check" onClick={() => approve(e)}>Approve</Btn>
               </div>}
               {e.status === 'Approved' && <Can user={me} module="Expenses" action="Edit">
                 <Btn variant="primary" size="sm" icon="wallet" onClick={() => openPay(e)}>Pay</Btn>

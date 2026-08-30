@@ -183,8 +183,9 @@ class LoanPaymentController extends Controller
                 LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $data['amount']);
             }
 
-            if ($isManual) {
-                $type = ApprovalType::where('code', 'payment_manual_allocation')->firstOrFail();
+            if ($isManual || $isSettlement) {
+                $approvalCode = $isManual ? 'payment_manual_allocation' : 'payment_settlement';
+                $type = ApprovalType::where('code', $approvalCode)->firstOrFail();
                 ApprovalRequest::create([
                     'approval_type_id' => $type->id,
                     'subject_id' => $payment->id,
@@ -208,22 +209,50 @@ class LoanPaymentController extends Controller
         return response()->json($payment->load('receiver:id,name'), 201);
     }
 
+    /** Maker-checker via the shared approval_requests table (code
+     *  'payment_settlement') — mirrors approveAllocationRequest(). The
+     *  allocation/ledger posting only runs once enough distinct approvals are
+     *  in; the FacilityPayment keeps its own approval_status for the UI badge. */
     public function approveSettlement(Request $request, FacilityPayment $payment)
     {
         if ($payment->payment_type !== 'Settlement' || $payment->approval_status !== 'PendingApproval') {
             return response()->json(['message' => 'This payment is not a pending settlement request.'], 422);
         }
+        $req = $payment->pendingSettlementRequest;
+        if (!$req) {
+            return response()->json(['message' => 'No pending approval request found for this settlement.'], 422);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'payment_settlement')) {
+            return response()->json(['message' => 'You are not an approver for loan payment settlements.'], 403);
+        }
+        if ($req->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own settlement request.'], 422);
+        }
+        if ($req->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
         $loan = Loan::findOrFail($payment->credit_facility_id);
-        // Re-quote as of the same date the settlement was originally
-        // requested for — the request's amount was already computed against
-        // this (see store()), so this only catches genuine drift (a new
-        // charge, an existing installment paid off some other way) since then.
+        // Re-quote as of the same date the settlement was originally requested
+        // for — this only catches genuine drift (a new charge, an installment
+        // paid off some other way) since then. Left for a human to reject-and-
+        // resubmit rather than auto-rejected, because rejection also unwinds
+        // the cash receipt.
         $quote = LoanPaymentAllocator::settlementQuote($loan, $payment->paid_at);
         if ((float) $payment->amount > $quote['outstanding']) {
             return response()->json(['message' => "The outstanding balance has changed since this request was made (now {$quote['outstanding']}). Reject it and ask the cashier to resubmit."], 422);
         }
 
-        DB::transaction(function () use ($loan, $payment, $quote, $request) {
+        DB::transaction(function () use ($loan, $payment, $quote, $req, $request) {
+            if (!$req->first_approved_by) {
+                $req->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $req->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($req->fresh()->approvalsCount() < $req->required_approvals) {
+                return;
+            }
+
             LoanPaymentAllocator::applySettlementWaiver($loan, $quote['waivedInterest']);
             LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $payment->amount);
             LoanLedgerPoster::postSettlementApplied($payment);
@@ -232,9 +261,10 @@ class LoanPaymentController extends Controller
                 'approved_by' => $request->user()->id,
                 'approved_at' => now(),
             ]);
+            $req->update(['status' => 'Approved']);
         });
 
-        return $payment->fresh()->load('receiver:id,name', 'approver:id,name');
+        return $payment->fresh()->load('receiver:id,name', 'approver:id,name', 'pendingSettlementRequest.firstApprover:id,name');
     }
 
     public function rejectSettlement(Request $request, FacilityPayment $payment)
@@ -242,9 +272,13 @@ class LoanPaymentController extends Controller
         if ($payment->payment_type !== 'Settlement' || $payment->approval_status !== 'PendingApproval') {
             return response()->json(['message' => 'This payment is not a pending settlement request.'], 422);
         }
+        $req = $payment->pendingSettlementRequest;
+        if ($req && !ApprovalType::isAuthorized($request->user(), 'payment_settlement')) {
+            return response()->json(['message' => 'You are not an approver for loan payment settlements.'], 403);
+        }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
 
-        DB::transaction(function () use ($payment, $data, $request) {
+        DB::transaction(function () use ($payment, $data, $req, $request) {
             $payment->update([
                 'approval_status' => 'Rejected',
                 'status' => 'Voided',
@@ -256,6 +290,14 @@ class LoanPaymentController extends Controller
             // rejected settlement means it's being handed back, so unwind that entry.
             CashbookPoster::reverseCashReceipt($payment);
             LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
+            if ($req) {
+                $req->update([
+                    'status' => 'Rejected',
+                    'rejected_by' => $request->user()->id,
+                    'rejected_at' => now(),
+                    'reject_reason' => $data['void_reason'] ?? null,
+                ]);
+            }
         });
 
         return $payment->fresh()->load('voider:id,name');

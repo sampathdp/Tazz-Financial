@@ -20,6 +20,60 @@ class FdInterestPaymentController extends Controller
         return $fixedDeposit->interestPayments()->with('payer:id,name')->get();
     }
 
+    /**
+     * Every monthly interest installment still Pending on an Active FD that is
+     * due on or before the end of the current month, split into release
+     * buckets — Overdue (past due, still unpaid), Today, This Week (through the
+     * end of this week), and This Month (the rest, through month end). Powers
+     * the "Interest Due" screen so the desk can see, at a glance, which FD
+     * interest payments have to be released now / this week / this month.
+     */
+    public function due()
+    {
+        $today = now()->startOfDay();
+        $endOfWeek = now()->endOfWeek();
+        $endOfMonth = now()->endOfMonth();
+
+        $rows = FdInterestPayment::query()
+            ->where('status', 'Pending')
+            ->whereDate('due_date', '<=', $endOfMonth)
+            ->whereHas('fixedDeposit', fn ($q) => $q->where('status', 'Active'))
+            ->with(['fixedDeposit:id,fd_number,customer_id', 'fixedDeposit.customer:id,full_name,code,nic_no,phone'])
+            ->orderBy('due_date')
+            ->orderBy('fixed_deposit_id')
+            ->get();
+
+        $buckets = ['overdue' => [], 'today' => [], 'this_week' => [], 'this_month' => []];
+        foreach ($rows as $row) {
+            $due = \Carbon\Carbon::parse($row->due_date)->startOfDay();
+            $key = match (true) {
+                $due->lt($today) => 'overdue',
+                $due->eq($today) => 'today',
+                $due->lte($endOfWeek) => 'this_week',
+                default => 'this_month',
+            };
+            $buckets[$key][] = $row;
+        }
+
+        $shape = fn (array $items) => [
+            'count' => count($items),
+            'total' => round(array_sum(array_map(fn ($i) => (float) $i->amount, $items)), 2),
+            'items' => array_values($items),
+        ];
+
+        return [
+            'as_of' => $today->format('Y-m-d'),
+            'end_of_week' => $endOfWeek->format('Y-m-d'),
+            'end_of_month' => $endOfMonth->format('Y-m-d'),
+            'buckets' => [
+                'overdue' => $shape($buckets['overdue']),
+                'today' => $shape($buckets['today']),
+                'this_week' => $shape($buckets['this_week']),
+                'this_month' => $shape($buckets['this_month']),
+            ],
+        ];
+    }
+
     public function pay(Request $request, FdInterestPayment $fdInterestPayment)
     {
         if ($fdInterestPayment->status === 'Paid') {

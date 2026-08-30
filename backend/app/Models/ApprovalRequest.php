@@ -71,6 +71,18 @@ class ApprovalRequest extends Model
         return $this->belongsTo(SpeedDraft::class, 'subject_id');
     }
 
+    /** Only meaningful/eager-loadable for the cash_transfer bucket. */
+    public function cashTransfer()
+    {
+        return $this->belongsTo(CashTransfer::class, 'subject_id');
+    }
+
+    /** Only meaningful/eager-loadable for the expense_approval bucket. */
+    public function expense()
+    {
+        return $this->belongsTo(Expense::class, 'subject_id');
+    }
+
     public function approvalsCount(): int
     {
         return ($this->first_approved_by ? 1 : 0) + ($this->second_approved_by ? 1 : 0);

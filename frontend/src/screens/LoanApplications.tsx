@@ -312,7 +312,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     const c = form.collateral[i]
     if (!editing || !c.id) return
     try { preview.open(await loanCollateralDocumentsApi.download(editing.id, c.id, doc.id), doc.filePath) }
-    catch { notify.error('Could not open attachment') }
+    catch (ex: any) { notify.error('Could not open attachment', getErrorText(ex)) }
   }
 
   const q = search.trim().toLowerCase()

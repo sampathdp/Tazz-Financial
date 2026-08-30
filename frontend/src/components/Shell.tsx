@@ -58,6 +58,7 @@ export const NAV: NavNode[] = [
     { id: 'fund/deposits', label: 'Deposits', icon: 'wallet' },
     { id: 'fund/fds', label: 'Fixed Deposits', icon: 'coins' },
     { id: 'fund/deposit-payment', label: 'Deposit Payment', icon: 'receipt' },
+    { id: 'fund/interest-due', label: 'Interest Due', icon: 'wallet' },
     { id: 'fund/reports', label: 'Funding Reports', icon: 'chart' },
   ] },
 
@@ -126,6 +127,7 @@ export const NAV: NavNode[] = [
     { group: 'Customer Reports', icon: 'users', items: [
       { id: 'rep/cust-summary', label: 'Customer Summary', icon: 'users' },
       { id: 'rep/cust-activity', label: 'Customer Activity', icon: 'list' },
+      { id: 'rep/cust-credit', label: 'Customer Credit Report', icon: 'shield' },
     ] },
     { group: 'Investor Reports', icon: 'pie', items: [
       { id: 'rep/inv-summary', label: 'Investor Summary', icon: 'pie' },
@@ -161,6 +163,7 @@ export const NAV: NavNode[] = [
     { id: 'ad/audit', label: 'Audit Logs', icon: 'list', soon: true },
     { id: 'ad/login-activity', label: 'Login Activity', icon: 'clock', soon: true },
     { id: 'ad/company', label: 'Company Profile', icon: 'building' },
+    { id: 'ad/maintenance', label: 'Data Maintenance', icon: 'trash' },
   ] },
 ]
 

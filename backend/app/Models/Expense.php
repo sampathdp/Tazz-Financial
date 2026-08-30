@@ -48,4 +48,21 @@ class Expense extends Model
     {
         return $this->hasOne(PaymentVoucher::class);
     }
+
+    /** Shared approval_requests table, scoped to this expense's
+     *  'expense_approval' rows via subject_id — see ApprovalRequest's docblock. */
+    public function approvalRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'expense_approval'))
+            ->orderByDesc('requested_at');
+    }
+
+    /** The one expense-approval request currently awaiting approval, if any. */
+    public function pendingApprovalRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'expense_approval'))
+            ->where('status', 'PendingApproval');
+    }
 }

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApprovalRequest;
+use App\Models\ApprovalType;
 use App\Models\CashAccount;
 use App\Models\CashTransfer;
 use App\Models\ChartOfAccount;
@@ -37,21 +39,61 @@ class CashTransferController extends Controller
             'description' => 'nullable|string|max:255',
         ]);
 
-        $transfer = CashTransfer::create($data + [
-            'status' => 'Pending',
-            'requested_by' => $request->user()->id,
-        ]);
+        $transfer = DB::transaction(function () use ($data, $request) {
+            $transfer = CashTransfer::create($data + [
+                'status' => 'Pending',
+                'requested_by' => $request->user()->id,
+            ]);
+            $type = ApprovalType::where('code', 'cash_transfer')->firstOrFail();
+            ApprovalRequest::create([
+                'approval_type_id' => $type->id,
+                'subject_id' => $transfer->id,
+                'requested_by' => $request->user()->id,
+                'requested_at' => now(),
+                'reason' => $data['description'] ?? null,
+                'required_approvals' => $type->required_approvals,
+            ]);
+
+            return $transfer;
+        });
 
         return response()->json($transfer->load(self::WITH), 201);
     }
 
+    /** Maker-checker via the shared approval_requests table (code
+     *  'cash_transfer') — mirrors LoanController::approveCancelRequest(). The
+     *  till-balance move + GL entry only run once enough distinct approvals are
+     *  in; the CashTransfer keeps its own status for the UI. */
     public function approve(Request $request, CashTransfer $cashTransfer)
     {
         if ($cashTransfer->status !== 'Pending') {
             return response()->json(['message' => 'Only pending transfers can be approved.'], 422);
         }
+        $req = $cashTransfer->pendingApprovalRequest;
+        if (!$req) {
+            return response()->json(['message' => 'No pending approval request found for this transfer.'], 422);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'cash_transfer')) {
+            return response()->json(['message' => 'You are not an approver for cash transfers.'], 403);
+        }
+        if ($req->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own transfer request.'], 422);
+        }
+        if ($req->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
 
-        DB::transaction(function () use ($cashTransfer, $request) {
+        DB::transaction(function () use ($cashTransfer, $req, $request) {
+            if (!$req->first_approved_by) {
+                $req->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $req->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($req->fresh()->approvalsCount() < $req->required_approvals) {
+                return;
+            }
+
             // Lock in a stable id order to avoid deadlocks against opposite-direction transfers.
             $ids = [$cashTransfer->from_cash_account_id, $cashTransfer->to_cash_account_id];
             sort($ids);
@@ -81,6 +123,8 @@ class CashTransferController extends Controller
                 'branch_id' => $from->branch_id,
                 'posted_by' => $request->user()->id,
             ]);
+
+            $req->update(['status' => 'Approved']);
         });
 
         return $cashTransfer->load(self::WITH);
@@ -91,12 +135,27 @@ class CashTransferController extends Controller
         if ($cashTransfer->status !== 'Pending') {
             return response()->json(['message' => 'Only pending transfers can be rejected.'], 422);
         }
+        $req = $cashTransfer->pendingApprovalRequest;
+        if ($req && !ApprovalType::isAuthorized($request->user(), 'cash_transfer')) {
+            return response()->json(['message' => 'You are not an approver for cash transfers.'], 403);
+        }
+        $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);
 
-        $cashTransfer->update([
-            'status' => 'Rejected',
-            'approved_by' => $request->user()->id,
-            'approved_at' => now(),
-        ]);
+        DB::transaction(function () use ($cashTransfer, $data, $req, $request) {
+            $cashTransfer->update([
+                'status' => 'Rejected',
+                'approved_by' => $request->user()->id,
+                'approved_at' => now(),
+            ]);
+            if ($req) {
+                $req->update([
+                    'status' => 'Rejected',
+                    'rejected_by' => $request->user()->id,
+                    'rejected_at' => now(),
+                    'reject_reason' => $data['reject_reason'] ?? null,
+                ]);
+            }
+        });
 
         return $cashTransfer->load(self::WITH);
     }

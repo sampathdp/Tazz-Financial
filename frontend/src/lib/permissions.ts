@@ -53,6 +53,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'rep/coll-trend': 'Collection Reports',
   'rep/cust-summary': 'Customer Reports',
   'rep/cust-activity': 'Customer Reports',
+  'rep/cust-credit': 'Customer Reports',
   'rep/inv-summary': 'Investor Reports',
   'rep/inv-directory': 'Investor Reports',
   'rep/cb-position': 'Cash & Bank Reports',
@@ -103,6 +104,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'fund/deposits': 'Deposits',
   'fund/fds': 'Fixed Deposits',
   'fund/deposit-payment': 'Fixed Deposits',
+  'fund/interest-due': 'Fixed Deposits',
   'fund/reports': 'Funding Reports',
   'subs/list': 'Subscriptions',
 }

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApprovalRequest;
+use App\Models\ApprovalType;
 use App\Models\BankAccount;
 use App\Models\Branch;
 use App\Models\CashAccount;
@@ -41,22 +43,67 @@ class ExpenseController extends Controller
         $branch = Branch::findOrFail($data['branch_id']);
         $code = NumberGenerator::next('expense', ['branch_code' => $branch->code]);
 
-        $expense = Expense::create($data + [
-            'code' => $code,
-            'status' => 'Pending',
-            'requested_by' => $request->user()->id,
-        ]);
-        NumberGenerator::attach($code, $expense);
+        $expense = DB::transaction(function () use ($data, $code, $request) {
+            $expense = Expense::create($data + [
+                'code' => $code,
+                'status' => 'Pending',
+                'requested_by' => $request->user()->id,
+            ]);
+            NumberGenerator::attach($code, $expense);
+
+            $type = ApprovalType::where('code', 'expense_approval')->firstOrFail();
+            ApprovalRequest::create([
+                'approval_type_id' => $type->id,
+                'subject_id' => $expense->id,
+                'requested_by' => $request->user()->id,
+                'requested_at' => now(),
+                'reason' => $data['description'] ?? null,
+                'required_approvals' => $type->required_approvals,
+            ]);
+
+            return $expense;
+        });
 
         return response()->json($expense->load('category:id,name'), 201);
     }
 
+    /** Maker-checker via the shared approval_requests table (code
+     *  'expense_approval') — mirrors LoanController::approveCancelRequest().
+     *  The expense flips to Approved (ready for pay()) only once enough
+     *  distinct approvals are in. */
     public function approve(Request $request, Expense $expense)
     {
         if ($expense->status !== 'Pending') {
             return response()->json(['message' => 'Only a pending expense can be approved.'], 422);
         }
-        $expense->update(['status' => 'Approved', 'approved_by' => $request->user()->id, 'approved_at' => now()]);
+        $req = $expense->pendingApprovalRequest;
+        if (!$req) {
+            return response()->json(['message' => 'No pending approval request found for this expense.'], 422);
+        }
+        if (!ApprovalType::isAuthorized($request->user(), 'expense_approval')) {
+            return response()->json(['message' => 'You are not an approver for expenses.'], 403);
+        }
+        if ($req->requested_by === $request->user()->id) {
+            return response()->json(['message' => 'You cannot approve your own expense request.'], 422);
+        }
+        if ($req->hasApproved($request->user()->id)) {
+            return response()->json(['message' => 'You have already approved this request.'], 422);
+        }
+
+        DB::transaction(function () use ($expense, $req, $request) {
+            if (!$req->first_approved_by) {
+                $req->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
+            } else {
+                $req->update(['second_approved_by' => $request->user()->id, 'second_approved_at' => now()]);
+            }
+
+            if ($req->fresh()->approvalsCount() < $req->required_approvals) {
+                return;
+            }
+
+            $expense->update(['status' => 'Approved', 'approved_by' => $request->user()->id, 'approved_at' => now()]);
+            $req->update(['status' => 'Approved']);
+        });
 
         return $expense->fresh();
     }
@@ -66,7 +113,23 @@ class ExpenseController extends Controller
         if ($expense->status !== 'Pending') {
             return response()->json(['message' => 'Only a pending expense can be rejected.'], 422);
         }
-        $expense->update(['status' => 'Rejected', 'approved_by' => $request->user()->id, 'approved_at' => now()]);
+        $req = $expense->pendingApprovalRequest;
+        if ($req && !ApprovalType::isAuthorized($request->user(), 'expense_approval')) {
+            return response()->json(['message' => 'You are not an approver for expenses.'], 403);
+        }
+        $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);
+
+        DB::transaction(function () use ($expense, $data, $req, $request) {
+            $expense->update(['status' => 'Rejected', 'approved_by' => $request->user()->id, 'approved_at' => now()]);
+            if ($req) {
+                $req->update([
+                    'status' => 'Rejected',
+                    'rejected_by' => $request->user()->id,
+                    'rejected_at' => now(),
+                    'reject_reason' => $data['reject_reason'] ?? null,
+                ]);
+            }
+        });
 
         return $expense->fresh();
     }

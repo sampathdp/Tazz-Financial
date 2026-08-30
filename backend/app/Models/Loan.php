@@ -194,6 +194,25 @@ class Loan extends Model
             ->where('status', 'PendingApproval');
     }
 
+    /** Same shared-table pattern as cancelRequests()/pendingCancelRequest(),
+     *  scoped to this loan's 'loan_write_off' rows — see
+     *  LoanController::writeOffRequest(). */
+    public function writeOffRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_write_off'))
+            ->orderByDesc('requested_at');
+    }
+
+    /** The one write-off request currently awaiting approval, if any — at most
+     *  one live at a time, see writeOffRequest()'s guard. */
+    public function pendingWriteOffRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_write_off'))
+            ->where('status', 'PendingApproval');
+    }
+
     /** Recurring commission cycles for this loan's sales executive — see facility_type SalesExecutiveCommission. */
     public function salesExecutiveCommissions()
     {

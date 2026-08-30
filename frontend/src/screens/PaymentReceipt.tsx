@@ -17,7 +17,7 @@ import {
   type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser, type PaymentAllocationSplit,
   type SpeedDraft, type SpeedDraftPayment, type SpeedDraftSchedule, type SpeedDraftPaymentType,
 } from '../api'
-import { Can, userCan, canApprove } from '../lib/permissions'
+import { Can, canApprove } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -531,8 +531,15 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     try {
       const balanceBefore = num(pendingSettlement.amount)
       const approved = await loanPaymentsApi.approveSettlement(pendingSettlement.id)
-      const fresh = await loansApi.get(selected.id)
-      setReceipt({ payment: approved, loan: fresh, balanceBefore })
+      // Maker-checker: with a 2-approver type the first approval doesn't close
+      // the loan yet — only show the receipt once it's fully Approved.
+      if (approved.approvalStatus === 'Approved') {
+        const fresh = await loansApi.get(selected.id)
+        setReceipt({ payment: approved, loan: fresh, balanceBefore })
+      } else {
+        notify.success('Approved', 'Awaiting another approver')
+        await reloadSelected()
+      }
       refresh()
     } catch (ex: any) {
       notify.error('Approval failed', getErrorText(ex))
@@ -782,14 +789,25 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 {pendingSettlement.paymentMethod === 'Cheque' && pendingSettlement.bank?.name && <div><span className="t-2">Bank: </span><b>{pendingSettlement.bank.name}</b></div>}
                 {pendingSettlement.paymentMethod === 'Cheque' && pendingSettlement.chequeDate && <div><span className="t-2">Cheque Date: </span><b>{dateOnly(pendingSettlement.chequeDate)}</b></div>}
               </div>
-              {userCan(me, 'Loan Payments', 'Approve') ? (
-                <div className="row gap-2">
-                  <Btn variant="primary" icon="check" onClick={approveSettlement} disabled={busy}>{busy ? 'Approving…' : 'Approve & Close Loan'}</Btn>
-                  <Btn variant="danger" icon="x" onClick={rejectSettlement} disabled={busy}>Reject</Btn>
-                </div>
-              ) : (
-                <div className="t-2" style={{ fontSize: 12.5 }}>Awaiting Branch Manager approval — the loan will close and the receipt can be printed once approved.</div>
-              )}
+              {(() => {
+                const req = pendingSettlement.pendingSettlementRequest
+                const left = req ? req.requiredApprovals - (req.firstApprover ? 1 : 0) : 1
+                const mayApprove = canApprove(me, 'payment_settlement')
+                  && me?.id !== req?.requester?.id && me?.id !== req?.firstApprover?.id
+                return mayApprove ? (
+                  <div className="col gap-1">
+                    <div className="row gap-2">
+                      <Btn variant="primary" icon="check" onClick={approveSettlement} disabled={busy}>{busy ? 'Approving…' : (left > 1 ? 'Approve' : 'Approve & Close Loan')}</Btn>
+                      <Btn variant="danger" icon="x" onClick={rejectSettlement} disabled={busy}>Reject</Btn>
+                    </div>
+                    {req?.firstApprover && <div className="t-2" style={{ fontSize: 11.5 }}>Approved by {req.firstApprover.name} · needs {left} more</div>}
+                  </div>
+                ) : (
+                  <div className="t-2" style={{ fontSize: 12.5 }}>
+                    Awaiting approval{req?.firstApprover ? ` — approved by ${req.firstApprover.name}, needs ${left} more` : ''} — the loan will close and the receipt can be printed once approved.
+                  </div>
+                )
+              })()}
             </Card>
           )}
 

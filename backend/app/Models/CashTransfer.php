@@ -43,4 +43,21 @@ class CashTransfer extends Model
     {
         return $this->belongsTo(User::class, 'voided_by');
     }
+
+    /** Shared approval_requests table, scoped to this transfer's 'cash_transfer'
+     *  rows via subject_id — see ApprovalRequest's docblock. */
+    public function approvalRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'cash_transfer'))
+            ->orderByDesc('requested_at');
+    }
+
+    /** The one transfer-approval request currently awaiting approval, if any. */
+    public function pendingApprovalRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'cash_transfer'))
+            ->where('status', 'PendingApproval');
+    }
 }

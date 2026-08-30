@@ -42,8 +42,23 @@ http.interceptors.response.use(
     if (r.config.responseType === 'blob') endDownload()
     return r
   },
-  (err) => {
-    if (err?.config?.responseType === 'blob') endDownload()
+  async (err) => {
+    if (err?.config?.responseType === 'blob') {
+      endDownload()
+      // A failed blob request carries its error body as a Blob, not parsed JSON —
+      // decode it so getErrorText()/callers see the real {message} instead of nothing.
+      const body = err?.response?.data
+      if (body instanceof Blob) {
+        try {
+          const text = await body.text()
+          try {
+            err.response.data = JSON.parse(text)
+          } catch {
+            err.response.data = { message: /<html|<!doctype/i.test(text) ? `Server error (${err.response?.status ?? '?'})` : text.slice(0, 300) }
+          }
+        } catch { /* leave as-is */ }
+      }
+    }
     const status = err?.response?.status
     if (status === 401 && localStorage.getItem('mms-token') && !unauthorizedHandled) {
       unauthorizedHandled = true
@@ -406,6 +421,8 @@ export interface Loan {
   provisionPostedAmount?: number | string;
   /** The one cancel request awaiting approval right now, if any — see loansApi.requestCancel(). */
   pendingCancelRequest?: LoanCancelRequest | null;
+  /** The one write-off request awaiting approval right now, if any — see loansApi.requestWriteOff(). */
+  pendingWriteOffRequest?: LoanCancelRequest | null;
   /** The approval_requests row (code 'loan_application') created at submission time — only present while status is Pending. */
   pendingApplicationRequest?: LoanCancelRequest | null;
   cancelRequests?: LoanCancelRequest[];
@@ -575,6 +592,9 @@ export interface LoanPayment {
    *  same shared approval_requests shape as pendingVoidRequest, just for code
    *  'payment_manual_allocation'. */
   pendingAllocationRequest?: LoanPaymentVoidRequest | null;
+  /** The one settlement-approval request awaiting approval right now, if any —
+   *  same shared approval_requests shape, for code 'payment_settlement'. */
+  pendingSettlementRequest?: LoanPaymentVoidRequest | null;
   createdAt?: string;
 }
 
@@ -847,6 +867,9 @@ export interface CashTransfer {
   voider?: { id: number; name: string } | null;
   voidReason?: string | null;
   voidedAt?: string | null;
+  /** The one approval request awaiting sign-off right now, if any — shared
+   *  approval_requests shape, for code 'cash_transfer'. */
+  pendingApprovalRequest?: LoanPaymentVoidRequest | null;
 }
 
 /** Denomination note value -> quantity counted, e.g. { "5000": 20, "2000": 0, ... }. */
@@ -894,7 +917,7 @@ export const cashTransfersApi = {
     http.get('/cash-transfers', { params: cashAccountId ? { cash_account_id: cashAccountId } : {} }).then((r) => camelize(r.data) as CashTransfer[]),
   create: (body: Partial<CashTransfer>) => http.post('/cash-transfers', snakeize(body)).then((r) => camelize(r.data) as CashTransfer),
   approve: (id: number) => http.put(`/cash-transfers/${id}/approve`).then((r) => camelize(r.data) as CashTransfer),
-  reject: (id: number) => http.put(`/cash-transfers/${id}/reject`).then((r) => camelize(r.data) as CashTransfer),
+  reject: (id: number, rejectReason?: string) => http.put(`/cash-transfers/${id}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data) as CashTransfer),
   remove: (id: number) => http.delete(`/cash-transfers/${id}`).then((r) => r.data),
   /** Undoes a mistakenly-approved transfer — moves both till balances back and reverses the GL entry (see backend CashTransferController::void). */
   void: (id: number, voidReason?: string) => http.post(`/cash-transfers/${id}/void`, { void_reason: voidReason }).then((r) => camelize(r.data) as CashTransfer),
@@ -1016,8 +1039,10 @@ export const loansApi = {
   requestCancel: (id: number, reason: string) => http.post(`/loans/${id}/cancel-request`, { cancelled_reason: reason }).then((r) => camelize(r.data) as LoanCancelRequest),
   approveCancelRequest: (requestId: number) => http.post(`/loan-cancel-requests/${requestId}/approve`).then((r) => camelize(r.data) as LoanCancelRequest),
   rejectCancelRequest: (requestId: number, reason?: string) => http.post(`/loan-cancel-requests/${requestId}/reject`, snakeize({ rejectReason: reason })).then((r) => camelize(r.data) as LoanCancelRequest),
-  /** Admin-only (see backend LoanController::writeOff) — direct bad-debt write-off, posts the outstanding balance as a loss and closes the loan. */
-  writeOff: (id: number, reason: string) => http.post(`/loans/${id}/write-off`, { reason }).then((r) => camelize(r.data) as Loan),
+  /** Submits a bad-debt write-off request — doesn't write the loan off itself, maker-checker like requestCancel(). See LoanController::writeOffRequest(). */
+  requestWriteOff: (id: number, reason: string) => http.post(`/loans/${id}/write-off-request`, { reason }).then((r) => camelize(r.data) as LoanCancelRequest),
+  approveWriteOffRequest: (requestId: number) => http.post(`/loan-write-off-requests/${requestId}/approve`).then((r) => camelize(r.data) as LoanCancelRequest),
+  rejectWriteOffRequest: (requestId: number, reason?: string) => http.post(`/loan-write-off-requests/${requestId}/reject`, snakeize({ rejectReason: reason })).then((r) => camelize(r.data) as LoanCancelRequest),
   /** Manual close for a loan that's fully settled but didn't auto-close — see backend LoanController::close(). */
   close: (id: number) => http.post(`/loans/${id}/close`).then((r) => camelize(r.data) as Loan),
   /** Admin-only (see backend LoanController::reschedule) — closes this loan as
@@ -1109,6 +1134,9 @@ export interface ApprovalsInbox {
   loanCancelRequests: (LoanCancelRequest & {
     loan?: { id: number; code: string; principalAmount: number | string; status: LoanStatus; customer?: { id: number; fullName: string } } | null
   })[]
+  loanWriteOffRequests: (LoanCancelRequest & {
+    loan?: { id: number; code: string; principalAmount: number | string; outstandingBalanceCache?: number | string; status: LoanStatus; customer?: { id: number; fullName: string } } | null
+  })[]
   paymentVoidRequests: (LoanPaymentVoidRequest & {
     payment?: {
       id: number; code: string; amount: number | string; paymentType?: LoanPaymentType
@@ -1119,6 +1147,24 @@ export interface ApprovalsInbox {
     payment?: {
       id: number; code: string; amount: number | string; paymentType?: LoanPaymentType; manualAllocation?: PaymentAllocationSplit | null
       facility?: { id: number; code: string; customer?: { id: number; fullName: string } } | null
+    } | null
+  })[]
+  settlementRequests: (LoanPaymentVoidRequest & {
+    payment?: {
+      id: number; code: string; amount: number | string; paymentType?: LoanPaymentType
+      facility?: { id: number; code: string; customer?: { id: number; fullName: string } } | null
+    } | null
+  })[]
+  cashTransferRequests: (LoanPaymentVoidRequest & {
+    cashTransfer?: {
+      id: number; amount: number | string; transferDate: string; status: CashTransferStatus
+      fromAccount?: { id: number; name: string } | null; toAccount?: { id: number; name: string } | null
+    } | null
+  })[]
+  expenseRequests: (LoanPaymentVoidRequest & {
+    expense?: {
+      id: number; code: string; amount: number | string; status: ExpenseStatus
+      branch?: { id: number; name: string } | null; category?: { id: number; name: string } | null; vendor?: { id: number; name: string } | null
     } | null
   })[]
 }
@@ -1660,8 +1706,24 @@ export const financeCalculatorApi = {
     http.post('/finance-calculator/calculate', snakeize(body)).then((r) => camelize(r.data) as FinanceCalcResult),
 }
 
+/** One Pending monthly interest installment that needs releasing, as returned by fdInterestPaymentsApi.due(). */
+export interface FdInterestDueItem {
+  id: number; installmentNo: number; dueDate: string; amount: number | string;
+  fixedDeposit: {
+    id: number; fdNumber: string; customerId: number;
+    customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null } | null;
+  };
+}
+export interface FdInterestDueBucket { count: number; total: number; items: FdInterestDueItem[] }
+export interface FdInterestDue {
+  asOf: string; endOfWeek: string; endOfMonth: string;
+  buckets: { overdue: FdInterestDueBucket; today: FdInterestDueBucket; thisWeek: FdInterestDueBucket; thisMonth: FdInterestDueBucket };
+}
+
 export const fdInterestPaymentsApi = {
   list: (fixedDepositId: number) => http.get(`/fixed-deposits/${fixedDepositId}/interest-payments`).then((r) => camelize(r.data) as FdInterestPayment[]),
+  /** Pending monthly interest installments due by month end, split into Overdue / Today / This Week / This Month release buckets (see backend FdInterestPaymentController::due). */
+  due: () => http.get('/fd-interest-payments/due').then((r) => camelize(r.data) as FdInterestDue),
   pay: (id: number, body: { paidAt?: string; paymentMethod: FdPaymentMethod; referenceNo?: string }) =>
     http.post(`/fd-interest-payments/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as FdInterestPayment),
   /** Undoes a mistaken interest payment — reverses GL/Cashbook and puts the installment back to Pending (see backend FdInterestPaymentController::void). */
@@ -1939,6 +2001,9 @@ export interface Expense {
   requestedBy?: number | null; requester?: { id: number; name: string } | null;
   approvedBy?: number | null; approver?: { id: number; name: string } | null; approvedAt?: string | null;
   voucher?: PaymentVoucher | null;
+  /** The one approval request awaiting sign-off right now, if any — shared
+   *  approval_requests shape, for code 'expense_approval'. */
+  pendingApprovalRequest?: LoanPaymentVoidRequest | null;
 }
 export const expensesApi = {
   list: (params?: { status?: ExpenseStatus; branchId?: number }) =>
@@ -1946,7 +2011,7 @@ export const expensesApi = {
   create: (body: { branchId: number; expenseCategoryId: number; vendorId?: number; amount: number | string; expenseDate: string; description?: string }) =>
     http.post('/expenses', snakeize(body)).then((r) => camelize(r.data) as Expense),
   approve: (id: number) => http.put(`/expenses/${id}/approve`).then((r) => camelize(r.data) as Expense),
-  reject: (id: number) => http.put(`/expenses/${id}/reject`).then((r) => camelize(r.data) as Expense),
+  reject: (id: number, rejectReason?: string) => http.put(`/expenses/${id}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data) as Expense),
   pay: (id: number, body: { paymentMethod: PaymentMethod; cashAccountId?: number; bankAccountId?: number; chequeNo?: string; paidAt?: string }) =>
     http.post(`/expenses/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as PaymentVoucher),
 }
@@ -2047,6 +2112,21 @@ export const company = {
   },
   /** Always the same endpoint — append a cache-busting `?v=` when rendering. */
   logoUrl: `${API_BASE}/company-profile/logo`,
+}
+
+/* ======================= System Maintenance ======================= */
+
+/** Must be typed verbatim in the UI — mirrors the backend constant. */
+export const CLEAN_CONFIRM_PHRASE = 'DELETE ALL TRANSACTION DATA'
+
+export interface CleanResult { ok: true; rowsDeleted: number; tablesWiped: number; filesDeleted: number }
+
+export const systemApi = {
+  /** Admin-only. Wipes every transactional table + its uploaded files; keeps
+   *  all master/config data and customers. Irreversible. */
+  cleanTransactions: (password: string, confirmPhrase: string) =>
+    http.post('/system/clean-transactions', { password, confirm_phrase: confirmPhrase })
+      .then((r) => camelize(r.data) as CleanResult),
 }
 
 /* ======================= Pawning (Gold Loan) Management =======================

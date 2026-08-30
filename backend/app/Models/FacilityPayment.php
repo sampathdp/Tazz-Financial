@@ -107,4 +107,23 @@ class FacilityPayment extends Model
             ->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_manual_allocation'))
             ->where('status', 'PendingApproval');
     }
+
+    /** Shared approval_requests table, scoped to this payment's
+     *  'payment_settlement' rows — a full-settlement payment held at
+     *  approval_status='PendingApproval' until approved. See
+     *  LoanPaymentController::approveSettlement(). */
+    public function settlementRequests()
+    {
+        return $this->hasMany(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_settlement'))
+            ->orderByDesc('requested_at');
+    }
+
+    /** The one settlement request currently awaiting approval, if any. */
+    public function pendingSettlementRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_settlement'))
+            ->where('status', 'PendingApproval');
+    }
 }

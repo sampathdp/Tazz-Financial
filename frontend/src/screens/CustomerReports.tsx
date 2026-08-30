@@ -1,12 +1,12 @@
 /* Customer base reports: two standalone screens (Summary, Activity), each
    its own nav entry and route — no tabs. Same shape as LoanReports.tsx. */
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Card, PageHead, Badge, Table, Td , LoadingBlock } from '../components/ui'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Card, PageHead, Badge, Btn, Input, Table, Td , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { ExportButtons } from '../components/ExportButtons'
 import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
 import { Donut, ProgressRow } from '../components/charts'
-import { customerReportsApi, type AuthUser } from '../api'
+import { customerReportsApi, customersApi, type Customer, type AuthUser } from '../api'
 import { getErrorText } from '../lib/apiError'
 import { downloadBlob, exportFlatTableToExcel } from '../lib/export'
 import type { Go } from './types'
@@ -172,6 +172,68 @@ export function CustomerActivityScreen({ go: _go, user: me }: { go: Go; user?: A
               </>} />
           </Card>
         </>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------- Credit Report ------------------------- */
+
+/* Picker only — search a customer, then open the per-customer internal
+   CRIB-style credit report at /customers/:id/credit-report (same page the
+   customer detail screen links to). */
+export function CustomerCreditReportScreen({ go, user: _me }: { go: Go; user?: AuthUser | null }) {
+  const [search, setSearch] = useState('')
+  const [debounced, setDebounced] = useState('')
+  const [rows, setRows] = useState<Customer[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setDebounced(search.trim()), 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [search])
+
+  useEffect(() => {
+    if (!debounced) { setRows([]); setTotal(0); return }
+    setLoading(true)
+    customersApi.browse({ search: debounced, page: 1 })
+      .then((r) => { setRows(r.data); setTotal(r.total) })
+      .catch(() => { setRows([]); setTotal(0) })
+      .finally(() => setLoading(false))
+  }, [debounced])
+
+  const open = (c: Customer) => go(`customers/${c.id}/credit-report`)
+
+  return (
+    <div>
+      <PageHead crumbs="Customer Management / Reports" title="Customer Credit Report" icon="shield"
+        sub="Internal, CRIB-style — payment profile, credit facilities and indicative score for one customer." />
+      <Card style={{ marginBottom: 16 }}>
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customer by name, code, NIC or phone…" autoFocus />
+      </Card>
+      {loading ? <Loading /> : !debounced ? (
+        <div className="t-3" style={{ padding: 40, textAlign: 'center', fontSize: 13 }}>Type to search for a customer.</div>
+      ) : (
+        <Card pad={0}>
+          <Table cols={[
+            { label: 'Code' }, { label: 'Name' }, { label: 'NIC' }, { label: 'Branch' },
+            { label: 'Status', align: 'center' as const }, { label: '', align: 'right' as const },
+          ]} rows={rows} empty="No matching customers" onRow={open}
+            render={(c) => <>
+              <Td mono>{c.code}</Td>
+              <Td>{c.fullName}</Td>
+              <Td mono>{c.nicNo || '—'}</Td>
+              <Td>{c.branch?.name || '—'}</Td>
+              <Td align="center"><Badge tone={c.status === 'Active' ? 'green' : c.status === 'Blacklisted' ? 'red' : 'neutral'} dot>{c.status}</Badge></Td>
+              <Td align="right"><Btn variant="solid" size="sm" icon="chart" onClick={() => open(c)}>Open report</Btn></Td>
+            </>} />
+          {total > rows.length && (
+            <div className="t-3" style={{ padding: '10px 14px', fontSize: 11.5 }}>Showing {rows.length} of {total} — refine the search to narrow results.</div>
+          )}
+        </Card>
       )}
     </div>
   )
