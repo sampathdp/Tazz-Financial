@@ -16,6 +16,7 @@ import {
 import { Can, canApprove } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
 import { getErrorText } from '../../lib/apiError'
+import { compressImageToWebp } from '../../lib/image'
 import type { Go } from '../types'
 
 const num = (v: unknown) => Number(v ?? 0)
@@ -831,31 +832,38 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
   const [docCategoryId, setDocCategoryId] = useState<number | ''>('')
   const [uploading, setUploading] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
+  const [preview, setPreview] = useState<{ url: string; kind: 'image' | 'pdf' | 'other'; name: string } | null>(null)
 
   useEffect(() => setDocs(loan.documents || []), [loan])
   useEffect(() => { documentCategoriesApi.list().then((res) => setCategories(res.filter(c => c.status === 'Active'))) }, [])
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url) }, [preview])
 
   const refresh = () => loanDocumentsApi.list(loan.id).then(setDocs).catch(() => {})
 
   const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!docCategoryId) { notify.error('Please select a document category'); e.target.value = ''; return }
-    const file = e.target.files?.[0]
+    const raw = e.target.files?.[0]
     e.target.value = ''
-    if (!file) return
+    if (!raw) return
     setUploading(true)
-    try { await loanDocumentsApi.upload(loan.id, file, docCategoryId); refresh(); notify.success('Image uploaded') }
+    try {
+      const file = await compressImageToWebp(raw)
+      await loanDocumentsApi.upload(loan.id, file, docCategoryId); refresh(); notify.success('Image uploaded')
+    }
     catch (ex: any) { notify.error('Upload failed', getErrorText(ex)) }
     finally { setUploading(false) }
   }
   const view = async (d: LoanDocument) => {
-    const win = window.open('', '_blank')
     try {
       const blob = await loanDocumentsApi.download(loan.id, d.id)
+      const ext = ((d.filePath || '').split('.').pop() || '').toLowerCase()
+      const isPdf = ext === 'pdf' || blob.type === 'application/pdf'
+      const isImage = /^(png|jpe?g|webp|gif|bmp)$/.test(ext) || blob.type.startsWith('image/')
       const url = URL.createObjectURL(blob)
-      if (win) win.location.href = url; else window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { win?.close(); notify.error('Could not open document') }
+      setPreview({ url, kind: isPdf ? 'pdf' : isImage ? 'image' : 'other', name: d.category?.name || 'Document' })
+    } catch { notify.error('Could not open document') }
   }
+  const closePreview = () => setPreview(null) // object URL revoked by the effect cleanup above
   const remove = async (d: LoanDocument) => {
     const ok = await notify.confirm({ title: 'Delete this document?', danger: true, okText: 'Delete' })
     if (!ok) return
@@ -891,6 +899,23 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
             </div>
           ))}
         </div>}
+
+      <Modal open={!!preview} onClose={closePreview} title={preview?.name} sub="Contract Image" width={900} footer={
+        <Btn variant="solid" onClick={closePreview}>Close</Btn>
+      }>
+        {preview?.kind === 'image' && (
+          <img src={preview.url} alt={preview.name} style={{ display: 'block', maxWidth: '100%', margin: '0 auto', borderRadius: 'var(--r-s)' }} />
+        )}
+        {preview?.kind === 'pdf' && (
+          <iframe src={preview.url} title={preview.name} style={{ width: '100%', height: '75vh', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }} />
+        )}
+        {preview?.kind === 'other' && (
+          <div className="col gap-2" style={{ alignItems: 'center', padding: 24 }}>
+            <div className="t-2" style={{ fontSize: 12.5 }}>This file type can't be previewed inline.</div>
+            <a href={preview.url} download={preview.name}><Btn variant="solid" icon="download" size="sm">Download</Btn></a>
+          </div>
+        )}
+      </Modal>
     </Card>
   )
 }
