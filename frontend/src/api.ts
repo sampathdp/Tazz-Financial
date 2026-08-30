@@ -1,6 +1,7 @@
 /* Axios client for the Laravel API. Base URL is proxied to http://localhost:8000 in dev (see vite.config.ts). */
 import axios from 'axios'
 import { beginDownload, endDownload } from './lib/downloadProgress'
+import { compressImageToWebp } from './lib/image'
 
 export const http = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -721,9 +722,9 @@ export const customersApi = {
     http.get('/customers', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<Customer>),
   /** Profile photo — auth-protected, so fetched as a blob rather than a plain <img src>. */
   photo: (id: number) => http.get(`/customers/${id}/photo`, { responseType: 'blob' }).then((r) => r.data as Blob),
-  uploadPhoto: (id: number, file: File) => {
+  uploadPhoto: async (id: number, file: File) => {
     const form = new FormData()
-    form.append('photo', file)
+    form.append('photo', await compressImageToWebp(file))
     return http.post(`/customers/${id}/photo`, form).then((r) => r.data as { hasPhoto: boolean })
   },
   removePhoto: (id: number) => http.delete(`/customers/${id}/photo`).then((r) => r.data),
@@ -1178,9 +1179,9 @@ export const loanPostDatedChequesApi = {
 
 export const loanDocumentsApi = {
   list: (loanId: number) => http.get(`/loans/${loanId}`).then((r) => (camelize(r.data).documents || []) as LoanDocument[]),
-  upload: (loanId: number, file: File, documentCategoryId: number) => {
+  upload: async (loanId: number, file: File, documentCategoryId: number) => {
     const form = new FormData()
-    form.append('file', file)
+    form.append('file', await compressImageToWebp(file))
     form.append('document_category_id', String(documentCategoryId))
     return http.post(`/loans/${loanId}/documents`, form).then((r) => camelize(r.data) as LoanDocument)
   },
@@ -1190,9 +1191,9 @@ export const loanDocumentsApi = {
 }
 
 export const loanCollateralDocumentsApi = {
-  upload: (loanId: number, collateralId: number, file: File) => {
+  upload: async (loanId: number, collateralId: number, file: File) => {
     const form = new FormData()
-    form.append('file', file)
+    form.append('file', await compressImageToWebp(file))
     return http.post(`/loans/${loanId}/collateral/${collateralId}/documents`, form).then((r) => camelize(r.data) as LoanCollateralDocument)
   },
   remove: (loanId: number, collateralId: number, documentId: number) =>
@@ -1217,9 +1218,9 @@ export const loanWaiversApi = {
 
 export const customerDocumentsApi = {
   list: (customerId: number) => http.get(`/customers/${customerId}`).then((r) => (camelize(r.data).documents || []) as CustomerDocument[]),
-  upload: (customerId: number, file: File, docType: CustomerDocType) => {
+  upload: async (customerId: number, file: File, docType: CustomerDocType) => {
     const form = new FormData()
-    form.append('file', file)
+    form.append('file', await compressImageToWebp(file))
     form.append('doc_type', docType)
     return http.post(`/customers/${customerId}/documents`, form).then((r) => camelize(r.data) as CustomerDocument)
   },
@@ -1459,9 +1460,9 @@ export const speedDraftCollateralApi = {
 }
 
 export const speedDraftCollateralDocumentsApi = {
-  upload: (collateralId: number, file: File) => {
+  upload: async (collateralId: number, file: File) => {
     const form = new FormData()
-    form.append('file', file)
+    form.append('file', await compressImageToWebp(file))
     return http.post(`/speed-draft-collateral/${collateralId}/documents`, form).then((r) => camelize(r.data) as SpeedDraftCollateralDocument)
   },
   remove: (collateralId: number, documentId: number) =>
@@ -2039,9 +2040,9 @@ export const company = {
   update: (body: any) => http.put('/company-profile', snakeize(body)).then((r) => camelize(r.data)),
   /** Public, pre-auth — name/tagline only, for the login screen. */
   branding: () => http.get('/company-profile/branding').then((r) => camelize(r.data)) as Promise<{ name: string; tagline: string; hasLogo: boolean }>,
-  uploadLogo: (file: File) => {
+  uploadLogo: async (file: File) => {
     const form = new FormData()
-    form.append('logo', file)
+    form.append('logo', await compressImageToWebp(file))
     return http.post('/company-profile/logo', form).then((r) => camelize(r.data))
   },
   /** Always the same endpoint — append a cache-busting `?v=` when rendering. */

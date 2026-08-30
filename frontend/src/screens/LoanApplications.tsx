@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { useFilePreview } from '../components/FilePreview'
 import {
   loansApi, customersApi, customerLoansApi, loanTypesApi, branchesApi, api, loanCollateralDocumentsApi,
   type Loan, type LoanStatus, type LoanType, type Customer, type LoanFrequency, type CustomerTitle,
@@ -70,6 +71,7 @@ const ROUTE_BASE = '/loan/apps'
 
 export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
+  const preview = useFilePreview()
   const navigate = useNavigate()
   const params = useParams<{ id?: string }>()
   const location = useLocation()
@@ -309,13 +311,8 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const viewCollateralDoc = async (i: number, doc: LoanCollateralDocument) => {
     const c = form.collateral[i]
     if (!editing || !c.id) return
-    const win = window.open('', '_blank')
-    try {
-      const blob = await loanCollateralDocumentsApi.download(editing.id, c.id, doc.id)
-      const url = URL.createObjectURL(blob)
-      if (win) win.location.href = url; else window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { win?.close(); notify.error('Could not open attachment') }
+    try { preview.open(await loanCollateralDocumentsApi.download(editing.id, c.id, doc.id), doc.filePath) }
+    catch { notify.error('Could not open attachment') }
   }
 
   const q = search.trim().toLowerCase()
@@ -640,6 +637,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             </Td>
           </>} />}
       </Card>
+      {preview.node}
     </div>
   )
 }

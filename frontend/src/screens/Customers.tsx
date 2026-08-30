@@ -1,8 +1,9 @@
 /* Tazz Investment & Credit — Customer Management (API-backed) */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, Pager, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { useFilePreview } from '../components/FilePreview'
 import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, customerCribApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type FdDeposit, type FixedDeposit, type CribReport, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -145,6 +146,7 @@ function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser 
   const [docType, setDocType] = useState<CustomerDocType>('NIC')
   const [uploading, setUploading] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
+  const preview = useFilePreview()
 
   const refresh = () => {
     setLoading(true)
@@ -163,13 +165,8 @@ function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser 
   }
 
   const view = async (d: CustomerDocument) => {
-    const win = window.open('', '_blank')
-    try {
-      const blob = await customerDocumentsApi.download(customerId, d.id)
-      const url = URL.createObjectURL(blob)
-      if (win) win.location.href = url; else window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { win?.close(); notify.error('Could not open document') }
+    try { preview.open(await customerDocumentsApi.download(customerId, d.id), d.filePath, DOC_TYPE_OPTIONS.find((o) => o.value === d.docType)?.label || d.docType) }
+    catch { notify.error('Could not open document') }
   }
 
   const remove = async (d: CustomerDocument) => {
@@ -206,6 +203,7 @@ function DocumentsPanel({ customerId, me }: { customerId: number; me?: AuthUser 
            </div>
          ))}
        </div>}
+      {preview.node}
     </div>
   )
 }
@@ -295,18 +293,74 @@ function FundingHistoryPanel({ customerId }: { customerId: number }) {
 
 const gradeTone: Record<string, 'green' | 'amber' | 'red'> = { A: 'green', B: 'green', C: 'amber', D: 'red', E: 'red' }
 
-/** Colour band for a Number-of-Days-in-Arrears cell in the payment-profile grid. */
+/** Colour band for a Number-of-Days-in-Arrears value. */
 function ndiaCell(n: number | null): { bg: string; fg: string; text: string } {
-  if (n === null) return { bg: 'transparent', fg: 'var(--tx-3)', text: '–' }
+  if (n === null) return { bg: 'var(--bg-2)', fg: 'var(--tx-3)', text: '–' }
   if (n === 0) return { bg: 'var(--ok-dim)', fg: 'var(--ok)', text: '0' }
   if (n <= 30) return { bg: 'var(--warn-dim)', fg: 'var(--warn)', text: String(n) }
-  if (n <= 90) return { bg: 'rgba(230,130,20,0.18)', fg: '#e68214', text: String(n) }
+  if (n <= 90) return { bg: 'rgba(224,123,26,0.18)', fg: '#e07b1a', text: String(n) }
   return { bg: 'var(--bad-dim)', fg: 'var(--bad)', text: String(n) }
 }
 
-function StatRow({ label, value }: { label: string; value: string | number }) {
-  return <div><span className="t-2">{label}: </span><b>{value}</b></div>
+/** Segmented 250–900 score band with the customer's score marked. */
+function ScoreBand({ score, grade }: { score: number; grade: string }) {
+  const MIN = 250, MAX = 900
+  const zones = [
+    { g: 'E', span: 210, c: 'var(--bad)' },
+    { g: 'D', span: 100, c: '#e07b1a' },
+    { g: 'C', span: 100, c: 'var(--warn)' },
+    { g: 'B', span: 100, c: '#4a9e5c' },
+    { g: 'A', span: 140, c: 'var(--ok)' },
+  ]
+  const pos = Math.max(0, Math.min(100, ((score - MIN) / (MAX - MIN)) * 100))
+  return (
+    <div style={{ flex: 1, minWidth: 240, maxWidth: 440 }}>
+      <div style={{ position: 'relative', paddingTop: 18 }}>
+        <div style={{ position: 'absolute', top: 0, left: `${pos}%`, transform: 'translateX(-50%)', textAlign: 'center', transition: 'left .9s var(--ease)' }}>
+          <div className="num" style={{ fontSize: 11, fontWeight: 700, fontFamily: 'Saira', lineHeight: 1 }}>{score}</div>
+          <div style={{ width: 0, height: 0, margin: '2px auto 0', borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '6px solid var(--tx-1)' }} />
+        </div>
+        <div className="row" style={{ height: 9, borderRadius: 5, overflow: 'hidden', gap: 2 }}>
+          {zones.map((z) => <div key={z.g} style={{ flexGrow: z.span, background: z.c, opacity: z.g === grade ? 1 : 0.28 }} />)}
+        </div>
+        <div className="row" style={{ gap: 2, marginTop: 3 }}>
+          {zones.map((z) => <div key={z.g} style={{ flexGrow: z.span, textAlign: 'center', fontSize: 9.5, fontWeight: z.g === grade ? 700 : 400, color: z.g === grade ? 'var(--tx-1)' : 'var(--tx-3)' }}>{z.g}</div>)}
+        </div>
+      </div>
+    </div>
+  )
 }
+
+function RStat({ icon, label, value, tone }: { icon: string; label: string; value: string; tone?: 'red' | 'amber' | 'green' }) {
+  const c = tone === 'red' ? 'var(--bad)' : tone === 'amber' ? 'var(--warn)' : tone === 'green' ? 'var(--ok)' : 'var(--tx-0)'
+  return (
+    <div style={{ padding: '9px 11px', background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
+      <div className="row gap-1" style={{ alignItems: 'center', color: 'var(--tx-3)', marginBottom: 5 }}>
+        <Icon n={icon} s={12} /><span style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 600 }}>{label}</span>
+      </div>
+      <div className="num" style={{ fontSize: 16, fontWeight: 700, fontFamily: 'Saira', color: c }}>{value}</div>
+    </div>
+  )
+}
+
+function RSection({ icon, title, children }: { icon: string; title: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 9 }}>
+        <Icon n={icon} s={13} /><span className="eyebrow">{title}</span>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const LEGEND: [string, string, string][] = [
+  ['0 · on time', 'var(--ok-dim)', 'var(--ok)'],
+  ['1–30', 'var(--warn-dim)', 'var(--warn)'],
+  ['31–90', 'rgba(224,123,26,0.18)', '#e07b1a'],
+  ['90+', 'var(--bad-dim)', 'var(--bad)'],
+  ['no data', 'var(--bg-2)', 'var(--tx-3)'],
+]
 
 /** Read-only internal credit report for one customer — CRIB-report layout, this
  *  company's own facilities only. Fetched lazily; PDF export mirrors the screen. */
@@ -333,72 +387,96 @@ function CreditReportPanel({ customerId, me }: { customerId: number; me?: AuthUs
 
   const s = data.paymentProfileStatus
   const sc = data.scoring
+  const gTone = gradeTone[sc.riskGrade]
+  const gColor = gTone === 'green' ? 'var(--ok)' : gTone === 'amber' ? 'var(--warn)' : 'var(--bad)'
+  const anyHistory = data.paymentProfileGrid.rows.some((r) => r.cells.some((c) => c.ndia !== null))
 
   return (
-    <div className="col gap-3">
-      <div className="row between wrap gap-2" style={{ alignItems: 'flex-start' }}>
-        <div className="row gap-3" style={{ alignItems: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div className="num" style={{ fontSize: 30, fontWeight: 700, fontFamily: 'Saira', lineHeight: 1 }}>{sc.score}</div>
-            <div className="t-2" style={{ fontSize: 10.5 }}>{sc.scale.min}–{sc.scale.max}</div>
+    <div className="col gap-4">
+      {/* Hero — score + grade band */}
+      <div style={{ padding: 16, borderRadius: 'var(--r-l)', border: '1px solid var(--line)', background: 'linear-gradient(180deg, var(--bg-1), var(--bg-0))' }}>
+        <div className="row between wrap" style={{ gap: 16, alignItems: 'center' }}>
+          <div className="row gap-3" style={{ alignItems: 'center' }}>
+            <div style={{ minWidth: 84, textAlign: 'center', padding: '6px 10px', borderRadius: 'var(--r-m)', background: 'var(--bg-2)', borderLeft: `3px solid ${gColor}` }}>
+              <div className="num" style={{ fontSize: 32, fontWeight: 800, fontFamily: 'Saira', lineHeight: 1, color: gColor }}>{sc.score}</div>
+              <div className="t-3" style={{ fontSize: 9.5, marginTop: 2 }}>of {sc.scale.min}–{sc.scale.max}</div>
+            </div>
+            <div className="col gap-1">
+              <div className="row gap-2" style={{ alignItems: 'center' }}>
+                <span style={{ fontSize: 22, fontWeight: 800, fontFamily: 'Saira', color: gColor }}>{sc.riskGrade}</span>
+                <Badge tone={gTone} dot>{sc.riskLabel}</Badge>
+              </div>
+              <span className="t-3" style={{ fontSize: 10.5 }}>Internal indicative score</span>
+            </div>
           </div>
-          <div className="col gap-1">
-            <Badge tone={gradeTone[sc.riskGrade]} dot>{sc.riskGrade} — {sc.riskLabel}</Badge>
-            <span className="t-2" style={{ fontSize: 10.5, maxWidth: 420 }}>{data.disclaimer}</span>
-          </div>
+          <ScoreBand score={sc.score} grade={sc.riskGrade} />
+          <Btn variant="solid" icon="download" size="sm" onClick={downloadPdf} disabled={downloading}>{downloading ? 'Preparing…' : 'Download PDF'}</Btn>
         </div>
-        <Btn variant="solid" icon="download" size="sm" onClick={downloadPdf} disabled={downloading}>{downloading ? 'Preparing…' : 'Download PDF'}</Btn>
+        <div className="t-3" style={{ fontSize: 10, marginTop: 12, lineHeight: 1.5, borderTop: '1px solid var(--line-soft)', paddingTop: 10 }}>{data.disclaimer}</div>
       </div>
 
-      <div style={{ padding: 12, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)',
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px 20px', fontSize: 12.5 }}>
-        <StatRow label="Open Credit Facilities" value={s.openCreditFacilities} />
-        <StatRow label="Closed Credit Facilities" value={s.closedCreditFacilities} />
-        <StatRow label="Written-off Facilities" value={s.writtenOffCreditFacilities} />
-        <StatRow label="Total Granted (open)" value={money(s.totalAmountGrantedOpen)} />
-        <StatRow label="Total Current Balance (open)" value={money(s.totalCurrentBalanceOpen)} />
-        <StatRow label="Total Installment (open)" value={money(s.totalInstallmentAmountOpen)} />
-        <StatRow label="Total Amount in Arrears" value={money(s.totalAmountInArrears)} />
-        <StatRow label="Highest Current NDIA" value={`${s.highestCurrentNdia} days`} />
-        <StatRow label="Highest NDIA in 12 Months" value={`${s.highestNdia12Months} days`} />
-        <StatRow label="Inquiries (6 / 12 months)" value={`${data.inquiries.last6Months} / ${data.inquiries.last12Months}`} />
+      {/* Payment profile status tiles */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))', gap: 10 }}>
+        <RStat icon="layers" label="Open Facilities" value={String(s.openCreditFacilities)} />
+        <RStat icon="check" label="Closed Facilities" value={String(s.closedCreditFacilities)} />
+        <RStat icon="flag" label="Written-off" value={String(s.writtenOffCreditFacilities)} tone={s.writtenOffCreditFacilities > 0 ? 'red' : undefined} />
+        <RStat icon="coins" label="Granted (open)" value={money(s.totalAmountGrantedOpen)} />
+        <RStat icon="wallet" label="Balance (open)" value={money(s.totalCurrentBalanceOpen)} />
+        <RStat icon="calendar" label="Installment / mo" value={money(s.totalInstallmentAmountOpen)} />
+        <RStat icon="alert" label="In Arrears" value={money(s.totalAmountInArrears)} tone={s.totalAmountInArrears > 0 ? 'red' : 'green'} />
+        <RStat icon="chart" label="Highest NDIA 12m" value={`${s.highestNdia12Months}d`} tone={s.highestNdia12Months > 90 ? 'red' : s.highestNdia12Months > 0 ? 'amber' : 'green'} />
+      </div>
+      <div className="t-3" style={{ fontSize: 11, marginTop: -6 }}>
+        Highest current NDIA <b style={{ color: 'var(--tx-1)' }}>{s.highestCurrentNdia} days</b>
+        {'  ·  '}Inquiries <b style={{ color: 'var(--tx-1)' }}>{data.inquiries.last6Months}</b> in 6 mo, <b style={{ color: 'var(--tx-1)' }}>{data.inquiries.last12Months}</b> in 12 mo
       </div>
 
+      {/* Payment profile heatmap */}
       {data.paymentProfileGrid.rows.length > 0 && (
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Payment Profile — Days in Arrears by Month</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ borderCollapse: 'collapse', fontSize: 11.5, minWidth: '100%' }}>
+        <RSection icon="grid" title="Payment Profile — Days in Arrears by Month">
+          <div style={{ overflowX: 'auto', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
+            <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: 11, width: '100%' }}>
               <thead>
                 <tr>
-                  <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--tx-2)', fontWeight: 600 }}>Facility</th>
+                  <th style={{ textAlign: 'left', padding: '7px 10px', position: 'sticky', left: 0, background: 'var(--bg-2)', color: 'var(--tx-2)', fontWeight: 600, zIndex: 1 }}>Facility</th>
                   {data.paymentProfileGrid.months.map((m) => (
-                    <th key={m} style={{ padding: '4px 6px', color: 'var(--tx-2)', fontWeight: 600, whiteSpace: 'nowrap' }}>{m}</th>
+                    <th key={m} style={{ padding: '7px 6px', background: 'var(--bg-2)', color: 'var(--tx-2)', fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'center' }}>{m}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {data.paymentProfileGrid.rows.map((r) => (
+                {data.paymentProfileGrid.rows.map((r, ri) => (
                   <tr key={r.code}>
-                    <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>
-                      <b>{r.code}</b> <span className="t-2">{r.product}</span>
+                    <td style={{ padding: '6px 10px', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: ri % 2 ? 'var(--bg-1)' : 'var(--bg-0)', borderTop: '1px solid var(--line-soft)' }}>
+                      <b>{r.code}</b> <span className="t-3" style={{ fontSize: 10 }}>{r.product}</span>
                     </td>
                     {r.cells.map((c, i) => {
                       const cc = ndiaCell(c.ndia)
-                      return <td key={i} style={{ padding: '3px 6px', textAlign: 'center' }}>
-                        <span style={{ display: 'inline-block', minWidth: 22, padding: '1px 4px', borderRadius: 4, background: cc.bg, color: cc.fg, fontWeight: 600 }}>{cc.text}</span>
-                      </td>
+                      return (
+                        <td key={i} style={{ padding: '4px 5px', textAlign: 'center', borderTop: '1px solid var(--line-soft)' }}>
+                          <span style={{ display: 'inline-block', minWidth: 26, padding: '3px 5px', borderRadius: 5, background: cc.bg, color: cc.fg, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{cc.text}</span>
+                        </td>
+                      )
                     })}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+          <div className="row gap-3 wrap" style={{ marginTop: 8 }}>
+            {LEGEND.map(([lbl, bg, fg]) => (
+              <span key={lbl} className="row gap-1" style={{ alignItems: 'center', fontSize: 10, color: 'var(--tx-3)' }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: bg, border: '1px solid var(--line)', display: 'inline-block' }} />
+                <span style={{ color: fg }}>{lbl}</span>
+              </span>
+            ))}
+          </div>
+          {!anyHistory && <div className="t-3" style={{ fontSize: 10.5, marginTop: 6 }}>No repayment history yet for the months shown.</div>}
+        </RSection>
       )}
 
-      <div>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>Credit Facilities</div>
+      {/* Credit facilities */}
+      <RSection icon="ledger" title="Credit Facilities">
         <Table cols={[
           { label: 'Code' }, { label: 'Product' }, { label: 'Status', align: 'center' as const },
           { label: 'Granted', align: 'right' as const }, { label: 'Balance', align: 'right' as const }, { label: 'Arrears', align: 'right' as const },
@@ -410,17 +488,16 @@ function CreditReportPanel({ customerId, me }: { customerId: number; me?: AuthUs
             <Td align="center"><Badge tone={f.status === 'Active' ? 'green' : f.status === 'WrittenOff' ? 'red' : 'neutral'} dot>{f.status}</Badge></Td>
             <Td align="right" mono>{money(f.amountGranted)}</Td>
             <Td align="right" mono>{money(f.currentBalance)}</Td>
-            <Td align="right" mono>{f.amountInArrears > 0 ? <span style={{ color: 'var(--bad)' }}>{money(f.amountInArrears)}</span> : money(f.amountInArrears)}</Td>
+            <Td align="right" mono c={f.amountInArrears > 0 ? 'var(--bad)' : undefined}>{money(f.amountInArrears)}</Td>
             <Td align="right" mono>{money(f.installmentAmount)}</Td>
-            <Td align="right" mono>{f.currentNdia === null ? '–' : f.currentNdia}</Td>
+            <Td align="right" mono>{f.currentNdia === null ? '–' : <span style={{ color: ndiaCell(f.currentNdia).fg, fontWeight: 700 }}>{f.currentNdia}</span>}</Td>
             <Td>{dateOnly(f.firstDisbursementDate)}</Td>
             <Td>{dateOnly(f.maturityDate)}</Td>
           </>} />
-      </div>
+      </RSection>
 
       {data.guarantorFacilities.length > 0 && (
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Facilities Guaranteed by this Customer</div>
+        <RSection icon="shield" title="Facilities Guaranteed by this Customer">
           <Table cols={[
             { label: 'Code' }, { label: 'Borrower' }, { label: 'Status', align: 'center' as const },
             { label: 'Granted', align: 'right' as const }, { label: 'Balance', align: 'right' as const }, { label: 'Guaranteed', align: 'right' as const },
@@ -433,7 +510,7 @@ function CreditReportPanel({ customerId, me }: { customerId: number; me?: AuthUs
               <Td align="right" mono>{money(g.currentBalance)}</Td>
               <Td align="right" mono>{g.guaranteedAmount == null ? '—' : money(g.guaranteedAmount)}</Td>
             </>} />
-        </div>
+        </RSection>
       )}
     </div>
   )

@@ -7,6 +7,7 @@ import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, ErrorBanner, statusTone } from '../../components/ui'
 import { Icon } from '../../components/Icon'
+import { useFilePreview } from '../../components/FilePreview'
 import {
   speedDraftsApi, speedDraftCollateralApi, speedDraftCollateralDocumentsApi, speedDraftPaymentsApi,
   type SpeedDraft, type SpeedDraftPayment, type SpeedDraftCollateralInput, type SpeedDraftCollateralDocument, type AuthUser, type PaymentMethod,
@@ -360,6 +361,7 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
 
 function CollateralPanel({ speedDraft: d, me, onChanged }: { speedDraft: SpeedDraft; me?: AuthUser | null; onChanged: () => void }) {
   const notify = useNotify()
+  const preview = useFilePreview()
   const [modal, setModal] = useState(false)
   const [editing, setEditing] = useState<SpeedDraftCollateralInput | null>(null)
   const [form, setForm] = useState<Partial<SpeedDraftCollateralInput>>({ collateralType: 'Jewelry' })
@@ -417,13 +419,8 @@ function CollateralPanel({ speedDraft: d, me, onChanged }: { speedDraft: SpeedDr
   }
   const viewDoc = async (doc: SpeedDraftCollateralDocument) => {
     if (!editing?.id) return
-    const win = window.open('', '_blank')
-    try {
-      const blob = await speedDraftCollateralDocumentsApi.download(editing.id, doc.id)
-      const url = URL.createObjectURL(blob)
-      if (win) win.location.href = url; else window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch { win?.close(); notify.error('Could not open attachment') }
+    try { preview.open(await speedDraftCollateralDocumentsApi.download(editing.id, doc.id), doc.filePath) }
+    catch { notify.error('Could not open attachment') }
   }
 
   return (
@@ -491,6 +488,7 @@ function CollateralPanel({ speedDraft: d, me, onChanged }: { speedDraft: SpeedDr
           </div>
         </div>
       </Modal>
+      {preview.node}
     </Card>
   )
 }
