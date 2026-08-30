@@ -8,12 +8,13 @@ class BankAccount extends Model
 {
     protected $fillable = [
         'branch_id', 'chart_of_account_id', 'bank_id', 'name', 'bank_branch_name', 'account_number',
-        'account_type', 'currency', 'opening_balance', 'current_balance', 'status', 'notes',
+        'account_type', 'currency', 'opening_balance', 'current_balance', 'status', 'notes', 'overdraft_limit',
     ];
 
     protected $casts = [
         'opening_balance' => 'decimal:2',
         'current_balance' => 'decimal:2',
+        'overdraft_limit' => 'decimal:2',
     ];
 
     public function branch()

@@ -11,6 +11,7 @@ use App\Support\LedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class BankTransactionController extends Controller
 {
@@ -47,6 +48,7 @@ class BankTransactionController extends Controller
             $account = BankAccount::lockForUpdate()->findOrFail($data['bank_account_id']);
             $isCredit = in_array($data['transaction_type'], BankTransaction::CREDIT_TYPES, true);
             $newBalance = bcadd((string) $account->current_balance, $isCredit ? $data['amount'] : -$data['amount'], 2);
+            $this->assertWithinOverdraft($account, $newBalance);
             $account->update(['current_balance' => $newBalance]);
 
             [$contraCoaId, $contraLabel] = $this->applyContra($data, $isCredit);
@@ -102,7 +104,9 @@ class BankTransactionController extends Controller
 
         if ($data['contra_kind'] === 'Bank') {
             $other = BankAccount::lockForUpdate()->findOrFail($data['contra_bank_account_id']);
-            $other->update(['current_balance' => bcadd((string) $other->current_balance, (string) ($sign * $data['amount']), 2)]);
+            $otherBalance = bcadd((string) $other->current_balance, (string) ($sign * $data['amount']), 2);
+            $this->assertWithinOverdraft($other, $otherBalance);
+            $other->update(['current_balance' => $otherBalance]);
 
             return [ChartOfAccount::forBankAccount($other)->id, "Bank: {$other->name}"];
         }
@@ -110,6 +114,24 @@ class BankTransactionController extends Controller
         $account = ChartOfAccount::findOrFail($data['contra_chart_of_account_id']);
 
         return [$account->id, "{$account->code} {$account->name}"];
+    }
+
+    /**
+     * A bank account may only go negative if it has a sanctioned overdraft
+     * (overdraft_limit is set), and never past that limit. An account with no
+     * overdraft_limit cannot go below zero at all.
+     */
+    private function assertWithinOverdraft(BankAccount $account, string $newBalance): void
+    {
+        $floor = $account->overdraft_limit !== null ? bcmul((string) $account->overdraft_limit, '-1', 2) : '0.00';
+        if (bccomp($newBalance, $floor, 2) < 0) {
+            $limit = $account->overdraft_limit !== null
+                ? "its overdraft limit of {$account->overdraft_limit}"
+                : 'zero (no overdraft facility is set on this account)';
+            throw ValidationException::withMessages([
+                'amount' => "This would take {$account->name} to {$newBalance}, beyond {$limit}.",
+            ]);
+        }
     }
 
     public function destroy(BankTransaction $bankTransaction)

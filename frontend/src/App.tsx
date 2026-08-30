@@ -35,6 +35,7 @@ const FundingProductsScreen = lazy(() => import('./screens/FundingProducts').the
 const DepositsScreen = lazy(() => import('./screens/Deposits').then((m) => ({ default: m.DepositsScreen })))
 const FixedDepositsScreen = lazy(() => import('./screens/FixedDeposits').then((m) => ({ default: m.FixedDepositsScreen })))
 const DepositPaymentScreen = lazy(() => import('./screens/DepositPayment').then((m) => ({ default: m.DepositPaymentScreen })))
+const BorrowingsScreen = lazy(() => import('./screens/Borrowings').then((m) => ({ default: m.BorrowingsScreen })))
 const FdInterestDueScreen = lazy(() => import('./screens/FdInterestDue').then((m) => ({ default: m.FdInterestDueScreen })))
 const FundingReportsScreen = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingReportsScreen })))
 const named = <M, K extends keyof M>(loader: () => Promise<M>, key: K) =>
@@ -193,6 +194,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'fund/deposits': DepositsScreen,
   'fund/fds': FixedDepositsScreen,
   'fund/deposit-payment': DepositPaymentScreen,
+  'fund/borrowings': BorrowingsScreen,
   'fund/interest-due': FdInterestDueScreen,
   'fund/reports': FundingReportsScreen,
   'rep/loans-summary': LoanPortfolioSummaryScreen,

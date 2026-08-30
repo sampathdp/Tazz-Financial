@@ -105,6 +105,7 @@ export function BankAccountsScreen({ go: _go, user: me }: { go: Go; user?: AuthU
           </Select></Field>
           <Field label="Currency"><Input value={form.currency || 'LKR'} onChange={(e) => setForm((s) => ({ ...s, currency: e.target.value.toUpperCase() }))} /></Field>
           <Field label="Opening Balance"><Input type="number" step="0.01" value={form.openingBalance ?? 0} disabled={!!editing} onChange={(e) => setForm((s) => ({ ...s, openingBalance: e.target.value }))} /></Field>
+          <Field label="Overdraft Limit"><Input type="number" step="0.01" value={form.overdraftLimit ?? ''} placeholder="Blank = no overdraft" onChange={(e) => setForm((s) => ({ ...s, overdraftLimit: e.target.value }))} /></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
           <Field label="Notes" full><textarea value={form.notes || ''} onChange={(e) => setForm((s) => ({ ...s, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
         </div>

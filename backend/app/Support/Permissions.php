@@ -52,6 +52,7 @@ class Permissions
         'Funding Products',
         'Deposits',
         'Fixed Deposits',
+        'Borrowings',
         'Funding Reports',
         'Chart of Accounts',
         'Accounting Reports',

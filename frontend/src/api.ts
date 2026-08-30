@@ -774,6 +774,8 @@ export interface BankAccount {
   accountNumber: string; accountType?: BankAccountType;
   currency?: string;
   openingBalance?: number | string; currentBalance?: number | string;
+  /** A sanctioned overdraft limit. Set it to let this account's balance go negative (down to -overdraftLimit); null = never below zero. */
+  overdraftLimit?: number | string | null;
   status?: 'Active' | 'Inactive';
   notes?: string | null;
 }
@@ -1676,6 +1678,88 @@ export const fixedDepositsApi = {
     http.post(`/fixed-deposits/${id}/part-payment`, snakeize(body)).then((r) => camelize(r.data) as FdPartPayment & { fixedDeposit: FixedDeposit }),
   /** Undoes a mistaken part payment — only allowed on the FD's most recent one (see backend FixedDepositController::voidPartPayment). */
   voidPartPayment: (partPaymentId: number) => http.post(`/fd-part-payments/${partPaymentId}/void`).then((r) => camelize(r.data) as FixedDeposit),
+}
+
+/* ===================== Borrowings (money the company borrows) ===================== */
+
+export type BorrowingType = 'Party' | 'Overdraft' | 'RePledgedPawning' | 'Other'
+export type BorrowingStatus = 'Active' | 'Settled' | 'Void'
+export type BorrowingTxnKind = 'Drawdown' | 'InterestPayment' | 'PrincipalRepayment' | 'Settlement'
+
+export interface BorrowingTransaction {
+  id: number; borrowingId: number; voucherNo: string;
+  kind: BorrowingTxnKind; amount: number | string; txnDate: string;
+  paymentMethod: FdPaymentMethod;
+  cashAccountId?: number | null; bankAccountId?: number | null;
+  referenceNo?: string | null; notes?: string | null;
+  outstandingBefore: number | string;
+  creator?: { id: number; name: string } | null;
+  createdAt?: string;
+}
+
+export interface BorrowingRepledgedItem {
+  id: number; borrowingId: number; pawningId: number;
+  pawning?: { id: number; code: string; principalAmount: number | string; status: string } | null;
+  appraisedValueSnapshot?: number | string | null;
+  financierName?: string | null; externalReference?: string | null;
+}
+
+export interface Borrowing {
+  id: number; borrowingNumber: string;
+  branchId: number; branch?: { id: number; name: string; code: string } | null;
+  type: BorrowingType;
+  lenderName: string; source?: string | null; purpose?: string | null;
+  principalAmount: number | string;
+  /** Running balance still owed. For an Overdraft this is computed live from the linked account's negative balance. */
+  outstandingAmount: number | string;
+  /** Overdraft only — same value as outstandingAmount, made explicit. */
+  overdraftDrawn?: number | string;
+  interestRatePercent?: number | string | null;
+  borrowingDate: string;
+  receiptMethod?: FdPaymentMethod | null;
+  receiptCashAccountId?: number | null; receiptCashAccount?: { id: number; name: string } | null;
+  receiptBankAccountId?: number | null; receiptBankAccount?: { id: number; name: string } | null;
+  bankAccountId?: number | null;
+  bankAccount?: { id: number; name: string; accountNumber?: string; currentBalance?: number | string; overdraftLimit?: number | string | null; bank?: { id: number; name: string } | null } | null;
+  referenceNo?: string | null; notes?: string | null;
+  status: BorrowingStatus;
+  transactions?: BorrowingTransaction[];
+  repledgedItems?: BorrowingRepledgedItem[];
+  creator?: { id: number; name: string } | null;
+  createdAt?: string;
+}
+
+export interface BorrowingCreateInput {
+  branchId: number; type: BorrowingType;
+  lenderName: string; source?: string; purpose?: string;
+  principalAmount: number | string; interestRatePercent?: number | string;
+  borrowingDate: string; referenceNo?: string; notes?: string;
+  receiptMethod?: FdPaymentMethod;
+  receiptCashAccountId?: number; receiptBankAccountId?: number;
+  bankAccountId?: number; setOverdraftLimit?: boolean;
+  repledgedItems?: { pawningId: number; appraisedValueSnapshot?: number | string; financierName?: string; externalReference?: string }[];
+}
+
+export interface BorrowingTxnInput {
+  kind: BorrowingTxnKind; amount: number | string; txnDate: string;
+  paymentMethod: FdPaymentMethod;
+  cashAccountId?: number; bankAccountId?: number;
+  referenceNo?: string; notes?: string;
+}
+
+export const borrowingsApi = {
+  list: (params?: { type?: BorrowingType; status?: BorrowingStatus }) =>
+    http.get('/borrowings', { params }).then((r) => camelize(r.data) as Borrowing[]),
+  get: (id: number) => http.get(`/borrowings/${id}`).then((r) => camelize(r.data) as Borrowing),
+  nextNumber: (branchId: number) =>
+    http.get('/borrowings/next-number', { params: { branch_id: branchId } }).then((r) => r.data.code as string),
+  create: (body: BorrowingCreateInput) =>
+    http.post('/borrowings', snakeize(body)).then((r) => camelize(r.data) as Borrowing),
+  addTransaction: (id: number, body: BorrowingTxnInput) =>
+    http.post(`/borrowings/${id}/transactions`, snakeize(body)).then((r) => camelize(r.data) as Borrowing),
+  voidTransaction: (txnId: number) =>
+    http.post(`/borrowing-transactions/${txnId}/void`).then((r) => camelize(r.data) as Borrowing),
+  remove: (id: number) => http.delete(`/borrowings/${id}`).then((r) => r.data),
 }
 
 export interface FinanceCalcCharge { label?: string; amount: number | string; financed?: boolean }

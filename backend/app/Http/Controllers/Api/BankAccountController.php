@@ -65,6 +65,10 @@ class BankAccountController extends Controller
             'account_type' => [Rule::in(self::TYPES)],
             'currency' => 'nullable|string|size:3',
             'opening_balance' => 'nullable|numeric',
+            // A sanctioned overdraft limit — set it to let this account's
+            // balance go negative (down to -overdraft_limit); leave it null and
+            // the account can never go below zero. See BankTransactionController.
+            'overdraft_limit' => 'nullable|numeric|min:0',
             'status' => [Rule::in(['Active', 'Inactive'])],
             'notes' => 'nullable|string|max:255',
         ]);

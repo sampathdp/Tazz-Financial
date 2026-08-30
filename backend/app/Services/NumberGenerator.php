@@ -68,6 +68,10 @@ class NumberGenerator
         // numbering is one company-wide series per year across all schemes.
         'pawning' => '{BRANCH}-PW-{YEAR:2}-{SEQ:6}',
         'pawning_auction' => '{BRANCH}-PWA-{YEAR:2}-{SEQ:4}',
+        // Company borrowings (money the company itself borrows) and their
+        // repayment/interest vouchers — one company-wide series per year each.
+        'borrowing' => '{BRANCH}-BRW-{YEAR:2}-{SEQ:5}',
+        'borrowing_txn' => '{BRANCH}-BRWV-{YEAR:2}-{SEQ:5}',
     ];
 
     // Modules whose {CODE} placeholder is keyed off a funding product (own

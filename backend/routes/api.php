@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\JournalEntryController;
+use App\Http\Controllers\Api\BorrowingController;
 use App\Http\Controllers\Api\FdDepositController;
 use App\Http\Controllers\Api\FdInterestPaymentController;
 use App\Http\Controllers\Api\FixedDepositController;
@@ -468,6 +469,15 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('fixed-deposits/{fixedDeposit}/interest-payments', [FdInterestPaymentController::class, 'index'])->middleware('perm:Fixed Deposits,View');
     Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fd-interest-payments/{fdInterestPayment}/void', [FdInterestPaymentController::class, 'void'])->middleware('perm:Fixed Deposits,Delete');
+
+    // --- Funding Management: Borrowings (money the company itself borrows) ---
+    Route::get('borrowings', [BorrowingController::class, 'index'])->middleware('perm:Borrowings,View');
+    Route::get('borrowings/next-number', [BorrowingController::class, 'nextNumber'])->middleware('perm:Borrowings,Create');
+    Route::get('borrowings/{borrowing}', [BorrowingController::class, 'show'])->middleware('perm:Borrowings,View');
+    Route::post('borrowings', [BorrowingController::class, 'store'])->middleware('perm:Borrowings,Create');
+    Route::post('borrowings/{borrowing}/transactions', [BorrowingController::class, 'addTransaction'])->middleware('perm:Borrowings,Edit');
+    Route::post('borrowing-transactions/{borrowingTransaction}/void', [BorrowingController::class, 'voidTransaction'])->middleware('perm:Borrowings,Delete');
+    Route::delete('borrowings/{borrowing}', [BorrowingController::class, 'destroy'])->middleware('perm:Borrowings,Delete');
 
     // --- Funding Management: Reports & Dashboard ---
     Route::get('funding-reports/{type}', [FundingReportController::class, 'show'])->middleware('perm:Funding Reports,View');

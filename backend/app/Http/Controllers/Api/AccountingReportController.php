@@ -514,6 +514,22 @@ class AccountingReportController extends Controller
             $totals[$account->account_type] = bcadd($totals[$account->account_type], $balance, 2);
         }
 
+        // A bank account (1020 leaf) with a credit/negative balance is an
+        // overdraft drawn — present it under liabilities, not as a negative
+        // asset. Moving |balance| off assets and onto liabilities raises both
+        // sides equally, so the A = L + E identity below still holds.
+        $rows['Asset'] = array_values(array_filter($rows['Asset'], function ($row) use (&$rows, &$totals) {
+            if (! preg_match('/^1020(-|$)/', $row['code']) || bccomp($row['balance'], '0', 2) >= 0) {
+                return true;
+            }
+            $drawn = bcmul($row['balance'], '-1', 2);
+            $rows['Liability'][] = ['account_id' => $row['account_id'], 'code' => $row['code'], 'name' => "Overdraft — {$row['name']}", 'balance' => $drawn];
+            $totals['Asset'] = bcsub($totals['Asset'], $row['balance'], 2);
+            $totals['Liability'] = bcadd($totals['Liability'], $drawn, 2);
+
+            return false;
+        }));
+
         $yearStart = Carbon::parse($asOf)->startOfYear()->toDateString();
         [, , $totalIncome, $totalExpense] = $this->plFigures($yearStart, $asOf);
         $currentYearProfit = bcsub($totalIncome, $totalExpense, 2);
