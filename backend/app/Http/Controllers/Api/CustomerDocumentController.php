@@ -35,21 +35,7 @@ class CustomerDocumentController extends Controller
 
     public function show(Customer $customer, CustomerDocument $document): StreamedResponse
     {
-        $absPath = storage_path('app/public/'.$document->file_path);
-        \Log::info('doc.show', [
-            'customer_id_url' => $customer->id,
-            'document_id' => $document->id,
-            'customer_id_row' => $document->customer_id,
-            'parent_matches' => $document->customer_id === $customer->id,
-            'file_path' => $document->file_path,
-            'disk_root' => config('filesystems.disks.public.root'),
-            'storage_exists' => Storage::disk('public')->exists($document->file_path),
-            'php_file_exists' => file_exists($absPath),
-            'is_readable' => @is_readable($absPath),
-            'abs_path' => $absPath,
-        ]);
-
-        abort_if($document->customer_id !== $customer->id, 404);
+        abort_if((int) $document->customer_id !== (int) $customer->id, 404);
         abort_unless(Storage::disk('public')->exists($document->file_path), 404);
 
         return Storage::disk('public')->response($document->file_path, Str::afterLast($document->file_path, '/'));

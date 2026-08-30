@@ -12,6 +12,9 @@ class FacilityCollateral extends Model
 
     protected $casts = [
         'estimated_value' => 'decimal:2',
+        // Some hosts' PDO returns integer columns as strings — keep the FK an int
+        // so the collateral-document controllers' strict !== guards never misfire.
+        'credit_facility_id' => 'integer',
     ];
 
     public function facility()
