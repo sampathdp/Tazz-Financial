@@ -81,7 +81,8 @@ class PostOpeningBalances extends Command
             $account = $t['account'];
             // Freshly-created leaf accounts (a till/bank with no postings yet)
             // won't be in the set computed above — treat as a zero balance.
-            $current = $balances->get($account->id)?->balance ?? '0.00';
+            $currentRow = $balances->get($account->id);
+            $current = $currentRow ? $currentRow->balance : '0.00';
             $deltaNormal = bcsub((string) $t['target'], (string) $current, 2); // in the account's normal-balance orientation
             if (bccomp($deltaNormal, '0.00', 2) === 0) {
                 continue;
@@ -100,7 +101,12 @@ class PostOpeningBalances extends Command
             return self::SUCCESS;
         }
 
-        $equity = ChartOfAccount::where('code', '3015')->firstOr(fn () => throw new \RuntimeException('3015 Opening Balance Equity is missing — run migrations.'));
+        $equity = ChartOfAccount::where('code', '3015')->first();
+        if (!$equity) {
+            $this->error('3015 Opening Balance Equity is missing — run migrations first.');
+
+            return self::FAILURE;
+        }
         $lines[] = [
             'account_id' => $equity->id,
             'debit' => bccomp($offsetDebit, '0.00', 2) > 0 ? $offsetDebit : '0.00',
