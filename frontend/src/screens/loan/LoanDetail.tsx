@@ -156,6 +156,27 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
     catch (ex: any) { notify.error('Close failed', getErrorText(ex)) }
   }
 
+  // TEMPORARY admin-only — hard-purge this loan (and its restructure chain) from
+  // the database. One-off live-data cleanup for test / mis-keyed loans; remove
+  // this handler + its button with the backend route. See LoanController::purge().
+  const purgeLoan = async () => {
+    const chain = [loan.code, loan.restructuredFrom?.code, loan.restructuredTo?.code].filter(Boolean).join(', ')
+    const typed = await notify.prompt({
+      title: `Permanently delete loan ${loan.code}?`,
+      msg: `TEMPORARY TOOL — this hard-deletes ${chain} and every record tied to them: schedule, payments, charges, collateral, documents, journal entries and cashbook receipts (the cash balance is corrected). This cannot be undone. Type the loan code to confirm.`,
+      placeholder: loan.code, required: true, danger: true, okText: 'Delete Forever',
+    })
+    if (!typed) return
+    if (typed.trim() !== loan.code) { notify.error('Code did not match — nothing deleted'); return }
+    setBusy(true)
+    try {
+      await loansApi.purge(loan.id)
+      notify.success('Loan purged', chain)
+      go?.('loan/active')
+    } catch (ex: any) { notify.error('Purge failed', getErrorText(ex)) }
+    finally { setBusy(false) }
+  }
+
   const eventOf = (type: FacilityStatusEventType) => (loan.statusEvents || []).find((e) => e.eventType === type)
   const flags: { label: string; on?: boolean; at?: string | null }[] = [
     { label: 'Terminated', on: !!eventOf('Terminated'), at: eventOf('Terminated')?.eventDate },
@@ -222,6 +243,10 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           })()}
           {context === 'applications' && go && ACTIVE_STAGE_STATUSES.includes(loan.status) && (
             <Btn size="sm" variant="solid" icon="coins" onClick={() => go('loan/active')}>Open in Active Loans</Btn>
+          )}
+          {/* TEMPORARY admin-only hard-purge — one-off live-data cleanup, remove with the backend route */}
+          {context === 'active' && me?.role === 'admin' && (
+            <Btn size="sm" variant="danger" icon="trash" onClick={purgeLoan} disabled={busy}>Delete Completely</Btn>
           )}
         </div>
       </div>

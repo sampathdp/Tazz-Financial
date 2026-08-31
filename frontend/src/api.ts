@@ -1059,6 +1059,11 @@ export const loansApi = {
     http.patch(`/loans/${id}/officers`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   overdue: (params?: { from?: string; to?: string }) =>
     http.get('/loans-overdue', { params }).then((r) => camelize(r.data) as OverdueLoan[]),
+  /** TEMPORARY, admin-only — hard-deletes this loan and its whole restructure
+   *  chain (-R1/-R2 …) plus every child record and its GL / cashbook footprint
+   *  (the cash balance is corrected). One-off live-data cleanup; remove with the
+   *  backend route. See LoanController::purge(). */
+  purge: (id: number) => http.delete(`/loans/${id}/purge`).then((r) => r.data as { ok: true; purgedLoanIds: number[] }),
 }
 
 export const loanProvisionsApi = {

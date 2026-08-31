@@ -210,6 +210,12 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // Loan reschedule (restructure) — closes the loan as 'Restructured' and creates a
     // new linked loan. Admin-only, no approval workflow, same as the other Loan Adjustments actions.
     Route::post('loans/{loan}/reschedule', [LoanController::class, 'reschedule'])->middleware('admin');
+    // TEMPORARY (admin-only) — hard-purges a loan and its whole restructure chain
+    // from the database: schedule, payments, charges, collateral, documents, GL
+    // journal entries + lines and cashbook receipts (the cash balance is
+    // corrected). One-off live-data cleanup for test / mis-keyed loans; remove
+    // this route + LoanController::purge() once the cleanup is done.
+    Route::delete('loans/{loan}/purge', [LoanController::class, 'purge'])->middleware('admin');
 
     // --- Loan Management: Impairment / NPL Provisioning ---
     // Flat path (not loans/provisions) so it can never collide with loans/{loan} below.
