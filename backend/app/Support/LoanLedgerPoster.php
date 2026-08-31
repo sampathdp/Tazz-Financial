@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\BankAccount;
 use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\FacilityPayment;
@@ -13,43 +14,68 @@ use App\Models\Loan;
  * CashbookPoster, triggered from the same places, but answering "what does
  * the business now own/earn" rather than "how much is in the till."
  *
- * Scope, deliberately: only Cash-method receipts, Cheque realizations, and
- * (now) Cash-method disbursements are wired here. Each has an unambiguous
- * account to move (the branch's till, or 1030 Cheques/Undeposited Funds).
- * Bank-method loan payments/disbursements are still NOT posted —
- * FacilityPayment.bank_id is only ever set for a cheque, loan_facility_
- * details.disbursement_method captures Cash/Bank/Cheque but no
- * bank_account_id, so there is no unambiguous account to move for Bank
- * either way; inventing one here would just be a second kind of drift. Same
- * limitation SpeedDraftLedgerPoster/PawningLedgerPoster already carry for
- * disbursement — not a new gap, just extended to Loan for consistency.
+ * Scope: Cash-method receipts, Cheque realizations, and disbursements by
+ * every method (Cash / Bank / Cheque). A Bank or Cheque disbursement credits
+ * the bank account it was paid out of (loan_facility_details
+ * .disbursement_bank_account_id, captured at disburse() time); a Cash one
+ * credits the branch till. Bank-method loan *payments* are still NOT posted —
+ * FacilityPayment carries no bank_account_id for a plain receipt.
  */
 class LoanLedgerPoster
 {
-    /** Capital handed to the customer at disbursement — Dr 1100 (principal now outstanding), Cr the branch till. Cash-method only, see class docblock. */
+    /**
+     * Capital handed to the customer at disbursement — Dr 1100 (principal now
+     * outstanding), Cr wherever the money left from: the branch till for a
+     * Cash disbursement, or the selected bank account for Bank / Cheque.
+     */
     public static function postDisbursement(Loan $loan): void
     {
-        if ($loan->loanDetail?->disbursement_method !== 'Cash') {
+        $detail = $loan->loanDetail;
+        $method = $detail?->disbursement_method;
+        $creditAccount = self::disbursementCreditAccount(
+            $method,
+            (int) $loan->branch_id,
+            $detail?->disbursement_bank_account_id ? (int) $detail->disbursement_bank_account_id : null,
+        );
+        if (!$creditAccount) {
             return;
         }
-        $till = CashAccount::branchPrimary((int) $loan->branch_id);
-        if (!$till) {
-            return;
-        }
-        $tillAccount = ChartOfAccount::forCashTill($till);
         $principalAccount = ChartOfAccount::system('1100');
         $entryDate = optional($loan->disbursed_at)->toDateString() ?? now()->toDateString();
 
         LedgerPoster::post([
             ['account_id' => $principalAccount->id, 'debit' => $loan->disbursed_amount, 'credit' => 0],
-            ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $loan->disbursed_amount],
+            ['account_id' => $creditAccount->id, 'debit' => 0, 'credit' => $loan->disbursed_amount],
         ], $entryDate, [
             'source_type' => 'Loan',
             'source_id' => $loan->id,
-            'description' => "Loan disbursed - {$loan->code}",
+            'description' => "Loan disbursed ({$method}) - {$loan->code}",
             'branch_id' => $loan->branch_id,
             'posted_by' => $loan->approved_by,
         ]);
+    }
+
+    /**
+     * The leaf account a disbursement's capital is credited to. Cash → the
+     * branch's primary till; Bank/Cheque → the chosen bank account. Returns
+     * null (caller no-ops) if the needed account can't be resolved — an
+     * unknown method, a branch with no till, or a Bank/Cheque disbursement
+     * with no bank account recorded (e.g. a pre-cutover loan).
+     */
+    public static function disbursementCreditAccount(?string $method, int $branchId, ?int $bankAccountId): ?ChartOfAccount
+    {
+        if ($method === 'Cash') {
+            $till = CashAccount::branchPrimary($branchId);
+
+            return $till ? ChartOfAccount::forCashTill($till) : null;
+        }
+        if (in_array($method, ['Bank', 'Cheque'], true) && $bankAccountId) {
+            $bank = BankAccount::find($bankAccountId);
+
+            return $bank ? ChartOfAccount::forBankAccount($bank) : null;
+        }
+
+        return null;
     }
 
     /**

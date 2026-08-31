@@ -13,36 +13,37 @@ use App\Models\SpeedDraft;
  * of LoanLedgerPoster, reusing the same LedgerPoster/ChartOfAccount/
  * CashbookPoster primitives rather than reinventing posting.
  *
- * Scope, deliberately: Cash-method only, same reasoning as LoanLedgerPoster —
- * Bank-method disbursement/receipts have no unambiguous account to move
- * without a captured bank_account_id, which this module doesn't have yet.
- * Unlike Loan (whose disbursement is never posted at all), disbursing a Speed
- * Draft's capital *is* posted here — it's the module's central money-out
- * event, not an incidental gap.
+ * Scope: Cash-method receipts and disbursements by Cash or Bank. A Bank
+ * disbursement credits the account it was paid out of (speed_draft_facility_
+ * details.disbursement_bank_account_id, captured at disburse() time); a Cash
+ * one credits the branch till. Bank-method receipts are still NOT posted —
+ * a plain FacilityPayment carries no bank account.
  */
 class SpeedDraftLedgerPoster
 {
-    /** Capital handed to the customer at disbursement — Dr 1110 (capital now outstanding), Cr the branch till. */
+    /** Capital handed to the customer at disbursement — Dr 1110 (capital now outstanding), Cr the branch till (Cash) or the chosen bank account (Bank). */
     public static function postDisbursement(SpeedDraft $draft): void
     {
-        if ($draft->speedDraftDetail?->disbursement_method !== 'Cash') {
+        $detail = $draft->speedDraftDetail;
+        $method = $detail?->disbursement_method;
+        $creditAccount = LoanLedgerPoster::disbursementCreditAccount(
+            $method,
+            (int) $draft->branch_id,
+            $detail?->disbursement_bank_account_id ? (int) $detail->disbursement_bank_account_id : null,
+        );
+        if (!$creditAccount) {
             return;
         }
-        $till = CashAccount::branchPrimary((int) $draft->branch_id);
-        if (!$till) {
-            return;
-        }
-        $tillAccount = ChartOfAccount::forCashTill($till);
         $capitalAccount = ChartOfAccount::system('1110');
         $entryDate = optional($draft->disbursed_at)->toDateString() ?? now()->toDateString();
 
         LedgerPoster::post([
             ['account_id' => $capitalAccount->id, 'debit' => $draft->disbursed_amount, 'credit' => 0],
-            ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $draft->disbursed_amount],
+            ['account_id' => $creditAccount->id, 'debit' => 0, 'credit' => $draft->disbursed_amount],
         ], $entryDate, [
             'source_type' => 'SpeedDraft',
             'source_id' => $draft->id,
-            'description' => "Speed Draft disbursed - {$draft->code}",
+            'description' => "Speed Draft disbursed ({$method}) - {$draft->code}",
             'branch_id' => $draft->branch_id,
             'posted_by' => $draft->approved_by,
         ]);

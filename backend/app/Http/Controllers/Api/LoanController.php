@@ -368,7 +368,8 @@ class LoanController extends Controller
      * footprint (journal entries + lines for the disbursement, every
      * payment, provisions and the reschedule rollover) plus the cashbook
      * receipts. Each deleted cash receipt is walked back out of the
-     * cash-account balance so the till stays correct.
+     * cash-account balance, and each deleted bank movement out of the
+     * bank-account balance, so the till / bank balances stay correct.
      *
      * The whole restructure chain goes together: a rescheduled loan is
      * linked to a -R{n} loan by restructured_from_id, and deleting only one
@@ -413,6 +414,16 @@ class LoanController extends Controller
 
                 // --- General ledger ---
                 if ($journalEntryIds) {
+                    // Walk each bank movement back out of the bank account's
+                    // running balance before dropping the row — same as the
+                    // cashbook handling above. A Withdrawal/TransferOut took
+                    // money off the account, so removing it adds it back.
+                    $bankTxns = DB::table('bank_transactions')->whereIn('journal_entry_id', $journalEntryIds)->get();
+                    foreach ($bankTxns as $txn) {
+                        $signed = in_array($txn->transaction_type, ['Withdrawal', 'TransferOut'], true) ? (float) $txn->amount : -(float) $txn->amount;
+                        DB::table('bank_accounts')->where('id', $txn->bank_account_id)
+                            ->update(['current_balance' => DB::raw('current_balance + '.$signed)]);
+                    }
                     DB::table('journal_lines')->whereIn('journal_entry_id', $journalEntryIds)->delete();
                     DB::table('bank_transactions')->whereIn('journal_entry_id', $journalEntryIds)->delete();
                     DB::table('journal_entries')->whereIn('id', $journalEntryIds)->delete();
@@ -718,6 +729,9 @@ class LoanController extends Controller
             'disbursed_at' => 'nullable|date',
             'first_installment_date' => 'required|date',
             'disbursement_method' => ['required', Rule::in(['Cash', 'Bank', 'Cheque'])],
+            // The account the money leaves from — required for Bank/Cheque so the
+            // GL has an unambiguous account to credit (see LoanLedgerPoster).
+            'disbursement_bank_account_id' => ['required_if:disbursement_method,Bank,Cheque', 'nullable', 'exists:bank_accounts,id'],
         ]);
 
         DB::transaction(function () use ($loan, $detail, $data) {
@@ -731,6 +745,7 @@ class LoanController extends Controller
             $detail->update([
                 'first_installment_date' => $data['first_installment_date'],
                 'disbursement_method' => $data['disbursement_method'],
+                'disbursement_bank_account_id' => $data['disbursement_method'] === 'Cash' ? null : $data['disbursement_bank_account_id'],
             ]);
             $rows = LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $data['first_installment_date']);
             $loan->schedules()->insert($rows);
@@ -1038,6 +1053,7 @@ class LoanController extends Controller
                 'vehicle_no' => $oldDetail->vehicle_no,
                 'down_payment' => 0,
                 'disbursement_method' => $oldDetail->disbursement_method,
+                'disbursement_bank_account_id' => $oldDetail->disbursement_bank_account_id,
                 'interest_method' => $data['interest_method'],
                 'installment_frequency' => $data['installment_frequency'],
                 'purpose' => 'Reschedule of ' . $loan->code,

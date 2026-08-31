@@ -56,6 +56,7 @@ class Permissions
         'Funding Reports',
         'Chart of Accounts',
         'Accounting Reports',
+        'Manual Journal Entries',
         'Vendors',
         'Expenses',
         'Payment Vouchers',

@@ -3,14 +3,14 @@
    Disburse live here (mirrors LoanDetail's DisburseForm); actually recording interest or
    capital payments happens on the standalone Speed Draft Payments screen, same split as
    Loan (ActiveLoans/LoanDetail show history, PaymentReceipt records payments). */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, ErrorBanner, statusTone } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import { useFilePreview } from '../../components/FilePreview'
 import {
-  speedDraftsApi, speedDraftCollateralApi, speedDraftCollateralDocumentsApi, speedDraftPaymentsApi,
-  type SpeedDraft, type SpeedDraftPayment, type SpeedDraftCollateralInput, type SpeedDraftCollateralDocument, type AuthUser, type PaymentMethod,
+  speedDraftsApi, speedDraftCollateralApi, speedDraftCollateralDocumentsApi, speedDraftPaymentsApi, bankAccountsApi,
+  type SpeedDraft, type SpeedDraftPayment, type SpeedDraftCollateralInput, type SpeedDraftCollateralDocument, type AuthUser, type PaymentMethod, type BankAccount,
 } from '../../api'
 import { Can, canApprove } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
@@ -180,9 +180,13 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
   const [busy, setBusy] = useState(false)
   const [disburseOpen, setDisburseOpen] = useState(false)
   const [method, setMethod] = useState<'Cash' | 'Bank'>('Cash')
+  const [bankAccountId, setBankAccountId] = useState<number | ''>('')
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [amount, setAmount] = useState(String(d.principalAmount))
   const [startDate, setStartDate] = useState(todayIso())
   const [err, setErr] = useState('')
+
+  useEffect(() => { bankAccountsApi.list().then(setBankAccounts).catch(() => setBankAccounts([])) }, [])
 
   const [renewOpen, setRenewOpen] = useState(false)
   const [renewTermMonths, setRenewTermMonths] = useState(d.termMonths)
@@ -219,9 +223,13 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
   const disburse = async () => {
     if (!amount || Number(amount) <= 0) { setErr('Enter the disbursed amount.'); return }
     if (!startDate) { setErr('Start date is required.'); return }
+    if (method !== 'Cash' && !bankAccountId) { setErr('Pick which bank account this is paid out of.'); return }
     setBusy(true); setErr('')
     try {
-      await speedDraftsApi.disburse(d.id, { disbursementMethod: method, disbursedAmount: amount, startDate })
+      await speedDraftsApi.disburse(d.id, {
+        disbursementMethod: method, disbursedAmount: amount, startDate,
+        disbursementBankAccountId: method === 'Cash' ? null : Number(bankAccountId),
+      })
       setDisburseOpen(false)
       notify.success('Speed Draft disbursed', 'Interest schedule generated')
       onChanged()
@@ -298,6 +306,12 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
               </Select></Field>
               <Field label="Disbursed Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
               <Field label="Start Date"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+              {method !== 'Cash' && (
+                <Field label="Paid Out Of (Bank Account)"><Select value={bankAccountId} onChange={(e) => setBankAccountId(Number(e.target.value) || '')}>
+                  <option value="">Select bank account…</option>
+                  {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+                </Select></Field>
+              )}
             </div>
             <div className="t-2" style={{ fontSize: 11.5 }}>
               Generates a {d.termMonths}-month interest-only schedule from the start date — interest is due monthly on the outstanding capital, with the full capital falling due at maturity.

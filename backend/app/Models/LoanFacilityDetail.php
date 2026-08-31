@@ -15,7 +15,7 @@ class LoanFacilityDetail extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'credit_facility_id', 'loan_type_id', 'vehicle_no', 'down_payment', 'disbursement_method', 'interest_method', 'installment_frequency',
+        'credit_facility_id', 'loan_type_id', 'vehicle_no', 'down_payment', 'disbursement_method', 'disbursement_bank_account_id', 'interest_method', 'installment_frequency',
         'effective_monthly_rate', 'effective_annual_rate',
         'purpose', 'application_date', 'reference_name', 'reference_id_no', 'reference_address',
         'loan_officer_id', 'recovery_officer_id', 'first_installment_date',
@@ -55,5 +55,11 @@ class LoanFacilityDetail extends Model
     public function confirmedBy()
     {
         return $this->belongsTo(User::class, 'confirmed_by');
+    }
+
+    /** Set only for a Bank/Cheque disbursement — the account the money was paid out of. */
+    public function disbursementBankAccount()
+    {
+        return $this->belongsTo(BankAccount::class, 'disbursement_bank_account_id');
     }
 }

@@ -89,6 +89,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'masters/banks': 'Masters',
   'acc/coa': 'Chart of Accounts',
   'acc/journal': 'Accounting Reports',
+  'acc/mje': 'Manual Journal Entries',
   'acc/gl': 'Accounting Reports',
   'acc/tb': 'Accounting Reports',
   'acc/pl': 'Accounting Reports',

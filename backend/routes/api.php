@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\JournalEntryController;
+use App\Http\Controllers\Api\ManualJournalEntryController;
 use App\Http\Controllers\Api\BorrowingController;
 use App\Http\Controllers\Api\FdDepositController;
 use App\Http\Controllers\Api\FdInterestPaymentController;
@@ -509,6 +510,14 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('accounting-reports/{type}', [AccountingReportController::class, 'show'])->middleware('perm:Accounting Reports,View');
     Route::get('accounting-reports/{type}/pdf', [AccountingReportController::class, 'exportPdf'])->middleware('perm:Accounting Reports,View');
     Route::get('journal-entries', [JournalEntryController::class, 'index'])->middleware('perm:Accounting Reports,View');
+
+    // --- Accounting: Manual Journal Entries (maker-checker, posts via LedgerPoster on approval) ---
+    Route::get('manual-journal-entries', [ManualJournalEntryController::class, 'index'])->middleware('perm:Manual Journal Entries,View');
+    Route::get('manual-journal-entries/account-options', [ManualJournalEntryController::class, 'accountOptions'])->middleware('perm:Manual Journal Entries,View');
+    Route::post('manual-journal-entries', [ManualJournalEntryController::class, 'store'])->middleware('perm:Manual Journal Entries,Create');
+    // approve/reject gated inline by ApprovalType::isAuthorized('manual_journal_entry') — same pattern as expense_approval.
+    Route::put('manual-journal-entries/{manualJournalEntry}/approve', [ManualJournalEntryController::class, 'approve']);
+    Route::put('manual-journal-entries/{manualJournalEntry}/reject', [ManualJournalEntryController::class, 'reject']);
 
     // --- Expense Management: Vendors ---
     Route::get('vendors', [VendorController::class, 'index'])->middleware('perm:Vendors,View');

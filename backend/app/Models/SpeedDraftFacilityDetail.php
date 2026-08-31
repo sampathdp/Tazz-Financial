@@ -15,12 +15,18 @@ class SpeedDraftFacilityDetail extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'credit_facility_id', 'speed_draft_type_id', 'vehicle_no', 'payment_frequency', 'disbursement_method',
+        'credit_facility_id', 'speed_draft_type_id', 'vehicle_no', 'payment_frequency', 'disbursement_method', 'disbursement_bank_account_id',
     ];
 
     public function speedDraft()
     {
         return $this->belongsTo(SpeedDraft::class, 'credit_facility_id');
+    }
+
+    /** Set only for a Bank disbursement — the account the money was paid out of. */
+    public function disbursementBankAccount()
+    {
+        return $this->belongsTo(BankAccount::class, 'disbursement_bank_account_id');
     }
 
     public function speedDraftType()

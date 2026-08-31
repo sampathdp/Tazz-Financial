@@ -48,24 +48,59 @@ class AccountingReportController extends Controller
         };
     }
 
+    /**
+     * A proper trial balance: one line per account, its *net closing balance*
+     * placed in the Debit or Credit column by which side it lands on — not the
+     * raw debit/credit turnover, which always foots equal by double-entry and
+     * so proves nothing. The two balance columns footing equal is the actual
+     * integrity check, surfaced as `totals.balanced`.
+     *
+     * `total_debit`/`total_credit` (period turnover) stay in each row for any
+     * caller that still wants them, but the report itself is driven by
+     * `debit_balance`/`credit_balance`. `is_abnormal` flags an account sitting
+     * on the opposite side of its normal balance (e.g. a credit balance on an
+     * asset) — usually a missing opening balance or an unposted counter-entry.
+     */
     private function trialBalance(Request $request)
     {
-        $asOf = $request->query('as_of');
+        $asOf = $request->query('as_of') ?: now()->toDateString();
         $balances = ChartOfAccount::balancesAsOf($asOf);
 
-        return ChartOfAccount::orderBy('code')->get()->map(function (ChartOfAccount $account) use ($balances) {
+        $rows = ChartOfAccount::orderBy('code')->get()->map(function (ChartOfAccount $account) use ($balances) {
             $b = $balances->get($account->id);
+            $balance = $b->balance ?? '0.00'; // net, already oriented to the account's normal side
+            $onNormalSide = bccomp($balance, '0.00', 2) >= 0;
+            $magnitude = $onNormalSide ? $balance : bcsub('0.00', $balance, 2);
+            $sideIsDebit = ($account->normal_balance === 'Debit') === $onNormalSide;
 
             return [
                 'account_id' => $account->id,
                 'code' => $account->code,
                 'name' => $account->name,
                 'account_type' => $account->account_type,
+                'normal_balance' => $account->normal_balance,
                 'total_debit' => $b->total_debit ?? '0.00',
                 'total_credit' => $b->total_credit ?? '0.00',
-                'balance' => $b->balance ?? '0.00',
+                'balance' => $balance,
+                'debit_balance' => bccomp($magnitude, '0.00', 2) !== 0 && $sideIsDebit ? $magnitude : '0.00',
+                'credit_balance' => bccomp($magnitude, '0.00', 2) !== 0 && !$sideIsDebit ? $magnitude : '0.00',
+                'is_abnormal' => !$onNormalSide && bccomp($magnitude, '0.00', 2) !== 0,
             ];
         })->values();
+
+        $totalDebit = $rows->reduce(fn ($c, $r) => bcadd($c, $r['debit_balance'], 2), '0.00');
+        $totalCredit = $rows->reduce(fn ($c, $r) => bcadd($c, $r['credit_balance'], 2), '0.00');
+
+        return [
+            'as_of' => $asOf,
+            'rows' => $rows,
+            'totals' => [
+                'debit' => $totalDebit,
+                'credit' => $totalCredit,
+                'difference' => bcsub($totalDebit, $totalCredit, 2),
+                'balanced' => bccomp($totalDebit, $totalCredit, 2) === 0,
+            ],
+        ];
     }
 
     private function generalLedger(Request $request)
@@ -300,20 +335,25 @@ class AccountingReportController extends Controller
 
     private function trialBalancePdf(Request $request): array
     {
-        $rows = $this->trialBalance($request);
-        $mapped = $rows->map(fn ($r) => ['code' => $r['code'], 'name' => $r['name'], 'type' => $r['account_type'], 'debit' => $r['total_debit'], 'credit' => $r['total_credit'], 'balance' => $r['balance']]);
+        $report = $this->trialBalance($request);
+        $mapped = collect($report['rows'])->map(fn ($r) => [
+            'code' => $r['code'],
+            'name' => $r['name'] . ($r['is_abnormal'] ? '  (abnormal balance)' : ''),
+            'type' => $r['account_type'],
+            'debit' => (float) $r['debit_balance'] > 0 ? $r['debit_balance'] : null,
+            'credit' => (float) $r['credit_balance'] > 0 ? $r['credit_balance'] : null,
+        ]);
         $sections = [[
             'columns' => [
                 ['key' => 'code', 'label' => 'Code'], ['key' => 'name', 'label' => 'Name'], ['key' => 'type', 'label' => 'Type', 'align' => 'center'],
-                ['key' => 'debit', 'label' => 'Debit', 'align' => 'right', 'format' => 'money'], ['key' => 'credit', 'label' => 'Credit', 'align' => 'right', 'format' => 'money'], ['key' => 'balance', 'label' => 'Balance', 'align' => 'right', 'format' => 'money'],
+                ['key' => 'debit', 'label' => 'Debit', 'align' => 'right', 'format' => 'money'], ['key' => 'credit', 'label' => 'Credit', 'align' => 'right', 'format' => 'money'],
             ],
             'rows' => $mapped->all(),
-            'totalRow' => ['name' => 'Totals', 'debit' => $mapped->sum(fn ($r) => (float) $r['debit']), 'credit' => $mapped->sum(fn ($r) => (float) $r['credit'])],
+            'totalRow' => ['name' => $report['totals']['balanced'] ? 'Totals (balanced)' : 'Totals — OUT OF BALANCE by ' . $report['totals']['difference'], 'debit' => (float) $report['totals']['debit'], 'credit' => (float) $report['totals']['credit']],
             'emptyText' => 'No accounts yet',
         ]];
-        $asOf = $request->query('as_of');
 
-        return ['Trial Balance', $sections, null, $asOf ? "As of {$asOf}" : null];
+        return ['Trial Balance', $sections, null, "As of {$report['as_of']}"];
     }
 
     private function generalLedgerPdf(Request $request): array

@@ -66,6 +66,7 @@ const ChargeCategoriesScreen = named(() => import('./screens/Masters'), 'ChargeC
 
 const ChartOfAccountsScreen = named(() => import('./screens/Accounting'), 'ChartOfAccountsScreen')
 const JournalEntriesScreen = named(() => import('./screens/Accounting'), 'JournalEntriesScreen')
+const ManualJournalEntriesScreen = named(() => import('./screens/Accounting'), 'ManualJournalEntriesScreen')
 const GeneralLedgerScreen = named(() => import('./screens/Accounting'), 'GeneralLedgerScreen')
 const TrialBalanceScreen = named(() => import('./screens/Accounting'), 'TrialBalanceScreen')
 const ProfitLossScreen = named(() => import('./screens/Accounting'), 'ProfitLossScreen')
@@ -179,6 +180,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'masters/charge-categories': ChargeCategoriesScreen,
   'acc/coa': ChartOfAccountsScreen,
   'acc/journal': JournalEntriesScreen,
+  'acc/mje': ManualJournalEntriesScreen,
   'acc/gl': GeneralLedgerScreen,
   'acc/tb': TrialBalanceScreen,
   'acc/pl': ProfitLossScreen,

@@ -1051,7 +1051,7 @@ export const loansApi = {
    *  'Restructured' and returns the new linked loan (code {original}-R1, -R2 …). */
   reschedule: (id: number, body: RescheduleInput) =>
     http.post(`/loans/${id}/reschedule`, snakeize(body)).then((r) => camelize(r.data) as Loan),
-  disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque' }) =>
+  disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque'; disbursementBankAccountId?: number | null }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>
     http.patch(`/loans/${id}/status-flags`, snakeize(body)).then((r) => camelize(r.data) as Loan),
@@ -1491,7 +1491,7 @@ export const speedDraftsApi = {
   remove: (id: number) => http.delete(`/speed-drafts/${id}`).then((r) => r.data),
   approve: (id: number) => http.post(`/speed-drafts/${id}/approve`).then((r) => camelize(r.data) as SpeedDraft),
   reject: (id: number, reason?: string) => http.post(`/speed-drafts/${id}/reject`, { rejected_reason: reason }).then((r) => camelize(r.data) as SpeedDraft),
-  disburse: (id: number, body: { disbursementMethod: 'Cash' | 'Bank'; disbursedAmount?: number | string; startDate: string }) =>
+  disburse: (id: number, body: { disbursementMethod: 'Cash' | 'Bank'; disbursementBankAccountId?: number | null; disbursedAmount?: number | string; startDate: string }) =>
     http.post(`/speed-drafts/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as SpeedDraft),
   overdue: () => http.get('/speed-drafts-overdue').then((r) => camelize(r.data) as OverdueSpeedDraft[]),
   /** Renews a matured Speed Draft under the same product for a new term — closes this draft, creates a new one.
@@ -2039,7 +2039,15 @@ export interface GeneralLedgerReport {
   account: { id: number; code: string; name: string; accountType: AccountType; normalBalance: 'Debit' | 'Credit' };
   lines: GeneralLedgerLine[];
 }
-export interface TrialBalanceRow { accountId: number; code: string; name: string; accountType: AccountType; totalDebit: string; totalCredit: string; balance: string }
+export interface TrialBalanceRow {
+  accountId: number; code: string; name: string; accountType: AccountType; normalBalance: 'Debit' | 'Credit';
+  totalDebit: string; totalCredit: string; balance: string;
+  debitBalance: string; creditBalance: string; isAbnormal: boolean;
+}
+export interface TrialBalanceReport {
+  asOf: string; rows: TrialBalanceRow[];
+  totals: { debit: string; credit: string; difference: string; balanced: boolean };
+}
 export interface PLRow { accountId: number; code: string; name: string; balance: string }
 export interface PLIncomeRow { accountId: number; code: string; name: string; cashBalance: string; accrualBalance: string }
 export interface PLWaterfall {
@@ -2078,7 +2086,7 @@ export interface CashFlowReport {
   netChangeInCash: string; openingCash: string; closingCash: string; reconciled: boolean;
 }
 export const accountingReportsApi = {
-  trialBalance: (asOf?: string) => http.get('/accounting-reports/trial-balance', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as TrialBalanceRow[]),
+  trialBalance: (asOf?: string) => http.get('/accounting-reports/trial-balance', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as TrialBalanceReport),
   generalLedger: (accountId: number, params?: { from?: string; to?: string }) =>
     http.get('/accounting-reports/general-ledger', { params: snakeize({ accountId, ...params }) }).then((r) => camelize(r.data) as GeneralLedgerReport),
   profitLoss: (params?: { from?: string; to?: string }) =>
@@ -2089,6 +2097,26 @@ export const accountingReportsApi = {
   ledgerDrift: (asOf?: string) => http.get('/accounting-reports/ledger-drift', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as LedgerDriftReport),
   pdf: (type: 'trial-balance' | 'general-ledger' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ledger-drift', params?: Record<string, any>) =>
     http.get(`/accounting-reports/${type}/pdf`, { params: snakeize(params || {}), responseType: 'blob' }).then((r) => r.data as Blob),
+}
+
+export interface JournalAccountOption { id: number; code: string; name: string; accountType: AccountType; normalBalance: 'Debit' | 'Credit' }
+export interface ManualJournalLineInput { accountId: number | ''; debit: string; credit: string; description?: string }
+export interface ManualJournalLine { id: number; accountId: number; account?: { id: number; code: string; name: string } | null; debit: string; credit: string; description?: string | null }
+export interface ManualJournalEntry {
+  id: number; code: string; entryDate: string; description?: string | null;
+  branchId?: number | null; branch?: { id: number; name: string } | null;
+  status: 'PendingApproval' | 'Approved' | 'Rejected';
+  requestedBy: number; requester?: { id: number; name: string } | null; reason?: string | null;
+  journalEntryId?: number | null; journalEntry?: { id: number; code: string } | null;
+  rejectReason?: string | null; lines: ManualJournalLine[]; createdAt?: string;
+}
+export const manualJournalEntriesApi = {
+  list: (status?: string) => http.get('/manual-journal-entries', { params: status ? { status } : {} }).then((r) => camelize(r.data) as ManualJournalEntry[]),
+  accountOptions: () => http.get('/manual-journal-entries/account-options').then((r) => camelize(r.data) as JournalAccountOption[]),
+  create: (body: { entryDate: string; description?: string; branchId?: number | null; reason?: string; lines: { accountId: number; debit: number; credit: number; description?: string }[] }) =>
+    http.post('/manual-journal-entries', snakeize(body)).then((r) => camelize(r.data) as ManualJournalEntry),
+  approve: (id: number) => http.put(`/manual-journal-entries/${id}/approve`).then((r) => camelize(r.data) as ManualJournalEntry),
+  reject: (id: number, rejectReason?: string) => http.put(`/manual-journal-entries/${id}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data) as ManualJournalEntry),
 }
 
 /* ============================================================

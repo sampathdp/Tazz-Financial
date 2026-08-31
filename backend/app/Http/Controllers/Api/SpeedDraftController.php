@@ -284,6 +284,7 @@ class SpeedDraftController extends Controller
         }
         $data = $request->validate([
             'disbursement_method' => ['required', Rule::in(['Cash', 'Bank'])],
+            'disbursement_bank_account_id' => ['required_if:disbursement_method,Bank', 'nullable', 'exists:bank_accounts,id'],
             'disbursed_amount' => 'nullable|numeric|min:0.01',
             'start_date' => 'required|date',
         ]);
@@ -297,7 +298,10 @@ class SpeedDraftController extends Controller
                 'maturity_date' => $startDate->copy()->addMonthsNoOverflow($speedDraft->term_months)->format('Y-m-d'),
                 'status' => 'Active',
             ]);
-            $speedDraft->speedDraftDetail()->update(['disbursement_method' => $data['disbursement_method']]);
+            $speedDraft->speedDraftDetail()->update([
+                'disbursement_method' => $data['disbursement_method'],
+                'disbursement_bank_account_id' => $data['disbursement_method'] === 'Cash' ? null : ($data['disbursement_bank_account_id'] ?? null),
+            ]);
             $fresh = $speedDraft->fresh();
 
             FacilitySchedule::insert(SpeedDraftScheduler::generate($fresh));

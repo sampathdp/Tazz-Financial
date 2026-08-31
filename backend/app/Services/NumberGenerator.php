@@ -49,6 +49,10 @@ class NumberGenerator
         // One company-wide series, no {BRANCH} — a journal entry isn't tied to a
         // single branch the way a receipt is (see LedgerPoster).
         'journal' => 'JV-{YEAR:2}-{SEQ:6}',
+        // Staging doc for a manual journal entry awaiting approval (see
+        // ManualJournalEntryController) — the real JV- code is minted by
+        // LedgerPoster only once it's approved and posted.
+        'manual_journal' => 'MJV-{YEAR:2}-{SEQ:5}',
         'expense' => '{BRANCH}-EXP-{YEAR:2}-{SEQ:5}',
         'payment_voucher' => '{BRANCH}-PV-{YEAR:2}-{SEQ:5}',
         // No {YEAR} — a fund is opened once and kept for years, not reissued

@@ -7,8 +7,8 @@ import { Card, Btn, Badge, Field, Input, Select, BankSelect, Table, Td, Modal, i
 import { Icon } from '../../components/Icon'
 import { useFilePreview } from '../../components/FilePreview'
 import {
-  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, api,
-  type Loan, type LoanStatus, type LoanSchedule,
+  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, api,
+  type Loan, type LoanStatus, type LoanSchedule, type BankAccount,
   type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type DocumentCategory, type LoanDiaryNote,
   type LoanCharge, type PaymentMethod, type LoanCollateralDocument,
@@ -1027,8 +1027,12 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const [disbursedAt, setDisbursedAt] = useState(todayIso())
   const [firstDate, setFirstDate] = useState('')
   const [method, setMethod] = useState<'Cash' | 'Bank' | 'Cheque'>('Cash')
+  const [bankAccountId, setBankAccountId] = useState<number | ''>('')
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+
+  useEffect(() => { bankAccountsApi.list().then(setBankAccounts).catch(() => setBankAccounts([])) }, [])
 
   const feePercent = num(loan.loanDetail?.loanType?.processingFeePercent)
   const computedDocCharge = Math.round(num(amount) * feePercent) / 100
@@ -1040,9 +1044,13 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const disburse = async () => {
     if (!firstDate) { setErr('Pick the first installment date.'); return }
     if (chargeBlocking) { setErr('Settle the document charge before disbursing this loan.'); return }
+    if (method !== 'Cash' && !bankAccountId) { setErr('Pick which bank account this loan is paid out of.'); return }
     setBusy(true); setErr('')
     try {
-      await loansApi.disburse(loan.id, { disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate, disbursementMethod: method })
+      await loansApi.disburse(loan.id, {
+        disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate, disbursementMethod: method,
+        disbursementBankAccountId: method === 'Cash' ? null : Number(bankAccountId),
+      })
       notify.success('Loan disbursed', loan.code)
       onChanged()
     } catch (ex: any) {
@@ -1111,6 +1119,12 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         <Field label="Disbursement Method"><Select value={method} onChange={(e) => setMethod(e.target.value as any)}>
           <option value="Cash">Cash</option><option value="Bank">Bank Transfer</option><option value="Cheque">Cheque</option>
         </Select></Field>
+        {method !== 'Cash' && (
+          <Field label="Paid Out Of (Bank Account)"><Select value={bankAccountId} onChange={(e) => setBankAccountId(Number(e.target.value) || '')}>
+            <option value="">Select bank account…</option>
+            {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+          </Select></Field>
+        )}
       </div>
       <div className="t-2" style={{ fontSize: 12, marginBottom: 16 }}>
         {loan.termMonths} months · {loan.loanDetail?.installmentFrequency} · {loan.loanDetail?.interestMethod === 'reducing_balance' ? 'Reducing balance' : 'Flat'} interest at {loan.interestRatePercent}%

@@ -84,6 +84,7 @@ export const NAV: NavNode[] = [
   { section: 'Accounting', icon: 'list', items: [
     { id: 'acc/coa', label: 'Chart of Accounts', icon: 'list' },
     { id: 'acc/journal', label: 'Journal Entries', icon: 'doc' },
+    { id: 'acc/mje', label: 'Manual Journal Entries', icon: 'edit' },
     { id: 'acc/gl', label: 'General Ledger', icon: 'layers' },
     { id: 'acc/tb', label: 'Trial Balance', icon: 'chart' },
     { id: 'acc/pl', label: 'Profit & Loss', icon: 'pie' },

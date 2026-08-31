@@ -9,11 +9,12 @@ import { Icon } from '../components/Icon'
 import { ExportButtons } from '../components/ExportButtons'
 import { DateRangeSelect } from '../components/DateRangeSelect'
 import {
-  chartOfAccountsApi, journalEntriesApi, accountingReportsApi,
+  chartOfAccountsApi, journalEntriesApi, accountingReportsApi, manualJournalEntriesApi,
   type ChartOfAccount, type AccountType, type JournalEntry, type GeneralLedgerReport,
-  type TrialBalanceRow, type ProfitLossReport, type BalanceSheetReport, type CashFlowReport, type LedgerDriftReport, type AuthUser,
+  type TrialBalanceReport, type ProfitLossReport, type BalanceSheetReport, type CashFlowReport, type LedgerDriftReport, type AuthUser,
+  type ManualJournalEntry, type JournalAccountOption,
 } from '../api'
-import { Can } from '../lib/permissions'
+import { Can, canApprove } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import { downloadBlob, exportFlatTableToExcel, exportReportToExcel } from '../lib/export'
@@ -259,31 +260,223 @@ export function GeneralLedgerScreen({ user: _me }: { go: Go; user?: AuthUser | n
   )
 }
 
+/* ---------------------- Manual Journal Entries ------------------------ */
+
+type MjeLine = { accountId: number | ''; debit: string; credit: string; description: string }
+const blankMjeLine = (): MjeLine => ({ accountId: '', debit: '', credit: '', description: '' })
+const mjeStatusTone = (s: ManualJournalEntry['status']) => s === 'Approved' ? 'green' : s === 'Rejected' ? 'red' : 'amber'
+
+export function ManualJournalEntriesScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [entries, setEntries] = useState<ManualJournalEntry[]>([])
+  const [accounts, setAccounts] = useState<JournalAccountOption[]>([])
+  const [loading, setLoading] = useState(true)
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState<ManualJournalEntry | null>(null)
+  const [entryDate, setEntryDate] = useState(today())
+  const [description, setDescription] = useState('')
+  const [reason, setReason] = useState('')
+  const [lines, setLines] = useState<MjeLine[]>([blankMjeLine(), blankMjeLine()])
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const refresh = () => {
+    setLoading(true)
+    manualJournalEntriesApi.list().then(setEntries).catch(() => setEntries([])).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [])
+  useEffect(() => { manualJournalEntriesApi.accountOptions().then(setAccounts).catch(() => setAccounts([])) }, [])
+
+  const totalDebit = lines.reduce((s, l) => s + Number(l.debit || 0), 0)
+  const totalCredit = lines.reduce((s, l) => s + Number(l.credit || 0), 0)
+  const balanced = totalDebit > 0 && Math.abs(totalDebit - totalCredit) < 0.005
+
+  const resetForm = () => { setEntryDate(today()); setDescription(''); setReason(''); setLines([blankMjeLine(), blankMjeLine()]); setErr('') }
+  const setLine = (i: number, patch: Partial<MjeLine>) => setLines((ls) => ls.map((l, j) => j === i ? { ...l, ...patch } : l))
+
+  const submit = async () => {
+    const clean = lines
+      .filter((l) => l.accountId && (Number(l.debit) > 0 || Number(l.credit) > 0))
+      .map((l) => ({ accountId: Number(l.accountId), debit: Number(l.debit || 0), credit: Number(l.credit || 0), description: l.description || undefined }))
+    if (clean.length < 2) { setErr('Add at least two lines with an account and an amount.'); return }
+    if (clean.some((l) => l.debit > 0 && l.credit > 0)) { setErr('Each line is a debit or a credit, not both.'); return }
+    if (!balanced) { setErr(`Entry does not balance — debit ${money(totalDebit)} vs credit ${money(totalCredit)}.`); return }
+    setBusy(true); setErr('')
+    try {
+      await manualJournalEntriesApi.create({ entryDate, description: description || undefined, reason: reason || undefined, lines: clean })
+      notify.success('Journal entry submitted', 'Awaiting approval')
+      setOpen(false); resetForm(); refresh()
+    } catch (ex: any) {
+      setErr(getErrorText(ex, 'Could not submit the entry'))
+    } finally { setBusy(false) }
+  }
+
+  const approve = async (e: ManualJournalEntry) => {
+    try { await manualJournalEntriesApi.approve(e.id); notify.success('Entry approved & posted'); setView(null); refresh() }
+    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  }
+  const reject = async (e: ManualJournalEntry) => {
+    const r = await notify.prompt({ title: `Reject entry ${e.code}?`, msg: 'Give a reason — the maker can correct and resubmit.', placeholder: 'Reason', danger: true, okText: 'Reject' })
+    if (r === null) return
+    try { await manualJournalEntriesApi.reject(e.id, r || undefined); notify.success('Entry rejected'); setView(null); refresh() }
+    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
+  }
+
+  const canReview = (e: ManualJournalEntry) => e.status === 'PendingApproval' && canApprove(me, 'manual_journal_entry') && e.requestedBy !== me?.id
+
+  return (
+    <div>
+      <PageHead crumbs="Accounting" title="Manual Journal Entries" icon="edit"
+        actions={<Can user={me} module="Manual Journal Entries" action="Create"><Btn variant="primary" icon="plus" onClick={() => { resetForm(); setOpen(true) }}>New Entry</Btn></Can>} />
+
+      <Card style={{ marginBottom: 16 }}>
+        <div className="t-2" style={{ fontSize: 12.5 }}>
+          Adjusting, opening-balance and correcting entries. Every entry needs a second authorised person to approve it before it posts to the general ledger — it is posted through the same writer as every automatic entry, so it can never be unbalanced.
+        </div>
+      </Card>
+
+      <Card pad={0}>
+        {loading ? <LoadingBlock /> :
+        <Table cols={[{ label: 'Code' }, { label: 'Date' }, { label: 'Description' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: 'Posted As' }]}
+          empty="No manual journal entries yet" rows={entries} onRow={(e) => setView(e)}
+          render={(e) => {
+            const amt = e.lines.reduce((s, l) => s + Number(l.debit || 0), 0)
+            return <>
+              <Td mono>{e.code}</Td>
+              <Td>{dateOnly(e.entryDate)}</Td>
+              <Td>{e.description || <span className="t-3">—</span>}</Td>
+              <Td align="right" mono>{money(amt)}</Td>
+              <Td align="center"><Badge tone={mjeStatusTone(e.status)} dot>{e.status === 'PendingApproval' ? 'Pending' : e.status}</Badge></Td>
+              <Td mono>{e.journalEntry?.code || '—'}</Td>
+            </>
+          }} />}
+      </Card>
+
+      <Modal open={open} onClose={() => setOpen(false)} title="New Manual Journal Entry" width={760}
+        footer={<>
+          <Btn variant="solid" onClick={() => setOpen(false)}>Cancel</Btn>
+          <Btn variant="primary" icon="check" onClick={submit} disabled={busy || !balanced}>{busy ? 'Submitting…' : 'Submit for Approval'}</Btn>
+        </>}>
+        <div className="col gap-3">
+          <ErrorBanner error={err} style={{ marginBottom: 0 }} />
+          <div className="row gap-3 wrap">
+            <Field label="Entry Date"><Input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} /></Field>
+            <Field label="Description" style={{ flex: 1, minWidth: 220 }}><Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Opening balance – loan book" /></Field>
+          </div>
+          <Field label="Reason / Note (optional)"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this entry is being made" /></Field>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr>
+                {['Account', 'Debit', 'Credit', 'Line note', ''].map((h, i) => <th key={i} style={{ textAlign: i === 1 || i === 2 ? 'right' : 'left', padding: '6px 8px', fontSize: 11, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {lines.map((l, i) => (
+                  <tr key={i}>
+                    <td style={{ padding: '4px 8px' }}>
+                      <Select value={l.accountId} onChange={(e) => setLine(i, { accountId: Number(e.target.value) || '' })} style={{ minWidth: 220 }}>
+                        <option value="">Select account…</option>
+                        {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+                      </Select>
+                    </td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                      <Input type="number" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: e.target.value ? '' : l.credit })} style={{ maxWidth: 130, textAlign: 'right' }} />
+                    </td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                      <Input type="number" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: e.target.value ? '' : l.debit })} style={{ maxWidth: 130, textAlign: 'right' }} />
+                    </td>
+                    <td style={{ padding: '4px 8px' }}>
+                      <Input value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} style={{ minWidth: 160 }} />
+                    </td>
+                    <td style={{ padding: '4px 8px' }}>
+                      {lines.length > 2 && <Btn size="sm" variant="solid" icon="trash" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 700, borderTop: '1px solid var(--line)' }}>
+                  <td style={{ padding: '8px' }}>
+                    <Btn size="sm" variant="solid" icon="plus" onClick={() => setLines((ls) => [...ls, blankMjeLine()])}>Add line</Btn>
+                  </td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontFamily: 'monospace' }}>{money(totalDebit)}</td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontFamily: 'monospace' }}>{money(totalCredit)}</td>
+                  <td colSpan={2} style={{ padding: '8px' }}>
+                    <Badge tone={balanced ? 'green' : 'red'} dot>{balanced ? 'balanced' : `off by ${money(Math.abs(totalDebit - totalCredit))}`}</Badge>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={!!view} onClose={() => setView(null)} width={760} title={view ? `Journal Entry ${view.code}` : ''}
+        footer={view && canReview(view) ? <>
+          <Btn variant="danger" icon="x" onClick={() => reject(view)}>Reject</Btn>
+          <Btn variant="primary" icon="check" onClick={() => approve(view)}>Approve &amp; Post</Btn>
+        </> : <Btn variant="solid" onClick={() => setView(null)}>Close</Btn>}>
+        {view && (
+          <div className="col gap-3">
+            <div className="row gap-4 wrap t-2" style={{ fontSize: 12.5 }}>
+              <span>Date: <b style={{ color: 'var(--tx-1)' }}>{dateOnly(view.entryDate)}</b></span>
+              <span>Status: <Badge tone={mjeStatusTone(view.status)} dot>{view.status}</Badge></span>
+              <span>Requested by: <b style={{ color: 'var(--tx-1)' }}>{view.requester?.name || '—'}</b></span>
+              {view.journalEntry?.code && <span>Posted as: <b style={{ color: 'var(--tx-1)' }}>{view.journalEntry.code}</b></span>}
+            </div>
+            {view.description && <div style={{ fontSize: 13 }}>{view.description}</div>}
+            {view.reason && <div className="t-2" style={{ fontSize: 12.5 }}>Note: {view.reason}</div>}
+            {view.rejectReason && <div style={{ fontSize: 12.5, color: 'var(--bad)' }}>Rejected: {view.rejectReason}</div>}
+            <Table cols={[{ label: 'Account' }, { label: 'Debit', align: 'right' }, { label: 'Credit', align: 'right' }, { label: 'Note' }]}
+              empty="No lines" rows={view.lines}
+              render={(l) => <>
+                <Td mono>{l.account ? `${l.account.code} — ${l.account.name}` : l.accountId}</Td>
+                <Td align="right" mono>{Number(l.debit) > 0 ? money(l.debit) : '—'}</Td>
+                <Td align="right" mono>{Number(l.credit) > 0 ? money(l.credit) : '—'}</Td>
+                <Td>{l.description || '—'}</Td>
+              </>} />
+            {canReview(view) && view.requestedBy === me?.id && <div className="t-3" style={{ fontSize: 12 }}>You cannot approve your own entry.</div>}
+          </div>
+        )}
+      </Modal>
+    </div>
+  )
+}
+
 /* ---------------------------- Trial Balance ---------------------------- */
 
 export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
-  const [asOf, setAsOf] = useState('')
-  const [rows, setRows] = useState<TrialBalanceRow[]>([])
+  const [asOf, setAsOf] = useState(today())
+  const [report, setReport] = useState<TrialBalanceReport | null>(null)
   const [loading, setLoading] = useState(true)
 
   const refresh = () => {
     setLoading(true)
-    accountingReportsApi.trialBalance(asOf || undefined).then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+    accountingReportsApi.trialBalance(asOf || undefined).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
   }
   useEffect(refresh, [asOf]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalDebit = rows.reduce((s, r) => s + Number(r.totalDebit || 0), 0)
-  const totalCredit = rows.reduce((s, r) => s + Number(r.totalCredit || 0), 0)
+  const rows = report?.rows ?? []
+  const totals = report?.totals
+  // A trial balance foots when the debit-balance and credit-balance columns are equal;
+  // that equality — not the always-equal debit/credit turnover — is the integrity check.
+  const totalDebit = Number(totals?.debit ?? 0)
+  const totalCredit = Number(totals?.credit ?? 0)
+  const balanced = totals?.balanced ?? true
+  const abnormal = rows.filter((r) => r.isAbnormal)
 
   const exportExcel = () => {
     void exportFlatTableToExcel({
-      reportTitle: 'Trial Balance', meta: asOf ? `As of ${asOf}` : undefined,
+      reportTitle: 'Trial Balance', meta: `As of ${report?.asOf ?? asOf}`,
       columns: [
         { label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Type', key: 'type', align: 'center' },
-        { label: 'Debit', key: 'debit', align: 'right', format: 'money' }, { label: 'Credit', key: 'credit', align: 'right', format: 'money' }, { label: 'Balance', key: 'balance', align: 'right', format: 'money' },
+        { label: 'Debit', key: 'debit', align: 'right', format: 'money' }, { label: 'Credit', key: 'credit', align: 'right', format: 'money' },
       ],
-      rows: rows.map((r) => ({ code: r.code, name: r.name, type: r.accountType, debit: Number(r.totalDebit || 0), credit: Number(r.totalCredit || 0), balance: Number(r.balance) })),
-      totalRow: { name: 'Totals', debit: totalDebit, credit: totalCredit },
+      rows: rows.map((r) => ({
+        code: r.code, name: r.name + (r.isAbnormal ? ' (abnormal balance)' : ''), type: r.accountType,
+        debit: Number(r.debitBalance) || '', credit: Number(r.creditBalance) || '',
+      })),
+      totalRow: { name: balanced ? 'Totals (balanced)' : `Totals — OUT OF BALANCE by ${money(totals?.difference ?? 0)}`, debit: totalDebit, credit: totalCredit },
       emptyText: 'No accounts yet',
     }, `trial-balance-${today()}.xlsx`)
   }
@@ -294,22 +487,47 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
       <PageHead crumbs="Accounting" title="Trial Balance" icon="chart"
         actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
+
+      {!loading && !balanced && (
+        <Card style={{ marginBottom: 16, borderColor: 'var(--bad)', background: 'var(--bad-dim)' }}>
+          <div className="row gap-2" style={{ alignItems: 'center', fontWeight: 600, color: 'var(--bad)' }}>
+            <Icon n="alert" /> Ledger is out of balance by {money(totals?.difference ?? 0)} — debit balances {money(totalDebit)} vs credit balances {money(totalCredit)}.
+          </div>
+          <div className="t-2" style={{ fontSize: 12, marginTop: 6 }}>Every posting is internally balanced, so a nonzero difference here means data was changed outside the ledger writer. Check the Ledger Drift report.</div>
+        </Card>
+      )}
+      {!loading && balanced && abnormal.length > 0 && (
+        <Card style={{ marginBottom: 16, borderColor: 'var(--warn)', background: 'var(--warn-dim)' }}>
+          <div className="row gap-2" style={{ alignItems: 'center', fontWeight: 600 }}>
+            <Icon n="alert" /> {abnormal.length} account{abnormal.length > 1 ? 's' : ''} sitting on the wrong side of its normal balance
+          </div>
+          <div className="t-2" style={{ fontSize: 12, marginTop: 6 }}>
+            {abnormal.map((r) => `${r.code} ${r.name}`).join(' · ')}. Usually a missing opening balance or an unposted counter-entry (e.g. a bank/cheque disbursement).
+          </div>
+        </Card>
+      )}
+
       <Card pad={0}>
         {loading ? <LoadingBlock /> :
-        <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Type', align: 'center' }, { label: 'Debit', align: 'right' }, { label: 'Credit', align: 'right' }, { label: 'Balance', align: 'right' }]}
+        <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Type', align: 'center' }, { label: 'Debit', align: 'right' }, { label: 'Credit', align: 'right' }]}
           empty="No accounts yet" rows={rows}
           render={(r) => <>
             <Td mono>{r.code}</Td>
-            <Td>{r.name}</Td>
+            <Td>{r.name}{r.isAbnormal && <Badge tone="red" dot>abnormal</Badge>}</Td>
             <Td align="center"><Badge tone={typeTone(r.accountType)} dot>{r.accountType}</Badge></Td>
-            <Td align="right" mono>{Number(r.totalDebit) > 0 ? money(r.totalDebit) : '—'}</Td>
-            <Td align="right" mono>{Number(r.totalCredit) > 0 ? money(r.totalCredit) : '—'}</Td>
-            <Td align="right" mono style={{ fontWeight: 600 }}>{money(r.balance)}</Td>
+            <Td align="right" mono c={r.isAbnormal && Number(r.debitBalance) > 0 ? 'var(--danger)' : undefined}>{Number(r.debitBalance) > 0 ? money(r.debitBalance) : '—'}</Td>
+            <Td align="right" mono c={r.isAbnormal && Number(r.creditBalance) > 0 ? 'var(--danger)' : undefined}>{Number(r.creditBalance) > 0 ? money(r.creditBalance) : '—'}</Td>
           </>} />}
         {!loading && rows.length > 0 && (
           <div className="row between" style={{ padding: '12px 20px', borderTop: '1px solid var(--line)', fontWeight: 700 }}>
-            <span>Totals</span>
-            <div className="row gap-4"><span style={{ fontFamily: 'monospace' }}>{money(totalDebit)}</span><span style={{ fontFamily: 'monospace' }}>{money(totalCredit)}</span></div>
+            <span className="row gap-2" style={{ alignItems: 'center' }}>
+              Totals
+              <Badge tone={balanced ? 'green' : 'red'} dot>{balanced ? 'balanced' : `off by ${money(totals?.difference ?? 0)}`}</Badge>
+            </span>
+            <div className="row gap-4">
+              <span style={{ fontFamily: 'monospace' }}>{money(totalDebit)}</span>
+              <span style={{ fontFamily: 'monospace' }}>{money(totalCredit)}</span>
+            </div>
           </div>
         )}
       </Card>
