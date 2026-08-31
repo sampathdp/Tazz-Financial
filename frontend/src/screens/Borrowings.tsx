@@ -20,8 +20,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Table, Td, Modal, ErrorBanner, LoadingBlock, inputStyle } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
-  borrowingsApi, branchesApi, cashAccountsApi, bankAccountsApi, pawningsApi,
-  type Borrowing, type BorrowingType, type BorrowingStatus, type BorrowingTxnKind,
+  borrowingsApi, branchesApi,
+  type Borrowing, type BorrowingType, type BorrowingStatus, type BorrowingTxnKind, type BorrowingOnMaturity,
   type BorrowingCreateInput, type FdPaymentMethod, type Branch, type CashAccount, type BankAccount, type Pawning, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
@@ -33,6 +33,21 @@ const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
 const todayIso = () => new Date().toISOString().slice(0, 10)
+/** ISO date `months` calendar months after `iso` (clamped to end-of-month, like the backend's addMonthsNoOverflow). */
+const addMonths = (iso: string, months: number): string => {
+  if (!iso || !months || months < 1) return ''
+  const d = new Date(iso + 'T00:00:00')
+  const day = d.getDate()
+  d.setDate(1)
+  d.setMonth(d.getMonth() + months)
+  d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()))
+  return d.toISOString().slice(0, 10)
+}
+
+const ON_MATURITY: { value: BorrowingOnMaturity; label: string }[] = [
+  { value: 'Renew', label: 'Renew for another term' },
+  { value: 'Settle', label: 'Settle (repay and close)' },
+]
 
 const TYPES: { value: BorrowingType; label: string }[] = [
   { value: 'Party', label: 'Party / Institutional' },
@@ -53,7 +68,8 @@ interface Form {
   branchId?: number; type: BorrowingType;
   lenderName: string; source: string; purpose: string;
   principalAmount: string; interestRatePercent: string; borrowingDate: string;
-  referenceNo: string; notes: string;
+  termMonths: string; maturityDate: string; onMaturity: '' | BorrowingOnMaturity;
+  referenceNo: string; contractNo: string; notes: string;
   receiptMethod: FdPaymentMethod; receiptCashAccountId?: number; receiptBankAccountId?: number;
   bankAccountId?: number; setOverdraftLimit: boolean;
   repledged: RepledgeRow[];
@@ -61,7 +77,8 @@ interface Form {
 const blank = (branchId?: number): Form => ({
   branchId, type: 'Party', lenderName: '', source: '', purpose: '',
   principalAmount: '', interestRatePercent: '', borrowingDate: todayIso(),
-  referenceNo: '', notes: '', receiptMethod: 'Cash', repledged: [{}], setOverdraftLimit: true,
+  termMonths: '', maturityDate: '', onMaturity: '',
+  referenceNo: '', contractNo: '', notes: '', receiptMethod: 'Cash', repledged: [{}], setOverdraftLimit: true,
 })
 
 export function BorrowingsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
@@ -87,9 +104,11 @@ export function BorrowingsScreen({ go: _go, user: me }: { go: Go; user?: AuthUse
   useEffect(() => { refresh() }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     branchesApi.list().then(setBranches).catch(() => setBranches([]))
-    cashAccountsApi.list().then(setCashAccounts).catch(() => setCashAccounts([]))
-    bankAccountsApi.list().then(setBankAccounts).catch(() => setBankAccounts([]))
-    pawningsApi.list('Active').then(setPawnings).catch(() => setPawnings([]))
+    borrowingsApi.lookups().then((d) => {
+      setCashAccounts(d.cashAccounts)
+      setBankAccounts(d.bankAccounts)
+      setPawnings(d.pawnings)
+    }).catch(() => { setCashAccounts([]); setBankAccounts([]); setPawnings([]) })
   }, [])
 
   useEffect(() => {
@@ -126,7 +145,11 @@ export function BorrowingsScreen({ go: _go, user: me }: { go: Go; user?: AuthUse
       branchId: f.branchId, type: f.type,
       lenderName: f.lenderName.trim(), source: f.source.trim() || undefined, purpose: f.purpose.trim() || undefined,
       principalAmount: f.principalAmount, interestRatePercent: f.interestRatePercent || undefined,
-      borrowingDate: f.borrowingDate, referenceNo: f.referenceNo.trim() || undefined, notes: f.notes.trim() || undefined,
+      termMonths: f.termMonths || undefined,
+      maturityDate: f.maturityDate || (f.termMonths ? addMonths(f.borrowingDate, Number(f.termMonths)) : undefined) || undefined,
+      onMaturity: f.onMaturity || undefined,
+      borrowingDate: f.borrowingDate,
+      referenceNo: f.referenceNo.trim() || undefined, contractNo: f.contractNo.trim() || undefined, notes: f.notes.trim() || undefined,
       ...(isOd
         ? { bankAccountId: f.bankAccountId, setOverdraftLimit: f.setOverdraftLimit }
         : {
@@ -219,8 +242,22 @@ export function BorrowingsScreen({ go: _go, user: me }: { go: Go; user?: AuthUse
 
           <Field label={isOd ? 'Sanctioned OD Limit' : 'Amount Borrowed'}><Input type="number" step="0.01" value={form.principalAmount} onChange={(e) => setForm((s) => ({ ...s, principalAmount: e.target.value }))} /></Field>
           <Field label="Interest Rate % (p.a.)"><Input type="number" step="0.001" value={form.interestRatePercent} onChange={(e) => setForm((s) => ({ ...s, interestRatePercent: e.target.value }))} /></Field>
-          <Field label="Date"><DateInput value={form.borrowingDate} onChange={(iso) => setForm((s) => ({ ...s, borrowingDate: iso }))} /></Field>
-          <Field label="Reference No."><Input value={form.referenceNo} onChange={(e) => setForm((s) => ({ ...s, referenceNo: e.target.value }))} /></Field>
+          <Field label="Date"><DateInput value={form.borrowingDate} onChange={(iso) => setForm((s) => ({ ...s, borrowingDate: iso, maturityDate: s.termMonths ? addMonths(iso, Number(s.termMonths)) : s.maturityDate }))} /></Field>
+
+          <Field label="Tenure (months)">
+            <Input type="number" step="1" min="1" value={form.termMonths}
+              onChange={(e) => setForm((s) => ({ ...s, termMonths: e.target.value, maturityDate: e.target.value ? addMonths(s.borrowingDate, Number(e.target.value)) : s.maturityDate }))} />
+          </Field>
+          <Field label="Maturity Date"><DateInput value={form.maturityDate} onChange={(iso) => setForm((s) => ({ ...s, maturityDate: iso }))} /></Field>
+          <Field label="On Maturity">
+            <Select value={form.onMaturity} onChange={(e) => setForm((s) => ({ ...s, onMaturity: e.target.value as '' | BorrowingOnMaturity }))}>
+              <option value="">— not decided —</option>
+              {ON_MATURITY.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </Field>
+          <Field label="Contract / Agreement No."><Input value={form.contractNo} onChange={(e) => setForm((s) => ({ ...s, contractNo: e.target.value }))} placeholder="lender's facility / agreement ref" /></Field>
+
+          <Field label="Reference No."><Input value={form.referenceNo} onChange={(e) => setForm((s) => ({ ...s, referenceNo: e.target.value }))} placeholder="cheque / transfer ref on receipt" /></Field>
 
           {isOd ? <>
             <Field label="Current Account (OD drawn on)" full>
@@ -306,11 +343,16 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
   const [ref, setRef] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [renewOpen, setRenewOpen] = useState(false)
+  const [rnErr, setRnErr] = useState('')
+  const blankRenew = () => ({ renewedOn: todayIso(), newMaturityDate: '', newTermMonths: '', newRate: '', interestPaid: '', notes: '' })
+  const [rn, setRn] = useState(blankRenew())
 
   useEffect(() => {
     if (!borrowing) return
-    setKind(borrowing.type === 'Overdraft' ? 'InterestPayment' : 'InterestPayment')
+    setKind('InterestPayment')
     setAmount(''); setTxnDate(todayIso()); setMethod('Cash'); setCashId(undefined); setBankId(undefined); setRef(''); setErr('')
+    setRenewOpen(false); setRnErr(''); setRn(blankRenew())
   }, [borrowing?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!borrowing) return null
@@ -340,6 +382,22 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
     } finally { setBusy(false) }
   }
 
+  const doRenew = async () => {
+    if (!rn.newMaturityDate) { setRnErr('New maturity date is required.'); return }
+    setBusy(true); setRnErr('')
+    try {
+      const updated = await borrowingsApi.renew(b.id, {
+        renewedOn: rn.renewedOn, newMaturityDate: rn.newMaturityDate,
+        newTermMonths: rn.newTermMonths || undefined, newInterestRatePercent: rn.newRate || undefined,
+        interestPaidAmount: rn.interestPaid || undefined, notes: rn.notes.trim() || undefined,
+      })
+      onChanged(updated); setRenewOpen(false); setRn(blankRenew())
+      notify.success('Borrowing renewed')
+    } catch (ex: any) {
+      setRnErr(getErrorText(ex, 'Renew failed'))
+    } finally { setBusy(false) }
+  }
+
   const voidTxn = async (txnId: number) => {
     const ok = await notify.confirm({ title: 'Void this transaction?', msg: 'Only the most recent transaction can be voided. Its ledger and cashbook postings are reversed.', danger: true, okText: 'Void' })
     if (!ok) return
@@ -358,6 +416,10 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
         <div className="row between"><span className="t-2">{isOd ? 'Sanctioned Limit' : 'Amount Borrowed'}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.principalAmount)}</b></div>
         <div className="row between"><span className="t-2">{isOd ? 'Overdraft Utilised (live)' : 'Outstanding'}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.outstandingAmount)}</b></div>
         {b.interestRatePercent != null && <div className="row between"><span className="t-2">Interest Rate</span><b>{b.interestRatePercent}% p.a.</b></div>}
+        {b.termMonths != null && <div className="row between"><span className="t-2">Tenure</span><b>{b.termMonths} months</b></div>}
+        {b.maturityDate && <div className="row between"><span className="t-2">Maturity Date</span><b>{dateOnly(b.maturityDate)}</b></div>}
+        {b.onMaturity && <div className="row between"><span className="t-2">On Maturity</span><b>{b.onMaturity === 'Renew' ? 'Renew' : 'Settle'}</b></div>}
+        {b.contractNo && <div className="row between"><span className="t-2">Contract No.</span><b>{b.contractNo}</b></div>}
         {isOd && b.bankAccount && (
           <div className="row between"><span className="t-2">Current Account</span><b>{b.bankAccount.name} · bal {money(b.bankAccount.currentBalance)}{b.bankAccount.overdraftLimit != null ? ` · limit ${money(b.bankAccount.overdraftLimit)}` : ''}</b></div>
         )}
@@ -376,6 +438,50 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
               <Td align="right" mono>{it.appraisedValueSnapshot != null ? money(it.appraisedValueSnapshot) : '—'}</Td>
             </>} />
         </div>
+      )}
+
+      {b.renewals && b.renewals.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div className="t-2" style={{ fontSize: 12, marginBottom: 6 }}>RENEWALS</div>
+          <Table cols={[{ label: 'Renewed On' }, { label: 'New Maturity' }, { label: 'Term', align: 'right' }, { label: 'Rate', align: 'right' }, { label: 'Interest Paid', align: 'right' }]}
+            rows={b.renewals}
+            render={(r) => <>
+              <Td>{dateOnly(r.renewedOn)}</Td>
+              <Td>{dateOnly(r.newMaturityDate)}</Td>
+              <Td align="right">{r.newTermMonths ?? '—'}</Td>
+              <Td align="right">{r.newInterestRatePercent != null ? `${r.newInterestRatePercent}%` : '—'}</Td>
+              <Td align="right" mono>{Number(r.interestPaidAmount) > 0 ? money(r.interestPaidAmount) : '—'}</Td>
+            </>} />
+        </div>
+      )}
+
+      {!isOd && b.status === 'Active' && (
+        <Can user={me} module="Borrowings" action="Edit">
+          <div style={{ marginBottom: 16 }}>
+            {!renewOpen
+              ? <Btn size="sm" variant="ghost" icon="swap" onClick={() => setRenewOpen(true)}>Renew for another term</Btn>
+              : <div style={{ padding: 12, border: '1px solid var(--line)', borderRadius: 8 }}>
+                  <div className="t-2" style={{ fontSize: 12, marginBottom: 8 }}>RENEW BORROWING</div>
+                  <ErrorBanner error={rnErr} style={{ marginBottom: 10 }} />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                    <Field label="Renewed On"><DateInput value={rn.renewedOn} onChange={(iso) => setRn((s) => ({ ...s, renewedOn: iso }))} /></Field>
+                    <Field label="New Term (months)">
+                      <Input type="number" step="1" min="1" value={rn.newTermMonths}
+                        onChange={(e) => setRn((s) => ({ ...s, newTermMonths: e.target.value, newMaturityDate: e.target.value ? addMonths(b.maturityDate || s.renewedOn, Number(e.target.value)) : s.newMaturityDate }))} />
+                    </Field>
+                    <Field label="New Maturity Date"><DateInput value={rn.newMaturityDate} onChange={(iso) => setRn((s) => ({ ...s, newMaturityDate: iso }))} /></Field>
+                    <Field label="New Interest Rate %"><Input type="number" step="0.001" value={rn.newRate} onChange={(e) => setRn((s) => ({ ...s, newRate: e.target.value }))} placeholder={b.interestRatePercent != null ? String(b.interestRatePercent) : ''} /></Field>
+                    <Field label="Interest Cleared (info)"><Input type="number" step="0.01" value={rn.interestPaid} onChange={(e) => setRn((s) => ({ ...s, interestPaid: e.target.value }))} /></Field>
+                    <Field label="Notes"><Input value={rn.notes} onChange={(e) => setRn((s) => ({ ...s, notes: e.target.value }))} /></Field>
+                  </div>
+                  <div className="t-2" style={{ fontSize: 12, marginTop: 6 }}>Rolls the borrowing over in place — updates maturity / term / rate and logs the prior values. No cash moves; if interest is actually paid at roll-over, also add an <b>InterestPayment</b> transaction below.</div>
+                  <div className="row gap-1" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+                    <Btn variant="plain" onClick={() => { setRenewOpen(false); setRnErr('') }}>Cancel</Btn>
+                    <Btn variant="primary" icon="check" onClick={doRenew} disabled={busy}>{busy ? 'Saving…' : 'Renew'}</Btn>
+                  </div>
+                </div>}
+          </div>
+        </Can>
       )}
 
       <div className="t-2" style={{ fontSize: 12, marginBottom: 6 }}>TRANSACTIONS</div>

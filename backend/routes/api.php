@@ -473,6 +473,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Funding Management: Borrowings (money the company itself borrows) ---
     Route::get('borrowings', [BorrowingController::class, 'index'])->middleware('perm:Borrowings,View');
     Route::get('borrowings/next-number', [BorrowingController::class, 'nextNumber'])->middleware('perm:Borrowings,Create');
+    Route::get('borrowings/lookups', [BorrowingController::class, 'lookups'])->middleware('perm:Borrowings,View');
     Route::get('borrowings/{borrowing}', [BorrowingController::class, 'show'])->middleware('perm:Borrowings,View');
     Route::post('borrowings', [BorrowingController::class, 'store'])->middleware('perm:Borrowings,Create');
     Route::post('borrowings/{borrowing}/renew', [BorrowingController::class, 'renew'])->middleware('perm:Borrowings,Edit');

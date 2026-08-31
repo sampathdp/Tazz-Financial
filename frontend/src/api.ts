@@ -1704,6 +1704,19 @@ export interface BorrowingRepledgedItem {
   financierName?: string | null; externalReference?: string | null;
 }
 
+export type BorrowingOnMaturity = 'Renew' | 'Settle'
+
+export interface BorrowingRenewal {
+  id: number; borrowingId: number; renewedOn: string;
+  previousMaturityDate?: string | null; newMaturityDate: string;
+  previousTermMonths?: number | null; newTermMonths?: number | null;
+  previousInterestRatePercent?: number | string | null; newInterestRatePercent?: number | string | null;
+  interestPaidAmount: number | string;
+  notes?: string | null;
+  creator?: { id: number; name: string } | null;
+  createdAt?: string;
+}
+
 export interface Borrowing {
   id: number; borrowingNumber: string;
   branchId: number; branch?: { id: number; name: string; code: string } | null;
@@ -1715,7 +1728,11 @@ export interface Borrowing {
   /** Overdraft only — same value as outstandingAmount, made explicit. */
   overdraftDrawn?: number | string;
   interestRatePercent?: number | string | null;
+  termMonths?: number | null;
   borrowingDate: string;
+  maturityDate?: string | null;
+  onMaturity?: BorrowingOnMaturity | null;
+  contractNo?: string | null;
   receiptMethod?: FdPaymentMethod | null;
   receiptCashAccountId?: number | null; receiptCashAccount?: { id: number; name: string } | null;
   receiptBankAccountId?: number | null; receiptBankAccount?: { id: number; name: string } | null;
@@ -1725,6 +1742,7 @@ export interface Borrowing {
   status: BorrowingStatus;
   transactions?: BorrowingTransaction[];
   repledgedItems?: BorrowingRepledgedItem[];
+  renewals?: BorrowingRenewal[];
   creator?: { id: number; name: string } | null;
   createdAt?: string;
 }
@@ -1733,7 +1751,8 @@ export interface BorrowingCreateInput {
   branchId: number; type: BorrowingType;
   lenderName: string; source?: string; purpose?: string;
   principalAmount: number | string; interestRatePercent?: number | string;
-  borrowingDate: string; referenceNo?: string; notes?: string;
+  termMonths?: number | string; maturityDate?: string; onMaturity?: BorrowingOnMaturity;
+  borrowingDate: string; referenceNo?: string; contractNo?: string; notes?: string;
   receiptMethod?: FdPaymentMethod;
   receiptCashAccountId?: number; receiptBankAccountId?: number;
   bankAccountId?: number; setOverdraftLimit?: boolean;
@@ -1747,16 +1766,29 @@ export interface BorrowingTxnInput {
   referenceNo?: string; notes?: string;
 }
 
+export interface BorrowingRenewInput {
+  renewedOn: string; newMaturityDate: string;
+  newTermMonths?: number | string; newInterestRatePercent?: number | string;
+  interestPaidAmount?: number | string; notes?: string;
+}
+
 export const borrowingsApi = {
   list: (params?: { type?: BorrowingType; status?: BorrowingStatus }) =>
     http.get('/borrowings', { params }).then((r) => camelize(r.data) as Borrowing[]),
   get: (id: number) => http.get(`/borrowings/${id}`).then((r) => camelize(r.data) as Borrowing),
   nextNumber: (branchId: number) =>
     http.get('/borrowings/next-number', { params: { branch_id: branchId } }).then((r) => r.data.code as string),
+  /** Form dropdown data, served under the Borrowings permission (so the form works
+   *  without also granting Cashbook / Bank Accounts / Pawnings view rights). */
+  lookups: () =>
+    http.get('/borrowings/lookups').then((r) => camelize(r.data) as { cashAccounts: CashAccount[]; bankAccounts: BankAccount[]; pawnings: Pawning[] }),
   create: (body: BorrowingCreateInput) =>
     http.post('/borrowings', snakeize(body)).then((r) => camelize(r.data) as Borrowing),
   addTransaction: (id: number, body: BorrowingTxnInput) =>
     http.post(`/borrowings/${id}/transactions`, snakeize(body)).then((r) => camelize(r.data) as Borrowing),
+  /** Roll a matured borrowing over for another term (see backend BorrowingController::renew). */
+  renew: (id: number, body: BorrowingRenewInput) =>
+    http.post(`/borrowings/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as Borrowing),
   voidTransaction: (txnId: number) =>
     http.post(`/borrowing-transactions/${txnId}/void`).then((r) => camelize(r.data) as Borrowing),
   remove: (id: number) => http.delete(`/borrowings/${id}`).then((r) => r.data),

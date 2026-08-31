@@ -7,6 +7,8 @@ use App\Models\BankAccount;
 use App\Models\Borrowing;
 use App\Models\BorrowingTransaction;
 use App\Models\Branch;
+use App\Models\CashAccount;
+use App\Models\Pawning;
 use App\Services\NumberGenerator;
 use App\Support\BorrowingCashbookPoster;
 use App\Support\BorrowingLedgerPoster;
@@ -57,6 +59,24 @@ class BorrowingController extends Controller
         $this->applyLiveOverdraft($borrowing);
 
         return $borrowing;
+    }
+
+    /**
+     * Form dropdown data — cash accounts, bank accounts and in-house pawning
+     * tickets — served under the Borrowings permission so the Record Borrowing
+     * form works without also granting Cashbook / Bank Accounts / Pawnings view
+     * rights.
+     */
+    public function lookups()
+    {
+        return response()->json([
+            'cash_accounts' => CashAccount::where('status', 'Active')
+                ->orderBy('name')->get(['id', 'name', 'branch_id', 'status']),
+            'bank_accounts' => BankAccount::where('status', 'Active')
+                ->orderBy('name')->get(['id', 'name', 'account_number', 'branch_id', 'account_type', 'overdraft_limit', 'current_balance', 'status']),
+            'pawnings' => Pawning::where('status', 'Active')
+                ->orderByDesc('id')->get(['id', 'code', 'principal_amount', 'status']),
+        ]);
     }
 
     public function nextNumber(Request $request)
