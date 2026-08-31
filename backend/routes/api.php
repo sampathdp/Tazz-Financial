@@ -475,6 +475,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('borrowings/next-number', [BorrowingController::class, 'nextNumber'])->middleware('perm:Borrowings,Create');
     Route::get('borrowings/{borrowing}', [BorrowingController::class, 'show'])->middleware('perm:Borrowings,View');
     Route::post('borrowings', [BorrowingController::class, 'store'])->middleware('perm:Borrowings,Create');
+    Route::post('borrowings/{borrowing}/renew', [BorrowingController::class, 'renew'])->middleware('perm:Borrowings,Edit');
     Route::post('borrowings/{borrowing}/transactions', [BorrowingController::class, 'addTransaction'])->middleware('perm:Borrowings,Edit');
     Route::post('borrowing-transactions/{borrowingTransaction}/void', [BorrowingController::class, 'voidTransaction'])->middleware('perm:Borrowings,Delete');
     Route::delete('borrowings/{borrowing}', [BorrowingController::class, 'destroy'])->middleware('perm:Borrowings,Delete');

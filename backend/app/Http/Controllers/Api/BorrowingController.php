@@ -35,6 +35,7 @@ class BorrowingController extends Controller
     private const DETAIL_RELATIONS = [
         'transactions.creator:id,name',
         'repledgedItems.pawning:id,code,principal_amount,status',
+        'renewals.creator:id,name',
     ];
 
     public function index(Request $request)
@@ -79,8 +80,12 @@ class BorrowingController extends Controller
             'purpose' => 'nullable|string',
             'principal_amount' => 'required|numeric|min:0.01',
             'interest_rate_percent' => 'nullable|numeric|min:0|max:999',
+            'term_months' => 'nullable|integer|min:1|max:600',
             'borrowing_date' => 'required|date',
+            'maturity_date' => 'nullable|date|after_or_equal:borrowing_date',
+            'on_maturity' => ['nullable', Rule::in(['Renew', 'Settle'])],
             'reference_no' => 'nullable|string|max:64',
+            'contract_no' => 'nullable|string|max:80',
             'notes' => 'nullable|string',
 
             'receipt_method' => ['nullable', 'required_unless:type,Overdraft', Rule::in(self::METHODS)],
@@ -117,7 +122,12 @@ class BorrowingController extends Controller
                 'principal_amount' => $data['principal_amount'],
                 'outstanding_amount' => $isOverdraft ? 0 : $data['principal_amount'],
                 'interest_rate_percent' => $data['interest_rate_percent'] ?? null,
+                'term_months' => $data['term_months'] ?? null,
                 'borrowing_date' => $data['borrowing_date'],
+                'maturity_date' => $data['maturity_date']
+                    ?? (isset($data['term_months']) ? \Carbon\Carbon::parse($data['borrowing_date'])->addMonthsNoOverflow((int) $data['term_months'])->toDateString() : null),
+                'on_maturity' => $data['on_maturity'] ?? null,
+                'contract_no' => $data['contract_no'] ?? null,
                 'receipt_method' => $isOverdraft ? null : $data['receipt_method'],
                 'receipt_cash_account_id' => $isOverdraft ? null : ($data['receipt_cash_account_id'] ?? null),
                 'receipt_bank_account_id' => $isOverdraft ? null : ($data['receipt_bank_account_id'] ?? null),
@@ -151,6 +161,55 @@ class BorrowingController extends Controller
         });
 
         return response()->json($this->fresh($borrowing), 201);
+    }
+
+    /**
+     * Rolls a matured borrowing over for another term — updates its
+     * maturity_date / term / rate in place and logs the prior values to
+     * borrowing_renewals. No cash moves here; if interest is cleared at
+     * roll-over, record it separately as an InterestPayment transaction
+     * (interest_paid_amount below is informational only).
+     */
+    public function renew(Request $request, Borrowing $borrowing)
+    {
+        if ($borrowing->status !== 'Active') {
+            return response()->json(['message' => 'Only an active borrowing can be renewed.'], 422);
+        }
+        if ($borrowing->type === 'Overdraft') {
+            return response()->json(['message' => 'An overdraft facility is managed on the linked bank account, not renewed here.'], 422);
+        }
+
+        $data = $request->validate([
+            'renewed_on' => 'required|date',
+            'new_maturity_date' => 'required|date|after:renewed_on',
+            'new_term_months' => 'nullable|integer|min:1|max:600',
+            'new_interest_rate_percent' => 'nullable|numeric|min:0|max:999',
+            'interest_paid_amount' => 'nullable|numeric|min:0',
+            'notes' => 'nullable|string',
+        ]);
+
+        DB::transaction(function () use ($data, $request, $borrowing) {
+            $borrowing->renewals()->create([
+                'renewed_on' => $data['renewed_on'],
+                'previous_maturity_date' => $borrowing->maturity_date,
+                'new_maturity_date' => $data['new_maturity_date'],
+                'previous_term_months' => $borrowing->term_months,
+                'new_term_months' => $data['new_term_months'] ?? $borrowing->term_months,
+                'previous_interest_rate_percent' => $borrowing->interest_rate_percent,
+                'new_interest_rate_percent' => $data['new_interest_rate_percent'] ?? $borrowing->interest_rate_percent,
+                'interest_paid_amount' => $data['interest_paid_amount'] ?? 0,
+                'notes' => $data['notes'] ?? null,
+                'created_by' => $request->user()->id,
+            ]);
+
+            $borrowing->update([
+                'maturity_date' => $data['new_maturity_date'],
+                'term_months' => $data['new_term_months'] ?? $borrowing->term_months,
+                'interest_rate_percent' => $data['new_interest_rate_percent'] ?? $borrowing->interest_rate_percent,
+            ]);
+        });
+
+        return response()->json($this->fresh($borrowing->refresh()));
     }
 
     public function addTransaction(Request $request, Borrowing $borrowing)
