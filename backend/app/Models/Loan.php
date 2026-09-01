@@ -255,4 +255,17 @@ class Loan extends Model
             ->whereHas('approvalType', fn ($q) => $q->where('code', 'loan_application'))
             ->where('status', 'PendingApproval');
     }
+
+    /** The LoanDisbursement finance request currently in flight for this loan
+     *  (raised by LoanController::requestDisbursement(), still open) — the
+     *  marker that a request-path disbursement is underway. Never more than
+     *  one at a time, guarded in disbursementBlockReason(). */
+    public function pendingDisbursementRequest()
+    {
+        return $this->hasOne(FinanceRequest::class, 'source_id')
+            ->where('source_module', 'Loan')
+            ->where('request_type', 'LoanDisbursement')
+            ->whereNotIn('status', ['Rejected', 'Cancelled', 'Completed', 'Reversed'])
+            ->orderByDesc('id');
+    }
 }

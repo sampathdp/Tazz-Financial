@@ -11,7 +11,10 @@ use App\Models\FacilitySchedule;
 use App\Models\SpeedDraft;
 use App\Models\SpeedDraftRenewal;
 use App\Models\SpeedDraftType;
+use App\Models\ChartOfAccount;
 use App\Services\NumberGenerator;
+use App\Support\FinanceRequestService;
+use App\Support\SpeedDraftDisbursementCompleter;
 use App\Support\SpeedDraftLedgerPoster;
 use App\Support\SpeedDraftPaymentAllocator;
 use App\Support\SpeedDraftScheduler;
@@ -36,6 +39,8 @@ class SpeedDraftController extends Controller
         'collateral.jewelryDetail', 'collateral.vehicleDetail', 'collateral.documents',
         'schedules.allocations', 'schedules.activeAllocations', 'payments.receiver:id,name', 'payments.voider:id,name',
         'pendingApplicationRequest.requester:id,name',
+        'pendingDisbursementRequest:id,code,source_id,status,amount,requested_by',
+        'pendingDisbursementRequest.requester:id,name',
         'renewedTo.renewedBy:id,name', 'renewedFrom.renewedBy:id,name',
     ];
 
@@ -276,42 +281,81 @@ class SpeedDraftController extends Controller
         return $speedDraft->fresh()->load(self::DETAIL_RELATIONS);
     }
 
-    /** Hands the capital to the customer and generates the interest-only schedule. */
-    public function disburse(Request $request, SpeedDraft $speedDraft)
+    private const DISBURSE_RULES = [
+        'disbursement_method' => ['required', 'in:Cash,Bank'],
+        'disbursement_bank_account_id' => ['required_if:disbursement_method,Bank', 'nullable', 'exists:bank_accounts,id'],
+        'disbursed_amount' => 'nullable|numeric|min:0.01',
+        'start_date' => 'required|date',
+    ];
+
+    private function disbursementBlockReason(SpeedDraft $speedDraft): ?string
     {
         if ($speedDraft->status !== 'Approved') {
-            return response()->json(['message' => 'Only an Approved Speed Draft can be disbursed.'], 422);
+            return 'Only an Approved Speed Draft can be disbursed.';
         }
-        $data = $request->validate([
-            'disbursement_method' => ['required', Rule::in(['Cash', 'Bank'])],
-            'disbursement_bank_account_id' => ['required_if:disbursement_method,Bank', 'nullable', 'exists:bank_accounts,id'],
-            'disbursed_amount' => 'nullable|numeric|min:0.01',
-            'start_date' => 'required|date',
-        ]);
+        if ($speedDraft->pendingDisbursementRequest()->exists()) {
+            return 'A disbursement request for this Speed Draft is already awaiting finance approval or payment.';
+        }
+
+        return null;
+    }
+
+    /** Direct disburse (Finance / admin, perm Speed Drafts,Approve): finishes the draft and releases the money in one call. */
+    public function disburse(Request $request, SpeedDraft $speedDraft)
+    {
+        if ($block = $this->disbursementBlockReason($speedDraft)) {
+            return response()->json(['message' => $block], 422);
+        }
+        $data = $request->validate(self::DISBURSE_RULES);
 
         $executedBy = $request->user()->id;
-        $speedDraft = DB::transaction(function () use ($speedDraft, $data, $executedBy) {
-            $startDate = Carbon::parse($data['start_date']);
-            $speedDraft->update([
-                'disbursed_amount' => $data['disbursed_amount'] ?? $speedDraft->principal_amount,
-                'disbursed_at' => now(),
-                'start_date' => $startDate->format('Y-m-d'),
-                'maturity_date' => $startDate->copy()->addMonthsNoOverflow($speedDraft->term_months)->format('Y-m-d'),
-                'status' => 'Active',
-            ]);
-            $speedDraft->speedDraftDetail()->update([
-                'disbursement_method' => $data['disbursement_method'],
-                'disbursement_bank_account_id' => $data['disbursement_method'] === 'Cash' ? null : ($data['disbursement_bank_account_id'] ?? null),
-            ]);
-            $fresh = $speedDraft->fresh();
-
-            FacilitySchedule::insert(SpeedDraftScheduler::generate($fresh));
-            SpeedDraftLedgerPoster::postDisbursement($fresh, $executedBy);
-
-            return $fresh;
+        DB::transaction(function () use ($speedDraft, $data, $executedBy) {
+            SpeedDraftDisbursementCompleter::complete($speedDraft, $data);
+            SpeedDraftLedgerPoster::postDisbursement($speedDraft->fresh(), $executedBy);
         });
 
-        return $speedDraft->load(self::DETAIL_RELATIONS);
+        return $speedDraft->fresh()->load(self::DETAIL_RELATIONS);
+    }
+
+    /** Request path (perm Speed Drafts,Create): raises a LoanDisbursement finance request; the FinanceRequestSettled listener finishes the draft once Finance executes it. */
+    public function requestDisbursement(Request $request, SpeedDraft $speedDraft)
+    {
+        if ($block = $this->disbursementBlockReason($speedDraft)) {
+            return response()->json(['message' => $block], 422);
+        }
+        $data = $request->validate(self::DISBURSE_RULES);
+
+        $financed = $data['disbursed_amount'] ?? $speedDraft->principal_amount;
+        $bankAccountId = $data['disbursement_method'] === 'Cash' ? null : ($data['disbursement_bank_account_id'] ?? null);
+
+        $financeRequest = FinanceRequestService::open([
+            'request_type' => 'LoanDisbursement',
+            'amount' => $financed,
+            'branch_id' => $speedDraft->branch_id,
+            'source_module' => 'SpeedDraft',
+            'source_id' => $speedDraft->id,
+            'payee_type' => 'Customer',
+            'payee_id' => $speedDraft->customer_id,
+            'payee_name' => $speedDraft->customer?->full_name,
+            'preferred_method' => $data['disbursement_method'],
+            'purpose' => "Speed Draft disbursement - {$speedDraft->code}",
+            'requested_by' => $request->user()->id,
+            'meta' => [
+                'gl_source_type' => 'SpeedDraft',
+                'gl_source_id' => $speedDraft->id,
+                'offset_account_id' => ChartOfAccount::system('1110')->id,
+                'start_date' => $data['start_date'],
+                'disbursed_amount' => $financed,
+                'disbursement_method' => $data['disbursement_method'],
+                'disbursement_bank_account_id' => $bankAccountId,
+                'source_bank_account_id' => $bankAccountId,
+            ],
+        ]);
+
+        return response()->json([
+            'message' => 'Disbursement request sent to Finance.',
+            'financeRequest' => $financeRequest->load('branch:id,name'),
+        ], 201);
     }
 
     /**

@@ -231,8 +231,19 @@ class FinanceRequestService
         }
         $entryDate = $exec['entry_date'] ?? now()->toDateString();
         $isTransfer = in_array($request->txnType(), ['TRANSFER', 'FLOAT_ISSUE'], true);
+        $meta = $request->meta ?? [];
 
-        [$srcType, $srcId, $srcLeaf] = self::resolveAccount($exec['method'] ?? 'Cash', $exec['cash_account_id'] ?? null, $exec['bank_account_id'] ?? null);
+        // For a source-driven request (loan disbursement, expense) the method
+        // and the specific bank account were fixed when the request was
+        // raised — the executor only confirms / picks the cash till. Fall
+        // back to those before the generic defaults.
+        $method = $exec['method'] ?? $request->preferred_method ?? 'Cash';
+        if ($method === 'Cheque') {
+            $method = 'Bank';
+        }
+        $bankId = $exec['bank_account_id'] ?? ($method === 'Bank' ? ($meta['source_bank_account_id'] ?? null) : null);
+
+        [$srcType, $srcId, $srcLeaf] = self::resolveAccount($method, $exec['cash_account_id'] ?? null, $bankId);
         $movements = [['account_type' => $srcType, 'account_id' => $srcId, 'delta' => '-' . $amount]];
 
         if ($isTransfer) {
@@ -248,7 +259,7 @@ class FinanceRequestService
                 ['account_id' => $srcLeaf->id, 'debit' => 0, 'credit' => $amount],
             ];
         } else {
-            $offsetId = $exec['offset_account_id'] ?? $request->meta['offset_account_id'] ?? null;
+            $offsetId = $exec['offset_account_id'] ?? $meta['offset_account_id'] ?? null;
             if (!$offsetId) {
                 throw new FinancePostingException('Choose the account this payment should be posted against.');
             }
@@ -258,10 +269,17 @@ class FinanceRequestService
             ];
         }
 
-        DB::transaction(function () use ($request, $userId, $amount, $entryDate, $movements, $glLines, $srcType, $srcId) {
+        // A source-keyed GL entry (loan disbursement stays source_type='Loan')
+        // when the request carries it — so LoanController::purge() /
+        // reverseDisbursement() still find the journal entry.
+        $glSource = isset($meta['gl_source_type'])
+            ? ['gl_source_type' => $meta['gl_source_type'], 'gl_source_id' => $meta['gl_source_id'] ?? null]
+            : [];
+
+        DB::transaction(function () use ($request, $userId, $amount, $entryDate, $movements, $glLines, $glSource, $srcType, $srcId) {
             $request->update(['status' => 'Processing']);
 
-            $txn = FinancePostingService::execute([
+            $txn = FinancePostingService::execute($glSource + [
                 'txn_type' => $request->txnType(),
                 'amount' => $amount,
                 'entry_date' => $entryDate,

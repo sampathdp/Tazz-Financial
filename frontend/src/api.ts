@@ -425,6 +425,8 @@ export interface Loan {
   pendingWriteOffRequest?: LoanCancelRequest | null;
   /** The approval_requests row (code 'loan_application') created at submission time — only present while status is Pending. */
   pendingApplicationRequest?: LoanCancelRequest | null;
+  /** The LoanDisbursement finance request in flight for this loan, if an officer requested disbursement (see loansApi.requestDisbursement()). */
+  pendingDisbursementRequest?: FinanceRequest | null;
   cancelRequests?: LoanCancelRequest[];
   disbursedAmount?: number | string | null;
   disbursedAt?: string | null;
@@ -1167,6 +1169,9 @@ export const loansApi = {
     http.post(`/loans/${id}/reschedule`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque'; disbursementBankAccountId?: number | null }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
+  /** Loan-officer path: raises a LoanDisbursement finance request instead of disbursing directly. Finance approves + executes it. */
+  requestDisbursement: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque'; disbursementBankAccountId?: number | null }) =>
+    http.post(`/loans/${id}/request-disbursement`, snakeize(body)).then((r) => camelize(r.data) as { message: string; financeRequest: FinanceRequest }),
   updateStatusFlags: (id: number, body: LoanStatusFlags) =>
     http.patch(`/loans/${id}/status-flags`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   updateOfficers: (id: number, body: { loanOfficerId?: number | null; recoveryOfficerId?: number | null }) =>
@@ -1555,6 +1560,8 @@ export interface SpeedDraft {
   closedAt?: string | null;
   /** The approval_requests row (code 'speed_draft_application') created at submission time — only present while status is Pending. */
   pendingApplicationRequest?: LoanCancelRequest | null;
+  /** The LoanDisbursement finance request in flight, if an officer requested disbursement (see speedDraftsApi.requestDisbursement()). */
+  pendingDisbursementRequest?: FinanceRequest | null;
   /** Present once this draft has been renewed into a new one — see speedDraftsApi.renew(). */
   renewedTo?: SpeedDraftRenewal | null;
   /** Present when this draft was itself created by renewing an older, now-Closed one. */
@@ -1605,6 +1612,8 @@ export const speedDraftsApi = {
   remove: (id: number) => http.delete(`/speed-drafts/${id}`).then((r) => r.data),
   approve: (id: number) => http.post(`/speed-drafts/${id}/approve`).then((r) => camelize(r.data) as SpeedDraft),
   reject: (id: number, reason?: string) => http.post(`/speed-drafts/${id}/reject`, { rejected_reason: reason }).then((r) => camelize(r.data) as SpeedDraft),
+  requestDisbursement: (id: number, body: { disbursementMethod: 'Cash' | 'Bank'; disbursementBankAccountId?: number | null; disbursedAmount?: number | string; startDate: string }) =>
+    http.post(`/speed-drafts/${id}/request-disbursement`, snakeize(body)).then((r) => camelize(r.data) as { message: string; financeRequest: FinanceRequest }),
   disburse: (id: number, body: { disbursementMethod: 'Cash' | 'Bank'; disbursementBankAccountId?: number | null; disbursedAmount?: number | string; startDate: string }) =>
     http.post(`/speed-drafts/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as SpeedDraft),
   overdue: () => http.get('/speed-drafts-overdue').then((r) => camelize(r.data) as OverdueSpeedDraft[]),

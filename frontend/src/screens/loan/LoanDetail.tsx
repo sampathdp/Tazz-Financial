@@ -1041,16 +1041,22 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const chargeRequired = feePercent > 0
   const chargeBlocking = chargeRequired && (!docCharge || docBalance > 0)
 
+  const disburseBody = () => ({
+    disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate, disbursementMethod: method,
+    disbursementBankAccountId: method === 'Cash' ? null : Number(bankAccountId),
+  })
+  const validateForm = () => {
+    if (!firstDate) { setErr('Pick the first installment date.'); return false }
+    if (chargeBlocking) { setErr('Settle the document charge before disbursing this loan.'); return false }
+    if (method !== 'Cash' && !bankAccountId) { setErr('Pick which bank account this loan is paid out of.'); return false }
+    return true
+  }
+
   const disburse = async () => {
-    if (!firstDate) { setErr('Pick the first installment date.'); return }
-    if (chargeBlocking) { setErr('Settle the document charge before disbursing this loan.'); return }
-    if (method !== 'Cash' && !bankAccountId) { setErr('Pick which bank account this loan is paid out of.'); return }
+    if (!validateForm()) return
     setBusy(true); setErr('')
     try {
-      await loansApi.disburse(loan.id, {
-        disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate, disbursementMethod: method,
-        disbursementBankAccountId: method === 'Cash' ? null : Number(bankAccountId),
-      })
+      await loansApi.disburse(loan.id, disburseBody())
       notify.success('Loan disbursed', loan.code)
       onChanged()
     } catch (ex: any) {
@@ -1058,7 +1064,20 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
     } finally { setBusy(false) }
   }
 
+  const requestDisburse = async () => {
+    if (!validateForm()) return
+    setBusy(true); setErr('')
+    try {
+      await loansApi.requestDisbursement(loan.id, disburseBody())
+      notify.success('Disbursement requested', 'Sent to Finance for approval and payment')
+      onChanged()
+    } catch (ex: any) {
+      setErr(getErrorText(ex, 'Could not send the request'))
+    } finally { setBusy(false) }
+  }
+
   const pendingCancel = loan.pendingCancelRequest
+  const pendingDisb = loan.pendingDisbursementRequest
 
   const cancel = async () => {
     const reason = await notify.prompt({ title: `Request cancel for loan ${loan.code}?`, msg: 'Approved but not yet disbursed — give a reason. Needs a second person to approve before it takes effect.', placeholder: 'Reason for cancellation', required: true, danger: true, okText: 'Send Request' })
@@ -1110,6 +1129,17 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
       )}
       <ErrorBanner error={err} style={{ marginBottom: 14 }} />
 
+      {pendingDisb && (
+        <div className="row between wrap gap-2" style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--ac-dim)', border: '1px solid var(--ac-line)', borderRadius: 'var(--r-s)' }}>
+          <div style={{ fontSize: 12.5 }}>
+            <b>Disbursement requested</b> — {pendingDisb.code} · {pendingDisb.status.replace(/([A-Z])/g, ' $1').trim()}
+            <div className="t-2" style={{ fontSize: 11.5, marginTop: 2 }}>
+              {pendingDisb.requester?.name ? `Raised by ${pendingDisb.requester.name}. ` : ''}Finance will approve and release the funds — track it under Finance › Finance Requests.
+            </div>
+          </div>
+        </div>
+      )}
+
       <DocumentChargeSection loan={loan} me={me} docCharge={docCharge} docBalance={docBalance} computedAmount={computedDocCharge} feePercent={feePercent} onChanged={onChanged} notify={notify} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 16 }}>
@@ -1130,13 +1160,18 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         {loan.termMonths} months · {loan.loanDetail?.installmentFrequency} · {loan.loanDetail?.interestMethod === 'reducing_balance' ? 'Reducing balance' : 'Flat'} interest at {loan.interestRatePercent}%
         {num(loan.loanDetail?.downPayment) > 0 && <> · Down payment {money(loan.loanDetail?.downPayment)} already settled — schedule covers the remaining {money(financedAmount)}</>}
       </div>
-      <Can user={me} module="Active Loans" action="Approve">
-        <div className="row gap-2" style={{ alignItems: 'center' }}>
-          <Btn variant="primary" icon="check" onClick={disburse} disabled={busy || chargeBlocking || !!pendingCancel}>{busy ? 'Disbursing…' : 'Disburse Loan'}</Btn>
+      {!pendingDisb && (
+        <div className="row gap-2 wrap" style={{ alignItems: 'center' }}>
+          <Can user={me} module="Active Loans" action="Create">
+            <Btn variant="solid" icon="receipt" onClick={requestDisburse} disabled={busy || chargeBlocking || !!pendingCancel}>{busy ? 'Sending…' : 'Request Disbursement'}</Btn>
+          </Can>
+          <Can user={me} module="Active Loans" action="Approve">
+            <Btn variant="primary" icon="check" onClick={disburse} disabled={busy || chargeBlocking || !!pendingCancel}>{busy ? 'Disbursing…' : 'Disburse Now'}</Btn>
+          </Can>
           {chargeBlocking && !pendingCancel && <span className="t-2" style={{ fontSize: 12 }}>{docCharge ? 'Settle' : 'Add and settle'} the document charge above first.</span>}
           {pendingCancel && <span className="t-2" style={{ fontSize: 12 }}>A cancel request is pending — resolve it before disbursing.</span>}
         </div>
-      </Can>
+      )}
     </Card>
   )
 }

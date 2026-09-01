@@ -123,6 +123,18 @@ class SpeedDraft extends Model
             ->where('status', 'PendingApproval');
     }
 
+    /** The LoanDisbursement finance request currently in flight for this draft
+     *  (see SpeedDraftController::requestDisbursement()) — mirrors
+     *  Loan::pendingDisbursementRequest(). */
+    public function pendingDisbursementRequest()
+    {
+        return $this->hasOne(FinanceRequest::class, 'source_id')
+            ->where('source_module', 'SpeedDraft')
+            ->where('request_type', 'LoanDisbursement')
+            ->whereNotIn('status', ['Rejected', 'Cancelled', 'Completed', 'Reversed'])
+            ->orderByDesc('id');
+    }
+
     /** The renewal row that closed THIS draft into a new one — present once this draft has been renewed. */
     public function renewedTo()
     {

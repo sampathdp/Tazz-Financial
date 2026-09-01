@@ -203,7 +203,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('loan-cancel-requests/{cancelRequest}/reject', [LoanController::class, 'rejectCancelRequest']);
 
     // --- Loan Management: Active Loans ---
+    // Direct disburse (Finance / admin): finishes the loan and releases the money in one call.
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
+    // Request disburse (loan officer): raises a LoanDisbursement finance request; Finance
+    // approves + executes it, then a listener finishes the loan (see the Finance module plan, D2).
+    Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware('perm:Active Loans,Create');
     // Write-off is maker-checker (shared approval_requests table, code 'loan_write_off'),
     // same pattern as loan_cancel below. Submitting needs the module permission; who may
     // approve/reject is admin-manageable data via ApprovalType::isAuthorized('loan_write_off').
@@ -322,6 +326,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve']);
     Route::post('speed-drafts/{speedDraft}/reject', [SpeedDraftController::class, 'reject']);
     Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware('perm:Speed Drafts,Approve');
+    Route::post('speed-drafts/{speedDraft}/request-disbursement', [SpeedDraftController::class, 'requestDisbursement'])->middleware('perm:Speed Drafts,Create');
     Route::post('speed-drafts/{speedDraft}/renew', [SpeedDraftController::class, 'renew'])->middleware('perm:Speed Draft Payments,Create');
 
     // --- Speed Drafts: Collateral (Gold Pawning / Lease asset records) ---
