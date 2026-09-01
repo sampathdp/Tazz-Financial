@@ -6,16 +6,48 @@ use Illuminate\Database\Eloquent\Model;
 
 class CashAccount extends Model
 {
-    protected $fillable = ['branch_id', 'chart_of_account_id', 'name', 'opening_balance', 'current_balance', 'status'];
+    /** Branch/head-office tills that receive auto-posted collections and are the default source for outbound cash at a branch. */
+    public const PRIMARY_TYPES = ['BranchMain', 'HeadOfficeMain'];
+
+    /** Every account_type — see the add_finance_metadata_to_cash_accounts migration. */
+    public const ACCOUNT_TYPES = [
+        'HeadOfficeMain', 'BranchMain', 'PettyCash',
+        'CashierFloat', 'CollectionCash', 'InTransit', 'Other',
+    ];
+
+    protected $fillable = [
+        'code', 'branch_id', 'account_type', 'responsible_user_id', 'parent_cash_account_id',
+        'chart_of_account_id', 'name', 'opening_balance', 'current_balance',
+        'allow_negative', 'last_reconciled_at', 'status',
+    ];
 
     protected $casts = [
         'opening_balance' => 'decimal:2',
         'current_balance' => 'decimal:2',
+        'allow_negative' => 'boolean',
+        'last_reconciled_at' => 'datetime',
     ];
 
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    /** The person accountable for this account's cash — a float holder or petty-cash custodian. Null for branch/HO tills. */
+    public function responsibleUser()
+    {
+        return $this->belongsTo(User::class, 'responsible_user_id');
+    }
+
+    /** A float's home account — where it was issued from and settles back to. */
+    public function parent()
+    {
+        return $this->belongsTo(self::class, 'parent_cash_account_id');
+    }
+
+    public function children()
+    {
+        return $this->hasMany(self::class, 'parent_cash_account_id');
     }
 
     public function entries()
@@ -44,9 +76,45 @@ class CashAccount extends Model
         return $this->belongsTo(ChartOfAccount::class);
     }
 
-    /** The branch's primary till for auto-posted collections — its oldest active cash account. Branches expected to keep exactly one; if several exist, the first one created wins. Shared by CashbookPoster and LoanLedgerPoster so there's one definition of "the branch's till", not two. */
+    /**
+     * The branch's primary till for auto-posted collections and default
+     * outbound cash — its oldest active BranchMain/HeadOfficeMain account.
+     * Falls back to the oldest active account of any type so a branch that
+     * pre-dates the Finance-metadata backfill (every row typed) still
+     * resolves. A CashierFloat / PettyCash / InTransit account is never
+     * picked here. Shared by every *Poster so there's one definition of
+     * "the branch's till".
+     */
     public static function branchPrimary(int $branchId): ?self
     {
-        return static::where('branch_id', $branchId)->where('status', 'Active')->orderBy('id')->first();
+        $base = static::where('branch_id', $branchId)->where('status', 'Active');
+
+        return (clone $base)->whereIn('account_type', self::PRIMARY_TYPES)->orderBy('id')->first()
+            ?? $base->orderBy('id')->first();
+    }
+
+    /**
+     * The branch's cash-in-transit holding account, created on first use. A
+     * cross-branch transfer's money sits here between "released" by the
+     * sending branch and "received" by the destination — see
+     * FinanceRequestService::release()/receive().
+     */
+    public static function branchInTransit(int $branchId): self
+    {
+        $existing = static::where('branch_id', $branchId)->where('account_type', 'InTransit')->first();
+        if ($existing) {
+            return $existing;
+        }
+        $branchCode = optional(Branch::find($branchId))->code ?? $branchId;
+
+        return static::create([
+            'code' => "{$branchCode}-TRANSIT",
+            'branch_id' => $branchId,
+            'account_type' => 'InTransit',
+            'name' => "Cash in Transit - {$branchCode}",
+            'opening_balance' => 0,
+            'current_balance' => 0,
+            'status' => 'Active',
+        ]);
     }
 }

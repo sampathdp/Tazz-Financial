@@ -10,7 +10,6 @@ use App\Models\Branch;
 use App\Models\CashAccount;
 use App\Models\Pawning;
 use App\Services\NumberGenerator;
-use App\Support\BorrowingCashbookPoster;
 use App\Support\BorrowingLedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -174,7 +173,6 @@ class BorrowingController extends Controller
             // cash in now, posted like an FD deposit (Cash method only).
             if (!$isOverdraft) {
                 BorrowingLedgerPoster::postDrawdown($borrowing);
-                BorrowingCashbookPoster::postDrawdown($borrowing);
             }
 
             return $borrowing;
@@ -283,7 +281,6 @@ class BorrowingController extends Controller
             $this->applyTransactionToBalance($borrowing, $data['kind'], (string) $data['amount']);
 
             BorrowingLedgerPoster::postTransaction($txn);
-            BorrowingCashbookPoster::postTransaction($txn);
 
             return $txn;
         });
@@ -302,7 +299,6 @@ class BorrowingController extends Controller
 
         DB::transaction(function () use ($borrowingTransaction, $borrowing) {
             BorrowingLedgerPoster::reverseTransaction($borrowingTransaction);
-            BorrowingCashbookPoster::reverse('BorrowingTransaction', $borrowingTransaction->id);
 
             $borrowing->update([
                 'outstanding_amount' => $borrowingTransaction->outstanding_before,
@@ -322,7 +318,6 @@ class BorrowingController extends Controller
 
         DB::transaction(function () use ($borrowing) {
             BorrowingLedgerPoster::reverseDrawdown($borrowing);
-            BorrowingCashbookPoster::reverse('Borrowing', $borrowing->id);
             $borrowing->delete();
         });
 

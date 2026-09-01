@@ -51,6 +51,16 @@ const PermScreen = named(() => import('./screens/Admin'), 'PermScreen')
 const CompanyScreen = named(() => import('./screens/Admin'), 'CompanyScreen')
 const MaintenanceScreen = named(() => import('./screens/Maintenance'), 'MaintenanceScreen')
 
+const FinanceDashboardScreen = named(() => import('./screens/Finance'), 'FinanceDashboardScreen')
+const FinanceRequestsScreen = named(() => import('./screens/Finance'), 'FinanceRequestsScreen')
+const FinanceTransfersScreen = named(() => import('./screens/Finance'), 'FinanceTransfersScreen')
+const CashFloatsScreen = named(() => import('./screens/Finance'), 'CashFloatsScreen')
+const CashSessionsScreen = named(() => import('./screens/Finance'), 'CashSessionsScreen')
+const FinanceSettingsScreen = named(() => import('./screens/Finance'), 'FinanceSettingsScreen')
+const CashTransactionsScreen = named(() => import('./screens/Finance'), 'CashTransactionsScreen')
+const AuditLogScreen = named(() => import('./screens/Finance'), 'AuditLogScreen')
+const FinanceReportsScreen = named(() => import('./screens/FinanceReports'), 'FinanceReportsScreen')
+
 const CashbookScreen = named(() => import('./screens/Cashbook'), 'CashbookScreen')
 const CashTransfersScreen = named(() => import('./screens/Cashbook'), 'CashTransfersScreen')
 const CashReconciliationScreen = named(() => import('./screens/Cashbook'), 'CashReconciliationScreen')
@@ -145,6 +155,15 @@ const SCREENS: Record<string, ScreenComp> = {
   customers: CustomersScreen,
   'loan/types': LoanTypesScreen,
   'finance/calculator': LoanCalculatorScreen,
+  'finance/dashboard': FinanceDashboardScreen,
+  'finance/requests': FinanceRequestsScreen,
+  'finance/transfers': FinanceTransfersScreen,
+  'finance/floats': CashFloatsScreen,
+  'finance/sessions': CashSessionsScreen,
+  'finance/settings': FinanceSettingsScreen,
+  'finance/transactions': CashTransactionsScreen,
+  'finance/audit': AuditLogScreen,
+  'finance/reports': FinanceReportsScreen,
   'loan/apps': LoanApplicationsScreen,
   'loan/active': ActiveLoansScreen,
   'loan/overdue': OverdueLoansScreen,

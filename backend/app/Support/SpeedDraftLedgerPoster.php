@@ -21,80 +21,118 @@ use App\Models\SpeedDraft;
  */
 class SpeedDraftLedgerPoster
 {
-    /** Capital handed to the customer at disbursement — Dr 1110 (capital now outstanding), Cr the branch till (Cash) or the chosen bank account (Bank). */
-    public static function postDisbursement(SpeedDraft $draft): void
+    /**
+     * Capital handed to the customer at disbursement. Routes through
+     * FinancePostingService (the one money writer) exactly like
+     * LoanLedgerPoster::postDisbursement — posts the GL (Dr 1110 capital
+     * outstanding / Cr the branch till for Cash, or the chosen bank account
+     * for Bank / Cheque) AND moves that account's physical current_balance,
+     * with a finance_transactions row. The journal entry stays
+     * source_type='SpeedDraft' / source_id=draft. Idempotent per draft.
+     */
+    public static function postDisbursement(SpeedDraft $draft, ?int $executedBy = null): void
     {
         $detail = $draft->speedDraftDetail;
         $method = $detail?->disbursement_method;
-        $creditAccount = LoanLedgerPoster::disbursementCreditAccount(
+        $target = LoanLedgerPoster::disbursementTarget(
             $method,
             (int) $draft->branch_id,
             $detail?->disbursement_bank_account_id ? (int) $detail->disbursement_bank_account_id : null,
         );
-        if (!$creditAccount) {
+        if (!$target) {
             return;
         }
-        $capitalAccount = ChartOfAccount::system('1110');
+        $amount = (string) $draft->disbursed_amount;
         $entryDate = optional($draft->disbursed_at)->toDateString() ?? now()->toDateString();
 
-        LedgerPoster::post([
-            ['account_id' => $capitalAccount->id, 'debit' => $draft->disbursed_amount, 'credit' => 0],
-            ['account_id' => $creditAccount->id, 'debit' => 0, 'credit' => $draft->disbursed_amount],
-        ], $entryDate, [
-            'source_type' => 'SpeedDraft',
-            'source_id' => $draft->id,
-            'description' => "Speed Draft disbursed ({$method}) - {$draft->code}",
+        FinancePostingService::execute([
+            'txn_type' => 'DISBURSEMENT',
+            'amount' => $amount,
+            'entry_date' => $entryDate,
             'branch_id' => $draft->branch_id,
-            'posted_by' => $draft->approved_by,
+            'movements' => [[
+                'account_type' => $target['phys_type'],
+                'account_id' => $target['phys_id'],
+                'delta' => '-' . $amount,
+            ]],
+            'gl_lines' => [
+                ['account_id' => ChartOfAccount::system('1110')->id, 'debit' => $amount, 'credit' => 0],
+                ['account_id' => $target['leaf']->id, 'debit' => 0, 'credit' => $amount],
+            ],
+            'gl_source_type' => 'SpeedDraft',
+            'gl_source_id' => $draft->id,
+            'gl_description' => "Speed Draft disbursed ({$method}) - {$draft->code}",
+            'description' => "Speed Draft disbursed ({$method}) - {$draft->code}",
+            'source_module' => 'SpeedDraft',
+            'source_id' => $draft->id,
+            'idempotency_key' => "speed-draft-disbursement-{$draft->id}",
+            'executed_by' => $executedBy ?? $draft->approved_by,
         ]);
     }
 
-    /** An interest payment received in cash — Dr till, Cr 4015, sourced from the allocation rows just written. */
-    public static function postInterestReceipt(FacilityPayment $payment): void
+    /**
+     * A cash payment received now — books the interest (4015) / penalty
+     * (4030) / capital (1110) split in one COLLECTION transaction through
+     * FinancePostingService, so the till balance moves, a
+     * finance_transactions row is recorded and a cashbook mirror is written,
+     * all atomic with the GL. Replaced postInterestReceipt /
+     * postPenaltyReceipt / postCapitalReceipt in Phase 7.
+     */
+    public static function postCashReceipt(FacilityPayment $payment): void
     {
         if ($payment->payment_method !== 'Cash') {
-            return;
-        }
-        $interest = (float) $payment->allocations()->sum('interest_applied');
-        if ($interest <= 0) {
             return;
         }
         $till = CashAccount::branchPrimary((int) $payment->branch_id);
         if (!$till) {
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
-        $income = ChartOfAccount::system('4015');
-        $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
+        $interest = (string) $payment->allocations()->sum('interest_applied');
+        $penalty = (string) $payment->allocations()->sum('penalty_applied');
+        $capital = (string) $payment->allocations()->sum('principal_applied');
 
-        LedgerPoster::post([
-            ['account_id' => $tillAccount->id, 'debit' => $interest, 'credit' => 0],
-            ['account_id' => $income->id, 'debit' => 0, 'credit' => $interest],
-        ], $entryDate, self::meta($payment, "Speed Draft interest received - {$payment->code}"));
+        $credits = [];
+        if (bccomp($interest, '0.00', 2) > 0) {
+            $credits[] = ['account_id' => ChartOfAccount::system('4015')->id, 'credit' => $interest];
+        }
+        if (bccomp($penalty, '0.00', 2) > 0) {
+            $credits[] = ['account_id' => ChartOfAccount::system('4030')->id, 'credit' => $penalty];
+        }
+        if (bccomp($capital, '0.00', 2) > 0) {
+            $credits[] = ['account_id' => ChartOfAccount::system('1110')->id, 'credit' => $capital];
+        }
+        if (!$credits) {
+            return;
+        }
+        $amount = bcadd(bcadd($interest, $penalty, 2), $capital, 2);
+        self::postCollection($payment, $till, $amount, $credits, "Speed Draft payment {$payment->code}");
     }
 
-    /** A penalty payment received in cash — Dr till, Cr 4030 (Penalty Income — shared with Loan, not a Speed-Draft-specific account). */
-    public static function postPenaltyReceipt(FacilityPayment $payment): void
+    /** Books a Speed Draft cash collection through the one money writer. */
+    private static function postCollection(FacilityPayment $payment, CashAccount $till, string $amount, array $credits, string $description): void
     {
-        if ($payment->payment_method !== 'Cash') {
-            return;
-        }
-        $penalty = (float) $payment->allocations()->sum('penalty_applied');
-        if ($penalty <= 0) {
-            return;
-        }
-        $till = CashAccount::branchPrimary((int) $payment->branch_id);
-        if (!$till) {
-            return;
-        }
-        $tillAccount = ChartOfAccount::forCashTill($till);
-        $income = ChartOfAccount::system('4030');
+        $tillLeaf = ChartOfAccount::forCashTill($till);
         $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
 
-        LedgerPoster::post([
-            ['account_id' => $tillAccount->id, 'debit' => $penalty, 'credit' => 0],
-            ['account_id' => $income->id, 'debit' => 0, 'credit' => $penalty],
-        ], $entryDate, self::meta($payment, "Speed Draft penalty received - {$payment->code}"));
+        FinancePostingService::execute([
+            'txn_type' => 'COLLECTION',
+            'amount' => $amount,
+            'entry_date' => $entryDate,
+            'branch_id' => $payment->branch_id,
+            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $amount]],
+            'gl_lines' => array_merge(
+                [['account_id' => $tillLeaf->id, 'debit' => $amount, 'credit' => 0]],
+                array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
+            ),
+            'gl_source_type' => 'SpeedDraftPayment',
+            'gl_source_id' => $payment->id,
+            'gl_description' => $description,
+            'description' => $description,
+            'source_module' => 'SpeedDraftPayment',
+            'source_id' => $payment->id,
+            'idempotency_key' => "speed-draft-payment-{$payment->id}",
+            'executed_by' => $payment->received_by,
+        ]);
     }
 
     /**
@@ -134,33 +172,15 @@ class SpeedDraftLedgerPoster
         ]);
     }
 
-    /** A capital-reduction (or the capital portion of a settlement) received in cash — Dr till, Cr 1110. */
-    public static function postCapitalReceipt(FacilityPayment $payment): void
-    {
-        if ($payment->payment_method !== 'Cash') {
-            return;
-        }
-        $capital = (float) $payment->allocations()->sum('principal_applied');
-        if ($capital <= 0) {
-            return;
-        }
-        $till = CashAccount::branchPrimary((int) $payment->branch_id);
-        if (!$till) {
-            return;
-        }
-        $tillAccount = ChartOfAccount::forCashTill($till);
-        $capitalAccount = ChartOfAccount::system('1110');
-        $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
-
-        LedgerPoster::post([
-            ['account_id' => $tillAccount->id, 'debit' => $capital, 'credit' => 0],
-            ['account_id' => $capitalAccount->id, 'debit' => 0, 'credit' => $capital],
-        ], $entryDate, self::meta($payment, "Speed Draft capital received - {$payment->code}"));
-    }
-
-    /** Reverses every posted journal entry this payment ever caused — called when a payment is voided. */
+    /** Reverses a voided payment — the COLLECTION transaction back through FinancePostingService (restores till + GL + cashbook), any other posted JE on the GL. */
     public static function reverseAllFor(FacilityPayment $payment, ?int $userId = null): void
     {
+        $collection = \App\Models\FinanceTransaction::where('source_module', 'SpeedDraftPayment')
+            ->where('source_id', $payment->id)->where('txn_type', 'COLLECTION')->where('status', 'Completed')
+            ->latest('id')->first();
+        if ($collection) {
+            FinancePostingService::reverse($collection, "Voided: {$payment->code}", $userId);
+        }
         JournalEntry::where('source_type', 'SpeedDraftPayment')
             ->where('source_id', $payment->id)
             ->where('status', 'Posted')

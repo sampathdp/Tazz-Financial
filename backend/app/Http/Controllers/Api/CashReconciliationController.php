@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApprovalType;
 use App\Models\CashAccount;
 use App\Models\CashReconciliation;
 use App\Models\FacilityPayment;
@@ -71,6 +72,12 @@ class CashReconciliationController extends Controller
             'notes' => 'nullable|string|max:255',
         ]);
 
+        $locked = CashReconciliation::where('branch_id', $data['branch_id'])
+            ->where('as_at_date', $data['as_at_date'])->whereNotNull('locked_at')->exists();
+        if ($locked) {
+            return response()->json(['message' => 'This reconciliation has been verified and locked — it can no longer be edited.'], 422);
+        }
+
         $systemCashTotal = $this->systemCashTotal($data['branch_id']);
         $chequeInHandTotal = $this->chequeInHandTotal($data['branch_id']);
         $postdatedChequeTotal = $this->postdatedChequeTotal($data['branch_id']);
@@ -126,8 +133,41 @@ class CashReconciliationController extends Controller
         return response()->json($recon->load(['branch:id,name,code', 'otherBranch:id,name,code', 'otherBranchChequeBranch:id,name,code', 'reconciler:id,name']), 201);
     }
 
+    /**
+     * A manager signs off a day's reconciliation and locks it. Verifying one
+     * that carries a counted-vs-system variance needs the
+     * finance_reconciliation_variance approval authorisation.
+     */
+    public function verify(Request $request, CashReconciliation $cashReconciliation)
+    {
+        if ($cashReconciliation->status === 'Verified') {
+            return response()->json(['message' => 'This reconciliation is already verified.'], 422);
+        }
+        if ($cashReconciliation->reconciled_by === $request->user()->id) {
+            return response()->json(['message' => 'The person who entered a reconciliation cannot verify it.'], 422);
+        }
+        if (bccomp((string) $cashReconciliation->variance, '0.00', 2) !== 0
+            && !ApprovalType::isAuthorized($request->user(), 'finance_reconciliation_variance')) {
+            return response()->json(['message' => 'This reconciliation has a variance — only an approver for cash reconciliation variances can sign it off.'], 403);
+        }
+
+        $cashReconciliation->update([
+            'status' => 'Verified',
+            'verified_by' => $request->user()->id,
+            'verified_at' => now(),
+            'locked_at' => now(),
+        ]);
+
+        CashAccount::where('branch_id', $cashReconciliation->branch_id)->update(['last_reconciled_at' => now()]);
+
+        return $cashReconciliation->fresh()->load(['branch:id,name,code', 'reconciler:id,name', 'verifier:id,name']);
+    }
+
     public function destroy(CashReconciliation $cashReconciliation)
     {
+        if ($cashReconciliation->locked_at) {
+            return response()->json(['message' => 'A verified reconciliation cannot be deleted.'], 422);
+        }
         $cashReconciliation->delete();
 
         return response()->noContent();

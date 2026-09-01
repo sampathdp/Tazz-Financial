@@ -17,6 +17,9 @@ class Kernel extends ConsoleKernel
     {
         // $schedule->command('inspire')->hourly();
         $schedule->command('loans:recompute-provisioning')->dailyAt('01:00');
+        // Re-assert cash/bank cache == GL every morning; logs + a
+        // finance_audit_event on any drift (see CheckLedgerDrift).
+        $schedule->command('finance:check-drift')->dailyAt('02:00');
     }
 
     /**

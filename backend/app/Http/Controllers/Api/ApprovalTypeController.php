@@ -25,7 +25,7 @@ class ApprovalTypeController extends Controller
             'code' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/', Rule::unique('approval_types', 'code')],
             'name' => 'required|string|max:128',
             'description' => 'nullable|string|max:255',
-            'required_approvals' => ['nullable', Rule::in([1, 2])],
+            'required_approvals' => ['nullable', Rule::in([1, 2, 3, 4])],
         ]);
         $type = ApprovalType::create($data + ['is_system' => false]);
 
@@ -40,7 +40,7 @@ class ApprovalTypeController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:128',
             'description' => 'nullable|string|max:255',
-            'required_approvals' => ['nullable', Rule::in([1, 2])],
+            'required_approvals' => ['nullable', Rule::in([1, 2, 3, 4])],
         ]);
         $approvalType->update($data);
 

@@ -28,6 +28,14 @@ class BranchController extends Controller
         if (isset($data['parent_id']) && $data['parent_id'] === $branch->id) {
             return response()->json(['message' => 'A branch cannot be its own parent.'], 422);
         }
+        if (($data['status'] ?? $branch->status) === 'Inactive' && $branch->status === 'Active') {
+            if (\App\Models\CashAccount::where('branch_id', $branch->id)->where('status', 'Active')->where('current_balance', '!=', 0)->exists()) {
+                return response()->json(['message' => 'This branch still holds cash (a till, float or petty-cash balance). Settle and transfer it out before deactivating.'], 422);
+            }
+            if (\App\Models\CashSession::where('branch_id', $branch->id)->where('status', 'Open')->exists()) {
+                return response()->json(['message' => 'This branch has an open cash session. Close and verify it before deactivating.'], 422);
+            }
+        }
         $branch->update($data);
 
         return $branch->load('parent:id,name,code');

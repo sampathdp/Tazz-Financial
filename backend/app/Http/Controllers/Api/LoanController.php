@@ -10,12 +10,12 @@ use App\Models\FacilityCollateralVehicleDetail;
 use App\Models\FacilityReschedule;
 use App\Models\FacilitySchedule;
 use App\Models\Loan;
-use App\Models\LoanFacilityDetail;
 use App\Models\LoanType;
-use App\Models\SalesExecutiveCommission;
+use App\Models\ChartOfAccount;
 use App\Services\NumberGenerator;
-use App\Support\AerCalculator;
+use App\Support\FinanceRequestService;
 use App\Support\LoanAmortizer;
+use App\Support\LoanDisbursementCompleter;
 use App\Support\LoanLedgerPoster;
 use App\Support\LoanPaymentAllocator;
 use App\Support\LoanSummary;
@@ -43,6 +43,7 @@ class LoanController extends Controller
         'loanDetail.loanOfficer:id,name',
         'pendingCancelRequest:id,approval_type_id,subject_id,status,required_approvals',
         'pendingWriteOffRequest:id,approval_type_id,subject_id,status,required_approvals',
+        'pendingDisbursementRequest:id,code,source_id,status,amount,requested_by',
     ];
 
     private const DETAIL_RELATIONS = [
@@ -63,6 +64,8 @@ class LoanController extends Controller
         'cancelRequests.requester:id,name', 'cancelRequests.firstApprover:id,name', 'cancelRequests.secondApprover:id,name', 'cancelRequests.rejecter:id,name',
         'pendingWriteOffRequest.requester:id,name', 'pendingWriteOffRequest.firstApprover:id,name',
         'pendingApplicationRequest.requester:id,name',
+        'pendingDisbursementRequest:id,code,source_id,status,amount,requested_by',
+        'pendingDisbursementRequest.requester:id,name',
         'coApplicants.coApplicant:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
         'guarantors.guarantor:id,full_name,code,nic_no,phone',
         'collateral.vehicleDetail',
@@ -400,7 +403,7 @@ class LoanController extends Controller
         DB::transaction(function () use ($ids, $paymentIds, $chargeIds, $collateralIds, $journalEntryIds) {
             DB::statement('SET FOREIGN_KEY_CHECKS=0');
             try {
-                // --- Cashbook: undo the till movement for each cash receipt, then drop the row ---
+                // --- Legacy cashbook rows (pre-Phase-7 loan cash receipts) ---
                 if ($paymentIds) {
                     $entries = DB::table('cashbook_entries')
                         ->where('source_type', 'LoanPayment')->whereIn('source_id', $paymentIds)->get();
@@ -410,6 +413,33 @@ class LoanController extends Controller
                             ->update(['current_balance' => DB::raw('current_balance + '.$signed)]);
                     }
                     DB::table('cashbook_entries')->where('source_type', 'LoanPayment')->whereIn('source_id', $paymentIds)->delete();
+                }
+
+                // --- Finance transactions: the loan disbursement + every cash
+                // receipt (Phase 7) + any reversal. Undo each row's balance
+                // effect, drop the cashbook mirror, then drop the rows. A
+                // cancelled/voided pair (original Reversed + its REVERSAL)
+                // nets to zero, matching the balance already being whole.
+                $financeTxns = DB::table('finance_transactions')
+                    ->where(fn ($q) => $q->where('source_module', 'Loan')->whereIn('source_id', $ids))
+                    ->when($paymentIds, fn ($q) => $q->orWhere(fn ($w) => $w->where('source_module', 'LoanPayment')->whereIn('source_id', $paymentIds)))
+                    ->get();
+                foreach ($financeTxns as $ftx) {
+                    if ($ftx->source_account_id) {
+                        $table = $ftx->source_account_type === 'cash' ? 'cash_accounts' : 'bank_accounts';
+                        DB::table($table)->where('id', $ftx->source_account_id)
+                            ->update(['current_balance' => DB::raw('current_balance + '.(float) $ftx->amount)]);
+                    }
+                    if ($ftx->dest_account_id) {
+                        $table = $ftx->dest_account_type === 'cash' ? 'cash_accounts' : 'bank_accounts';
+                        DB::table($table)->where('id', $ftx->dest_account_id)
+                            ->update(['current_balance' => DB::raw('current_balance - '.(float) $ftx->amount)]);
+                    }
+                }
+                $ftxIds = collect($financeTxns)->pluck('id')->all();
+                if ($ftxIds) {
+                    DB::table('cashbook_entries')->where('source_type', 'FinanceTransaction')->whereIn('source_id', $ftxIds)->delete();
+                    DB::table('finance_transactions')->whereIn('id', $ftxIds)->delete();
                 }
 
                 // --- General ledger ---
@@ -709,52 +739,107 @@ class LoanController extends Controller
         return $cancelRequest->fresh()->load('requester:id,name', 'rejecter:id,name');
     }
 
-    public function disburse(Request $request, Loan $loan)
+    /** Shared validation rules for the disburse / request-disbursement forms. */
+    private const DISBURSE_RULES = [
+        'disbursed_amount' => 'nullable|numeric|min:0',
+        'disbursed_at' => 'nullable|date',
+        'first_installment_date' => 'required|date',
+        'disbursement_method' => ['required', 'in:Cash,Bank,Cheque'],
+        // The account the money leaves from — required for Bank/Cheque.
+        'disbursement_bank_account_id' => ['required_if:disbursement_method,Bank,Cheque', 'nullable', 'exists:bank_accounts,id'],
+    ];
+
+    /** Why this loan can't be disbursed yet — status, unsettled document charge, or a disbursement request already in flight. Null when it's clear. */
+    private function disbursementBlockReason(Loan $loan): ?string
     {
         if ($loan->status !== 'Approved') {
-            return response()->json(['message' => 'Only approved loans can be disbursed.'], 422);
+            return 'Only approved loans can be disbursed.';
         }
-        $detail = $loan->loanDetail()->with('loanType')->firstOrFail();
-        $loanType = $detail->loanType;
-        $documentCharges = $loan->charges()->whereHas('category', fn($q) => $q->where('name', 'Document'))->get();
+        $detail = $loan->loanDetail()->with('loanType')->first();
+        $loanType = $detail?->loanType;
+        $documentCharges = $loan->charges()->whereHas('category', fn ($q) => $q->where('name', 'Document'))->get();
         if ($loanType && (float) $loanType->processing_fee_percent > 0 && $documentCharges->isEmpty()) {
-            return response()->json(['message' => 'Add the document charge before disbursing this loan.'], 422);
+            return 'Add the document charge before disbursing this loan.';
         }
-        $unpaidDocumentCharge = $documentCharges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount));
-        if ($unpaidDocumentCharge > 0) {
-            return response()->json(['message' => 'Settle the document charge before disbursing this loan.'], 422);
+        if ($documentCharges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount)) > 0) {
+            return 'Settle the document charge before disbursing this loan.';
         }
-        $data = $request->validate([
-            'disbursed_amount' => 'nullable|numeric|min:0',
-            'disbursed_at' => 'nullable|date',
-            'first_installment_date' => 'required|date',
-            'disbursement_method' => ['required', Rule::in(['Cash', 'Bank', 'Cheque'])],
-            // The account the money leaves from — required for Bank/Cheque so the
-            // GL has an unambiguous account to credit (see LoanLedgerPoster).
-            'disbursement_bank_account_id' => ['required_if:disbursement_method,Bank,Cheque', 'nullable', 'exists:bank_accounts,id'],
-        ]);
+        if ($loan->pendingDisbursementRequest()->exists()) {
+            return 'A disbursement request for this loan is already awaiting finance approval or payment.';
+        }
 
-        DB::transaction(function () use ($loan, $detail, $data) {
-            $financed = $data['disbursed_amount'] ?? ((float) $loan->principal_amount - (float) $detail->down_payment);
-            $loan->update([
-                'disbursed_amount' => $financed,
-                'disbursed_at' => $data['disbursed_at'] ?? now(),
-                'outstanding_balance_cache' => $financed,
-                'status' => 'Active',
-            ]);
-            $detail->update([
-                'first_installment_date' => $data['first_installment_date'],
-                'disbursement_method' => $data['disbursement_method'],
-                'disbursement_bank_account_id' => $data['disbursement_method'] === 'Cash' ? null : $data['disbursement_bank_account_id'],
-            ]);
-            $rows = LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $data['first_installment_date']);
-            $loan->schedules()->insert($rows);
-            $this->applyEffectiveRate($detail->fresh(), $rows);
-            $this->generateSalesExecutiveCommission($loan->fresh(), $detail);
-            LoanLedgerPoster::postDisbursement($loan->fresh());
+        return null;
+    }
+
+    /**
+     * The direct disburse path (Finance / admin, perm Active Loans,Approve):
+     * finishes the loan side and releases the money in one call. Loan officers
+     * use requestDisbursement() instead — see the D2 decision in the Finance
+     * module plan.
+     */
+    public function disburse(Request $request, Loan $loan)
+    {
+        if ($block = $this->disbursementBlockReason($loan)) {
+            return response()->json(['message' => $block], 422);
+        }
+        $data = $request->validate(self::DISBURSE_RULES);
+
+        $executedBy = $request->user()->id;
+        DB::transaction(function () use ($loan, $data, $executedBy) {
+            LoanDisbursementCompleter::complete($loan, $data);
+            LoanLedgerPoster::postDisbursement($loan->fresh(), $executedBy);
         });
 
         return $loan->load(self::DETAIL_RELATIONS);
+    }
+
+    /**
+     * The request path (a loan officer, perm Active Loans,Create): raises a
+     * LoanDisbursement finance request instead of disbursing. Finance
+     * approves + executes it (the money moves there), then the
+     * FinanceRequestSettled listener runs LoanDisbursementCompleter to finish
+     * the loan. The disbursement params are snapshotted onto the request meta.
+     */
+    public function requestDisbursement(Request $request, Loan $loan)
+    {
+        if ($block = $this->disbursementBlockReason($loan)) {
+            return response()->json(['message' => $block], 422);
+        }
+        $data = $request->validate(self::DISBURSE_RULES);
+
+        $detail = $loan->loanDetail;
+        $financed = $data['disbursed_amount'] ?? ((float) $loan->principal_amount - (float) $detail->down_payment);
+        $bankAccountId = $data['disbursement_method'] === 'Cash' ? null : ($data['disbursement_bank_account_id'] ?? null);
+
+        $financeRequest = FinanceRequestService::open([
+            'request_type' => 'LoanDisbursement',
+            'amount' => $financed,
+            'branch_id' => $loan->branch_id,
+            'source_module' => 'Loan',
+            'source_id' => $loan->id,
+            'payee_type' => 'Customer',
+            'payee_id' => $loan->customer_id,
+            'payee_name' => $loan->customer?->full_name,
+            'preferred_method' => $data['disbursement_method'] === 'Cheque' ? 'Cheque' : $data['disbursement_method'],
+            'purpose' => "Loan disbursement - {$loan->code}",
+            'requested_by' => $request->user()->id,
+            'meta' => [
+                'gl_source_type' => 'Loan',
+                'gl_source_id' => $loan->id,
+                'offset_account_id' => ChartOfAccount::system('1100')->id,
+                'first_installment_date' => $data['first_installment_date'],
+                'disbursed_amount' => $financed,
+                'disbursed_at' => $data['disbursed_at'] ?? now()->toDateString(),
+                'disbursement_method' => $data['disbursement_method'],
+                'disbursement_bank_account_id' => $bankAccountId,
+                'source_bank_account_id' => $bankAccountId,
+            ],
+        ]);
+
+        return response()->json([
+            'message' => 'Disbursement request sent to Finance.',
+            'financeRequest' => $financeRequest->load('branch:id,name'),
+        ], 201);
     }
 
     /** Common guard for both writeOffRequest() and approveWriteOffRequest():
@@ -1094,7 +1179,7 @@ class LoanController extends Controller
             $newDetail = $newLoan->loanDetail()->with('loanType')->first();
             $rows = LoanAmortizer::generate($newLoan->fresh(), $newDetail, $data['first_installment_date']);
             $newLoan->schedules()->insert($rows);
-            $this->applyEffectiveRate($newDetail->fresh(), $rows);
+            LoanDisbursementCompleter::applyEffectiveRate($newDetail->fresh(), $rows);
 
             // Manually added charge lines — rolled into the new principal (above)
             // AND recorded as real charges on the new loan so finance can still
@@ -1220,61 +1305,6 @@ class LoanController extends Controller
      *  Deliberately swallows any failure (invalid inputs, non-convergence, an AER
      *  large enough to overflow the decimal(10,8) columns) so it can never turn a
      *  successful disbursement into a failed one. */
-    private function applyEffectiveRate(LoanFacilityDetail $detail, array $rows): void
-    {
-        if ($detail->interest_method !== 'flat' || empty($rows)) {
-            return;
-        }
-        try {
-            $principal = (float) $detail->loan->principal_amount - (float) $detail->down_payment;
-            $rental = (float) $rows[0]['total_due'];
-            $weekdaysOnly = $detail->installment_frequency === 'daily' && $detail->loanType?->collection_days === 'week_days';
-            $periodsPerMonth = LoanAmortizer::periodsPerMonth($detail->installment_frequency, $weekdaysOnly);
-            $result = AerCalculator::calculate($principal, $rental, count($rows), $periodsPerMonth);
-            if ($result) {
-                $detail->update([
-                    'effective_monthly_rate' => round($result['monthly'], 8),
-                    'effective_annual_rate' => round($result['annual'], 8),
-                ]);
-            }
-        } catch (\Throwable $e) {
-            Log::warning('AER calculation skipped for loan '.$detail->credit_facility_id.': '.$e->getMessage());
-        }
-    }
-
-    /** Creates the first commission cycle for the loan's sales executive, if its
-     *  loan type has a commission configured — only for loans disbursed from now
-     *  on, since this only runs at disbursal time. A percentage-type commission
-     *  goes on to pay out repeatedly, once per cycle of required_installments
-     *  paid installments — see SalesExecutiveCommissionController::maybeStartNextCycle(). */
-    private function generateSalesExecutiveCommission(Loan $loan, LoanFacilityDetail $detail): void
-    {
-        $loanType = $detail->loanType ?? LoanType::find($detail->loan_type_id);
-        if (!$detail->loan_officer_id || !$loanType || (float) $loanType->commission_value <= 0) {
-            return;
-        }
-
-        // Percentage commissions are earned against interest actually collected over
-        // this cycle, not the capital disbursed — nothing has been collected yet at
-        // disbursal time, so this starts at 0 and is recalculated live (see
-        // SalesExecutiveCommissionController::commissionAmount()) until it's paid.
-        $commissionAmount = $loanType->commission_type === 'percentage'
-            ? 0.0
-            : (float) $loanType->commission_value;
-
-        SalesExecutiveCommission::create([
-            'credit_facility_id' => $loan->id,
-            'sales_executive_id' => $detail->loan_officer_id,
-            'loan_type_id' => $loanType->id,
-            'cycle_no' => 1,
-            'from_installment' => 0,
-            'commission_type' => $loanType->commission_type,
-            'commission_value' => $loanType->commission_value,
-            'commission_amount' => $commissionAmount,
-            'required_installments' => $loanType->min_paid_installments,
-        ]);
-    }
-
     /** Pushes an unpaid installment to the back of the schedule (due one period
      *  after the current last installment) instead of collecting it on time —
      *  the loan simply runs one period longer. */

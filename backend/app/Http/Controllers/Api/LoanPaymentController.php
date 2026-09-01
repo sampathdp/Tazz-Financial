@@ -9,7 +9,6 @@ use App\Models\Branch;
 use App\Models\FacilityPayment;
 use App\Models\Loan;
 use App\Services\NumberGenerator;
-use App\Support\CashbookPoster;
 use App\Support\LoanLedgerPoster;
 use App\Support\LoanPaymentAllocator;
 use Carbon\Carbon;
@@ -84,6 +83,14 @@ class LoanPaymentController extends Controller
             'allocations.od_charge' => 'nullable|numeric|min:0',
             'allocations.other_charges' => 'nullable|numeric|min:0',
         ]);
+        // A cash collection needs an open cash session for the branch till when
+        // the Finance module requires it (off by default — see FinanceSetting).
+        if (($data['payment_method'] ?? 'Cash') === 'Cash' && \App\Models\FinanceSetting::bool('require_cash_session')) {
+            $till = \App\Models\CashAccount::branchPrimary((int) $loan->branch_id);
+            if ($till && !\App\Support\CashSessionService::openFor($till->id)) {
+                return response()->json(['message' => "Open today's cash session for {$till->name} before recording cash payments."], 422);
+            }
+        }
         $isSettlement = (bool) ($data['is_settlement'] ?? false);
         $isManual = ($data['allocation_mode'] ?? 'auto') === 'manual';
         $isCheque = ($data['payment_method'] ?? 'Cash') === 'Cheque';
@@ -200,7 +207,6 @@ class LoanPaymentController extends Controller
             // whether it's a pending settlement/manual-allocation awaiting
             // approval — post it to the Cashbook now rather than only when/if the
             // allocation is applied.
-            CashbookPoster::postCashReceipt($payment);
             LoanLedgerPoster::postCashReceipt($payment);
 
             return $payment;
@@ -288,7 +294,6 @@ class LoanPaymentController extends Controller
             ]);
             // The cash was posted to the Cashbook at record time (see store()) — a
             // rejected settlement means it's being handed back, so unwind that entry.
-            CashbookPoster::reverseCashReceipt($payment);
             LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
             if ($req) {
                 $req->update([
@@ -452,7 +457,6 @@ class LoanPaymentController extends Controller
                 'voided_at' => now(),
             ]);
             $this->refreshOutstandingCache($loan);
-            CashbookPoster::reverseCashReceipt($payment);
             LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
             $voidRequest->update(['status' => 'Approved']);
         });
@@ -569,7 +573,6 @@ class LoanPaymentController extends Controller
                 // The cash was posted to the Cashbook at record time (see store()) —
                 // a rejected allocation request means it's being handed back, so
                 // unwind that entry.
-                CashbookPoster::reverseCashReceipt($payment);
                 LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
             }
             $allocationRequest->update([

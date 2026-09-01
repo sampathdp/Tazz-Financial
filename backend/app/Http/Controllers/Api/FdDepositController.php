@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\FdDeposit;
 use App\Services\NumberGenerator;
-use App\Support\FdCashbookPoster;
 use App\Support\FdLedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -68,7 +67,6 @@ class FdDepositController extends Controller
 
             // Cash is physically in hand the moment it's recorded — post it now
             // rather than waiting for it to be allocated to a Fixed Deposit.
-            FdCashbookPoster::postDepositReceived($deposit);
             FdLedgerPoster::postDepositReceived($deposit);
 
             return $deposit;
@@ -84,7 +82,6 @@ class FdDepositController extends Controller
         }
 
         DB::transaction(function () use ($fdDeposit) {
-            FdCashbookPoster::reverseDepositReceived($fdDeposit);
             FdLedgerPoster::reverseDepositReceived($fdDeposit);
             $fdDeposit->delete();
         });

@@ -166,4 +166,12 @@ class ChartOfAccount extends Model
 
         return self::$balancesCache[$key] = $balances;
     }
+
+    /** Clears the per-request balance memo — for tests, where one long-lived
+     *  PHP process runs many isolated cases and the static cache would
+     *  otherwise carry a previous test's figures into the next. */
+    public static function flushBalancesCache(): void
+    {
+        self::$balancesCache = [];
+    }
 }

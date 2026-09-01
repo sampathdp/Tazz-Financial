@@ -180,7 +180,7 @@ class PawningController extends Controller
                 'purpose' => $purpose,
             ]);
 
-            PawningLedgerPoster::postDisbursement($pawning->fresh());
+            PawningLedgerPoster::postDisbursement($pawning->fresh(), $request->user()->id);
 
             return $pawning;
         });
@@ -280,8 +280,7 @@ class PawningController extends Controller
                 'maturity_date' => $newDueDate->toDateString(),
             ]);
 
-            PawningLedgerPoster::postInterestReceipt($payment);
-            PawningLedgerPoster::postCapitalReceipt($payment);
+            PawningLedgerPoster::postCashReceipt($payment);
 
             return $pawning;
         });
@@ -389,8 +388,7 @@ class PawningController extends Controller
                 $pawning->update(['status' => 'Closed', 'closed_at' => now(), 'outstanding_balance_cache' => 0]);
             }
 
-            PawningLedgerPoster::postInterestReceipt($payment);
-            PawningLedgerPoster::postCapitalReceipt($payment);
+            PawningLedgerPoster::postCashReceipt($payment);
 
             return $pawning;
         });

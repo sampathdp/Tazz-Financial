@@ -49,6 +49,14 @@ class NumberGenerator
         // One company-wide series, no {BRANCH} — a journal entry isn't tied to a
         // single branch the way a receipt is (see LedgerPoster).
         'journal' => 'JV-{YEAR:2}-{SEQ:6}',
+        // Finance module money-movement ledger (see FinancePostingService) —
+        // one company-wide series per year, like 'journal': a finance
+        // transaction spans branches (a branch-to-branch transfer) and is not
+        // a branch receipt book.
+        'finance_transaction' => 'FTX-{YEAR:2}-{SEQ:6}',
+        // Finance request (the outbound-payment queue, see FinanceRequestService).
+        // {BRANCH} is the requesting branch, cosmetic — one company-wide series.
+        'finance_request' => '{BRANCH}-FR-{YEAR:2}-{SEQ:5}',
         // Staging doc for a manual journal entry awaiting approval (see
         // ManualJournalEntryController) — the real JV- code is minted by
         // LedgerPoster only once it's approved and posted.

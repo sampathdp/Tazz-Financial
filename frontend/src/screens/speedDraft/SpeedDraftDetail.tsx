@@ -220,21 +220,28 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
     catch (ex: any) { notify.error('Withdraw failed', getErrorText(ex)) }
     finally { setBusy(false) }
   }
+  const [disburseMode, setDisburseMode] = useState<'direct' | 'request'>('direct')
   const disburse = async () => {
     if (!amount || Number(amount) <= 0) { setErr('Enter the disbursed amount.'); return }
     if (!startDate) { setErr('Start date is required.'); return }
     if (method !== 'Cash' && !bankAccountId) { setErr('Pick which bank account this is paid out of.'); return }
     setBusy(true); setErr('')
+    const body = {
+      disbursementMethod: method, disbursedAmount: amount, startDate,
+      disbursementBankAccountId: method === 'Cash' ? null : Number(bankAccountId),
+    }
     try {
-      await speedDraftsApi.disburse(d.id, {
-        disbursementMethod: method, disbursedAmount: amount, startDate,
-        disbursementBankAccountId: method === 'Cash' ? null : Number(bankAccountId),
-      })
+      if (disburseMode === 'request') {
+        await speedDraftsApi.requestDisbursement(d.id, body)
+        notify.success('Disbursement requested', 'Sent to Finance for approval and payment')
+      } else {
+        await speedDraftsApi.disburse(d.id, body)
+        notify.success('Speed Draft disbursed', 'Interest schedule generated')
+      }
       setDisburseOpen(false)
-      notify.success('Speed Draft disbursed', 'Interest schedule generated')
       onChanged()
     } catch (ex: any) {
-      setErr(getErrorText(ex, 'Disbursement failed'))
+      setErr(getErrorText(ex, disburseMode === 'request' ? 'Could not send the request' : 'Disbursement failed'))
     } finally { setBusy(false) }
   }
 
@@ -288,15 +295,25 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
     )
   }
   if (d.status === 'Approved') {
+    if (d.pendingDisbursementRequest) {
+      return (
+        <div style={{ fontSize: 12.5, padding: '8px 12px', background: 'var(--ac-dim)', border: '1px solid var(--ac-line)', borderRadius: 'var(--r-s)' }}>
+          <b>Disbursement requested</b> — {d.pendingDisbursementRequest.code} · {d.pendingDisbursementRequest.status.replace(/([A-Z])/g, ' $1').trim()}. Finance will release the funds.
+        </div>
+      )
+    }
     return (
       <>
-        <Can user={me} module="Speed Drafts" action="Approve">
-          <Btn variant="primary" size="sm" icon="flag" onClick={() => setDisburseOpen(true)}>Disburse</Btn>
+        <Can user={me} module="Speed Drafts" action="Create">
+          <Btn variant="solid" size="sm" icon="receipt" onClick={() => { setDisburseMode('request'); setDisburseOpen(true) }}>Request Disbursement</Btn>
         </Can>
-        <Modal open={disburseOpen} onClose={() => setDisburseOpen(false)} title="Disburse Speed Draft" sub={d.code}
+        <Can user={me} module="Speed Drafts" action="Approve">
+          <Btn variant="primary" size="sm" icon="flag" onClick={() => { setDisburseMode('direct'); setDisburseOpen(true) }}>Disburse Now</Btn>
+        </Can>
+        <Modal open={disburseOpen} onClose={() => setDisburseOpen(false)} title={disburseMode === 'request' ? 'Request Speed Draft Disbursement' : 'Disburse Speed Draft'} sub={d.code}
           footer={<>
             <Btn variant="solid" onClick={() => setDisburseOpen(false)}>Cancel</Btn>
-            <Btn variant="primary" icon="check" onClick={disburse} disabled={busy}>{busy ? 'Disbursing…' : 'Disburse & Generate Schedule'}</Btn>
+            <Btn variant="primary" icon="check" onClick={disburse} disabled={busy}>{busy ? 'Working…' : disburseMode === 'request' ? 'Send Request to Finance' : 'Disburse & Generate Schedule'}</Btn>
           </>}>
           <div className="col gap-3">
             <ErrorBanner error={err} style={{ marginBottom: 0 }} />

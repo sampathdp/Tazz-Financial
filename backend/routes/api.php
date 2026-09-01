@@ -30,7 +30,15 @@ use App\Http\Controllers\Api\PettyCashFundController;
 use App\Http\Controllers\Api\PettyCashReplenishmentController;
 use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
+use App\Http\Controllers\Api\CashFloatController;
+use App\Http\Controllers\Api\CashSessionController;
+use App\Http\Controllers\Api\FinanceAuditController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
+use App\Http\Controllers\Api\FinanceSettingController;
+use App\Http\Controllers\Api\FinanceDashboardController;
+use App\Http\Controllers\Api\FinanceReportController;
+use App\Http\Controllers\Api\FinanceRequestController;
+use App\Http\Controllers\Api\FinanceTransactionController;
 use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\ManualJournalEntryController;
 use App\Http\Controllers\Api\BorrowingController;
@@ -201,7 +209,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('loan-cancel-requests/{cancelRequest}/reject', [LoanController::class, 'rejectCancelRequest']);
 
     // --- Loan Management: Active Loans ---
+    // Direct disburse (Finance / admin): finishes the loan and releases the money in one call.
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
+    // Request disburse (loan officer): raises a LoanDisbursement finance request; Finance
+    // approves + executes it, then a listener finishes the loan (see the Finance module plan, D2).
+    Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware('perm:Active Loans,Create');
     // Write-off is maker-checker (shared approval_requests table, code 'loan_write_off'),
     // same pattern as loan_cancel below. Submitting needs the module permission; who may
     // approve/reject is admin-manageable data via ApprovalType::isAuthorized('loan_write_off').
@@ -320,6 +332,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve']);
     Route::post('speed-drafts/{speedDraft}/reject', [SpeedDraftController::class, 'reject']);
     Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware('perm:Speed Drafts,Approve');
+    Route::post('speed-drafts/{speedDraft}/request-disbursement', [SpeedDraftController::class, 'requestDisbursement'])->middleware('perm:Speed Drafts,Create');
     Route::post('speed-drafts/{speedDraft}/renew', [SpeedDraftController::class, 'renew'])->middleware('perm:Speed Draft Payments,Create');
 
     // --- Speed Drafts: Collateral (Gold Pawning / Lease asset records) ---
@@ -420,7 +433,64 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('cash-reconciliations', [CashReconciliationController::class, 'index'])->middleware('perm:Cash Reconciliation,View');
     Route::get('cash-reconciliations/summary', [CashReconciliationController::class, 'summary'])->middleware('perm:Cash Reconciliation,View');
     Route::post('cash-reconciliations', [CashReconciliationController::class, 'store'])->middleware('perm:Cash Reconciliation,Create');
+    Route::post('cash-reconciliations/{cashReconciliation}/verify', [CashReconciliationController::class, 'verify'])->middleware('perm:Cash Reconciliation,Edit');
     Route::delete('cash-reconciliations/{cashReconciliation}', [CashReconciliationController::class, 'destroy'])->middleware('perm:Cash Reconciliation,Delete');
+
+    // --- Finance: Dashboard (cash control at a glance) ---
+    Route::get('finance-dashboard', [FinanceDashboardController::class, 'index'])->middleware('perm:Finance Dashboard,View');
+
+    // --- Finance: Transaction ledger + reversals ---
+    Route::get('finance-transactions', [FinanceTransactionController::class, 'index'])->middleware('perm:Cash Transactions,View');
+    Route::get('finance-transactions/{financeTransaction}', [FinanceTransactionController::class, 'show'])->middleware('perm:Cash Transactions,View');
+    // Reverse — direct if the reversal_requires_approval setting is off, else raises a finance_reversal approval.
+    Route::post('finance-transactions/{financeTransaction}/reverse-request', [FinanceTransactionController::class, 'reverseRequest'])->middleware('perm:Cash Transactions,Delete');
+    Route::post('finance-transaction-reverse-requests/{approvalRequest}/approve', [FinanceTransactionController::class, 'approveReverse']);
+    Route::post('finance-transaction-reverse-requests/{approvalRequest}/reject', [FinanceTransactionController::class, 'rejectReverse']);
+
+    // --- Finance: Audit Log ---
+    Route::get('finance-audit', [FinanceAuditController::class, 'index'])->middleware('perm:Finance Audit,View');
+
+    // --- Finance: Reports (daily-cash, cash-position, cash-flow, transfers, floats,
+    //     requests-pending, requests-unpaid, reversals, variance, audit) ---
+    Route::get('finance-reports/{type}', [FinanceReportController::class, 'show'])->middleware('perm:Finance Reports,View');
+    Route::get('finance-reports/{type}/pdf', [FinanceReportController::class, 'exportPdf'])->middleware('perm:Finance Reports,View');
+
+    // --- Finance: Daily Cash Sessions (open / close / verify per cash account) ---
+    Route::get('cash-sessions', [CashSessionController::class, 'index'])->middleware('perm:Cash Sessions,View');
+    Route::get('cash-sessions/current', [CashSessionController::class, 'current'])->middleware('perm:Cash Sessions,View');
+    Route::post('cash-sessions/open', [CashSessionController::class, 'open'])->middleware('perm:Cash Sessions,Create');
+    Route::post('cash-sessions/{cashSession}/close', [CashSessionController::class, 'close'])->middleware('perm:Cash Sessions,Create');
+    Route::post('cash-sessions/{cashSession}/verify', [CashSessionController::class, 'verify'])->middleware('perm:Cash Sessions,Edit');
+
+    // --- Finance: Settings ---
+    Route::get('finance-settings', [FinanceSettingController::class, 'index'])->middleware('perm:Finance Settings,View');
+    Route::put('finance-settings', [FinanceSettingController::class, 'update'])->middleware('perm:Finance Settings,Edit');
+
+    // --- Finance: Cash Floats (a float is a cash_accounts row, type CashierFloat) ---
+    Route::get('cash-floats', [CashFloatController::class, 'index'])->middleware('perm:Cash Floats,View');
+    Route::get('cash-float-settlements', [CashFloatController::class, 'settlements'])->middleware('perm:Cash Floats,View');
+    Route::post('cash-floats/issue', [CashFloatController::class, 'issue'])->middleware('perm:Cash Floats,Create');
+    Route::post('cash-floats/{cashAccount}/request-settlement', [CashFloatController::class, 'requestSettlement'])->middleware('perm:Cash Floats,Edit');
+    // settle gated inline by ApprovalType::isAuthorized('finance_float_settlement') — same maker-checker pattern.
+    Route::post('cash-float-settlements/{cashFloatSettlement}/settle', [CashFloatController::class, 'settle'])->middleware('perm:Cash Floats,Edit');
+
+    // --- Finance: Requests (the single outbound-payment / transfer queue) ---
+    // Create / submit / cancel are requester actions; approve / reject are
+    // gated inline by ApprovalType::isAuthorized() on the request's approval
+    // code (finance_request_payment / finance_transfer / finance_float_issue),
+    // same maker-checker pattern as expense_approval; execute releases money.
+    Route::get('finance-requests', [FinanceRequestController::class, 'index'])->middleware('perm:Finance Requests,View');
+    Route::get('finance-requests/{financeRequest}', [FinanceRequestController::class, 'show'])->middleware('perm:Finance Requests,View');
+    Route::post('finance-requests', [FinanceRequestController::class, 'store'])->middleware('perm:Finance Requests,Create');
+    Route::post('finance-requests/{financeRequest}/submit', [FinanceRequestController::class, 'submit'])->middleware('perm:Finance Requests,Create');
+    Route::post('finance-requests/{financeRequest}/cancel', [FinanceRequestController::class, 'cancel'])->middleware('perm:Finance Requests,Create');
+    Route::post('finance-requests/{financeRequest}/approve', [FinanceRequestController::class, 'approve']);
+    Route::post('finance-requests/{financeRequest}/reject', [FinanceRequestController::class, 'reject']);
+    Route::post('finance-requests/{financeRequest}/execute', [FinanceRequestController::class, 'execute'])->middleware('perm:Finance Requests,Edit');
+    // Cross-branch transfer: release (send) -> receive (confirm) -> or recall.
+    Route::post('finance-requests/{financeRequest}/release', [FinanceRequestController::class, 'release'])->middleware('perm:Finance Transfers,Edit');
+    Route::post('finance-requests/{financeRequest}/receive', [FinanceRequestController::class, 'receive'])->middleware('perm:Finance Transfers,Edit');
+    Route::post('finance-requests/{financeRequest}/recall', [FinanceRequestController::class, 'recall'])->middleware('perm:Finance Transfers,Edit');
 
     // --- Masters: Expense Categories — a dedicated table, used by the
     // Expense Management module's category picker. ---
@@ -532,7 +602,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // not the module permission grid, same maker-checker pattern as loan_cancel.
     Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve']);
     Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject']);
+    // Direct pay (Finance / admin): moves the money + records the voucher.
     Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware('perm:Expenses,Edit');
+    // Request pay (requester / manager): raises an ExpensePayment finance request; Finance executes it.
+    Route::post('expenses/{expense}/request-payment', [ExpenseController::class, 'requestPayment'])->middleware('perm:Expenses,Create');
 
     // --- Expense Management: Payment Vouchers (auto-created by ExpenseController::pay — view/void only, see PaymentVoucherController) ---
     Route::get('payment-vouchers', [PaymentVoucherController::class, 'index'])->middleware('perm:Payment Vouchers,View');

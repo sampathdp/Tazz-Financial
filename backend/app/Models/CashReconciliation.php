@@ -14,7 +14,7 @@ class CashReconciliation extends Model
         'other_branch_cash', 'other_branch_id', 'other_branch_cheque', 'other_branch_cheque_branch_id',
         'total_cash', 'total_cheque',
         'denominations', 'coins_amount', 'counted_total', 'variance',
-        'notes', 'reconciled_by',
+        'notes', 'reconciled_by', 'status', 'verified_by', 'verified_at', 'locked_at',
     ];
 
     protected $casts = [
@@ -37,6 +37,8 @@ class CashReconciliation extends Model
         'counted_total' => 'decimal:2',
         'variance' => 'decimal:2',
         'denominations' => 'array',
+        'verified_at' => 'datetime',
+        'locked_at' => 'datetime',
     ];
 
     /** Note values counted on the physical cash count — keys used in the `denominations` JSON column. */
@@ -63,5 +65,10 @@ class CashReconciliation extends Model
     public function reconciler()
     {
         return $this->belongsTo(User::class, 'reconciled_by');
+    }
+
+    public function verifier()
+    {
+        return $this->belongsTo(User::class, 'verified_by');
     }
 }

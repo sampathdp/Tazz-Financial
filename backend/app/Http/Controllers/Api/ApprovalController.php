@@ -17,6 +17,12 @@ use App\Models\ApprovalRequest;
  * Gated to the 'admin' role only (see routes/api.php), same as
  * Loan Adjustments and Cheque Clearance — not wired into the module
  * permission grid, deliberately kept out of per-role/per-user delegation.
+ *
+ * Finance module approvals (codes finance_request_payment / finance_transfer
+ * / finance_float_* / finance_reversal) are NOT bucketed here — they have
+ * their own dedicated Finance Requests screen with per-code canApprove()
+ * gating and the approve / reject / execute actions in one place, which is a
+ * better surface than this consolidated inbox for a queue that can be large.
  */
 class ApprovalController extends Controller
 {

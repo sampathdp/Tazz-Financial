@@ -198,27 +198,37 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
   const approvalsLeft = (e: Expense) =>
     e.pendingApprovalRequest ? e.pendingApprovalRequest.requiredApprovals - (e.pendingApprovalRequest.firstApprover ? 1 : 0) : 0
 
-  const openPay = (e: Expense) => { setPayTarget(e); setPayForm(blankPayForm()); setErr('') }
+  const [payMode, setPayMode] = useState<'direct' | 'request'>('direct')
+  const openPay = (e: Expense, mode: 'direct' | 'request') => { setPayTarget(e); setPayMode(mode); setPayForm(blankPayForm()); setErr('') }
   const closePay = () => { setPayTarget(null); setErr('') }
 
   const savePay = async () => {
     if (!payTarget) return
-    if (payForm.paymentMethod === 'Cash' && !payForm.cashAccountId) { setErr('Pick which till this was paid from.'); return }
-    if (payForm.paymentMethod !== 'Cash' && !payForm.bankAccountId) { setErr('Pick which bank account this was paid from.'); return }
+    if (payMode === 'direct' && payForm.paymentMethod === 'Cash' && !payForm.cashAccountId) { setErr('Pick which till this was paid from.'); return }
+    if (payForm.paymentMethod !== 'Cash' && payMode === 'direct' && !payForm.bankAccountId) { setErr('Pick which bank account this was paid from.'); return }
     if (payForm.paymentMethod === 'Cheque' && !payForm.chequeNo) { setErr('Cheque number is required.'); return }
     setBusy(true); setErr('')
     try {
-      await expensesApi.pay(payTarget.id, {
-        paymentMethod: payForm.paymentMethod,
-        cashAccountId: payForm.cashAccountId ? Number(payForm.cashAccountId) : undefined,
-        bankAccountId: payForm.bankAccountId ? Number(payForm.bankAccountId) : undefined,
-        chequeNo: payForm.chequeNo || undefined,
-        paidAt: payForm.paidAt,
-      })
+      if (payMode === 'request') {
+        await expensesApi.requestPayment(payTarget.id, {
+          paymentMethod: payForm.paymentMethod,
+          bankAccountId: payForm.bankAccountId ? Number(payForm.bankAccountId) : undefined,
+          chequeNo: payForm.chequeNo || undefined,
+        })
+        notify.success('Payment requested', 'Sent to Finance for approval and payment')
+      } else {
+        await expensesApi.pay(payTarget.id, {
+          paymentMethod: payForm.paymentMethod,
+          cashAccountId: payForm.cashAccountId ? Number(payForm.cashAccountId) : undefined,
+          bankAccountId: payForm.bankAccountId ? Number(payForm.bankAccountId) : undefined,
+          chequeNo: payForm.chequeNo || undefined,
+          paidAt: payForm.paidAt,
+        })
+        notify.success('Expense paid', payTarget.code)
+      }
       closePay(); refresh()
-      notify.success('Expense paid', payTarget.code)
     } catch (ex: any) {
-      setErr(getErrorText(ex, 'Payment failed'))
+      setErr(getErrorText(ex, payMode === 'request' ? 'Could not send the request' : 'Payment failed'))
     } finally { setBusy(false) }
   }
 
@@ -252,15 +262,23 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
               {e.status === 'Pending' && approvalsLeft(e) > 0 && (
                 <div className="t-2" style={{ fontSize: 10.5, marginTop: 2 }}>needs {approvalsLeft(e)} approval{approvalsLeft(e) === 1 ? '' : 's'}</div>
               )}
+              {e.status === 'Approved' && e.pendingPaymentRequest && (
+                <div className="t-2" style={{ fontSize: 10.5, marginTop: 2 }}>payment requested · {e.pendingPaymentRequest.status.replace(/([A-Z])/g, ' $1').trim()}</div>
+              )}
             </Td>
             <Td align="right">
               {e.status === 'Pending' && canApproveExpense(e) && <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
                 <Btn variant="ghost" size="sm" onClick={() => reject(e)}>Reject</Btn>
                 <Btn variant="primary" size="sm" icon="check" onClick={() => approve(e)}>Approve</Btn>
               </div>}
-              {e.status === 'Approved' && <Can user={me} module="Expenses" action="Edit">
-                <Btn variant="primary" size="sm" icon="wallet" onClick={() => openPay(e)}>Pay</Btn>
-              </Can>}
+              {e.status === 'Approved' && !e.pendingPaymentRequest && <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+                <Can user={me} module="Expenses" action="Create">
+                  <Btn variant="ghost" size="sm" icon="receipt" onClick={() => openPay(e, 'request')}>Request Pay</Btn>
+                </Can>
+                <Can user={me} module="Expenses" action="Edit">
+                  <Btn variant="primary" size="sm" icon="wallet" onClick={() => openPay(e, 'direct')}>Pay Now</Btn>
+                </Can>
+              </div>}
               {e.status === 'Paid' && e.voucher && <span className="t-2" style={{ fontSize: 12 }}>{e.voucher.paymentMethod} — {dateOnly(e.voucher.paidAt)}</span>}
             </Td>
           </>} />}
@@ -291,16 +309,26 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
         </div>
       </Modal>
 
-      <Modal open={!!payTarget} onClose={closePay} width={520} title="Pay Expense" sub={payTarget ? `${payTarget.code} — ${money(payTarget.amount)}` : undefined}
+      <Modal open={!!payTarget} onClose={closePay} width={520}
+        title={payMode === 'request' ? 'Request Expense Payment' : 'Pay Expense'}
+        sub={payTarget ? `${payTarget.code} — ${money(payTarget.amount)}` : undefined}
         footer={<>
           <Btn variant="plain" onClick={closePay}>Cancel</Btn>
-          <Btn variant="primary" icon="check" onClick={savePay} disabled={busy}>{busy ? 'Paying...' : 'Confirm Payment'}</Btn>
+          <Btn variant="primary" icon="check" onClick={savePay} disabled={busy}>
+            {busy ? 'Working…' : payMode === 'request' ? 'Send Request to Finance' : 'Confirm Payment'}
+          </Btn>
         </>}>
         <ErrorBanner error={err} />
+        {payMode === 'request' && (
+          <p className="t-2" style={{ fontSize: 11.5, marginBottom: 12 }}>
+            Finance will approve this and choose the till or account it is paid from. Set a preferred method below if it matters.
+          </p>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Field label="Payment Method"><Select value={payForm.paymentMethod} onChange={(e) => setPayForm((s) => ({ ...s, paymentMethod: e.target.value as PaymentMethod }))}>
+          <Field label={payMode === 'request' ? 'Preferred Method' : 'Payment Method'}><Select value={payForm.paymentMethod} onChange={(e) => setPayForm((s) => ({ ...s, paymentMethod: e.target.value as PaymentMethod }))}>
             <option value="Cash">Cash</option><option value="Bank">Bank</option><option value="Cheque">Cheque</option>
           </Select></Field>
+          {payMode === 'direct' && (
           <Field label="Paid At">
             <DateInput value={payForm.paidAt} disabled={!payForm.backDated} onChange={(iso) => setPayForm((s) => ({ ...s, paidAt: iso }))} />
             <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>
@@ -311,12 +339,13 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
               <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
             </label>
           </Field>
-          {payForm.paymentMethod === 'Cash' ? (
+          )}
+          {payMode === 'direct' && payForm.paymentMethod === 'Cash' ? (
             <Field label="Cash Till" full><Select value={payForm.cashAccountId} onChange={(e) => setPayForm((s) => ({ ...s, cashAccountId: Number(e.target.value) || '' }))}>
               <option value="">Select till…</option>
               {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </Select></Field>
-          ) : (
+          ) : payForm.paymentMethod !== 'Cash' ? (
             <>
               <Field label="Bank Account"><Select value={payForm.bankAccountId} onChange={(e) => setPayForm((s) => ({ ...s, bankAccountId: Number(e.target.value) || '' }))}>
                 <option value="">Select account…</option>
@@ -324,7 +353,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
               </Select></Field>
               {payForm.paymentMethod === 'Cheque' && <Field label="Cheque No."><Input value={payForm.chequeNo} onChange={(e) => setPayForm((s) => ({ ...s, chequeNo: e.target.value }))} /></Field>}
             </>
-          )}
+          ) : null}
         </div>
       </Modal>
     </div>

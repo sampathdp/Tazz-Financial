@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\FdInterestPayment;
 use App\Models\FixedDeposit;
-use App\Support\FdCashbookPoster;
 use App\Support\FdLedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -107,14 +106,13 @@ class FdInterestPaymentController extends Controller
             $next = $fd->interestPayments()->where('status', 'Pending')->orderBy('due_date')->first();
             $fd->update(['next_interest_date' => $next?->due_date]);
 
-            FdCashbookPoster::postInterestPaid($fdInterestPayment->fresh());
             FdLedgerPoster::postInterestPaid($fdInterestPayment->fresh());
         });
 
         return $fdInterestPayment->fresh(['fixedDeposit:id,fd_number,customer_id', 'payer:id,name']);
     }
 
-    /** Undoes a mistaken interest payment — reverses GL/Cashbook and puts the installment back to Pending. */
+    /** Undoes a mistaken interest payment — reverses the ledger/till and puts the installment back to Pending. */
     public function void(Request $request, FdInterestPayment $fdInterestPayment)
     {
         if ($fdInterestPayment->status !== 'Paid') {
@@ -124,7 +122,6 @@ class FdInterestPaymentController extends Controller
         $fd = $fdInterestPayment->fixedDeposit;
 
         DB::transaction(function () use ($fdInterestPayment, $fd) {
-            FdCashbookPoster::reverseInterestPaid($fdInterestPayment);
             FdLedgerPoster::reverseInterestPaid($fdInterestPayment);
             $fdInterestPayment->update([
                 'status' => 'Pending',
