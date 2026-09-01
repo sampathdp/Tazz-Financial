@@ -10,7 +10,6 @@ use App\Models\FdWithdrawal;
 use App\Models\FixedDeposit;
 use App\Models\FundingProduct;
 use App\Services\NumberGenerator;
-use App\Support\FdCashbookPoster;
 use App\Support\FdInterestCalculator;
 use App\Support\FdLedgerPoster;
 use Carbon\Carbon;
@@ -184,7 +183,6 @@ class FixedDepositController extends Controller
                 ]);
                 NumberGenerator::attach($depositNumber, $enhancementDeposit);
 
-                FdCashbookPoster::postDepositReceived($enhancementDeposit);
                 FdLedgerPoster::postDepositReceived($enhancementDeposit);
             }
 
@@ -262,7 +260,6 @@ class FixedDepositController extends Controller
             $fixedDeposit->update(['status' => 'Closed', 'closed_at' => $closedAt]);
 
             $withdrawal->setRelation('fixedDeposit', $fixedDeposit);
-            FdCashbookPoster::postWithdrawal($withdrawal);
             FdLedgerPoster::postWithdrawal($withdrawal);
 
             return $withdrawal;
@@ -272,7 +269,7 @@ class FixedDepositController extends Controller
     }
 
     /**
-     * Undoes a mistaken closure — reverses the GL/Cashbook entries, reopens
+     * Undoes a mistaken closure — reverses the ledger/till entries, reopens
      * the FD (Active, closed_at cleared), and deletes the withdrawal row
      * (FdWithdrawal has no Voided status of its own to flip, unlike
      * FacilityPayment, so removal is the only way to represent "this never
@@ -287,7 +284,6 @@ class FixedDepositController extends Controller
         }
 
         DB::transaction(function () use ($fixedDeposit, $withdrawal, $request) {
-            FdCashbookPoster::reverseWithdrawal($withdrawal);
             FdLedgerPoster::reverseWithdrawal($withdrawal, $request->user()->id);
             $fixedDeposit->update(['status' => 'Active', 'closed_at' => null]);
             $withdrawal->delete();
@@ -391,7 +387,6 @@ class FixedDepositController extends Controller
             $this->recalculateAfterPartPayment($fixedDeposit, $remaining, $paidAt);
 
             $partPayment->setRelation('fixedDeposit', $fixedDeposit);
-            FdCashbookPoster::postPartPayment($partPayment);
             FdLedgerPoster::postPartPayment($partPayment);
 
             return $partPayment;
@@ -401,7 +396,7 @@ class FixedDepositController extends Controller
     }
 
     /**
-     * Undoes a mistaken part payment — reverses GL/Cashbook and restores the
+     * Undoes a mistaken part payment — reverses the ledger/till and restores the
      * FD's principal/interest figures from the *_before snapshot taken at the
      * time of that part payment. Only ever allowed on an FD's most recent
      * part payment, so that snapshot is guaranteed to still match reality
@@ -417,7 +412,6 @@ class FixedDepositController extends Controller
         }
 
         DB::transaction(function () use ($fixedDeposit, $fdPartPayment) {
-            FdCashbookPoster::reversePartPayment($fdPartPayment);
             FdLedgerPoster::reversePartPayment($fdPartPayment);
 
             $fixedDeposit->update([
