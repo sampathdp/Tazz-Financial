@@ -137,11 +137,7 @@ class BackfillFinanceTransactions extends Command
                     $residual++;
                 }
                 $inbound = in_array($row->transaction_type, $credit, true);
-                $type = match ($row->transaction_type) {
-                    'Deposit' => 'BANK_DEPOSIT',
-                    'Withdrawal' => 'BANK_WITHDRAWAL',
-                    default => 'TRANSFER',
-                };
+                $type = ['Deposit' => 'BANK_DEPOSIT', 'Withdrawal' => 'BANK_WITHDRAWAL'][$row->transaction_type] ?? 'TRANSFER';
                 $branchId = DB::table('bank_accounts')->where('id', $row->bank_account_id)->value('branch_id');
                 $this->write($apply, $key, [
                     'txn_type' => $type,
