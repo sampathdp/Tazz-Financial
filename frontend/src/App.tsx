@@ -51,6 +51,9 @@ const PermScreen = named(() => import('./screens/Admin'), 'PermScreen')
 const CompanyScreen = named(() => import('./screens/Admin'), 'CompanyScreen')
 const MaintenanceScreen = named(() => import('./screens/Maintenance'), 'MaintenanceScreen')
 
+const FinanceDashboardScreen = named(() => import('./screens/Finance'), 'FinanceDashboardScreen')
+const FinanceRequestsScreen = named(() => import('./screens/Finance'), 'FinanceRequestsScreen')
+
 const CashbookScreen = named(() => import('./screens/Cashbook'), 'CashbookScreen')
 const CashTransfersScreen = named(() => import('./screens/Cashbook'), 'CashTransfersScreen')
 const CashReconciliationScreen = named(() => import('./screens/Cashbook'), 'CashReconciliationScreen')
@@ -145,6 +148,8 @@ const SCREENS: Record<string, ScreenComp> = {
   customers: CustomersScreen,
   'loan/types': LoanTypesScreen,
   'finance/calculator': LoanCalculatorScreen,
+  'finance/dashboard': FinanceDashboardScreen,
+  'finance/requests': FinanceRequestsScreen,
   'loan/apps': LoanApplicationsScreen,
   'loan/active': ActiveLoansScreen,
   'loan/overdue': OverdueLoansScreen,

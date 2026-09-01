@@ -832,11 +832,20 @@ export const bankReconciliationsApi = {
 
 /* =========================== Cashbook Management =========================== */
 
+export type CashAccountType =
+  | 'HeadOfficeMain' | 'BranchMain' | 'PettyCash' | 'CashierFloat' | 'CollectionCash' | 'InTransit' | 'Other'
+
 export interface CashAccount {
   id: number;
+  code?: string | null;
   branchId: number; branch?: { id: number; name: string; code: string } | null;
+  accountType?: CashAccountType;
+  responsibleUserId?: number | null; responsibleUser?: { id: number; name: string } | null;
+  parentCashAccountId?: number | null;
   name: string;
   openingBalance?: number | string; currentBalance?: number | string;
+  allowNegative?: boolean;
+  lastReconciledAt?: string | null;
   status?: 'Active' | 'Inactive';
 }
 
@@ -932,6 +941,111 @@ export const cashReconciliationsApi = {
     http.get('/cash-reconciliations/summary', { params: { branch_id: branchId, as_at_date: asAtDate } }).then((r) => camelize(r.data) as CashReconciliationSummary),
   save: (body: Partial<CashReconciliation>) => http.post('/cash-reconciliations', snakeize(body)).then((r) => camelize(r.data) as CashReconciliation),
   remove: (id: number) => http.delete(`/cash-reconciliations/${id}`).then((r) => r.data),
+}
+
+/* ============================================================
+   FINANCE MODULE — the central cash-control layer.
+   finance_requests is the single queue for every outbound payment /
+   transfer; FinancePostingService is the one writer that moves a
+   cash/bank balance; finance_transactions is the immutable record.
+   ============================================================ */
+
+export type FinanceRequestType =
+  | 'LoanDisbursement' | 'ExpensePayment' | 'SupplierPayment' | 'Refund' | 'Advance'
+  | 'CashFloat' | 'BranchFunding' | 'CommissionPayout' | 'FdPayout' | 'CashTransfer' | 'Other'
+
+export type FinanceRequestStatus =
+  | 'Draft' | 'Submitted' | 'PendingApproval' | 'Approved' | 'Rejected'
+  | 'ReadyForPayment' | 'Processing' | 'Paid' | 'Completed' | 'Cancelled' | 'Reversed'
+
+export type FinanceTxnType =
+  | 'CASH_IN' | 'CASH_OUT' | 'TRANSFER' | 'DISBURSEMENT' | 'EXPENSE_PAYMENT'
+  | 'FLOAT_ISSUE' | 'FLOAT_RETURN' | 'COLLECTION' | 'BANK_DEPOSIT' | 'BANK_WITHDRAWAL'
+  | 'ADJUSTMENT' | 'REVERSAL'
+
+export interface FinanceTransactionRef {
+  id: number; code: string; txnType: FinanceTxnType;
+  amount: number | string; status: string; journalEntryId?: number | null;
+}
+
+/** The shared approval_requests row for a finance request (up to four slots). */
+export interface FinanceApprovalRequest {
+  id: number; status: ApprovalRequestStatus; requiredApprovals: number;
+  requester?: { id: number; name: string } | null;
+  firstApprover?: { id: number; name: string } | null;
+  secondApprover?: { id: number; name: string } | null;
+  thirdApprover?: { id: number; name: string } | null;
+  fourthApprover?: { id: number; name: string } | null;
+  rejectReason?: string | null;
+}
+
+export interface FinanceRequest {
+  id: number; code: string;
+  requestType: FinanceRequestType;
+  sourceModule?: string | null; sourceId?: number | null;
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  amount: number | string; currency?: string;
+  payeeType?: 'Customer' | 'Vendor' | 'User' | 'Other' | null;
+  payeeId?: number | null; payeeName?: string | null;
+  preferredMethod?: PaymentMethod | null;
+  purpose?: string | null; notes?: string | null;
+  priority?: 'Normal' | 'Urgent';
+  status: FinanceRequestStatus;
+  rejectReason?: string | null;
+  meta?: Record<string, unknown> | null;
+  requester?: { id: number; name: string } | null;
+  approver?: { id: number; name: string } | null;
+  executor?: { id: number; name: string } | null;
+  requestedAt?: string | null; approvedAt?: string | null; executedAt?: string | null;
+  sourceCashAccount?: { id: number; name: string; code?: string | null } | null;
+  sourceBankAccount?: { id: number; name: string } | null;
+  approvalRequest?: FinanceApprovalRequest | null;
+  financeTransaction?: FinanceTransactionRef | null;
+}
+
+export interface FinanceRequestExecuteInput {
+  method: 'Cash' | 'Bank';
+  cashAccountId?: number;
+  bankAccountId?: number;
+  offsetAccountId?: number;
+  destCashAccountId?: number;
+  destBankAccountId?: number;
+  amount?: number | string;
+  entryDate?: string;
+}
+
+export const financeRequestsApi = {
+  list: (params?: { status?: string; requestType?: string; priority?: string; from?: string; to?: string; q?: string; page?: number; perPage?: number }) =>
+    http.get('/finance-requests', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as Paginated<FinanceRequest>),
+  get: (id: number) => http.get(`/finance-requests/${id}`).then((r) => camelize(r.data) as FinanceRequest),
+  create: (body: Partial<FinanceRequest> & { submit?: boolean }) =>
+    http.post('/finance-requests', snakeize(body)).then((r) => camelize(r.data) as FinanceRequest),
+  submit: (id: number) => http.post(`/finance-requests/${id}/submit`).then((r) => camelize(r.data) as FinanceRequest),
+  approve: (id: number) => http.post(`/finance-requests/${id}/approve`).then((r) => camelize(r.data) as FinanceRequest),
+  reject: (id: number, rejectReason?: string) =>
+    http.post(`/finance-requests/${id}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data) as FinanceRequest),
+  cancel: (id: number) => http.post(`/finance-requests/${id}/cancel`).then((r) => camelize(r.data) as FinanceRequest),
+  execute: (id: number, body: FinanceRequestExecuteInput) =>
+    http.post(`/finance-requests/${id}/execute`, snakeize(body)).then((r) => camelize(r.data) as FinanceRequest),
+}
+
+export interface FinanceDashboard {
+  cash: {
+    total: number;
+    byType: Partial<Record<CashAccountType, number>>;
+    main: number; petty: number; floats: number; inTransit: number;
+  };
+  bankTotal: number;
+  unreconciledAccounts: number;
+  requests: { pendingCount: number; pendingAmount: number; readyCount: number; readyAmount: number };
+  today: { inflow: number; outflow: number; disbursements: number; expensePayments: number; transfers: number; collections: number };
+  accounts: { id: number; code: string | null; name: string; accountType: CashAccountType; branchId: number; currentBalance: number; lastReconciledAt: string | null }[];
+  byBranch: { branchId: number; branch: string; cash: number; pendingCount: number; pendingAmount: number }[];
+}
+
+export const financeDashboardApi = {
+  get: (params?: { branchId?: number; staleDays?: number }) =>
+    http.get('/finance-dashboard', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as FinanceDashboard),
 }
 
 /** A spend category (Masters > Expense Categories) — same shape/pattern as

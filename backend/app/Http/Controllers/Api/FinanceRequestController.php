@@ -22,7 +22,8 @@ class FinanceRequestController extends Controller
     private const WITH = [
         'branch:id,name,code', 'requester:id,name', 'approver:id,name', 'executor:id,name',
         'sourceCashAccount:id,name,code', 'sourceBankAccount:id,name',
-        'approvalRequest:id,status,required_approvals,first_approved_by,second_approved_by,third_approved_by,fourth_approved_by,rejected_by,reject_reason',
+        'approvalRequest:id,status,required_approvals,requested_by,first_approved_by,second_approved_by,third_approved_by,fourth_approved_by,rejected_by,reject_reason',
+        'approvalRequest.requester:id,name',
         'approvalRequest.firstApprover:id,name', 'approvalRequest.secondApprover:id,name',
         'approvalRequest.thirdApprover:id,name', 'approvalRequest.fourthApprover:id,name',
         'financeTransaction:id,code,txn_type,amount,status,journal_entry_id',
