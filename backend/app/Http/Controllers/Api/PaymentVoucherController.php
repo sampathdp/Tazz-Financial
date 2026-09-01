@@ -7,6 +7,7 @@ use App\Models\BankAccount;
 use App\Models\CashAccount;
 use App\Models\Expense;
 use App\Models\PaymentVoucher;
+use App\Support\FinancePostingService;
 use App\Support\LedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -39,16 +40,23 @@ class PaymentVoucherController extends Controller
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
 
         DB::transaction(function () use ($paymentVoucher, $data, $request) {
-            if ($paymentVoucher->cash_account_id) {
-                $till = CashAccount::lockForUpdate()->findOrFail($paymentVoucher->cash_account_id);
-                $till->update(['current_balance' => bcadd((string) $till->current_balance, (string) $paymentVoucher->amount, 2)]);
-            } elseif ($paymentVoucher->bank_account_id) {
-                $bank = BankAccount::lockForUpdate()->findOrFail($paymentVoucher->bank_account_id);
-                $bank->update(['current_balance' => bcadd((string) $bank->current_balance, (string) $paymentVoucher->amount, 2)]);
-            }
-
-            if ($paymentVoucher->journal_entry_id) {
-                LedgerPoster::reverse($paymentVoucher->journalEntry, "Voided: {$paymentVoucher->code}", $request->user()->id);
+            if ($paymentVoucher->finance_transaction_id && $paymentVoucher->financeTransaction?->status === 'Completed') {
+                // Since Phase 4 the money moved through FinancePostingService —
+                // reverse() restores the balance AND mirrors the GL, and leaves
+                // a linked REVERSAL row.
+                FinancePostingService::reverse($paymentVoucher->financeTransaction, "Voided: {$paymentVoucher->code}", $request->user()->id);
+            } else {
+                // Legacy voucher (pre-Phase-4): unwind the balance + GL by hand.
+                if ($paymentVoucher->cash_account_id) {
+                    $till = CashAccount::lockForUpdate()->findOrFail($paymentVoucher->cash_account_id);
+                    $till->update(['current_balance' => bcadd((string) $till->current_balance, (string) $paymentVoucher->amount, 2)]);
+                } elseif ($paymentVoucher->bank_account_id) {
+                    $bank = BankAccount::lockForUpdate()->findOrFail($paymentVoucher->bank_account_id);
+                    $bank->update(['current_balance' => bcadd((string) $bank->current_balance, (string) $paymentVoucher->amount, 2)]);
+                }
+                if ($paymentVoucher->journal_entry_id) {
+                    LedgerPoster::reverse($paymentVoucher->journalEntry, "Voided: {$paymentVoucher->code}", $request->user()->id);
+                }
             }
 
             if ($paymentVoucher->expense_id) {

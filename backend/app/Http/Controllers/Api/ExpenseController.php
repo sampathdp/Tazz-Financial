@@ -5,16 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ApprovalRequest;
 use App\Models\ApprovalType;
-use App\Models\BankAccount;
 use App\Models\Branch;
-use App\Models\CashAccount;
-use App\Models\ChartOfAccount;
 use App\Models\Expense;
-use App\Models\ExpenseCategory;
-use App\Models\PaymentVoucher;
 use App\Services\NumberGenerator;
-use App\Support\LedgerPoster;
-use Carbon\Carbon;
+use App\Support\ExpensePaymentExecutor;
+use App\Support\FinanceRequestService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -23,7 +18,11 @@ class ExpenseController extends Controller
 {
     public function index(Request $request)
     {
-        return Expense::with(['branch:id,name,code', 'category:id,name,chart_of_account_id', 'vendor:id,name', 'requester:id,name', 'approver:id,name', 'voucher'])
+        return Expense::with(['branch:id,name,code', 'category:id,name,chart_of_account_id', 'vendor:id,name', 'requester:id,name', 'approver:id,name', 'voucher',
+            'pendingApprovalRequest:id,subject_id,status,required_approvals,requested_by,first_approved_by',
+            'pendingApprovalRequest.requester:id,name', 'pendingApprovalRequest.firstApprover:id,name',
+            'pendingPaymentRequest:id,code,source_id,status,amount,requested_by',
+            'pendingPaymentRequest.requester:id,name'])
             ->when($request->query('status'), fn ($q, $s) => $q->where('status', $s))
             ->when($request->query('branch_id'), fn ($q, $b) => $q->where('branch_id', $b))
             ->orderByDesc('id')
@@ -134,77 +133,91 @@ class ExpenseController extends Controller
         return $expense->fresh();
     }
 
+    private const PAY_RULES = [
+        'payment_method' => ['required', 'in:Cash,Bank,Cheque'],
+        'cash_account_id' => 'required_if:payment_method,Cash|nullable|exists:cash_accounts,id',
+        'bank_account_id' => 'required_if:payment_method,Bank,Cheque|nullable|exists:bank_accounts,id',
+        'cheque_no' => 'required_if:payment_method,Cheque|nullable|string|max:20',
+        'paid_at' => 'nullable|date',
+    ];
+
+    private function paymentBlockReason(Expense $expense): ?string
+    {
+        if ($expense->status !== 'Approved') {
+            return 'Only an approved expense can be paid.';
+        }
+        if ($expense->pendingPaymentRequest()->exists()) {
+            return 'A payment request for this expense is already awaiting finance approval or payment.';
+        }
+
+        return null;
+    }
+
     /**
-     * Settles an approved expense: posts the double-entry journal (Dr the
-     * category's expense account, Cr the till/bank it left from — see
-     * LedgerPoster), moves the physical balance on that till/bank account,
-     * and records the PaymentVoucher tying it all together.
+     * The direct pay path (Finance / admin, perm Expenses,Edit): moves the
+     * money and records the PaymentVoucher in one call — see
+     * ExpensePaymentExecutor. Everyone else raises a request via
+     * requestPayment().
      */
     public function pay(Request $request, Expense $expense)
     {
-        if ($expense->status !== 'Approved') {
-            return response()->json(['message' => 'Only an approved expense can be paid.'], 422);
+        if ($block = $this->paymentBlockReason($expense)) {
+            return response()->json(['message' => $block], 422);
+        }
+        $data = $request->validate(self::PAY_RULES);
+
+        $voucher = ExpensePaymentExecutor::pay($expense, $data, $request->user()->id);
+
+        return response()->json($voucher->load('journalEntry', 'financeTransaction'), 201);
+    }
+
+    /**
+     * The request path (perm Expenses,Create): raises an ExpensePayment
+     * finance request. Finance approves + executes it (money moves there),
+     * then the CompleteExpensePaymentOnSettled listener writes the voucher
+     * and flips the expense to Paid.
+     */
+    public function requestPayment(Request $request, Expense $expense)
+    {
+        if ($block = $this->paymentBlockReason($expense)) {
+            return response()->json(['message' => $block], 422);
+        }
+        $category = $expense->category;
+        if (!$category || !$category->chart_of_account_id) {
+            return response()->json(['message' => "The expense category has no linked chart-of-accounts entry yet — set one in Masters › Expense Categories first."], 422);
         }
         $data = $request->validate([
-            'payment_method' => ['required', Rule::in(['Cash', 'Bank', 'Cheque'])],
-            'cash_account_id' => 'required_if:payment_method,Cash|nullable|exists:cash_accounts,id',
-            'bank_account_id' => 'required_if:payment_method,Bank,Cheque|nullable|exists:bank_accounts,id',
-            'cheque_no' => 'required_if:payment_method,Cheque|nullable|string|max:20',
-            'paid_at' => 'nullable|date',
+            'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
+            'bank_account_id' => 'nullable|exists:bank_accounts,id',
+            'cheque_no' => 'nullable|string|max:20',
+        ]);
+        $method = $data['payment_method'] ?? 'Cash';
+
+        $financeRequest = FinanceRequestService::open([
+            'request_type' => 'ExpensePayment',
+            'amount' => $expense->amount,
+            'branch_id' => $expense->branch_id,
+            'source_module' => 'Expense',
+            'source_id' => $expense->id,
+            'payee_type' => $expense->vendor_id ? 'Vendor' : 'Other',
+            'payee_id' => $expense->vendor_id,
+            'payee_name' => $expense->vendor?->name,
+            'preferred_method' => $method,
+            'purpose' => "Expense payment - {$expense->code}",
+            'requested_by' => $request->user()->id,
+            'meta' => [
+                'gl_source_type' => 'Expense',
+                'gl_source_id' => $expense->id,
+                'offset_account_id' => $category->chart_of_account_id,
+                'payment_method' => $method,
+                'cheque_no' => $data['cheque_no'] ?? null,
+                'source_bank_account_id' => $method === 'Cash' ? null : ($data['bank_account_id'] ?? null),
+            ],
         ]);
 
-        $category = ExpenseCategory::findOrFail($expense->expense_category_id);
-        if (!$category->chart_of_account_id) {
-            return response()->json(['message' => "The expense category \"{$category->name}\" has no linked chart-of-accounts entry yet — set one in Masters > Expense Categories first."], 422);
-        }
-
-        $voucher = DB::transaction(function () use ($expense, $category, $data, $request) {
-            $paidAt = $data['paid_at'] ?? now();
-            $isCash = $data['payment_method'] === 'Cash';
-
-            if ($isCash) {
-                $till = CashAccount::lockForUpdate()->findOrFail($data['cash_account_id']);
-                $outAccount = ChartOfAccount::forCashTill($till);
-                $till->update(['current_balance' => bcsub((string) $till->current_balance, (string) $expense->amount, 2)]);
-            } else {
-                $bank = BankAccount::lockForUpdate()->findOrFail($data['bank_account_id']);
-                $outAccount = ChartOfAccount::forBankAccount($bank);
-                $bank->update(['current_balance' => bcsub((string) $bank->current_balance, (string) $expense->amount, 2)]);
-            }
-
-            $entry = LedgerPoster::post([
-                ['account_id' => $category->chart_of_account_id, 'debit' => $expense->amount, 'credit' => 0, 'description' => $expense->description],
-                ['account_id' => $outAccount->id, 'debit' => 0, 'credit' => $expense->amount],
-            ], Carbon::parse($paidAt)->toDateString(), [
-                'source_type' => 'Expense',
-                'source_id' => $expense->id,
-                'description' => "Expense payment {$expense->code}",
-                'branch_id' => $expense->branch_id,
-                'posted_by' => $request->user()->id,
-            ]);
-
-            $voucherCode = NumberGenerator::next('payment_voucher', ['branch_code' => $expense->branch->code]);
-            $voucher = PaymentVoucher::create([
-                'code' => $voucherCode,
-                'expense_id' => $expense->id,
-                'vendor_id' => $expense->vendor_id,
-                'amount' => $expense->amount,
-                'payment_method' => $data['payment_method'],
-                'paid_at' => $paidAt,
-                'paid_by' => $request->user()->id,
-                'cash_account_id' => $data['cash_account_id'] ?? null,
-                'bank_account_id' => $data['bank_account_id'] ?? null,
-                'cheque_no' => $data['cheque_no'] ?? null,
-                'status' => 'Issued',
-                'journal_entry_id' => $entry->id,
-            ]);
-            NumberGenerator::attach($voucherCode, $voucher);
-
-            $expense->update(['status' => 'Paid']);
-
-            return $voucher;
-        });
-
-        return response()->json($voucher->load('journalEntry'), 201);
+        return response()->json([
+            'message' => 'Payment request sent to Finance.',
+            'financeRequest' => $financeRequest->load('branch:id,name'),
+        ], 201);
     }
 }

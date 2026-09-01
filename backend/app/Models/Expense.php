@@ -65,4 +65,16 @@ class Expense extends Model
             ->whereHas('approvalType', fn ($q) => $q->where('code', 'expense_approval'))
             ->where('status', 'PendingApproval');
     }
+
+    /** The ExpensePayment finance request in flight for this expense (raised
+     *  by ExpenseController::requestPayment()), if any — mirrors
+     *  Loan::pendingDisbursementRequest(). */
+    public function pendingPaymentRequest()
+    {
+        return $this->hasOne(FinanceRequest::class, 'source_id')
+            ->where('source_module', 'Expense')
+            ->where('request_type', 'ExpensePayment')
+            ->whereNotIn('status', ['Rejected', 'Cancelled', 'Completed', 'Reversed'])
+            ->orderByDesc('id');
+    }
 }

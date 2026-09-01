@@ -2276,6 +2276,8 @@ export interface Expense {
   /** The one approval request awaiting sign-off right now, if any — shared
    *  approval_requests shape, for code 'expense_approval'. */
   pendingApprovalRequest?: LoanPaymentVoidRequest | null;
+  /** The ExpensePayment finance request in flight, if someone requested payment (see expensesApi.requestPayment()). */
+  pendingPaymentRequest?: FinanceRequest | null;
 }
 export const expensesApi = {
   list: (params?: { status?: ExpenseStatus; branchId?: number }) =>
@@ -2286,6 +2288,9 @@ export const expensesApi = {
   reject: (id: number, rejectReason?: string) => http.put(`/expenses/${id}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data) as Expense),
   pay: (id: number, body: { paymentMethod: PaymentMethod; cashAccountId?: number; bankAccountId?: number; chequeNo?: string; paidAt?: string }) =>
     http.post(`/expenses/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as PaymentVoucher),
+  /** Requester / manager path: raises an ExpensePayment finance request instead of paying directly. */
+  requestPayment: (id: number, body: { paymentMethod?: PaymentMethod; bankAccountId?: number; chequeNo?: string }) =>
+    http.post(`/expenses/${id}/request-payment`, snakeize(body)).then((r) => camelize(r.data) as { message: string; financeRequest: FinanceRequest }),
 }
 
 export const paymentVouchersApi = {

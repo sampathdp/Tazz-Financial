@@ -556,7 +556,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // not the module permission grid, same maker-checker pattern as loan_cancel.
     Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve']);
     Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject']);
+    // Direct pay (Finance / admin): moves the money + records the voucher.
     Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware('perm:Expenses,Edit');
+    // Request pay (requester / manager): raises an ExpensePayment finance request; Finance executes it.
+    Route::post('expenses/{expense}/request-payment', [ExpenseController::class, 'requestPayment'])->middleware('perm:Expenses,Create');
 
     // --- Expense Management: Payment Vouchers (auto-created by ExpenseController::pay — view/void only, see PaymentVoucherController) ---
     Route::get('payment-vouchers', [PaymentVoucherController::class, 'index'])->middleware('perm:Payment Vouchers,View');
