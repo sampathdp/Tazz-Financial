@@ -30,26 +30,41 @@ use App\Models\PawningAuctionItem;
  */
 class PawningLedgerPoster
 {
-    /** Capital handed to the customer when a ticket is drawn — Dr 1120 (capital now outstanding), Cr the branch till. */
-    public static function postDisbursement(Pawning $pawning): void
+    /**
+     * Capital handed to the customer when a ticket is drawn. Routes through
+     * FinancePostingService (the one money writer) — posts the GL (Dr 1120
+     * capital outstanding / Cr the branch till) AND moves the till's physical
+     * current_balance, with a finance_transactions row. Cash only, always
+     * from the branch till (a pawning ticket is issued and disbursed over the
+     * counter in one step). Journal entry stays source_type='Pawning'.
+     */
+    public static function postDisbursement(Pawning $pawning, ?int $executedBy = null): void
     {
         $till = CashAccount::branchPrimary((int) $pawning->branch_id);
         if (!$till) {
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
-        $capitalAccount = ChartOfAccount::system('1120');
+        $amount = (string) $pawning->disbursed_amount;
         $entryDate = optional($pawning->disbursed_at)->toDateString() ?? now()->toDateString();
 
-        LedgerPoster::post([
-            ['account_id' => $capitalAccount->id, 'debit' => $pawning->disbursed_amount, 'credit' => 0],
-            ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $pawning->disbursed_amount],
-        ], $entryDate, [
-            'source_type' => 'Pawning',
-            'source_id' => $pawning->id,
-            'description' => "Pawning ticket drawn - {$pawning->code}",
+        FinancePostingService::execute([
+            'txn_type' => 'DISBURSEMENT',
+            'amount' => $amount,
+            'entry_date' => $entryDate,
             'branch_id' => $pawning->branch_id,
-            'posted_by' => $pawning->created_by,
+            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => '-' . $amount]],
+            'gl_lines' => [
+                ['account_id' => ChartOfAccount::system('1120')->id, 'debit' => $amount, 'credit' => 0],
+                ['account_id' => ChartOfAccount::forCashTill($till)->id, 'debit' => 0, 'credit' => $amount],
+            ],
+            'gl_source_type' => 'Pawning',
+            'gl_source_id' => $pawning->id,
+            'gl_description' => "Pawning ticket drawn - {$pawning->code}",
+            'description' => "Pawning ticket drawn - {$pawning->code}",
+            'source_module' => 'Pawning',
+            'source_id' => $pawning->id,
+            'idempotency_key' => "pawning-disbursement-{$pawning->id}",
+            'executed_by' => $executedBy ?? $pawning->created_by,
         ]);
     }
 

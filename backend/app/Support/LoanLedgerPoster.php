@@ -6,6 +6,7 @@ use App\Models\BankAccount;
 use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\FacilityPayment;
+use App\Models\FinanceTransaction;
 use App\Models\JournalEntry;
 use App\Models\Loan;
 
@@ -24,55 +25,93 @@ use App\Models\Loan;
 class LoanLedgerPoster
 {
     /**
-     * Capital handed to the customer at disbursement — Dr 1100 (principal now
-     * outstanding), Cr wherever the money left from: the branch till for a
-     * Cash disbursement, or the selected bank account for Bank / Cheque.
+     * Capital handed to the customer at disbursement. Now goes through
+     * FinancePostingService (the one money writer), so it both posts the GL
+     * (Dr 1100 principal outstanding / Cr wherever the money left from — the
+     * branch till for Cash, the selected bank account for Bank / Cheque) AND
+     * moves that account's physical current_balance and records a
+     * finance_transactions row. Before this, disbursement posted the GL only
+     * and the till / bank running balance silently overstated cash by every
+     * disbursement ever made.
+     *
+     * The journal entry is still keyed source_type='Loan' / source_id=loan
+     * so LoanController::purge() and reverseDisbursement() find it unchanged.
+     * Idempotent on "loan-disbursement-{id}" — a retried disburse call can
+     * never pay twice.
+     *
+     * No-ops (same as before) when the target account can't be resolved: an
+     * unknown method, a branch with no till, or a Bank/Cheque disbursement
+     * with no bank account recorded (a pre-cutover loan).
      */
-    public static function postDisbursement(Loan $loan): void
+    public static function postDisbursement(Loan $loan, ?int $executedBy = null): void
     {
         $detail = $loan->loanDetail;
         $method = $detail?->disbursement_method;
-        $creditAccount = self::disbursementCreditAccount(
+        $target = self::disbursementTarget(
             $method,
             (int) $loan->branch_id,
             $detail?->disbursement_bank_account_id ? (int) $detail->disbursement_bank_account_id : null,
         );
-        if (!$creditAccount) {
+        if (!$target) {
             return;
         }
-        $principalAccount = ChartOfAccount::system('1100');
+        $amount = (string) $loan->disbursed_amount;
         $entryDate = optional($loan->disbursed_at)->toDateString() ?? now()->toDateString();
 
-        LedgerPoster::post([
-            ['account_id' => $principalAccount->id, 'debit' => $loan->disbursed_amount, 'credit' => 0],
-            ['account_id' => $creditAccount->id, 'debit' => 0, 'credit' => $loan->disbursed_amount],
-        ], $entryDate, [
-            'source_type' => 'Loan',
-            'source_id' => $loan->id,
-            'description' => "Loan disbursed ({$method}) - {$loan->code}",
+        FinancePostingService::execute([
+            'txn_type' => 'DISBURSEMENT',
+            'amount' => $amount,
+            'entry_date' => $entryDate,
             'branch_id' => $loan->branch_id,
-            'posted_by' => $loan->approved_by,
+            'movements' => [[
+                'account_type' => $target['phys_type'],
+                'account_id' => $target['phys_id'],
+                'delta' => '-' . $amount,
+            ]],
+            'gl_lines' => [
+                ['account_id' => ChartOfAccount::system('1100')->id, 'debit' => $amount, 'credit' => 0],
+                ['account_id' => $target['leaf']->id, 'debit' => 0, 'credit' => $amount],
+            ],
+            'gl_source_type' => 'Loan',
+            'gl_source_id' => $loan->id,
+            'gl_description' => "Loan disbursed ({$method}) - {$loan->code}",
+            'description' => "Loan disbursed ({$method}) - {$loan->code}",
+            'source_module' => 'Loan',
+            'source_id' => $loan->id,
+            'idempotency_key' => "loan-disbursement-{$loan->id}",
+            'executed_by' => $executedBy ?? $loan->approved_by,
         ]);
     }
 
     /**
-     * The leaf account a disbursement's capital is credited to. Cash → the
-     * branch's primary till; Bank/Cheque → the chosen bank account. Returns
-     * null (caller no-ops) if the needed account can't be resolved — an
-     * unknown method, a branch with no till, or a Bank/Cheque disbursement
-     * with no bank account recorded (e.g. a pre-cutover loan).
+     * The leaf account a disbursement's capital is credited to — kept for
+     * SpeedDraftLedgerPoster, which still calls it directly. See
+     * disbursementTarget() for the full (leaf + physical account) resolution.
      */
     public static function disbursementCreditAccount(?string $method, int $branchId, ?int $bankAccountId): ?ChartOfAccount
+    {
+        return self::disbursementTarget($method, $branchId, $bankAccountId)['leaf'] ?? null;
+    }
+
+    /**
+     * Resolves both halves a disbursement needs: the chart-of-accounts leaf
+     * to credit, and the physical cash/bank account whose balance moves.
+     * Cash → the branch's primary till; Bank/Cheque → the chosen bank
+     * account. Null (caller no-ops) when it can't be resolved.
+     *
+     * @return array{leaf: ChartOfAccount, phys_type: string, phys_id: int}|null
+     */
+    public static function disbursementTarget(?string $method, int $branchId, ?int $bankAccountId): ?array
     {
         if ($method === 'Cash') {
             $till = CashAccount::branchPrimary($branchId);
 
-            return $till ? ChartOfAccount::forCashTill($till) : null;
+            return $till ? ['leaf' => ChartOfAccount::forCashTill($till), 'phys_type' => 'cash', 'phys_id' => (int) $till->id] : null;
         }
         if (in_array($method, ['Bank', 'Cheque'], true) && $bankAccountId) {
             $bank = BankAccount::find($bankAccountId);
 
-            return $bank ? ChartOfAccount::forBankAccount($bank) : null;
+            return $bank ? ['leaf' => ChartOfAccount::forBankAccount($bank), 'phys_type' => 'bank', 'phys_id' => (int) $bank->id] : null;
         }
 
         return null;
@@ -213,9 +252,30 @@ class LoanLedgerPoster
         ]);
     }
 
-    /** Reverses a Loan's disbursement entry — called when an Active-but-unpaid loan is cancelled (LoanController::approveCancelRequest() zeroes disbursed_amount/outstanding_balance_cache for exactly this case; the GL side needs the same undo). No-op if disbursement was never posted (Bank/Cheque method). */
+    /**
+     * Reverses a Loan's disbursement — called when an Active-but-unpaid loan
+     * is cancelled (LoanController::approveCancelRequest() zeroes
+     * disbursed_amount/outstanding_balance_cache for exactly this case). Goes
+     * through FinancePostingService::reverse(), which restores the till/bank
+     * current_balance AND posts the mirrored GL entry, then leaves a linked
+     * REVERSAL finance_transactions row. Falls back to a GL-only reversal for
+     * a loan disbursed before the Finance posting service existed. No-op if
+     * disbursement was never recorded at all.
+     */
     public static function reverseDisbursement(Loan $loan, ?int $userId = null): void
     {
+        $txn = FinanceTransaction::where('source_module', 'Loan')
+            ->where('source_id', $loan->id)
+            ->where('txn_type', 'DISBURSEMENT')
+            ->where('status', 'Completed')
+            ->latest('id')
+            ->first();
+        if ($txn) {
+            FinancePostingService::reverse($txn, "Cancelled: {$loan->code}", $userId);
+
+            return;
+        }
+
         JournalEntry::where('source_type', 'Loan')
             ->where('source_id', $loan->id)
             ->where('status', 'Posted')

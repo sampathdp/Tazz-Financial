@@ -8,6 +8,7 @@ use App\Models\BankAccount;
 use App\Models\CashAccount;
 use App\Models\FinanceTransaction;
 use App\Services\NumberGenerator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -49,6 +50,8 @@ class FinancePostingService
      *   finance_request_id?: ?int,
      *   description?: ?string,
      *   gl_description?: ?string,
+     *   gl_source_type?: ?string,
+     *   gl_source_id?: ?int,
      *   meta?: ?array,
      *   idempotency_key?: ?string,
      *   status?: string,
@@ -80,10 +83,17 @@ class FinancePostingService
                 self::applyMovement($m['account_type'], (int) $m['account_id'], (string) $m['delta']);
             }
 
-            // 4 — the GL entry, still through the one ledger writer.
+            // 4 — the GL entry, still through the one ledger writer. By default
+            // it is sourced as this finance transaction; a caller that needs
+            // the entry to stay keyed to its own record (e.g. Loan
+            // disbursement — so LoanController::purge()/reverseDisbursement()
+            // still find it by source_type='Loan') passes gl_source_type /
+            // gl_source_id instead.
+            $glSourceType = $spec['gl_source_type'] ?? 'FinanceTransaction';
+            $backfillGlSource = !isset($spec['gl_source_type']);
             $entry = LedgerPoster::post($spec['gl_lines'], $spec['entry_date'], [
-                'source_type' => 'FinanceTransaction',
-                'source_id' => null, // back-filled below once the row has an id
+                'source_type' => $glSourceType,
+                'source_id' => $spec['gl_source_id'] ?? null, // back-filled below when it is this txn
                 'description' => $spec['gl_description'] ?? $spec['description'],
                 'branch_id' => $spec['branch_id'],
                 'posted_by' => $spec['executed_by'],
@@ -119,7 +129,9 @@ class FinancePostingService
                 'executed_at' => now(),
             ]);
             NumberGenerator::attach($code, $txn);
-            $entry->update(['source_id' => $txn->id]);
+            if ($backfillGlSource) {
+                $entry->update(['source_id' => $txn->id]);
+            }
 
             return $txn;
         });
@@ -249,7 +261,7 @@ class FinancePostingService
     }
 
     /** 'In' (one inbound leg), 'Out' (one outbound leg), or 'Move' (a transfer with both). */
-    private static function direction($movements): string
+    private static function direction(Collection $movements): string
     {
         if ($movements->count() === 2) {
             return 'Move';
@@ -260,7 +272,7 @@ class FinancePostingService
     }
 
     /** [sourceLeg, destLeg] — the outbound account is the source, the inbound account is the dest. */
-    private static function endpoints($movements): array
+    private static function endpoints(Collection $movements): array
     {
         $outbound = $movements->first(fn ($m) => bccomp((string) $m['delta'], '0.00', 2) < 0);
         $inbound = $movements->first(fn ($m) => bccomp((string) $m['delta'], '0.00', 2) > 0);

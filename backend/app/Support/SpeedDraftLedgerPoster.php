@@ -21,31 +21,52 @@ use App\Models\SpeedDraft;
  */
 class SpeedDraftLedgerPoster
 {
-    /** Capital handed to the customer at disbursement — Dr 1110 (capital now outstanding), Cr the branch till (Cash) or the chosen bank account (Bank). */
-    public static function postDisbursement(SpeedDraft $draft): void
+    /**
+     * Capital handed to the customer at disbursement. Routes through
+     * FinancePostingService (the one money writer) exactly like
+     * LoanLedgerPoster::postDisbursement — posts the GL (Dr 1110 capital
+     * outstanding / Cr the branch till for Cash, or the chosen bank account
+     * for Bank / Cheque) AND moves that account's physical current_balance,
+     * with a finance_transactions row. The journal entry stays
+     * source_type='SpeedDraft' / source_id=draft. Idempotent per draft.
+     */
+    public static function postDisbursement(SpeedDraft $draft, ?int $executedBy = null): void
     {
         $detail = $draft->speedDraftDetail;
         $method = $detail?->disbursement_method;
-        $creditAccount = LoanLedgerPoster::disbursementCreditAccount(
+        $target = LoanLedgerPoster::disbursementTarget(
             $method,
             (int) $draft->branch_id,
             $detail?->disbursement_bank_account_id ? (int) $detail->disbursement_bank_account_id : null,
         );
-        if (!$creditAccount) {
+        if (!$target) {
             return;
         }
-        $capitalAccount = ChartOfAccount::system('1110');
+        $amount = (string) $draft->disbursed_amount;
         $entryDate = optional($draft->disbursed_at)->toDateString() ?? now()->toDateString();
 
-        LedgerPoster::post([
-            ['account_id' => $capitalAccount->id, 'debit' => $draft->disbursed_amount, 'credit' => 0],
-            ['account_id' => $creditAccount->id, 'debit' => 0, 'credit' => $draft->disbursed_amount],
-        ], $entryDate, [
-            'source_type' => 'SpeedDraft',
-            'source_id' => $draft->id,
-            'description' => "Speed Draft disbursed ({$method}) - {$draft->code}",
+        FinancePostingService::execute([
+            'txn_type' => 'DISBURSEMENT',
+            'amount' => $amount,
+            'entry_date' => $entryDate,
             'branch_id' => $draft->branch_id,
-            'posted_by' => $draft->approved_by,
+            'movements' => [[
+                'account_type' => $target['phys_type'],
+                'account_id' => $target['phys_id'],
+                'delta' => '-' . $amount,
+            ]],
+            'gl_lines' => [
+                ['account_id' => ChartOfAccount::system('1110')->id, 'debit' => $amount, 'credit' => 0],
+                ['account_id' => $target['leaf']->id, 'debit' => 0, 'credit' => $amount],
+            ],
+            'gl_source_type' => 'SpeedDraft',
+            'gl_source_id' => $draft->id,
+            'gl_description' => "Speed Draft disbursed ({$method}) - {$draft->code}",
+            'description' => "Speed Draft disbursed ({$method}) - {$draft->code}",
+            'source_module' => 'SpeedDraft',
+            'source_id' => $draft->id,
+            'idempotency_key' => "speed-draft-disbursement-{$draft->id}",
+            'executed_by' => $executedBy ?? $draft->approved_by,
         ]);
     }
 

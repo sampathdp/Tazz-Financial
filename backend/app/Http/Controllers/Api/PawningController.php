@@ -180,7 +180,7 @@ class PawningController extends Controller
                 'purpose' => $purpose,
             ]);
 
-            PawningLedgerPoster::postDisbursement($pawning->fresh());
+            PawningLedgerPoster::postDisbursement($pawning->fresh(), $request->user()->id);
 
             return $pawning;
         });

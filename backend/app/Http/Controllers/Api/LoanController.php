@@ -412,6 +412,31 @@ class LoanController extends Controller
                     DB::table('cashbook_entries')->where('source_type', 'LoanPayment')->whereIn('source_id', $paymentIds)->delete();
                 }
 
+                // --- Finance transactions (disbursement + any reversal) ---
+                // Since Phase 1b, a loan disbursement moves the till/bank
+                // current_balance through FinancePostingService and records a
+                // finance_transactions row (there is no bank_transactions row
+                // for it, so the GL walk-back below never sees it). Undo each
+                // row's balance effect, then drop the rows. A cancelled loan
+                // has both a Reversed DISBURSEMENT and its REVERSAL here —
+                // their inverses cancel out, matching the balance already
+                // being whole.
+                $financeTxns = DB::table('finance_transactions')
+                    ->where('source_module', 'Loan')->whereIn('source_id', $ids)->get();
+                foreach ($financeTxns as $ftx) {
+                    if ($ftx->source_account_id) {
+                        $table = $ftx->source_account_type === 'cash' ? 'cash_accounts' : 'bank_accounts';
+                        DB::table($table)->where('id', $ftx->source_account_id)
+                            ->update(['current_balance' => DB::raw('current_balance + '.(float) $ftx->amount)]);
+                    }
+                    if ($ftx->dest_account_id) {
+                        $table = $ftx->dest_account_type === 'cash' ? 'cash_accounts' : 'bank_accounts';
+                        DB::table($table)->where('id', $ftx->dest_account_id)
+                            ->update(['current_balance' => DB::raw('current_balance - '.(float) $ftx->amount)]);
+                    }
+                }
+                DB::table('finance_transactions')->where('source_module', 'Loan')->whereIn('source_id', $ids)->delete();
+
                 // --- General ledger ---
                 if ($journalEntryIds) {
                     // Walk each bank movement back out of the bank account's
@@ -734,7 +759,8 @@ class LoanController extends Controller
             'disbursement_bank_account_id' => ['required_if:disbursement_method,Bank,Cheque', 'nullable', 'exists:bank_accounts,id'],
         ]);
 
-        DB::transaction(function () use ($loan, $detail, $data) {
+        $executedBy = $request->user()->id;
+        DB::transaction(function () use ($loan, $detail, $data, $executedBy) {
             $financed = $data['disbursed_amount'] ?? ((float) $loan->principal_amount - (float) $detail->down_payment);
             $loan->update([
                 'disbursed_amount' => $financed,
@@ -751,7 +777,7 @@ class LoanController extends Controller
             $loan->schedules()->insert($rows);
             $this->applyEffectiveRate($detail->fresh(), $rows);
             $this->generateSalesExecutiveCommission($loan->fresh(), $detail);
-            LoanLedgerPoster::postDisbursement($loan->fresh());
+            LoanLedgerPoster::postDisbursement($loan->fresh(), $executedBy);
         });
 
         return $loan->load(self::DETAIL_RELATIONS);

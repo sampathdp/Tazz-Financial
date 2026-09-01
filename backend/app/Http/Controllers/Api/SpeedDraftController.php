@@ -289,7 +289,8 @@ class SpeedDraftController extends Controller
             'start_date' => 'required|date',
         ]);
 
-        $speedDraft = DB::transaction(function () use ($speedDraft, $data) {
+        $executedBy = $request->user()->id;
+        $speedDraft = DB::transaction(function () use ($speedDraft, $data, $executedBy) {
             $startDate = Carbon::parse($data['start_date']);
             $speedDraft->update([
                 'disbursed_amount' => $data['disbursed_amount'] ?? $speedDraft->principal_amount,
@@ -305,7 +306,7 @@ class SpeedDraftController extends Controller
             $fresh = $speedDraft->fresh();
 
             FacilitySchedule::insert(SpeedDraftScheduler::generate($fresh));
-            SpeedDraftLedgerPoster::postDisbursement($fresh);
+            SpeedDraftLedgerPoster::postDisbursement($fresh, $executedBy);
 
             return $fresh;
         });
