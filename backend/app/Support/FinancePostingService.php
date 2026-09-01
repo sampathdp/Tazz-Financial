@@ -79,8 +79,10 @@ class FinancePostingService
                 ->sortBy(fn ($m) => $m['account_type'] . ':' . str_pad((string) $m['account_id'], 12, '0', STR_PAD_LEFT))
                 ->values();
 
+            $applied = [];
             foreach ($movements as $m) {
-                self::applyMovement($m['account_type'], (int) $m['account_id'], (string) $m['delta']);
+                $newBalance = self::applyMovement($m['account_type'], (int) $m['account_id'], (string) $m['delta']);
+                $applied[] = ['type' => $m['account_type'], 'id' => (int) $m['account_id'], 'delta' => (string) $m['delta'], 'balance' => $newBalance];
             }
 
             // 4 — the GL entry, still through the one ledger writer. By default
@@ -133,8 +135,50 @@ class FinancePostingService
                 $entry->update(['source_id' => $txn->id]);
             }
 
+            // Mirror each cash-account leg into cashbook_entries so the
+            // Cashbook screen still shows every movement. This is a bridge:
+            // Phase 9 turns cashbook_entries into a view over
+            // finance_transactions and drops this write.
+            foreach ($applied as $leg) {
+                if ($leg['type'] === 'cash') {
+                    self::mirrorToCashbook($txn, $entry->id, $leg);
+                }
+            }
+
             return $txn;
         });
+    }
+
+    private const CASHBOOK_CATEGORY = [
+        'COLLECTION' => 'Loan Collection',
+        'EXPENSE_PAYMENT' => 'Expense',
+        'TRANSFER' => 'Transfer', 'FLOAT_ISSUE' => 'Transfer', 'FLOAT_RETURN' => 'Transfer',
+        'CASH_IN' => 'Other', 'CASH_OUT' => 'Other', 'DISBURSEMENT' => 'Other',
+        'BANK_DEPOSIT' => 'Deposit', 'BANK_WITHDRAWAL' => 'Other', 'ADJUSTMENT' => 'Other', 'REVERSAL' => 'Other',
+    ];
+
+    /** @param array{type:string,id:int,delta:string,balance:string} $leg */
+    private static function mirrorToCashbook(FinanceTransaction $txn, ?int $journalEntryId, array $leg): void
+    {
+        $account = CashAccount::find($leg['id']);
+        if (!$account) {
+            return;
+        }
+        $inbound = bccomp($leg['delta'], '0.00', 2) >= 0;
+        \App\Models\CashbookEntry::create([
+            'branch_id' => $account->branch_id,
+            'cash_account_id' => $account->id,
+            'journal_entry_id' => $journalEntryId,
+            'entry_date' => $txn->executed_at?->toDateString() ?? now()->toDateString(),
+            'direction' => $inbound ? 'In' : 'Out',
+            'category' => self::CASHBOOK_CATEGORY[$txn->txn_type] ?? 'Other',
+            'amount' => ltrim($leg['delta'], '-'),
+            'balance_after' => $leg['balance'],
+            'source_type' => 'FinanceTransaction',
+            'source_id' => $txn->id,
+            'description' => $txn->description ?? $txn->code,
+            'created_by' => $txn->executed_by,
+        ]);
     }
 
     /**
@@ -160,8 +204,10 @@ class FinancePostingService
                     $inverse[] = ['account_type' => $txn->$typeCol, 'account_id' => (int) $txn->$idCol, 'delta' => bcmul((string) $txn->amount, (string) $sign, 2)];
                 }
             }
+            $applied = [];
             foreach (collect($inverse)->sortBy(fn ($m) => $m['account_type'] . ':' . str_pad((string) $m['account_id'], 12, '0', STR_PAD_LEFT)) as $m) {
-                self::applyMovement($m['account_type'], (int) $m['account_id'], (string) $m['delta'], allowNegativeOverride: true);
+                $bal = self::applyMovement($m['account_type'], (int) $m['account_id'], (string) $m['delta'], allowNegativeOverride: true);
+                $applied[] = ['type' => $m['account_type'], 'id' => (int) $m['account_id'], 'delta' => (string) $m['delta'], 'balance' => $bal];
             }
 
             $reversalEntry = $txn->journalEntry
@@ -191,14 +237,20 @@ class FinancePostingService
             ]);
             NumberGenerator::attach($code, $reversal);
 
+            foreach ($applied as $leg) {
+                if ($leg['type'] === 'cash') {
+                    self::mirrorToCashbook($reversal, $reversalEntry?->id, $leg);
+                }
+            }
+
             $txn->update(['status' => 'Reversed']);
 
             return $reversal;
         });
     }
 
-    /** Locks one cash/bank account, applies a signed delta, and enforces the no-negative rule. */
-    private static function applyMovement(string $type, int $id, string $delta, bool $allowNegativeOverride = false): void
+    /** Locks one cash/bank account, applies a signed delta, enforces the no-negative rule, and returns the new balance. */
+    private static function applyMovement(string $type, int $id, string $delta, bool $allowNegativeOverride = false): string
     {
         if ($type === 'cash') {
             $account = CashAccount::lockForUpdate()->find($id);
@@ -211,7 +263,7 @@ class FinancePostingService
             }
             $account->update(['current_balance' => $newBalance]);
 
-            return;
+            return $newBalance;
         }
 
         if ($type === 'bank') {
@@ -226,7 +278,7 @@ class FinancePostingService
             }
             $account->update(['current_balance' => $newBalance]);
 
-            return;
+            return $newBalance;
         }
 
         throw new FinancePostingException("Unknown account type '{$type}'.");

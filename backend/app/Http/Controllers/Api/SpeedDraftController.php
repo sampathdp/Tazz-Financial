@@ -492,9 +492,7 @@ class SpeedDraftController extends Controller
                     SpeedDraftPaymentAllocator::applyCapitalReduction($speedDraft->fresh(), $payment, $capitalPayment, $asOf);
                 }
 
-                SpeedDraftLedgerPoster::postPenaltyReceipt($payment);
-                SpeedDraftLedgerPoster::postInterestReceipt($payment);
-                SpeedDraftLedgerPoster::postCapitalReceipt($payment);
+                SpeedDraftLedgerPoster::postCashReceipt($payment);
             }
 
             $speedDraft->fresh()->update(['status' => 'Closed', 'closed_at' => $asOf]);

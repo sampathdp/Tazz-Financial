@@ -116,13 +116,9 @@ class SpeedDraftPaymentController extends Controller
                 'Settlement' => SpeedDraftPaymentAllocator::applySettlement($speedDraft, $payment, $asOf),
             };
 
-            // Each poster only writes an entry for the bucket it actually finds
-            // allocated (see SpeedDraftLedgerPoster) — a Settlement payment
-            // typically has more than one, so all three fire; Interest/
-            // CapitalReduction only ever populate their matching bucket(s).
-            SpeedDraftLedgerPoster::postPenaltyReceipt($payment);
-            SpeedDraftLedgerPoster::postInterestReceipt($payment);
-            SpeedDraftLedgerPoster::postCapitalReceipt($payment);
+            // Books the interest / penalty / capital split of this cash payment
+            // as one COLLECTION transaction (till balance + GL + cashbook).
+            SpeedDraftLedgerPoster::postCashReceipt($payment);
 
             return $payment;
         });

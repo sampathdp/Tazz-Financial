@@ -9,7 +9,6 @@ use App\Models\Branch;
 use App\Models\FacilityPayment;
 use App\Models\Loan;
 use App\Services\NumberGenerator;
-use App\Support\CashbookPoster;
 use App\Support\LoanLedgerPoster;
 use App\Support\LoanPaymentAllocator;
 use Carbon\Carbon;
@@ -208,7 +207,6 @@ class LoanPaymentController extends Controller
             // whether it's a pending settlement/manual-allocation awaiting
             // approval — post it to the Cashbook now rather than only when/if the
             // allocation is applied.
-            CashbookPoster::postCashReceipt($payment);
             LoanLedgerPoster::postCashReceipt($payment);
 
             return $payment;
@@ -296,7 +294,6 @@ class LoanPaymentController extends Controller
             ]);
             // The cash was posted to the Cashbook at record time (see store()) — a
             // rejected settlement means it's being handed back, so unwind that entry.
-            CashbookPoster::reverseCashReceipt($payment);
             LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
             if ($req) {
                 $req->update([
@@ -460,7 +457,6 @@ class LoanPaymentController extends Controller
                 'voided_at' => now(),
             ]);
             $this->refreshOutstandingCache($loan);
-            CashbookPoster::reverseCashReceipt($payment);
             LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
             $voidRequest->update(['status' => 'Approved']);
         });
@@ -577,7 +573,6 @@ class LoanPaymentController extends Controller
                 // The cash was posted to the Cashbook at record time (see store()) —
                 // a rejected allocation request means it's being handed back, so
                 // unwind that entry.
-                CashbookPoster::reverseCashReceipt($payment);
                 LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
             }
             $allocationRequest->update([

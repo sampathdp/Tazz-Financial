@@ -68,52 +68,59 @@ class PawningLedgerPoster
         ]);
     }
 
-    /** An interest payment (renewal or the interest portion of a redemption) received in cash — Dr till, Cr 4025. */
-    public static function postInterestReceipt(FacilityPayment $payment): void
+    /**
+     * A cash payment received now (renewal interest, or the split of a
+     * redemption) — books the interest (4025) / capital (1120) split as one
+     * COLLECTION transaction through FinancePostingService (till balance + GL
+     * + cashbook mirror). Replaced postInterestReceipt / postCapitalReceipt
+     * in Phase 7.
+     */
+    public static function postCashReceipt(FacilityPayment $payment): void
     {
         if ($payment->payment_method !== 'Cash') {
-            return;
-        }
-        $interest = (float) $payment->allocations()->sum('interest_applied');
-        if ($interest <= 0) {
             return;
         }
         $till = CashAccount::branchPrimary((int) $payment->branch_id);
         if (!$till) {
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
-        $income = ChartOfAccount::system('4025');
+        $interest = (string) $payment->allocations()->sum('interest_applied');
+        $capital = (string) $payment->allocations()->sum('principal_applied');
+
+        $credits = [];
+        if (bccomp($interest, '0.00', 2) > 0) {
+            $credits[] = ['account_id' => ChartOfAccount::system('4025')->id, 'credit' => $interest];
+        }
+        if (bccomp($capital, '0.00', 2) > 0) {
+            $credits[] = ['account_id' => ChartOfAccount::system('1120')->id, 'credit' => $capital];
+        }
+        if (!$credits) {
+            return;
+        }
+        $amount = bcadd($interest, $capital, 2);
+        $tillLeaf = ChartOfAccount::forCashTill($till);
         $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
+        $description = "Pawning payment {$payment->code}";
 
-        LedgerPoster::post([
-            ['account_id' => $tillAccount->id, 'debit' => $interest, 'credit' => 0],
-            ['account_id' => $income->id, 'debit' => 0, 'credit' => $interest],
-        ], $entryDate, self::meta($payment, "Pawning interest received - {$payment->code}"));
-    }
-
-    /** A capital reduction (or the capital portion of a redemption) received in cash — Dr till, Cr 1120. */
-    public static function postCapitalReceipt(FacilityPayment $payment): void
-    {
-        if ($payment->payment_method !== 'Cash') {
-            return;
-        }
-        $capital = (float) $payment->allocations()->sum('principal_applied');
-        if ($capital <= 0) {
-            return;
-        }
-        $till = CashAccount::branchPrimary((int) $payment->branch_id);
-        if (!$till) {
-            return;
-        }
-        $tillAccount = ChartOfAccount::forCashTill($till);
-        $capitalAccount = ChartOfAccount::system('1120');
-        $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
-
-        LedgerPoster::post([
-            ['account_id' => $tillAccount->id, 'debit' => $capital, 'credit' => 0],
-            ['account_id' => $capitalAccount->id, 'debit' => 0, 'credit' => $capital],
-        ], $entryDate, self::meta($payment, "Pawning capital received - {$payment->code}"));
+        FinancePostingService::execute([
+            'txn_type' => 'COLLECTION',
+            'amount' => $amount,
+            'entry_date' => $entryDate,
+            'branch_id' => $payment->branch_id,
+            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $amount]],
+            'gl_lines' => array_merge(
+                [['account_id' => $tillLeaf->id, 'debit' => $amount, 'credit' => 0]],
+                array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
+            ),
+            'gl_source_type' => 'PawningPayment',
+            'gl_source_id' => $payment->id,
+            'gl_description' => $description,
+            'description' => $description,
+            'source_module' => 'PawningPayment',
+            'source_id' => $payment->id,
+            'idempotency_key' => "pawning-payment-{$payment->id}",
+            'executed_by' => $payment->received_by,
+        ]);
     }
 
     /**
@@ -228,9 +235,15 @@ class PawningLedgerPoster
         ]);
     }
 
-    /** Reverses every posted journal entry this payment ever caused — called when a payment is voided. */
+    /** Reverses a voided payment — the COLLECTION transaction back through FinancePostingService (restores till + GL + cashbook), any other posted JE on the GL. */
     public static function reverseAllFor(FacilityPayment $payment, ?int $userId = null): void
     {
+        $collection = \App\Models\FinanceTransaction::where('source_module', 'PawningPayment')
+            ->where('source_id', $payment->id)->where('txn_type', 'COLLECTION')->where('status', 'Completed')
+            ->latest('id')->first();
+        if ($collection) {
+            FinancePostingService::reverse($collection, "Voided: {$payment->code}", $userId);
+        }
         JournalEntry::where('source_type', 'PawningPayment')
             ->where('source_id', $payment->id)
             ->where('status', 'Posted')

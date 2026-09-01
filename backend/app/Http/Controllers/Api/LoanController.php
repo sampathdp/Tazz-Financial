@@ -403,7 +403,7 @@ class LoanController extends Controller
         DB::transaction(function () use ($ids, $paymentIds, $chargeIds, $collateralIds, $journalEntryIds) {
             DB::statement('SET FOREIGN_KEY_CHECKS=0');
             try {
-                // --- Cashbook: undo the till movement for each cash receipt, then drop the row ---
+                // --- Legacy cashbook rows (pre-Phase-7 loan cash receipts) ---
                 if ($paymentIds) {
                     $entries = DB::table('cashbook_entries')
                         ->where('source_type', 'LoanPayment')->whereIn('source_id', $paymentIds)->get();
@@ -415,17 +415,15 @@ class LoanController extends Controller
                     DB::table('cashbook_entries')->where('source_type', 'LoanPayment')->whereIn('source_id', $paymentIds)->delete();
                 }
 
-                // --- Finance transactions (disbursement + any reversal) ---
-                // Since Phase 1b, a loan disbursement moves the till/bank
-                // current_balance through FinancePostingService and records a
-                // finance_transactions row (there is no bank_transactions row
-                // for it, so the GL walk-back below never sees it). Undo each
-                // row's balance effect, then drop the rows. A cancelled loan
-                // has both a Reversed DISBURSEMENT and its REVERSAL here —
-                // their inverses cancel out, matching the balance already
-                // being whole.
+                // --- Finance transactions: the loan disbursement + every cash
+                // receipt (Phase 7) + any reversal. Undo each row's balance
+                // effect, drop the cashbook mirror, then drop the rows. A
+                // cancelled/voided pair (original Reversed + its REVERSAL)
+                // nets to zero, matching the balance already being whole.
                 $financeTxns = DB::table('finance_transactions')
-                    ->where('source_module', 'Loan')->whereIn('source_id', $ids)->get();
+                    ->where(fn ($q) => $q->where('source_module', 'Loan')->whereIn('source_id', $ids))
+                    ->when($paymentIds, fn ($q) => $q->orWhere(fn ($w) => $w->where('source_module', 'LoanPayment')->whereIn('source_id', $paymentIds)))
+                    ->get();
                 foreach ($financeTxns as $ftx) {
                     if ($ftx->source_account_id) {
                         $table = $ftx->source_account_type === 'cash' ? 'cash_accounts' : 'bank_accounts';
@@ -438,7 +436,11 @@ class LoanController extends Controller
                             ->update(['current_balance' => DB::raw('current_balance - '.(float) $ftx->amount)]);
                     }
                 }
-                DB::table('finance_transactions')->where('source_module', 'Loan')->whereIn('source_id', $ids)->delete();
+                $ftxIds = collect($financeTxns)->pluck('id')->all();
+                if ($ftxIds) {
+                    DB::table('cashbook_entries')->where('source_type', 'FinanceTransaction')->whereIn('source_id', $ftxIds)->delete();
+                    DB::table('finance_transactions')->whereIn('id', $ftxIds)->delete();
+                }
 
                 // --- General ledger ---
                 if ($journalEntryIds) {

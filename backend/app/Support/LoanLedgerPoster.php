@@ -288,6 +288,11 @@ class LoanLedgerPoster
      * Cash received right now — a regular payment (already allocated to the
      * schedule/charges by the caller) or a settlement request (not allocated
      * yet, held in the 2100 suspense account until approved).
+     *
+     * Since Phase 7 this goes through FinancePostingService (txn_type
+     * COLLECTION): the till's current_balance moves, a finance_transactions
+     * row is recorded and a cashbook_entries mirror is written — the same
+     * work CashbookPoster used to do separately, now atomic with the GL.
      */
     public static function postCashReceipt(FacilityPayment $payment): void
     {
@@ -298,30 +303,51 @@ class LoanLedgerPoster
         if (!$till) {
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
-        $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
 
-        // Settlement and ManualAllocation both hold the cash pending approval —
-        // neither has been allocated to the schedule yet (see
-        // LoanPaymentAllocator::applyAllocation()/applyManualAllocation()), so
-        // there's nothing splitLines() below could credit yet.
+        // Settlement and ManualAllocation hold the cash in 2100 suspense until
+        // approved (see LoanPaymentAllocator) — nothing splitLines() can
+        // credit yet.
         if (in_array($payment->payment_type, ['Settlement', 'ManualAllocation'], true)) {
-            $suspense = ChartOfAccount::system('2100');
             $label = $payment->payment_type === 'Settlement' ? 'settlement' : 'manual allocation';
-            LedgerPoster::post([
-                ['account_id' => $tillAccount->id, 'debit' => $payment->amount, 'credit' => 0],
-                ['account_id' => $suspense->id, 'debit' => 0, 'credit' => $payment->amount],
-            ], $entryDate, self::meta($payment, "Cash receipt pending {$label} approval - {$payment->code}"));
+            self::postCollection($payment, $till, [
+                ['account_id' => ChartOfAccount::system('2100')->id, 'credit' => (string) $payment->amount],
+            ], "Cash receipt pending {$label} approval - {$payment->code}");
 
             return;
         }
 
         $credits = self::splitLines($payment);
-        if (!$credits) {
-            return;
+        if ($credits) {
+            self::postCollection($payment, $till, $credits, "Loan payment {$payment->code}");
         }
-        $lines = array_merge([['account_id' => $tillAccount->id, 'debit' => $payment->amount, 'credit' => 0]], $credits);
-        LedgerPoster::post($lines, $entryDate, self::meta($payment, "Loan payment {$payment->code}"));
+    }
+
+    /** Books a cash collection through the one money writer. $credits is the Cr side (each ['account_id'=>, 'credit'=>]); the till Dr and the +movement are added here. */
+    private static function postCollection(FacilityPayment $payment, CashAccount $till, array $credits, string $description): void
+    {
+        $amount = (string) $payment->amount;
+        $tillLeaf = ChartOfAccount::forCashTill($till);
+        $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
+
+        FinancePostingService::execute([
+            'txn_type' => 'COLLECTION',
+            'amount' => $amount,
+            'entry_date' => $entryDate,
+            'branch_id' => $payment->branch_id,
+            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $amount]],
+            'gl_lines' => array_merge(
+                [['account_id' => $tillLeaf->id, 'debit' => $amount, 'credit' => 0]],
+                array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
+            ),
+            'gl_source_type' => 'LoanPayment',
+            'gl_source_id' => $payment->id,
+            'gl_description' => $description,
+            'description' => $description,
+            'source_module' => 'LoanPayment',
+            'source_id' => $payment->id,
+            'idempotency_key' => "loan-payment-{$payment->id}",
+            'executed_by' => $payment->received_by,
+        ]);
     }
 
     /** A pending settlement's cash moves from suspense into what it actually paid off — called once LoanPaymentAllocator::applyAllocation() has run at approval time. Cash-method only, matching postCashReceipt()'s original suspense entry. */
@@ -370,13 +396,30 @@ class LoanLedgerPoster
         LedgerPoster::post($lines, $entryDate, self::meta($payment, "Cheque realized {$payment->code}"));
     }
 
-    /** Reverses every posted journal entry this payment ever caused (one for a plain receipt, or two for an approved-then-voided settlement) — called wherever a payment is voided/rejected/bounced, mirroring CashbookPoster::reverseCashReceipt(). No-op if nothing was ever posted for it (Bank method, or a still-pending cheque). */
+    /**
+     * Reverses everything this payment ever caused — called wherever a payment
+     * is voided/rejected/bounced. The cash-receipt COLLECTION transaction goes
+     * back through FinancePostingService::reverse() (restores the till +
+     * mirrors the GL + cashbook); any other posted LoanPayment journal entry
+     * (a settlement/manual-allocation reclass) is reversed on the GL directly.
+     * No-op if nothing was ever posted (Bank method, or a still-pending cheque).
+     */
     public static function reverseAllFor(FacilityPayment $payment, ?int $userId = null): void
     {
+        $collection = FinanceTransaction::where('source_module', 'LoanPayment')
+            ->where('source_id', $payment->id)
+            ->where('txn_type', 'COLLECTION')
+            ->where('status', 'Completed')
+            ->latest('id')
+            ->first();
+        if ($collection) {
+            FinancePostingService::reverse($collection, "Voided: {$payment->code}", $userId);
+        }
+
         JournalEntry::where('source_type', 'LoanPayment')
             ->where('source_id', $payment->id)
             ->where('status', 'Posted')
-            ->whereNull('reversal_of_id') // never re-reverse a reversal entry, even though it shares the same reference
+            ->whereNull('reversal_of_id')
             ->get()
             ->each(fn (JournalEntry $entry) => LedgerPoster::reverse($entry, "Voided: {$payment->code}", $userId));
     }
