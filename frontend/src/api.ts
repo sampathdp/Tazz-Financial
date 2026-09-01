@@ -924,7 +924,8 @@ export const cashAccountsApi = resource<CashAccount>('cash-accounts')
 export const cashbookEntriesApi = {
   list: (cashAccountId?: number) =>
     http.get('/cashbook-entries', { params: cashAccountId ? { cash_account_id: cashAccountId } : {} }).then((r) => camelize(r.data) as CashbookEntry[]),
-  create: (body: Partial<CashbookEntry>) => http.post('/cashbook-entries', snakeize(body)).then((r) => camelize(r.data) as CashbookEntry),
+  /** A manual cashbook adjustment. offsetAccountId (a chart_of_accounts id) is the other side of the entry — it now posts a balanced GL entry, not just a till move. */
+  create: (body: Partial<CashbookEntry> & { offsetAccountId?: number }) => http.post('/cashbook-entries', snakeize(body)).then((r) => camelize(r.data) as CashbookEntry),
   remove: (id: number) => http.delete(`/cashbook-entries/${id}`).then((r) => r.data),
 }
 

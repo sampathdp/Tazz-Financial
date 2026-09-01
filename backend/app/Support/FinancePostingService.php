@@ -174,13 +174,18 @@ class FinancePostingService
             return;
         }
         $inbound = bccomp($leg['delta'], '0.00', 2) >= 0;
+        // A manual adjustment carries the operator's chosen category in meta;
+        // otherwise it is derived from the transaction type.
+        $category = $txn->meta['cashbook_category']
+            ?? self::CASHBOOK_CATEGORY[$txn->txn_type]
+            ?? 'Other';
         \App\Models\CashbookEntry::create([
             'branch_id' => $account->branch_id,
             'cash_account_id' => $account->id,
             'journal_entry_id' => $journalEntryId,
             'entry_date' => $txn->executed_at?->toDateString() ?? now()->toDateString(),
             'direction' => $inbound ? 'In' : 'Out',
-            'category' => self::CASHBOOK_CATEGORY[$txn->txn_type] ?? 'Other',
+            'category' => $category,
             'amount' => ltrim($leg['delta'], '-'),
             'balance_after' => $leg['balance'],
             'source_type' => 'FinanceTransaction',

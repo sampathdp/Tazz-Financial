@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
-  branchesApi, cashAccountsApi, cashbookEntriesApi, cashTransfersApi, cashReconciliationsApi,
+  branchesApi, cashAccountsApi, cashbookEntriesApi, cashTransfersApi, cashReconciliationsApi, chartOfAccountsApi,
   type Branch, type AuthUser, type CashAccount, type CashbookEntry, type CashEntryType, type CashEntryCategory,
   type CashTransfer, type CashReconciliation, type CashReconciliationSummary, type Denominations, DENOMINATION_VALUES,
+  type ChartOfAccount,
 } from '../api'
 import { Can, canApprove } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -20,7 +21,7 @@ const money = (v: number | string | null | undefined) =>
 interface AccountForm extends Partial<CashAccount> {}
 const blankAccountForm = (): AccountForm => ({ status: 'Active', openingBalance: 0 })
 
-interface EntryForm extends Partial<CashbookEntry> {}
+interface EntryForm extends Partial<CashbookEntry> { offsetAccountId?: number }
 const blankEntryForm = (accountId?: number): EntryForm =>
   ({ cashAccountId: accountId, direction: 'In', category: 'Other', entryDate: new Date().toISOString().slice(0, 10) })
 
@@ -36,6 +37,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
 
   const [entryModal, setEntryModal] = useState(false)
   const [entryForm, setEntryForm] = useState<EntryForm>(blankEntryForm())
+  const [ledgerAccounts, setLedgerAccounts] = useState<ChartOfAccount[]>([])
 
   const [acctModal, setAcctModal] = useState(false)
   const [acctView, setAcctView] = useState<'list' | 'form'>('list')
@@ -45,7 +47,11 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
   const [acctBusy, setAcctBusy] = useState(false)
 
   const refreshAccounts = () => cashAccountsApi.list().then((d) => { setAccounts(d); setAccountId((cur) => cur || d[0]?.id || '') }).catch(() => setAccounts([]))
-  useEffect(() => { refreshAccounts(); branchesApi.list().then(setBranches).catch(() => setBranches([])) }, [])
+  useEffect(() => {
+    refreshAccounts()
+    branchesApi.list().then(setBranches).catch(() => setBranches([]))
+    chartOfAccountsApi.list().then(setLedgerAccounts).catch(() => setLedgerAccounts([]))
+  }, [])
 
   const refresh = () => {
     setLoading(true)
@@ -61,6 +67,7 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
   const saveEntry = async () => {
     if (!entryForm.cashAccountId) { setErr('Cash account is required.'); return }
     if (!entryForm.amount || Number(entryForm.amount) <= 0) { setErr('Amount must be greater than zero.'); return }
+    if (!entryForm.offsetAccountId) { setErr('Pick the GL account for the other side of this entry.'); return }
     setBusy(true); setErr('')
     try {
       await cashbookEntriesApi.create(entryForm)
@@ -72,10 +79,10 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
   }
 
   const removeEntry = async (e: CashbookEntry) => {
-    const ok = await notify.confirm({ title: 'Delete this entry?', msg: 'This reverses its effect on the account balance. This action cannot be undone.', danger: true, okText: 'Delete' })
+    const ok = await notify.confirm({ title: 'Reverse this entry?', msg: 'A reversing entry is posted that cancels its effect on the balance and the ledger. Both entries stay on the cashbook.', danger: true, okText: 'Reverse' })
     if (!ok) return
-    try { await cashbookEntriesApi.remove(e.id); refresh(); refreshAccounts(); notify.success('Entry deleted') }
-    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
+    try { await cashbookEntriesApi.remove(e.id); refresh(); refreshAccounts(); notify.success('Entry reversed') }
+    catch (ex: any) { notify.error('Reverse failed', getErrorText(ex)) }
   }
 
   const openAccounts = () => { setAcctView('list'); setAcctModal(true) }
@@ -157,6 +164,12 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
             {categories.map((c) => <option key={c}>{c}</option>)}
           </Select></Field>
           <Field label="Amount"><Input type="number" step="0.01" value={entryForm.amount ?? ''} onChange={(e) => setEntryForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
+          <Field label={entryForm.direction === 'Out' ? 'Debit (other side)' : 'Credit (other side)'} full>
+            <Select value={entryForm.offsetAccountId ?? ''} onChange={(e) => setEntryForm((s) => ({ ...s, offsetAccountId: Number(e.target.value) || undefined }))}>
+              <option value="">— pick a GL account —</option>
+              {ledgerAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+            </Select>
+          </Field>
           <Field label="Description" full><Input value={entryForm.description || ''} onChange={(e) => setEntryForm((s) => ({ ...s, description: e.target.value }))} /></Field>
         </div>
       </Modal>
