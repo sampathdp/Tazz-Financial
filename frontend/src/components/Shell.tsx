@@ -80,7 +80,6 @@ export const NAV: NavNode[] = [
 
   { section: 'Cashbook Management', icon: 'wallet', items: [
     { id: 'cash/book', label: 'Cashbook', icon: 'wallet' },
-    { id: 'cash/transfers', label: 'Cash Transfers', icon: 'swap' },
     { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust' },
   ] },
 

@@ -89,15 +89,6 @@ class ApprovalController extends Controller
         ])->whereHas('approvalType', fn ($q) => $q->where('code', 'payment_settlement'))
             ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
 
-        $cashTransferRequests = ApprovalRequest::with([
-            'requester:id,name',
-            'firstApprover:id,name',
-            'cashTransfer:id,amount,transfer_date,status,from_cash_account_id,to_cash_account_id',
-            'cashTransfer.fromAccount:id,name',
-            'cashTransfer.toAccount:id,name',
-        ])->whereHas('approvalType', fn ($q) => $q->where('code', 'cash_transfer'))
-            ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
-
         $expenseRequests = ApprovalRequest::with([
             'requester:id,name',
             'firstApprover:id,name',
@@ -116,7 +107,6 @@ class ApprovalController extends Controller
             'paymentVoidRequests' => $voidRequests,
             'allocationRequests' => $allocationRequests,
             'settlementRequests' => $settlementRequests,
-            'cashTransferRequests' => $cashTransferRequests,
             'expenseRequests' => $expenseRequests,
         ];
     }

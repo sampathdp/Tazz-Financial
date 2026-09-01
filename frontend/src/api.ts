@@ -864,27 +864,6 @@ export interface CashbookEntry {
   createdAt?: string;
 }
 
-export type CashTransferStatus = 'Pending' | 'Completed' | 'Rejected' | 'Voided'
-
-export interface CashTransfer {
-  id: number;
-  fromCashAccountId: number; fromAccount?: { id: number; name: string };
-  toCashAccountId: number; toAccount?: { id: number; name: string };
-  transferDate: string;
-  amount: number | string;
-  description?: string | null;
-  status?: CashTransferStatus;
-  requester?: { id: number; name: string } | null;
-  approver?: { id: number; name: string } | null;
-  approvedAt?: string | null;
-  voider?: { id: number; name: string } | null;
-  voidReason?: string | null;
-  voidedAt?: string | null;
-  /** The one approval request awaiting sign-off right now, if any — shared
-   *  approval_requests shape, for code 'cash_transfer'. */
-  pendingApprovalRequest?: LoanPaymentVoidRequest | null;
-}
-
 /** Denomination note value -> quantity counted, e.g. { "5000": 20, "2000": 0, ... }. */
 export type Denominations = Record<string, number>
 export const DENOMINATION_VALUES = [5000, 2000, 1000, 500, 200, 100, 50, 20, 10] as const
@@ -927,17 +906,6 @@ export const cashbookEntriesApi = {
   /** A manual cashbook adjustment. offsetAccountId (a chart_of_accounts id) is the other side of the entry — it now posts a balanced GL entry, not just a till move. */
   create: (body: Partial<CashbookEntry> & { offsetAccountId?: number }) => http.post('/cashbook-entries', snakeize(body)).then((r) => camelize(r.data) as CashbookEntry),
   remove: (id: number) => http.delete(`/cashbook-entries/${id}`).then((r) => r.data),
-}
-
-export const cashTransfersApi = {
-  list: (cashAccountId?: number) =>
-    http.get('/cash-transfers', { params: cashAccountId ? { cash_account_id: cashAccountId } : {} }).then((r) => camelize(r.data) as CashTransfer[]),
-  create: (body: Partial<CashTransfer>) => http.post('/cash-transfers', snakeize(body)).then((r) => camelize(r.data) as CashTransfer),
-  approve: (id: number) => http.put(`/cash-transfers/${id}/approve`).then((r) => camelize(r.data) as CashTransfer),
-  reject: (id: number, rejectReason?: string) => http.put(`/cash-transfers/${id}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data) as CashTransfer),
-  remove: (id: number) => http.delete(`/cash-transfers/${id}`).then((r) => r.data),
-  /** Undoes a mistakenly-approved transfer — moves both till balances back and reverses the GL entry (see backend CashTransferController::void). */
-  void: (id: number, voidReason?: string) => http.post(`/cash-transfers/${id}/void`, { void_reason: voidReason }).then((r) => camelize(r.data) as CashTransfer),
 }
 
 export const cashReconciliationsApi = {
@@ -1400,12 +1368,6 @@ export interface ApprovalsInbox {
     payment?: {
       id: number; code: string; amount: number | string; paymentType?: LoanPaymentType
       facility?: { id: number; code: string; customer?: { id: number; fullName: string } } | null
-    } | null
-  })[]
-  cashTransferRequests: (LoanPaymentVoidRequest & {
-    cashTransfer?: {
-      id: number; amount: number | string; transferDate: string; status: CashTransferStatus
-      fromAccount?: { id: number; name: string } | null; toAccount?: { id: number; name: string } | null
     } | null
   })[]
   expenseRequests: (LoanPaymentVoidRequest & {

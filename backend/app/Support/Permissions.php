@@ -43,7 +43,6 @@ class Permissions
         'Pawning Payments',
         'Pawning Auctions',
         'Cashbook',
-        'Cash Transfers',
         'Cash Reconciliation',
         // --- Finance module (central cash control) ---
         'Finance Dashboard',

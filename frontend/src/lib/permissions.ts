@@ -89,7 +89,6 @@ export const ROUTE_MODULE: Record<string, string> = {
   'ad/perm': 'User Permission',
   'ad/company': 'Company Profile',
   'cash/book': 'Cashbook',
-  'cash/transfers': 'Cash Transfers',
   'cash/recon': 'Cash Reconciliation',
   'bank/accounts': 'Bank Accounts',
   'bank/txns': 'Bank Transactions',

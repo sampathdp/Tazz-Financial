@@ -3,12 +3,12 @@ import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
-  branchesApi, cashAccountsApi, cashbookEntriesApi, cashTransfersApi, cashReconciliationsApi, chartOfAccountsApi,
+  branchesApi, cashAccountsApi, cashbookEntriesApi, cashReconciliationsApi, chartOfAccountsApi,
   type Branch, type AuthUser, type CashAccount, type CashbookEntry, type CashEntryType, type CashEntryCategory,
-  type CashTransfer, type CashReconciliation, type CashReconciliationSummary, type Denominations, DENOMINATION_VALUES,
+  type CashReconciliation, type CashReconciliationSummary, type Denominations, DENOMINATION_VALUES,
   type ChartOfAccount,
 } from '../api'
-import { Can, canApprove } from '../lib/permissions'
+import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -209,160 +209,6 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
             </div>
           </>
         )}
-      </Modal>
-    </div>
-  )
-}
-
-/* ============================ Cash Transfers ============================ */
-
-interface TransferForm extends Partial<CashTransfer> {}
-const blankTransferForm = (): TransferForm => ({ transferDate: new Date().toISOString().slice(0, 10) })
-
-export function CashTransfersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
-  const notify = useNotify()
-  const [accounts, setAccounts] = useState<CashAccount[]>([])
-  const [accountId, setAccountId] = useState<number | ''>('')
-  const [rows, setRows] = useState<CashTransfer[]>([])
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const [modal, setModal] = useState(false)
-  const [form, setForm] = useState<TransferForm>(blankTransferForm())
-
-  useEffect(() => { cashAccountsApi.list().then(setAccounts).catch(() => setAccounts([])) }, [])
-
-  const refresh = () => {
-    setLoading(true)
-    cashTransfersApi.list(accountId || undefined).then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
-  }
-  useEffect(() => { refresh() }, [accountId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const openCreate = () => { setForm(blankTransferForm()); setErr(''); setModal(true) }
-  const close = () => { setModal(false); setErr('') }
-
-  const save = async () => {
-    if (!form.fromCashAccountId || !form.toCashAccountId) { setErr('Both accounts are required.'); return }
-    if (form.fromCashAccountId === form.toCashAccountId) { setErr('From and To accounts must be different.'); return }
-    if (!form.amount || Number(form.amount) <= 0) { setErr('Amount must be greater than zero.'); return }
-    setBusy(true); setErr('')
-    try {
-      await cashTransfersApi.create(form)
-      close(); refresh()
-      notify.success('Transfer requested')
-    } catch (ex: any) {
-      setErr(getErrorText(ex, 'Save failed'))
-    } finally { setBusy(false) }
-  }
-
-  const approve = async (t: CashTransfer) => {
-    const ok = await notify.confirm({ title: 'Approve this transfer?', msg: `Move ${money(t.amount)} from ${t.fromAccount?.name} to ${t.toAccount?.name}.`, okText: 'Approve' })
-    if (!ok) return
-    try { await cashTransfersApi.approve(t.id); refresh(); notify.success('Transfer approved') }
-    catch (ex: any) { notify.error('Approve failed', getErrorText(ex)) }
-  }
-
-  const reject = async (t: CashTransfer) => {
-    const reason = await notify.prompt({ title: 'Reject this transfer?', msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
-    if (reason === null) return
-    try { await cashTransfersApi.reject(t.id, reason || undefined); refresh(); notify.success('Transfer rejected') }
-    catch (ex: any) { notify.error('Reject failed', getErrorText(ex)) }
-  }
-
-  // Approve/reject is maker-checker (approval_types code 'cash_transfer') — the
-  // requester and anyone who already approved can't sign off (backend also 422s).
-  const canApproveTransfer = (t: CashTransfer) =>
-    canApprove(me, 'cash_transfer')
-    && me?.id !== t.pendingApprovalRequest?.requester?.id
-    && me?.id !== t.pendingApprovalRequest?.firstApprover?.id
-
-  const remove = async (t: CashTransfer) => {
-    const ok = await notify.confirm({ title: 'Delete this transfer request?', danger: true, okText: 'Delete' })
-    if (!ok) return
-    try { await cashTransfersApi.remove(t.id); refresh(); notify.success('Transfer deleted') }
-    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
-  }
-
-  const voidTransfer = async (t: CashTransfer) => {
-    const reason = await notify.prompt({ title: 'Void this completed transfer?', msg: `Moves ${money(t.amount)} back from ${t.toAccount?.name} to ${t.fromAccount?.name} and reverses its GL entry.`, placeholder: 'Reason (optional)', danger: true, okText: 'Void' })
-    if (reason === null) return
-    try { await cashTransfersApi.void(t.id, reason || undefined); refresh(); notify.success('Transfer voided') }
-    catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
-  }
-
-  const statusTone = (s?: string) => s === 'Completed' ? 'green' : s === 'Rejected' || s === 'Voided' ? 'red' : 'amber'
-
-  return (
-    <div>
-      <PageHead crumbs="Cashbook Management" title="Cash Transfers" icon="swap" sub={`${rows.length} transfers`}
-        actions={<Can user={me} module="Cash Transfers" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate} disabled={accounts.length < 2}>Add Transfer</Btn></Can>} />
-
-      <Card style={{ marginBottom: 16 }}>
-        <Field label="Cash Account"><Select value={accountId} onChange={(e) => setAccountId(Number(e.target.value) || '')}>
-          <option value="">All accounts</option>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </Select></Field>
-      </Card>
-
-      <Card pad={0}>
-        {loading ? <LoadingBlock /> :
-        <Table cols={[{ label: 'Date' }, { label: 'From' }, { label: 'To' }, { label: 'Amount', align: 'right' }, { label: 'Description' }, { label: 'Status', align: 'center' }, { label: 'Requested By' }, { label: '', align: 'right', w: 110 }]}
-          rows={rows}
-          render={(t) => <>
-            <Td>{t.transferDate}</Td>
-            <Td>{t.fromAccount?.name || '—'}</Td>
-            <Td>{t.toAccount?.name || '—'}</Td>
-            <Td align="right" mono>{money(t.amount)}</Td>
-            <Td c="var(--tx-2)" style={{ fontSize: 12.5, whiteSpace: 'normal' }}>{t.description || '—'}</Td>
-            <Td align="center">
-              <Badge tone={statusTone(t.status)} dot>{t.status || 'Pending'}</Badge>
-              {t.status === 'Pending' && t.pendingApprovalRequest && (t.pendingApprovalRequest.requiredApprovals - (t.pendingApprovalRequest.firstApprover ? 1 : 0)) > 0 && (
-                <div className="t-2" style={{ fontSize: 10.5, marginTop: 2 }}>
-                  needs {t.pendingApprovalRequest.requiredApprovals - (t.pendingApprovalRequest.firstApprover ? 1 : 0)} approval{t.pendingApprovalRequest.requiredApprovals - (t.pendingApprovalRequest.firstApprover ? 1 : 0) === 1 ? '' : 's'}
-                </div>
-              )}
-            </Td>
-            <Td>{t.requester?.name || '—'}</Td>
-            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-              {t.status === 'Pending' && canApproveTransfer(t) && <>
-                <button className="mms-act" title="Approve" onClick={() => approve(t)}><Icon n="check" s={15} /></button>
-                <button className="mms-act" title="Reject" onClick={() => reject(t)}><Icon n="x" s={15} /></button>
-              </>}
-              {t.status === 'Pending' && <Can user={me} module="Cash Transfers" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(t)}><Icon n="trash" s={15} /></button></Can>}
-              {t.status === 'Completed' && <Can user={me} module="Cash Transfers" action="Delete"><button className="mms-act" title="Void" onClick={() => voidTransfer(t)}><Icon n="x" s={15} c="var(--bad)" /></button></Can>}
-            </div></Td>
-          </>} />}
-      </Card>
-
-      <Modal open={modal} onClose={close} width={520} title="Add Cash Transfer"
-        footer={<>
-          <Btn variant="plain" onClick={close}>Cancel</Btn>
-          <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : 'Request Transfer'}</Btn>
-        </>}>
-        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Field label="From Account">
-            <Select value={form.fromCashAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, fromCashAccountId: Number(e.target.value) || undefined }))}>
-              <option value="">—</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </Select>
-            <span style={{ fontSize: 12, color: 'var(--tx-2)' }}>
-              Available: {money(accounts.find((a) => a.id === form.fromCashAccountId)?.currentBalance)}
-            </span>
-          </Field>
-          <Field label="To Account">
-            <Select value={form.toCashAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, toCashAccountId: Number(e.target.value) || undefined }))}>
-              <option value="">—</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </Select>
-            <span style={{ fontSize: 12, color: 'var(--tx-2)' }}>
-              Available: {money(accounts.find((a) => a.id === form.toCashAccountId)?.currentBalance)}
-            </span>
-          </Field>
-          <Field label="Date"><DateInput value={form.transferDate} onChange={(iso) => setForm((s) => ({ ...s, transferDate: iso }))} /></Field>
-          <Field label="Amount"><Input type="number" step="0.01" value={form.amount ?? ''} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
-          <Field label="Description" full><Input value={form.description || ''} onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} /></Field>
-        </div>
       </Modal>
     </div>
   )

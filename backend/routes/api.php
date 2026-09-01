@@ -13,7 +13,6 @@ use App\Http\Controllers\Api\CashAccountController;
 use App\Http\Controllers\Api\CashBankReportController;
 use App\Http\Controllers\Api\CashbookEntryController;
 use App\Http\Controllers\Api\CashReconciliationController;
-use App\Http\Controllers\Api\CashTransferController;
 use App\Http\Controllers\Api\CompanyProfileController;
 use App\Http\Controllers\Api\ChartOfAccountController;
 use App\Http\Controllers\Api\CollectionReportController;
@@ -419,15 +418,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('cashbook-entries', [CashbookEntryController::class, 'store'])->middleware('perm:Cashbook,Create');
     Route::delete('cashbook-entries/{cashbookEntry}', [CashbookEntryController::class, 'destroy'])->middleware('perm:Cashbook,Delete');
 
-    // --- Cashbook Management: Cash Transfers (between cash accounts, requires approval) ---
-    Route::get('cash-transfers', [CashTransferController::class, 'index'])->middleware('perm:Cash Transfers,View');
-    Route::post('cash-transfers', [CashTransferController::class, 'store'])->middleware('perm:Cash Transfers,Create');
-    // approve/reject gated inline by ApprovalType::isAuthorized('cash_transfer', ...) — see CashTransferController —
-    // not the module permission grid, same maker-checker pattern as loan_cancel.
-    Route::put('cash-transfers/{cashTransfer}/approve', [CashTransferController::class, 'approve']);
-    Route::put('cash-transfers/{cashTransfer}/reject', [CashTransferController::class, 'reject']);
-    Route::delete('cash-transfers/{cashTransfer}', [CashTransferController::class, 'destroy'])->middleware('perm:Cash Transfers,Delete');
-    Route::post('cash-transfers/{cashTransfer}/void', [CashTransferController::class, 'void'])->middleware('perm:Cash Transfers,Delete');
+    // Cash Transfers retired in Phase 9 — superseded by Finance > Transfers
+    // (finance_requests + FinancePostingService). The cash_transfers table and
+    // its history stay; there is no create/approve path any more.
 
     // --- Cashbook Management: Cash Reconciliation (branch-level daily cash-in-hand entry) ---
     Route::get('cash-reconciliations', [CashReconciliationController::class, 'index'])->middleware('perm:Cash Reconciliation,View');
