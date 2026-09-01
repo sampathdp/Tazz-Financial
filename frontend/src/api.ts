@@ -1009,6 +1009,50 @@ export interface FinanceRequest {
   financeTransaction?: FinanceTransactionRef | null;
 }
 
+export interface FinanceTransactionRow {
+  id: number; code: string; txnType: FinanceTxnType; direction: 'In' | 'Out' | 'Move';
+  sourceAccountType?: 'cash' | 'bank' | null; sourceAccountId?: number | null;
+  destAccountType?: 'cash' | 'bank' | null; destAccountId?: number | null;
+  amount: number | string; branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  sourceModule?: string | null; sourceId?: number | null;
+  status: 'Draft' | 'Pending' | 'Completed' | 'InTransit' | 'Reversed';
+  reversalOfId?: number | null; description?: string | null;
+  executor?: { id: number; name: string } | null;
+  journalEntry?: { id: number; code: string; status: string } | null;
+  reversalOf?: { id: number; code: string } | null;
+  reversal?: { id: number; code: string; status: string } | null;
+  pendingReverseRequest?: FinanceApprovalRequest | null;
+  executedAt?: string | null; createdAt?: string | null;
+}
+
+export const financeTransactionsApi = {
+  list: (params?: { txnType?: string; status?: string; from?: string; to?: string; cashAccountId?: number; q?: string; page?: number }) =>
+    http.get('/finance-transactions', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as Paginated<FinanceTransactionRow>),
+  get: (id: number) => http.get(`/finance-transactions/${id}`).then((r) => camelize(r.data) as FinanceTransactionRow),
+  reverseRequest: (id: number, reason: string) =>
+    http.post(`/finance-transactions/${id}/reverse-request`, { reason }).then((r) => camelize(r.data)),
+  approveReverse: (requestId: number) =>
+    http.post(`/finance-transaction-reverse-requests/${requestId}/approve`).then((r) => camelize(r.data)),
+  rejectReverse: (requestId: number, rejectReason?: string) =>
+    http.post(`/finance-transaction-reverse-requests/${requestId}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data)),
+}
+
+export interface FinanceAuditEvent {
+  id: number; action: string;
+  subjectType?: string | null; subjectId?: number | null;
+  fromStatus?: string | null; toStatus?: string | null;
+  amount?: number | string | null;
+  actor?: { id: number; name: string } | null;
+  reason?: string | null; ip?: string | null;
+  meta?: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export const financeAuditApi = {
+  list: (params?: { action?: string; subjectType?: string; subjectId?: number; actorId?: number; from?: string; to?: string; page?: number }) =>
+    http.get('/finance-audit', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as Paginated<FinanceAuditEvent>),
+}
+
 export interface FinanceRequestExecuteInput {
   method: 'Cash' | 'Bank';
   cashAccountId?: number;

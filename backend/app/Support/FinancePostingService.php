@@ -6,6 +6,7 @@ use App\Exceptions\FinancePostingException;
 use App\Exceptions\InsufficientFundsException;
 use App\Models\BankAccount;
 use App\Models\CashAccount;
+use App\Models\FinanceAuditEvent;
 use App\Models\FinanceTransaction;
 use App\Services\NumberGenerator;
 use Illuminate\Support\Collection;
@@ -145,6 +146,14 @@ class FinancePostingService
                 }
             }
 
+            FinanceAuditEvent::record('transaction.executed', $txn, [
+                'actor_id' => $spec['executed_by'],
+                'amount' => $txn->amount,
+                'branch_id' => $txn->branch_id,
+                'to_status' => $txn->status,
+                'meta' => ['txn_type' => $txn->txn_type, 'code' => $txn->code, 'source' => $txn->source_module],
+            ]);
+
             return $txn;
         });
     }
@@ -244,6 +253,16 @@ class FinancePostingService
             }
 
             $txn->update(['status' => 'Reversed']);
+
+            FinanceAuditEvent::record('transaction.reversed', $txn, [
+                'actor_id' => $userId,
+                'amount' => $txn->amount,
+                'branch_id' => $txn->branch_id,
+                'from_status' => 'Completed',
+                'to_status' => 'Reversed',
+                'reason' => $reason,
+                'meta' => ['reversal_code' => $reversal->code, 'original_code' => $txn->code],
+            ]);
 
             return $reversal;
         });

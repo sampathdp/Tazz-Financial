@@ -9,6 +9,7 @@ use App\Models\ApprovalType;
 use App\Models\BankAccount;
 use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
+use App\Models\FinanceAuditEvent;
 use App\Models\FinanceRequest;
 use App\Services\NumberGenerator;
 use Illuminate\Support\Facades\DB;
@@ -115,6 +116,11 @@ class FinanceRequestService
                 'status' => 'PendingApproval',
                 'approval_request_id' => $approval->id,
             ]);
+            FinanceAuditEvent::record('request.submitted', $request, [
+                'actor_id' => $userId, 'amount' => $request->amount, 'branch_id' => $request->branch_id,
+                'to_status' => 'PendingApproval',
+                'meta' => ['code' => $request->code, 'type' => $request->request_type, 'required_approvals' => $route['required_approvals']],
+            ]);
 
             return $request->fresh();
         });
@@ -151,6 +157,11 @@ class FinanceRequestService
                     'approved_at' => now(),
                 ]);
             }
+            FinanceAuditEvent::record('request.approved', $request, [
+                'actor_id' => $userId, 'amount' => $request->amount, 'branch_id' => $request->branch_id,
+                'to_status' => $complete ? 'ReadyForPayment' : 'PendingApproval',
+                'meta' => ['code' => $request->code, 'type' => $request->request_type, 'complete' => $complete],
+            ]);
 
             return $request->fresh();
         });
@@ -179,6 +190,10 @@ class FinanceRequestService
         });
 
         $request = $request->fresh();
+        FinanceAuditEvent::record('request.rejected', $request, [
+            'actor_id' => $userId, 'amount' => $request->amount, 'branch_id' => $request->branch_id,
+            'to_status' => 'Rejected', 'reason' => $reason, 'meta' => ['code' => $request->code],
+        ]);
         FinanceRequestSettled::dispatch($request, 'rejected');
 
         return $request;
@@ -198,6 +213,10 @@ class FinanceRequestService
         });
 
         $request = $request->fresh();
+        FinanceAuditEvent::record('request.cancelled', $request, [
+            'actor_id' => $userId, 'amount' => $request->amount, 'branch_id' => $request->branch_id,
+            'to_status' => 'Cancelled', 'meta' => ['code' => $request->code],
+        ]);
         FinanceRequestSettled::dispatch($request, 'cancelled');
 
         return $request;
@@ -297,6 +316,7 @@ class FinanceRequestService
         });
 
         $request = $request->fresh();
+        FinanceAuditEvent::record('request.executed', $request, ['actor_id' => $request->executed_by, 'amount' => $request->amount, 'branch_id' => $request->branch_id, 'to_status' => $request->status, 'meta' => ['code' => $request->code, 'type' => $request->request_type]]);
         FinanceRequestSettled::dispatch($request, 'paid');
 
         return $request;
@@ -360,6 +380,7 @@ class FinanceRequestService
         });
 
         $request = $request->fresh();
+        FinanceAuditEvent::record('request.executed', $request, ['actor_id' => $request->executed_by, 'amount' => $request->amount, 'branch_id' => $request->branch_id, 'to_status' => $request->status, 'meta' => ['code' => $request->code, 'type' => $request->request_type]]);
         FinanceRequestSettled::dispatch($request, 'paid');
 
         return $request;
@@ -464,6 +485,7 @@ class FinanceRequestService
         });
 
         $request = $request->fresh();
+        FinanceAuditEvent::record('request.executed', $request, ['actor_id' => $request->executed_by, 'amount' => $request->amount, 'branch_id' => $request->branch_id, 'to_status' => $request->status, 'meta' => ['code' => $request->code, 'type' => $request->request_type]]);
         FinanceRequestSettled::dispatch($request, 'paid');
 
         return $request;

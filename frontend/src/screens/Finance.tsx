@@ -9,10 +9,11 @@ import {
 } from '../components/ui'
 import {
   financeRequestsApi, financeDashboardApi, cashAccountsApi, bankAccountsApi, chartOfAccountsApi, branchesApi,
-  cashFloatsApi, cashSessionsApi, financeSettingsApi, api,
+  cashFloatsApi, cashSessionsApi, financeSettingsApi, financeTransactionsApi, financeAuditApi, api,
   type FinanceRequest, type FinanceRequestType, type FinanceRequestStatus, type FinanceDashboard,
   type CashAccount, type BankAccount, type ChartOfAccount, type Branch, type AuthUser,
   type CashFloat, type CashSession, type FinanceSettings,
+  type FinanceTransactionRow, type FinanceAuditEvent,
 } from '../api'
 import { Can, canApprove, userCan } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -637,6 +638,131 @@ export function CashFloatsScreen({ user: me }: { go: Go; user?: AuthUser | null 
           </p>
         )}
       </Modal>
+    </div>
+  )
+}
+
+/* =========================== Cash Transactions =========================== */
+
+const TXN_TYPES = ['CASH_IN', 'CASH_OUT', 'TRANSFER', 'DISBURSEMENT', 'EXPENSE_PAYMENT', 'FLOAT_ISSUE', 'FLOAT_RETURN', 'COLLECTION', 'ADJUSTMENT', 'REVERSAL']
+
+export function CashTransactionsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [page, setPage] = useState(1)
+  const [rows, setRows] = useState<FinanceTransactionRow[]>([])
+  const [pageInfo, setPageInfo] = useState({ lastPage: 1, total: 0 })
+  const [loading, setLoading] = useState(true)
+  const [type, setType] = useState('')
+  const [status, setStatus] = useState('')
+
+  const refresh = () => {
+    setLoading(true)
+    financeTransactionsApi.list({ txnType: type || undefined, status: status || undefined, page })
+      .then((p) => { setRows(p.data); setPageInfo({ lastPage: p.lastPage, total: p.total }) })
+      .catch(() => setRows([])).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [type, status, page]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPage(1) }, [type, status])
+
+  const reverse = async (t: FinanceTransactionRow) => {
+    const reason = await notify.prompt({ title: `Reverse ${t.code}?`, msg: 'Posts a mirrored entry — the original stays visible. May need approval.', placeholder: 'Reason', required: true, danger: true, okText: 'Reverse' })
+    if (!reason) return
+    try {
+      const res: any = await financeTransactionsApi.reverseRequest(t.id, reason)
+      refresh(); notify.success(res?.message || 'Done')
+    } catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
+  }
+  const approveReverse = async (t: FinanceTransactionRow) => {
+    if (!t.pendingReverseRequest) return
+    try { await financeTransactionsApi.approveReverse(t.pendingReverseRequest.id); refresh(); notify.success('Reversal approved') }
+    catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
+  }
+  const canApproveReverse = (t: FinanceTransactionRow) =>
+    t.pendingReverseRequest && canApprove(me, 'finance_reversal') && me?.id !== t.pendingReverseRequest.requester?.id
+
+  return (
+    <div>
+      <PageHead crumbs="Finance" title="Cash Transactions" icon="receipt" sub={`${pageInfo.total} movement${pageInfo.total === 1 ? '' : 's'}`} />
+      <Card style={{ marginBottom: 16 }}>
+        <div className="row gap-3 wrap">
+          <Field label="Type"><Select value={type} onChange={(e) => setType(e.target.value)} style={{ minWidth: 170 }}>
+            <option value="">All types</option>{TXN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </Select></Field>
+          <Field label="Status"><Select value={status} onChange={(e) => setStatus(e.target.value)} style={{ minWidth: 150 }}>
+            <option value="">All</option>{['Completed', 'InTransit', 'Reversed'].map((s) => <option key={s} value={s}>{s}</option>)}
+          </Select></Field>
+        </div>
+      </Card>
+      <Card pad={0}>
+        {loading ? <LoadingBlock /> :
+        <Table cols={[{ label: 'Code' }, { label: 'Type' }, { label: 'Dir' }, { label: 'Amount', align: 'right' }, { label: 'Branch' }, { label: 'When' }, { label: 'GL' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 190 }]}
+          empty="No transactions" rows={rows}
+          render={(t) => <>
+            <Td mono>{t.code}</Td>
+            <Td>{t.txnType}</Td>
+            <Td>{t.direction}</Td>
+            <Td align="right" mono>{money(t.amount)}</Td>
+            <Td>{t.branch?.name || '—'}</Td>
+            <Td c="var(--tx-2)">{dateOnly(t.executedAt)}</Td>
+            <Td mono c="var(--tx-2)">{t.journalEntry?.code || '—'}</Td>
+            <Td align="center"><Badge tone={t.status === 'Reversed' ? 'red' : t.status === 'InTransit' ? 'amber' : 'green'} dot>{t.status}</Badge></Td>
+            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+              {canApproveReverse(t) && <Btn variant="primary" size="sm" icon="check" onClick={() => approveReverse(t)}>Approve reversal</Btn>}
+              {t.status === 'Completed' && !t.reversalOfId && !t.pendingReverseRequest && (
+                <Can user={me} module="Cash Transactions" action="Delete"><Btn variant="ghost" size="sm" onClick={() => reverse(t)}>Reverse</Btn></Can>
+              )}
+              {t.pendingReverseRequest && !canApproveReverse(t) && <span className="t-2" style={{ fontSize: 11 }}>reversal pending</span>}
+            </div></Td>
+          </>} />}
+        <Pager page={page} lastPage={pageInfo.lastPage} total={pageInfo.total} onChange={setPage} />
+      </Card>
+    </div>
+  )
+}
+
+/* =========================== Audit Log =========================== */
+
+export function AuditLogScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
+  const [page, setPage] = useState(1)
+  const [rows, setRows] = useState<FinanceAuditEvent[]>([])
+  const [pageInfo, setPageInfo] = useState({ lastPage: 1, total: 0 })
+  const [loading, setLoading] = useState(true)
+  const [action, setAction] = useState('')
+
+  const refresh = () => {
+    setLoading(true)
+    financeAuditApi.list({ action: action || undefined, page })
+      .then((p) => { setRows(p.data); setPageInfo({ lastPage: p.lastPage, total: p.total }) })
+      .catch(() => setRows([])).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [action, page]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPage(1) }, [action])
+
+  return (
+    <div>
+      <PageHead crumbs="Finance" title="Audit Log" icon="list" sub={`${pageInfo.total} event${pageInfo.total === 1 ? '' : 's'}`} />
+      <Card style={{ marginBottom: 16 }}>
+        <Field label="Action"><Select value={action} onChange={(e) => setAction(e.target.value)} style={{ maxWidth: 240 }}>
+          <option value="">All actions</option>
+          {['request.', 'transaction.'].map((a) => <option key={a} value={a}>{a}*</option>)}
+          {['request.submitted', 'request.approved', 'request.rejected', 'request.executed', 'request.cancelled', 'transaction.executed', 'transaction.reversed', 'transaction.reverse_requested'].map((a) => <option key={a} value={a}>{a}</option>)}
+        </Select></Field>
+      </Card>
+      <Card pad={0}>
+        {loading ? <LoadingBlock /> :
+        <Table cols={[{ label: 'When' }, { label: 'Actor' }, { label: 'Action' }, { label: 'Subject' }, { label: 'Amount', align: 'right' }, { label: 'Status' }, { label: 'Reason' }]}
+          empty="No audit events" rows={rows}
+          render={(e) => <>
+            <Td c="var(--tx-2)" mono>{typeof e.createdAt === 'string' ? e.createdAt.slice(0, 16).replace('T', ' ') : '—'}</Td>
+            <Td>{e.actor?.name || '—'}</Td>
+            <Td mono>{e.action}</Td>
+            <Td>{e.subjectType ? `${e.subjectType} #${e.subjectId}` : '—'}</Td>
+            <Td align="right" mono>{e.amount == null ? '—' : money(e.amount)}</Td>
+            <Td>{[e.fromStatus, e.toStatus].filter(Boolean).join(' → ') || '—'}</Td>
+            <Td c="var(--tx-2)" style={{ whiteSpace: 'normal', maxWidth: 260 }}>{e.reason || '—'}</Td>
+          </>} />}
+        <Pager page={page} lastPage={pageInfo.lastPage} total={pageInfo.total} onChange={setPage} />
+      </Card>
     </div>
   )
 }

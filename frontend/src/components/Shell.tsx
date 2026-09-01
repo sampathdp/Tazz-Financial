@@ -26,9 +26,11 @@ export const NAV: NavNode[] = [
   { section: 'Finance', icon: 'wallet', items: [
     { id: 'finance/dashboard', label: 'Finance Dashboard', icon: 'wallet' },
     { id: 'finance/requests', label: 'Finance Requests', icon: 'receipt' },
+    { id: 'finance/transactions', label: 'Cash Transactions', icon: 'receipt' },
     { id: 'finance/transfers', label: 'Transfers', icon: 'swap' },
     { id: 'finance/floats', label: 'Cash Floats', icon: 'coins' },
     { id: 'finance/sessions', label: 'Daily Cash Sessions', icon: 'clock' },
+    { id: 'finance/audit', label: 'Audit Log', icon: 'list' },
     { id: 'finance/settings', label: 'Finance Settings', icon: 'shield' },
     { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
   ] },

@@ -53,6 +53,14 @@ class FinanceTransaction extends Model
         return $this->hasOne(self::class, 'reversal_of_id');
     }
 
+    /** The finance_reversal approval currently awaiting sign-off for this transaction, if any (shared approval_requests table, subject_id). */
+    public function pendingReverseRequest()
+    {
+        return $this->hasOne(ApprovalRequest::class, 'subject_id')
+            ->whereHas('approvalType', fn ($q) => $q->where('code', 'finance_reversal'))
+            ->where('status', 'PendingApproval');
+    }
+
     public function executor()
     {
         return $this->belongsTo(User::class, 'executed_by');

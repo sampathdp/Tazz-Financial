@@ -53,6 +53,7 @@ class Permissions
         'Finance Transfers',
         'Cash Floats',
         'Cash Sessions',
+        'Finance Audit',
         'Finance Reports',
         'Finance Settings',
         'Bank Accounts',

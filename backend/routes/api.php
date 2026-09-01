@@ -32,10 +32,12 @@ use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\CashFloatController;
 use App\Http\Controllers\Api\CashSessionController;
+use App\Http\Controllers\Api\FinanceAuditController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\FinanceSettingController;
 use App\Http\Controllers\Api\FinanceDashboardController;
 use App\Http\Controllers\Api\FinanceRequestController;
+use App\Http\Controllers\Api\FinanceTransactionController;
 use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\ManualJournalEntryController;
 use App\Http\Controllers\Api\BorrowingController;
@@ -435,6 +437,17 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Finance: Dashboard (cash control at a glance) ---
     Route::get('finance-dashboard', [FinanceDashboardController::class, 'index'])->middleware('perm:Finance Dashboard,View');
+
+    // --- Finance: Transaction ledger + reversals ---
+    Route::get('finance-transactions', [FinanceTransactionController::class, 'index'])->middleware('perm:Cash Transactions,View');
+    Route::get('finance-transactions/{financeTransaction}', [FinanceTransactionController::class, 'show'])->middleware('perm:Cash Transactions,View');
+    // Reverse — direct if the reversal_requires_approval setting is off, else raises a finance_reversal approval.
+    Route::post('finance-transactions/{financeTransaction}/reverse-request', [FinanceTransactionController::class, 'reverseRequest'])->middleware('perm:Cash Transactions,Delete');
+    Route::post('finance-transaction-reverse-requests/{approvalRequest}/approve', [FinanceTransactionController::class, 'approveReverse']);
+    Route::post('finance-transaction-reverse-requests/{approvalRequest}/reject', [FinanceTransactionController::class, 'rejectReverse']);
+
+    // --- Finance: Audit Log ---
+    Route::get('finance-audit', [FinanceAuditController::class, 'index'])->middleware('perm:Finance Audit,View');
 
     // --- Finance: Daily Cash Sessions (open / close / verify per cash account) ---
     Route::get('cash-sessions', [CashSessionController::class, 'index'])->middleware('perm:Cash Sessions,View');
