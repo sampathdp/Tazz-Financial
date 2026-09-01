@@ -7,15 +7,24 @@ use App\Models\BankAccount;
 use App\Models\BankTransaction;
 use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
+use App\Models\FinanceTransaction;
+use App\Support\FinancePostingService;
 use App\Support\LedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 
 class BankTransactionController extends Controller
 {
     private const TYPES = ['Deposit', 'Withdrawal', 'TransferIn', 'TransferOut'];
+
+    /** transaction_type => the finance_transactions txn_type it books as. */
+    private const TXN_TYPE = [
+        'Deposit' => 'BANK_DEPOSIT',
+        'Withdrawal' => 'BANK_WITHDRAWAL',
+        'TransferIn' => 'TRANSFER',
+        'TransferOut' => 'TRANSFER',
+    ];
 
     public function index(Request $request)
     {
@@ -28,6 +37,16 @@ class BankTransactionController extends Controller
         return $query->get();
     }
 
+    /**
+     * A manual bank movement. Since Phase 9 this is booked through
+     * FinancePostingService (the one money writer): it moves the bank
+     * account's current_balance — and the contra account's, when the other
+     * side is a real till or bank account — posts the balanced GL entry and
+     * records the immutable finance_transactions row. The bank_transactions
+     * row is then written alongside it, carrying the bank-only fields the
+     * ledger doesn't model (reference_no, contra kind, Cleared/Pending), and
+     * linked back by finance_transaction_id.
+     */
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -44,69 +63,79 @@ class BankTransactionController extends Controller
             'contra_chart_of_account_id' => 'required_if:contra_kind,Ledger|nullable|exists:chart_of_accounts,id',
         ]);
 
-        $txn = DB::transaction(function () use ($data, $request) {
-            $account = BankAccount::lockForUpdate()->findOrFail($data['bank_account_id']);
-            $isCredit = in_array($data['transaction_type'], BankTransaction::CREDIT_TYPES, true);
-            $newBalance = bcadd((string) $account->current_balance, $isCredit ? $data['amount'] : -$data['amount'], 2);
-            $this->assertWithinOverdraft($account, $newBalance);
-            $account->update(['current_balance' => $newBalance]);
+        $account = BankAccount::findOrFail($data['bank_account_id']);
+        $isCredit = in_array($data['transaction_type'], BankTransaction::CREDIT_TYPES, true);
+        $amount = number_format((float) $data['amount'], 2, '.', '');
+        $bankCoa = ChartOfAccount::forBankAccount($account);
 
-            [$contraCoaId, $contraLabel] = $this->applyContra($data, $isCredit);
+        // The primary bank leg moves +amount on a credit-type, -amount otherwise.
+        $movements = [['account_type' => 'bank', 'account_id' => (int) $account->id, 'delta' => ($isCredit ? '' : '-') . $amount]];
 
-            $bankCoa = ChartOfAccount::forBankAccount($account);
-            $entry = LedgerPoster::post([
-                ['account_id' => $isCredit ? $bankCoa->id : $contraCoaId, 'debit' => $data['amount'], 'credit' => 0],
-                ['account_id' => $isCredit ? $contraCoaId : $bankCoa->id, 'debit' => 0, 'credit' => $data['amount']],
-            ], $data['txn_date'], [
-                'source_type' => 'BankTransaction',
-                'description' => "{$data['transaction_type']} - {$account->name}" . ($contraLabel ? " / {$contraLabel}" : '') . (($data['description'] ?? null) ? " - {$data['description']}" : ''),
+        // The contra side: a real till/bank moves the opposite way and also
+        // gets a movement; a Ledger contra is just the GL line.
+        [$contraCoaId, $contraLabel] = $this->contraAccount($data, $movements, $isCredit, $amount);
+
+        $glLines = [
+            ['account_id' => $isCredit ? $bankCoa->id : $contraCoaId, 'debit' => $amount, 'credit' => 0],
+            ['account_id' => $isCredit ? $contraCoaId : $bankCoa->id, 'debit' => 0, 'credit' => $amount],
+        ];
+
+        $description = "{$data['transaction_type']} - {$account->name}"
+            . ($contraLabel ? " / {$contraLabel}" : '')
+            . (($data['description'] ?? null) ? " - {$data['description']}" : '');
+
+        $txn = DB::transaction(function () use ($data, $account, $amount, $movements, $glLines, $description, $request, $isCredit) {
+            $ftx = FinancePostingService::execute([
+                'txn_type' => self::TXN_TYPE[$data['transaction_type']],
+                'amount' => $amount,
+                'entry_date' => $data['txn_date'],
                 'branch_id' => $account->branch_id,
-                'posted_by' => $request->user()->id,
+                'movements' => $movements,
+                'gl_lines' => $glLines,
+                'description' => $description,
+                'gl_description' => $description,
+                'source_module' => 'BankTransaction',
+                'executed_by' => $request->user()->id,
             ]);
 
-            $txn = BankTransaction::create($data + [
-                'balance_after' => $newBalance,
+            $bt = BankTransaction::create($data + [
+                'journal_entry_id' => $ftx->journal_entry_id,
+                'finance_transaction_id' => $ftx->id,
+                'balance_after' => $account->fresh()->current_balance,
                 'status' => $data['status'] ?? 'Cleared',
                 'created_by' => $request->user()->id,
-                'journal_entry_id' => $entry->id,
             ]);
-            $entry->update(['source_id' => $txn->id]);
+            // Keep the ledger entry pointed at the bank_transactions row, as it always was.
+            $ftx->journalEntry?->update(['source_type' => 'BankTransaction', 'source_id' => $bt->id]);
 
-            return $txn;
+            return $bt;
         });
 
         return response()->json($txn->load(['bankAccount:id,name,bank_id,account_number', 'bankAccount.bank:id,name', 'creator:id,name']), 201);
     }
 
     /**
-     * Moves the contra side's own current_balance if it's a real till/bank
-     * account (Cash/Bank kind) — a Deposit's money has to come FROM
-     * somewhere, and if that "somewhere" is another balance this system
-     * tracks, that balance must move too or the two accounts silently drift
-     * apart. A Ledger-kind contra (bank charges, interest, an owner
-     * injection, ...) has no second balance to touch — just the GL line
-     * LedgerPoster::post writes for it.
+     * Resolves the contra account's chart_of_accounts id + a display label,
+     * and — for a Cash or Bank contra — appends its balance movement (the
+     * opposite direction to the primary bank leg) to $movements.
      *
-     * @return array{0:int, 1:?string} the contra account's chart_of_accounts id, and a display label for the journal description
+     * @return array{0:int, 1:?string}
      */
-    private function applyContra(array $data, bool $isCredit): array
+    private function contraAccount(array $data, array &$movements, bool $isCredit, string $amount): array
     {
-        // isCredit means the bank account gained money, so the contra side lost
-        // it (if it's a real balance) — and vice versa for a debit-type txn.
-        $sign = $isCredit ? -1 : 1;
+        // The bank gained money on a credit-type, so the contra lost it (and vice versa).
+        $contraDelta = ($isCredit ? '-' : '') . $amount;
 
         if ($data['contra_kind'] === 'Cash') {
-            $till = CashAccount::lockForUpdate()->findOrFail($data['contra_cash_account_id']);
-            $till->update(['current_balance' => bcadd((string) $till->current_balance, (string) ($sign * $data['amount']), 2)]);
+            $till = CashAccount::findOrFail($data['contra_cash_account_id']);
+            $movements[] = ['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $contraDelta];
 
             return [ChartOfAccount::forCashTill($till)->id, "Till: {$till->name}"];
         }
 
         if ($data['contra_kind'] === 'Bank') {
-            $other = BankAccount::lockForUpdate()->findOrFail($data['contra_bank_account_id']);
-            $otherBalance = bcadd((string) $other->current_balance, (string) ($sign * $data['amount']), 2);
-            $this->assertWithinOverdraft($other, $otherBalance);
-            $other->update(['current_balance' => $otherBalance]);
+            $other = BankAccount::findOrFail($data['contra_bank_account_id']);
+            $movements[] = ['account_type' => 'bank', 'account_id' => (int) $other->id, 'delta' => $contraDelta];
 
             return [ChartOfAccount::forBankAccount($other)->id, "Bank: {$other->name}"];
         }
@@ -117,33 +146,32 @@ class BankTransactionController extends Controller
     }
 
     /**
-     * A bank account may only go negative if it has a sanctioned overdraft
-     * (overdraft_limit is set), and never past that limit. An account with no
-     * overdraft_limit cannot go below zero at all.
+     * Undoes a manual bank movement. A Phase-9 row is reversed through
+     * FinancePostingService (restores every balance it moved, posts the
+     * mirrored GL reversal, leaves a REVERSAL finance_transactions row) then
+     * the bank_transactions row is removed. A legacy pre-Phase-9 row keeps
+     * the old hand-rolled walk-back.
      */
-    private function assertWithinOverdraft(BankAccount $account, string $newBalance): void
-    {
-        $floor = $account->overdraft_limit !== null ? bcmul((string) $account->overdraft_limit, '-1', 2) : '0.00';
-        if (bccomp($newBalance, $floor, 2) < 0) {
-            $limit = $account->overdraft_limit !== null
-                ? "its overdraft limit of {$account->overdraft_limit}"
-                : 'zero (no overdraft facility is set on this account)';
-            throw ValidationException::withMessages([
-                'amount' => "This would take {$account->name} to {$newBalance}, beyond {$limit}.",
-            ]);
-        }
-    }
-
     public function destroy(BankTransaction $bankTransaction)
     {
+        if ($bankTransaction->finance_transaction_id) {
+            DB::transaction(function () use ($bankTransaction) {
+                $ftx = FinanceTransaction::find($bankTransaction->finance_transaction_id);
+                if ($ftx && $ftx->status !== 'Reversed' && !$ftx->reversal_of_id) {
+                    FinancePostingService::reverse($ftx, "Deleted: bank transaction #{$bankTransaction->id}", request()->user()?->id);
+                }
+                $bankTransaction->delete();
+            });
+
+            return response()->noContent();
+        }
+
         DB::transaction(function () use ($bankTransaction) {
             $account = BankAccount::lockForUpdate()->findOrFail($bankTransaction->bank_account_id);
             $isCredit = in_array($bankTransaction->transaction_type, BankTransaction::CREDIT_TYPES, true);
-            // Reverse the original balance effect before removing the entry.
             $restored = bcadd((string) $account->current_balance, $isCredit ? -$bankTransaction->amount : $bankTransaction->amount, 2);
             $account->update(['current_balance' => $restored]);
 
-            // Reverse the contra side's own balance too, symmetric to applyContra() above.
             $sign = $isCredit ? 1 : -1;
             if ($bankTransaction->contra_kind === 'Cash' && $bankTransaction->contra_cash_account_id) {
                 $till = CashAccount::lockForUpdate()->find($bankTransaction->contra_cash_account_id);

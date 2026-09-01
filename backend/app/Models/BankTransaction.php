@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class BankTransaction extends Model
 {
     protected $fillable = [
-        'bank_account_id', 'journal_entry_id', 'txn_date', 'transaction_type', 'reference_no', 'description',
+        'bank_account_id', 'journal_entry_id', 'finance_transaction_id', 'txn_date', 'transaction_type', 'reference_no', 'description',
         'amount', 'balance_after', 'status', 'created_by',
         'contra_kind', 'contra_cash_account_id', 'contra_bank_account_id', 'contra_chart_of_account_id',
     ];
@@ -29,6 +29,11 @@ class BankTransaction extends Model
     public function journalEntry()
     {
         return $this->belongsTo(JournalEntry::class);
+    }
+
+    public function financeTransaction()
+    {
+        return $this->belongsTo(FinanceTransaction::class);
     }
 
     public function creator()

@@ -1,0 +1,108 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\BankAccount;
+use App\Models\CashAccount;
+use App\Models\ChartOfAccount;
+use App\Models\FinanceTransaction;
+use App\Models\User;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+/**
+ * Phase 9d prep — manual bank movements are booked through
+ * FinancePostingService: balance(s) move, a finance_transactions row is
+ * recorded, and the bank_transactions row links back by
+ * finance_transaction_id. DatabaseTransactions.
+ */
+class BankTransactionFinancePostingTest extends TestCase
+{
+    use DatabaseTransactions;
+
+    private BankAccount $bank;
+
+    private CashAccount $till;
+
+    private User $admin;
+
+    private int $branchId;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->admin = User::whereHas('role', fn ($q) => $q->where('slug', 'admin'))->first()
+            ?? $this->markTestSkipped('No admin user seeded.');
+        ChartOfAccount::where('code', '1020')->exists() ?: $this->markTestSkipped('Chart of accounts not seeded.');
+
+        $this->branchId = DB::table('branches')->insertGetId(['name' => 'BT', 'code' => 'BT' . Str::random(3), 'branch_type' => 'Branch', 'status' => 'Active', 'created_at' => now(), 'updated_at' => now()]);
+        $this->bank = BankAccount::create(['branch_id' => $this->branchId, 'bank_id' => DB::table('banks')->value('id'), 'name' => 'BT Current', 'account_number' => Str::random(10), 'account_type' => 'Current', 'currency' => 'LKR', 'opening_balance' => '100000.00', 'current_balance' => '100000.00', 'status' => 'Active']);
+        $this->till = CashAccount::create(['code' => 'BT-CASH-' . Str::random(3), 'branch_id' => $this->branchId, 'account_type' => 'BranchMain', 'name' => 'BT Till', 'opening_balance' => 0, 'current_balance' => '30000.00', 'status' => 'Active']);
+    }
+
+    public function test_cash_deposit_to_bank_moves_both_balances_and_links_the_ftx(): void
+    {
+        $this->actingAs($this->admin, 'sanctum');
+
+        $res = $this->postJson('/api/bank-transactions', [
+            'bank_account_id' => $this->bank->id,
+            'txn_date' => now()->toDateString(),
+            'transaction_type' => 'Deposit',
+            'amount' => '5000.00',
+            'contra_kind' => 'Cash',
+            'contra_cash_account_id' => $this->till->id,
+        ])->assertStatus(201);
+
+        $this->assertSame('105000.00', (string) $this->bank->fresh()->current_balance);
+        $this->assertSame('25000.00', (string) $this->till->fresh()->current_balance);
+
+        $ftxId = $res->json('finance_transaction_id');
+        $this->assertNotNull($ftxId);
+        $ftx = FinanceTransaction::find($ftxId);
+        $this->assertSame('BANK_DEPOSIT', $ftx->txn_type);
+        $this->assertDatabaseHas('cashbook_entries', ['source_type' => 'FinanceTransaction', 'source_id' => $ftx->id, 'direction' => 'Out']);
+
+        // Delete → reversal restores both balances.
+        $this->deleteJson('/api/bank-transactions/' . $res->json('id'))->assertNoContent();
+        $this->assertSame('100000.00', (string) $this->bank->fresh()->current_balance);
+        $this->assertSame('30000.00', (string) $this->till->fresh()->current_balance);
+        $this->assertSame('Reversed', $ftx->fresh()->status);
+    }
+
+    public function test_ledger_contra_withdrawal_needs_only_the_bank_leg(): void
+    {
+        $this->actingAs($this->admin, 'sanctum');
+        $bankCharges = ChartOfAccount::where('account_type', 'Expense')->value('id');
+
+        $this->postJson('/api/bank-transactions', [
+            'bank_account_id' => $this->bank->id,
+            'txn_date' => now()->toDateString(),
+            'transaction_type' => 'Withdrawal',
+            'amount' => '250.00',
+            'contra_kind' => 'Ledger',
+            'contra_chart_of_account_id' => $bankCharges,
+        ])->assertStatus(201);
+
+        $this->assertSame('99750.00', (string) $this->bank->fresh()->current_balance);
+        $ftx = FinanceTransaction::where('source_module', 'BankTransaction')->latest('id')->first();
+        $this->assertSame('BANK_WITHDRAWAL', $ftx->txn_type);
+        $this->assertDatabaseHas('journal_lines', ['journal_entry_id' => $ftx->journal_entry_id, 'account_id' => $bankCharges]);
+    }
+
+    public function test_withdrawal_beyond_balance_is_rejected(): void
+    {
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson('/api/bank-transactions', [
+            'bank_account_id' => $this->bank->id,
+            'txn_date' => now()->toDateString(),
+            'transaction_type' => 'Withdrawal',
+            'amount' => '500000.00',
+            'contra_kind' => 'Ledger',
+            'contra_chart_of_account_id' => ChartOfAccount::where('account_type', 'Expense')->value('id'),
+        ])->assertStatus(422);
+
+        $this->assertSame('100000.00', (string) $this->bank->fresh()->current_balance);
+    }
+}
