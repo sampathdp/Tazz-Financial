@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\PettyCashReplenishmentController;
 use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
+use App\Http\Controllers\Api\FinanceDashboardController;
 use App\Http\Controllers\Api\FinanceRequestController;
 use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\ManualJournalEntryController;
@@ -422,6 +423,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('cash-reconciliations/summary', [CashReconciliationController::class, 'summary'])->middleware('perm:Cash Reconciliation,View');
     Route::post('cash-reconciliations', [CashReconciliationController::class, 'store'])->middleware('perm:Cash Reconciliation,Create');
     Route::delete('cash-reconciliations/{cashReconciliation}', [CashReconciliationController::class, 'destroy'])->middleware('perm:Cash Reconciliation,Delete');
+
+    // --- Finance: Dashboard (cash control at a glance) ---
+    Route::get('finance-dashboard', [FinanceDashboardController::class, 'index'])->middleware('perm:Finance Dashboard,View');
 
     // --- Finance: Requests (the single outbound-payment / transfer queue) ---
     // Create / submit / cancel are requester actions; approve / reject are
