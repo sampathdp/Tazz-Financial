@@ -92,4 +92,29 @@ class CashAccount extends Model
         return (clone $base)->whereIn('account_type', self::PRIMARY_TYPES)->orderBy('id')->first()
             ?? $base->orderBy('id')->first();
     }
+
+    /**
+     * The branch's cash-in-transit holding account, created on first use. A
+     * cross-branch transfer's money sits here between "released" by the
+     * sending branch and "received" by the destination — see
+     * FinanceRequestService::release()/receive().
+     */
+    public static function branchInTransit(int $branchId): self
+    {
+        $existing = static::where('branch_id', $branchId)->where('account_type', 'InTransit')->first();
+        if ($existing) {
+            return $existing;
+        }
+        $branchCode = optional(Branch::find($branchId))->code ?? $branchId;
+
+        return static::create([
+            'code' => "{$branchCode}-TRANSIT",
+            'branch_id' => $branchId,
+            'account_type' => 'InTransit',
+            'name' => "Cash in Transit - {$branchCode}",
+            'opening_balance' => 0,
+            'current_balance' => 0,
+            'status' => 'Active',
+        ]);
+    }
 }

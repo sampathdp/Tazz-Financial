@@ -30,6 +30,7 @@ use App\Http\Controllers\Api\PettyCashFundController;
 use App\Http\Controllers\Api\PettyCashReplenishmentController;
 use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
+use App\Http\Controllers\Api\CashFloatController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\FinanceDashboardController;
 use App\Http\Controllers\Api\FinanceRequestController;
@@ -432,6 +433,14 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Finance: Dashboard (cash control at a glance) ---
     Route::get('finance-dashboard', [FinanceDashboardController::class, 'index'])->middleware('perm:Finance Dashboard,View');
 
+    // --- Finance: Cash Floats (a float is a cash_accounts row, type CashierFloat) ---
+    Route::get('cash-floats', [CashFloatController::class, 'index'])->middleware('perm:Cash Floats,View');
+    Route::get('cash-float-settlements', [CashFloatController::class, 'settlements'])->middleware('perm:Cash Floats,View');
+    Route::post('cash-floats/issue', [CashFloatController::class, 'issue'])->middleware('perm:Cash Floats,Create');
+    Route::post('cash-floats/{cashAccount}/request-settlement', [CashFloatController::class, 'requestSettlement'])->middleware('perm:Cash Floats,Edit');
+    // settle gated inline by ApprovalType::isAuthorized('finance_float_settlement') — same maker-checker pattern.
+    Route::post('cash-float-settlements/{cashFloatSettlement}/settle', [CashFloatController::class, 'settle'])->middleware('perm:Cash Floats,Edit');
+
     // --- Finance: Requests (the single outbound-payment / transfer queue) ---
     // Create / submit / cancel are requester actions; approve / reject are
     // gated inline by ApprovalType::isAuthorized() on the request's approval
@@ -445,6 +454,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('finance-requests/{financeRequest}/approve', [FinanceRequestController::class, 'approve']);
     Route::post('finance-requests/{financeRequest}/reject', [FinanceRequestController::class, 'reject']);
     Route::post('finance-requests/{financeRequest}/execute', [FinanceRequestController::class, 'execute'])->middleware('perm:Finance Requests,Edit');
+    // Cross-branch transfer: release (send) -> receive (confirm) -> or recall.
+    Route::post('finance-requests/{financeRequest}/release', [FinanceRequestController::class, 'release'])->middleware('perm:Finance Transfers,Edit');
+    Route::post('finance-requests/{financeRequest}/receive', [FinanceRequestController::class, 'receive'])->middleware('perm:Finance Transfers,Edit');
+    Route::post('finance-requests/{financeRequest}/recall', [FinanceRequestController::class, 'recall'])->middleware('perm:Finance Transfers,Edit');
 
     // --- Masters: Expense Categories — a dedicated table, used by the
     // Expense Management module's category picker. ---

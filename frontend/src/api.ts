@@ -958,7 +958,7 @@ export type FinanceRequestType =
 
 export type FinanceRequestStatus =
   | 'Draft' | 'Submitted' | 'PendingApproval' | 'Approved' | 'Rejected'
-  | 'ReadyForPayment' | 'Processing' | 'Paid' | 'Completed' | 'Cancelled' | 'Reversed'
+  | 'ReadyForPayment' | 'Processing' | 'InTransit' | 'Paid' | 'Completed' | 'Cancelled' | 'Reversed'
 
 export type FinanceTxnType =
   | 'CASH_IN' | 'CASH_OUT' | 'TRANSFER' | 'DISBURSEMENT' | 'EXPENSE_PAYMENT'
@@ -1029,6 +1029,42 @@ export const financeRequestsApi = {
   cancel: (id: number) => http.post(`/finance-requests/${id}/cancel`).then((r) => camelize(r.data) as FinanceRequest),
   execute: (id: number, body: FinanceRequestExecuteInput) =>
     http.post(`/finance-requests/${id}/execute`, snakeize(body)).then((r) => camelize(r.data) as FinanceRequest),
+  release: (id: number) => http.post(`/finance-requests/${id}/release`).then((r) => camelize(r.data) as FinanceRequest),
+  receive: (id: number) => http.post(`/finance-requests/${id}/receive`).then((r) => camelize(r.data) as FinanceRequest),
+  recall: (id: number, reason: string) => http.post(`/finance-requests/${id}/recall`, { reason }).then((r) => camelize(r.data) as FinanceRequest),
+}
+
+export interface CashFloat {
+  id: number; code: string | null; name: string;
+  branch?: { id: number; name: string; code: string } | null;
+  holder?: { id: number; name: string } | null;
+  home?: { id: number; name: string; code: string } | null;
+  currentBalance: number; spentTotal: number;
+  settlement?: CashFloatSettlement | null;
+}
+
+export interface CashFloatSettlement {
+  id: number; cashAccountId: number; status: 'Open' | 'SettlementRequested' | 'Settled' | 'Cancelled';
+  issuedTotal: number | string; expectedAmount?: number | string | null; countedAmount?: number | string | null;
+  variance: number | string; shortage: number | string; excess: number | string; returnedTotal: number | string;
+  floatAccount?: { id: number; code: string | null; name: string } | null;
+  homeAccount?: { id: number; name: string } | null;
+  custodian?: { id: number; name: string } | null;
+  settler?: { id: number; name: string } | null;
+  approvalRequest?: FinanceApprovalRequest | null;
+  openedAt?: string | null; closedAt?: string | null;
+}
+
+export const cashFloatsApi = {
+  list: () => http.get('/cash-floats').then((r) => camelize(r.data) as CashFloat[]),
+  settlements: (status?: string) =>
+    http.get('/cash-float-settlements', { params: status ? { status } : {} }).then((r) => camelize(r.data) as Paginated<CashFloatSettlement>),
+  issue: (body: { homeCashAccountId: number; custodianId: number; amount: number | string; notes?: string }) =>
+    http.post('/cash-floats/issue', snakeize(body)).then((r) => camelize(r.data) as { message: string; financeRequest: FinanceRequest }),
+  requestSettlement: (floatAccountId: number) =>
+    http.post(`/cash-floats/${floatAccountId}/request-settlement`).then((r) => camelize(r.data) as CashFloatSettlement),
+  settle: (settlementId: number, countedAmount: number | string) =>
+    http.post(`/cash-float-settlements/${settlementId}/settle`, snakeize({ countedAmount })).then((r) => camelize(r.data) as CashFloatSettlement),
 }
 
 export interface FinanceDashboard {

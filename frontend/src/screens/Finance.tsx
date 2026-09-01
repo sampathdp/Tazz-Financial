@@ -9,8 +9,10 @@ import {
 } from '../components/ui'
 import {
   financeRequestsApi, financeDashboardApi, cashAccountsApi, bankAccountsApi, chartOfAccountsApi, branchesApi,
+  cashFloatsApi, api,
   type FinanceRequest, type FinanceRequestType, type FinanceRequestStatus, type FinanceDashboard,
   type CashAccount, type BankAccount, type ChartOfAccount, type Branch, type AuthUser,
+  type CashFloat,
 } from '../api'
 import { Can, canApprove } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -399,6 +401,241 @@ export function FinanceRequestsScreen({ user: me }: { go: Go; user?: AuthUser | 
         <p className="t-2" style={{ fontSize: 11.5, marginTop: 12 }}>
           Releasing posts the general-ledger entry and moves the source account's balance in one step. It cannot be edited afterwards — only reversed.
         </p>
+      </Modal>
+    </div>
+  )
+}
+
+/* =========================== Finance Transfers =========================== */
+
+const TRANSFER_LIST_TYPES = 'CashTransfer,BranchFunding'
+
+export function FinanceTransfersScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [rows, setRows] = useState<FinanceRequest[]>([])
+  const [loading, setLoading] = useState(true)
+  const [cash, setCash] = useState<CashAccount[]>([])
+  const [bank, setBank] = useState<BankAccount[]>([])
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [form, setForm] = useState({ src: '', dst: '', amount: '', twoStep: false, purpose: '' })
+
+  useEffect(() => {
+    cashAccountsApi.list().then(setCash).catch(() => setCash([]))
+    bankAccountsApi.list().then(setBank).catch(() => setBank([]))
+  }, [])
+  const refresh = () => {
+    setLoading(true)
+    financeRequestsApi.list({ requestType: TRANSFER_LIST_TYPES, perPage: 100 })
+      .then((p) => setRows(p.data)).catch(() => setRows([])).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [])
+
+  const acctOpt = (v: string) => {
+    if (v.startsWith('b')) { const a = bank.find((x) => x.id === Number(v.slice(1))); return a ? { bankId: a.id } : {} }
+    const a = cash.find((x) => x.id === Number(v)); return a ? { cashId: a.id } : {}
+  }
+  const create = async () => {
+    if (!form.src || !form.dst) { setErr('Pick the source and destination.'); return }
+    if (form.src === form.dst) { setErr('Source and destination must differ.'); return }
+    if (!form.amount || Number(form.amount) <= 0) { setErr('Enter an amount.'); return }
+    const s = acctOpt(form.src), d = acctOpt(form.dst)
+    setBusy(true); setErr('')
+    try {
+      await financeRequestsApi.create({
+        requestType: form.twoStep ? 'BranchFunding' : 'CashTransfer',
+        amount: form.amount, purpose: form.purpose || undefined, submit: true,
+        meta: {
+          source_cash_account_id: s.cashId, source_bank_account_id: s.bankId,
+          dest_cash_account_id: d.cashId, dest_bank_account_id: d.bankId,
+          two_step: form.twoStep,
+        } as Record<string, unknown>,
+      })
+      setOpen(false); setForm({ src: '', dst: '', amount: '', twoStep: false, purpose: '' }); refresh()
+      notify.success('Transfer submitted', 'Routed for approval')
+    } catch (ex: any) { setErr(getErrorText(ex, 'Could not create the transfer')) }
+    finally { setBusy(false) }
+  }
+
+  const canApproveT = (r: FinanceRequest) => r.status === 'PendingApproval' && canApprove(me, 'finance_transfer') && me?.id !== r.requester?.id
+  const act = (fn: () => Promise<unknown>, ok: string) => async () => {
+    try { await fn(); refresh(); notify.success(ok) } catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
+  }
+  const recall = async (r: FinanceRequest) => {
+    const reason = await notify.prompt({ title: `Recall ${r.code}?`, msg: 'Cash returns to the source account.', placeholder: 'Reason', danger: true, okText: 'Recall' })
+    if (reason === null) return
+    try { await financeRequestsApi.recall(r.id, reason || 'recalled'); refresh(); notify.success('Recalled') } catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
+  }
+
+  const twoStepMeta = (r: FinanceRequest) => !!(r.meta as Record<string, unknown> | null | undefined)?.two_step
+  const acctName = (r: FinanceRequest, side: 'source' | 'dest') => {
+    const m = (r.meta || {}) as Record<string, number | undefined>
+    const cid = m[`${side}_cash_account_id`], bid = m[`${side}_bank_account_id`]
+    if (cid) return cash.find((a) => a.id === cid)?.name || `Cash #${cid}`
+    if (bid) return bank.find((a) => a.id === bid)?.name || `Bank #${bid}`
+    return '—'
+  }
+
+  return (
+    <div>
+      <PageHead crumbs="Finance" title="Transfers" icon="swap" sub={`${rows.length} transfer${rows.length === 1 ? '' : 's'}`}
+        actions={<Can user={me} module="Finance Transfers" action="Create"><Btn variant="primary" icon="plus" onClick={() => { setErr(''); setOpen(true) }}>New Transfer</Btn></Can>} />
+      <Card pad={0}>
+        {loading ? <LoadingBlock /> :
+        <Table cols={[{ label: 'Code' }, { label: 'From' }, { label: 'To' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 240 }]}
+          empty="No transfers" rows={rows}
+          render={(r) => <>
+            <Td mono>{r.code}</Td>
+            <Td>{acctName(r, 'source')}</Td>
+            <Td>{acctName(r, 'dest')}</Td>
+            <Td align="right" mono>{money(r.amount)}</Td>
+            <Td align="center"><Badge tone={statusTone(r.status)} dot>{r.status}</Badge></Td>
+            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+              {canApproveT(r) && <>
+                <Btn variant="ghost" size="sm" onClick={act(() => financeRequestsApi.reject(r.id), 'Rejected')}>Reject</Btn>
+                <Btn variant="primary" size="sm" icon="check" onClick={act(() => financeRequestsApi.approve(r.id), 'Approved')}>Approve</Btn>
+              </>}
+              {r.status === 'ReadyForPayment' && !twoStepMeta(r) && <Can user={me} module="Finance Transfers" action="Edit">
+                <Btn variant="primary" size="sm" icon="check" onClick={act(() => financeRequestsApi.execute(r.id, { method: 'Cash' }), 'Transferred')}>Execute</Btn>
+              </Can>}
+              {r.status === 'ReadyForPayment' && twoStepMeta(r) && <Can user={me} module="Finance Transfers" action="Edit">
+                <Btn variant="primary" size="sm" icon="upload" onClick={act(() => financeRequestsApi.release(r.id), 'Released')}>Release</Btn>
+              </Can>}
+              {r.status === 'InTransit' && <Can user={me} module="Finance Transfers" action="Edit">
+                <Btn variant="ghost" size="sm" onClick={() => recall(r)}>Recall</Btn>
+                <Btn variant="primary" size="sm" icon="check" onClick={act(() => financeRequestsApi.receive(r.id), 'Received')}>Confirm Receipt</Btn>
+              </Can>}
+            </div></Td>
+          </>} />}
+      </Card>
+
+      <Modal open={open} onClose={() => setOpen(false)} width={520} title="New Transfer"
+        footer={<><Btn variant="plain" onClick={() => setOpen(false)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={create} disabled={busy}>{busy ? 'Submitting…' : 'Submit'}</Btn></>}>
+        <ErrorBanner error={err} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Field label="From" full><Select value={form.src} onChange={(e) => setForm((s) => ({ ...s, src: e.target.value }))}>
+            <option value="">Select…</option>
+            <optgroup label="Cash">{cash.map((a) => <option key={`c${a.id}`} value={a.id}>{a.name} — {money(a.currentBalance)}</option>)}</optgroup>
+            <optgroup label="Bank">{bank.map((a) => <option key={`b${a.id}`} value={`b${a.id}`}>{a.name}</option>)}</optgroup>
+          </Select></Field>
+          <Field label="To" full><Select value={form.dst} onChange={(e) => setForm((s) => ({ ...s, dst: e.target.value }))}>
+            <option value="">Select…</option>
+            <optgroup label="Cash">{cash.map((a) => <option key={`c${a.id}`} value={a.id}>{a.name}</option>)}</optgroup>
+            <optgroup label="Bank">{bank.map((a) => <option key={`b${a.id}`} value={`b${a.id}`}>{a.name}</option>)}</optgroup>
+          </Select></Field>
+          <Field label="Amount"><Input type="number" step="0.01" value={form.amount} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
+          <Field label="Purpose"><Input value={form.purpose} onChange={(e) => setForm((s) => ({ ...s, purpose: e.target.value }))} /></Field>
+          <Field full><label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer' }}>
+            <input type="checkbox" checked={form.twoStep} onChange={(e) => setForm((s) => ({ ...s, twoStep: e.target.checked }))} />
+            <span style={{ fontSize: 13 }}>Cash physically travels between branches (release → receive)</span>
+          </label></Field>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+/* =========================== Cash Floats =========================== */
+
+export function CashFloatsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [rows, setRows] = useState<CashFloat[]>([])
+  const [loading, setLoading] = useState(true)
+  const [tills, setTills] = useState<CashAccount[]>([])
+  const [users, setUsers] = useState<{ id: number; name: string }[]>([])
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState({ home: '', custodian: '', amount: '', notes: '' })
+  const [settleFor, setSettleFor] = useState<CashFloat | null>(null)
+  const [counted, setCounted] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    cashAccountsApi.list().then((a) => setTills(a.filter((x) => x.accountType === 'BranchMain' || x.accountType === 'HeadOfficeMain'))).catch(() => setTills([]))
+    api.users.active().then(setUsers).catch(() => setUsers([]))
+  }, [])
+  const refresh = () => { setLoading(true); cashFloatsApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false)) }
+  useEffect(refresh, [])
+
+  const issue = async () => {
+    if (!form.home || !form.custodian || !form.amount) { setErr('Fill in every field.'); return }
+    setBusy(true); setErr('')
+    try {
+      await cashFloatsApi.issue({ homeCashAccountId: Number(form.home), custodianId: Number(form.custodian), amount: form.amount, notes: form.notes || undefined })
+      setOpen(false); setForm({ home: '', custodian: '', amount: '', notes: '' }); refresh()
+      notify.success('Float request sent', 'Finance will approve and fund it')
+    } catch (ex: any) { setErr(getErrorText(ex, 'Could not issue the float')) }
+    finally { setBusy(false) }
+  }
+  const askSettle = async (f: CashFloat) => {
+    try { await cashFloatsApi.requestSettlement(f.id); refresh(); notify.success('Settlement requested') }
+    catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
+  }
+  const doSettle = async () => {
+    if (!settleFor?.settlement) return
+    if (counted === '' || Number(counted) < 0) { setErr('Enter the counted amount.'); return }
+    setBusy(true); setErr('')
+    try {
+      await cashFloatsApi.settle(settleFor.settlement.id, counted)
+      setSettleFor(null); setCounted(''); refresh()
+      notify.success('Float settled', settleFor.name)
+    } catch (ex: any) { setErr(getErrorText(ex, 'Settlement failed')) }
+    finally { setBusy(false) }
+  }
+  const canSettle = (f: CashFloat) =>
+    f.settlement?.status === 'SettlementRequested' && canApprove(me, 'finance_float_settlement')
+    && me?.id !== f.holder?.id && me?.id !== f.settlement?.approvalRequest?.requester?.id
+
+  return (
+    <div>
+      <PageHead crumbs="Finance" title="Cash Floats" icon="coins" sub={`${rows.length} active float${rows.length === 1 ? '' : 's'}`}
+        actions={<Can user={me} module="Cash Floats" action="Create"><Btn variant="primary" icon="plus" onClick={() => { setErr(''); setOpen(true) }}>Issue Float</Btn></Can>} />
+      <Card pad={0}>
+        {loading ? <LoadingBlock /> :
+        <Table cols={[{ label: 'Float' }, { label: 'Holder' }, { label: 'Home' }, { label: 'Balance', align: 'right' }, { label: 'Spent', align: 'right' }, { label: 'Settlement', align: 'center' }, { label: '', align: 'right', w: 210 }]}
+          empty="No active floats" rows={rows}
+          render={(f) => <>
+            <Td c="var(--tx-0)">{f.name}<div className="t-2" style={{ fontSize: 11 }}>{f.code}</div></Td>
+            <Td>{f.holder?.name || '—'}</Td>
+            <Td>{f.home?.name || '—'}</Td>
+            <Td align="right" mono>{money(f.currentBalance)}</Td>
+            <Td align="right" mono>{money(f.spentTotal)}</Td>
+            <Td align="center">{f.settlement ? <Badge tone={f.settlement.status === 'SettlementRequested' ? 'amber' : 'neutral'}>{f.settlement.status}</Badge> : '—'}</Td>
+            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+              {f.settlement?.status === 'Open' && <Can user={me} module="Cash Floats" action="Edit">
+                <Btn variant="ghost" size="sm" onClick={() => askSettle(f)}>Request Settlement</Btn>
+              </Can>}
+              {canSettle(f) && <Btn variant="primary" size="sm" icon="check" onClick={() => { setSettleFor(f); setCounted(String(f.currentBalance)); setErr('') }}>Settle</Btn>}
+            </div></Td>
+          </>} />}
+      </Card>
+
+      <Modal open={open} onClose={() => setOpen(false)} width={480} title="Issue Cash Float"
+        footer={<><Btn variant="plain" onClick={() => setOpen(false)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={issue} disabled={busy}>{busy ? 'Sending…' : 'Send Request'}</Btn></>}>
+        <ErrorBanner error={err} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Field label="From Till" full><Select value={form.home} onChange={(e) => setForm((s) => ({ ...s, home: e.target.value }))}>
+            <option value="">Select…</option>{tills.map((a) => <option key={a.id} value={a.id}>{a.name} — {money(a.currentBalance)}</option>)}
+          </Select></Field>
+          <Field label="Custodian" full><Select value={form.custodian} onChange={(e) => setForm((s) => ({ ...s, custodian: e.target.value }))}>
+            <option value="">Select…</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </Select></Field>
+          <Field label="Amount"><Input type="number" step="0.01" value={form.amount} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
+          <Field label="Notes"><Input value={form.notes} onChange={(e) => setForm((s) => ({ ...s, notes: e.target.value }))} /></Field>
+        </div>
+      </Modal>
+
+      <Modal open={!!settleFor} onClose={() => setSettleFor(null)} width={440} title="Settle Float"
+        sub={settleFor ? `${settleFor.name} — books say ${money(settleFor.currentBalance)}` : undefined}
+        footer={<><Btn variant="plain" onClick={() => setSettleFor(null)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={doSettle} disabled={busy}>{busy ? 'Settling…' : 'Settle'}</Btn></>}>
+        <ErrorBanner error={err} />
+        <Field label="Cash counted"><Input type="number" step="0.01" value={counted} onChange={(e) => setCounted(e.target.value)} /></Field>
+        {settleFor && counted !== '' && (
+          <p className="t-2" style={{ fontSize: 12, marginTop: 10 }}>
+            Variance {money(Number(counted) - Number(settleFor.currentBalance))} — {Number(counted) < Number(settleFor.currentBalance) ? 'shortage posted to 5310' : Number(counted) > Number(settleFor.currentBalance) ? 'overage posted to 4905' : 'exact'}. The counted cash returns to {settleFor.home?.name}.
+          </p>
+        )}
       </Modal>
     </div>
   )

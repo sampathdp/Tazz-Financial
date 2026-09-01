@@ -26,6 +26,8 @@ export const NAV: NavNode[] = [
   { section: 'Finance', icon: 'wallet', items: [
     { id: 'finance/dashboard', label: 'Finance Dashboard', icon: 'wallet' },
     { id: 'finance/requests', label: 'Finance Requests', icon: 'receipt' },
+    { id: 'finance/transfers', label: 'Transfers', icon: 'swap' },
+    { id: 'finance/floats', label: 'Cash Floats', icon: 'coins' },
     { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
   ] },
 

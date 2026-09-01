@@ -26,7 +26,7 @@ class FinanceRequest extends Model
         'SupplierPayment' => 'finance_request_payment',
         'Refund' => 'finance_request_payment',
         'Advance' => 'finance_request_payment',
-        'BranchFunding' => 'finance_request_payment',
+        'BranchFunding' => 'finance_transfer',
         'CommissionPayout' => 'finance_request_payment',
         'FdPayout' => 'finance_request_payment',
         'CashFloat' => 'finance_float_issue',

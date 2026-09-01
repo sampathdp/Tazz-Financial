@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Events\FinanceRequestSettled;
 use App\Listeners\CompleteDisbursementOnSettled;
 use App\Listeners\CompleteExpensePaymentOnSettled;
+use App\Listeners\RecordFloatFundingOnSettled;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -24,6 +25,7 @@ class EventServiceProvider extends ServiceProvider
         FinanceRequestSettled::class => [
             CompleteDisbursementOnSettled::class,
             CompleteExpensePaymentOnSettled::class,
+            RecordFloatFundingOnSettled::class,
         ],
     ];
 

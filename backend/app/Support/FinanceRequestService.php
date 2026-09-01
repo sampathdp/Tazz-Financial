@@ -225,12 +225,15 @@ class FinanceRequestService
             throw new FinancePostingException('The person who raised a request cannot also execute it.');
         }
 
+        if (self::isTransfer($request)) {
+            return self::executeTransfer($request, $exec, $userId);
+        }
+
         $amount = (string) ($exec['amount'] ?? $request->amount);
         if (bccomp($amount, (string) $request->amount, 2) > 0) {
             throw new FinancePostingException('The executed amount cannot exceed the approved amount.');
         }
         $entryDate = $exec['entry_date'] ?? now()->toDateString();
-        $isTransfer = in_array($request->txnType(), ['TRANSFER', 'FLOAT_ISSUE'], true);
         $meta = $request->meta ?? [];
 
         // For a source-driven request (loan disbursement, expense) the method
@@ -246,28 +249,14 @@ class FinanceRequestService
         [$srcType, $srcId, $srcLeaf] = self::resolveAccount($method, $exec['cash_account_id'] ?? null, $bankId);
         $movements = [['account_type' => $srcType, 'account_id' => $srcId, 'delta' => '-' . $amount]];
 
-        if ($isTransfer) {
-            $destCash = $exec['dest_cash_account_id'] ?? null;
-            $destBank = $exec['dest_bank_account_id'] ?? null;
-            if (!$destCash && !$destBank) {
-                throw new FinancePostingException('A transfer needs a destination account.');
-            }
-            [$dType, $dId, $dLeaf] = self::resolveAccount($destCash ? 'Cash' : 'Bank', $destCash, $destBank);
-            $movements[] = ['account_type' => $dType, 'account_id' => $dId, 'delta' => $amount];
-            $glLines = [
-                ['account_id' => $dLeaf->id, 'debit' => $amount, 'credit' => 0],
-                ['account_id' => $srcLeaf->id, 'debit' => 0, 'credit' => $amount],
-            ];
-        } else {
-            $offsetId = $exec['offset_account_id'] ?? $meta['offset_account_id'] ?? null;
-            if (!$offsetId) {
-                throw new FinancePostingException('Choose the account this payment should be posted against.');
-            }
-            $glLines = [
-                ['account_id' => (int) $offsetId, 'debit' => $amount, 'credit' => 0],
-                ['account_id' => $srcLeaf->id, 'debit' => 0, 'credit' => $amount],
-            ];
+        $offsetId = $exec['offset_account_id'] ?? $meta['offset_account_id'] ?? null;
+        if (!$offsetId) {
+            throw new FinancePostingException('Choose the account this payment should be posted against.');
         }
+        $glLines = [
+            ['account_id' => (int) $offsetId, 'debit' => $amount, 'credit' => 0],
+            ['account_id' => $srcLeaf->id, 'debit' => 0, 'credit' => $amount],
+        ];
 
         // A source-keyed GL entry (loan disbursement stays source_type='Loan')
         // when the request carries it — so LoanController::purge() /
@@ -311,6 +300,211 @@ class FinanceRequestService
         FinanceRequestSettled::dispatch($request, 'paid');
 
         return $request;
+    }
+
+    private static function isTransfer(FinanceRequest $request): bool
+    {
+        return in_array($request->txnType(), ['TRANSFER', 'FLOAT_ISSUE', 'FLOAT_RETURN'], true);
+    }
+
+    /**
+     * One-step transfer (cash<->cash, cash<->bank, till<->float): both
+     * balances move now, one GL entry (Dr dest leaf / Cr source leaf). Source
+     * and destination come from the request meta (chosen when it was raised),
+     * with an exec override. Use release()/receive() when cash physically
+     * travels between branches.
+     */
+    private static function executeTransfer(FinanceRequest $request, array $exec, int $userId): FinanceRequest
+    {
+        $meta = $request->meta ?? [];
+        if (!empty($meta['two_step'])) {
+            throw new FinancePostingException('This is a cross-branch transfer — use Release, then Receive at the destination.');
+        }
+        $amount = (string) $request->amount;
+        $entryDate = $exec['entry_date'] ?? now()->toDateString();
+
+        [$srcType, $srcId, $srcLeaf] = self::resolveTransferEndpoint('source', $exec, $meta);
+        [$dType, $dId, $dLeaf] = self::resolveTransferEndpoint('dest', $exec, $meta);
+        if ($srcType === $dType && $srcId === $dId) {
+            throw new FinancePostingException('The source and destination accounts must be different.');
+        }
+
+        DB::transaction(function () use ($request, $userId, $amount, $entryDate, $srcType, $srcId, $srcLeaf, $dType, $dId, $dLeaf) {
+            $request->update(['status' => 'Processing']);
+            $txn = FinancePostingService::execute([
+                'txn_type' => $request->txnType(),
+                'amount' => $amount,
+                'entry_date' => $entryDate,
+                'branch_id' => $request->branch_id,
+                'movements' => [
+                    ['account_type' => $srcType, 'account_id' => $srcId, 'delta' => '-' . $amount],
+                    ['account_type' => $dType, 'account_id' => $dId, 'delta' => $amount],
+                ],
+                'gl_lines' => [
+                    ['account_id' => $dLeaf->id, 'debit' => $amount, 'credit' => 0],
+                    ['account_id' => $srcLeaf->id, 'debit' => 0, 'credit' => $amount],
+                ],
+                'description' => $request->purpose ?? "{$request->request_type} - {$request->code}",
+                'finance_request_id' => $request->id,
+                'idempotency_key' => "finance-request-{$request->id}",
+                'requested_by' => $request->requested_by,
+                'approved_by' => $request->approved_by,
+                'executed_by' => $userId,
+            ]);
+            $request->update([
+                'status' => 'Paid', 'executed_by' => $userId, 'executed_at' => now(), 'closed_at' => now(),
+                'finance_transaction_id' => $txn->id,
+                'source_cash_account_id' => $srcType === 'cash' ? $srcId : null,
+                'source_bank_account_id' => $srcType === 'bank' ? $srcId : null,
+            ]);
+        });
+
+        $request = $request->fresh();
+        FinanceRequestSettled::dispatch($request, 'paid');
+
+        return $request;
+    }
+
+    /**
+     * Step 1 of a cross-branch transfer: move the money out of the source
+     * account into its branch's cash-in-transit holding account. The request
+     * sits at InTransit until the destination branch confirms receive().
+     */
+    public static function release(FinanceRequest $request, int $userId): FinanceRequest
+    {
+        if (!self::isTransfer($request)) {
+            throw new FinancePostingException('Only a transfer can be released.');
+        }
+        if ($request->status !== 'ReadyForPayment') {
+            throw new FinancePostingException('This transfer is not ready to be released.');
+        }
+        $meta = $request->meta ?? [];
+        $amount = (string) $request->amount;
+
+        [$srcType, $srcId, $srcLeaf] = self::resolveTransferEndpoint('source', [], $meta);
+        $transit = \App\Models\CashAccount::branchInTransit((int) (\App\Models\CashAccount::find($srcId)?->branch_id ?? $request->branch_id));
+        $transitLeaf = ChartOfAccount::forCashTill($transit);
+
+        DB::transaction(function () use ($request, $userId, $amount, $srcType, $srcId, $srcLeaf, $transit, $transitLeaf, $meta) {
+            $txn = FinancePostingService::execute([
+                'txn_type' => 'TRANSFER',
+                'amount' => $amount,
+                'entry_date' => now()->toDateString(),
+                'branch_id' => $request->branch_id,
+                'movements' => [
+                    ['account_type' => $srcType, 'account_id' => $srcId, 'delta' => '-' . $amount],
+                    ['account_type' => 'cash', 'account_id' => (int) $transit->id, 'delta' => $amount],
+                ],
+                'gl_lines' => [
+                    ['account_id' => $transitLeaf->id, 'debit' => $amount, 'credit' => 0],
+                    ['account_id' => $srcLeaf->id, 'debit' => 0, 'credit' => $amount],
+                ],
+                'status' => 'InTransit',
+                'description' => "Transfer released - {$request->code}",
+                'finance_request_id' => $request->id,
+                'idempotency_key' => "finance-request-{$request->id}-release",
+                'requested_by' => $request->requested_by,
+                'approved_by' => $request->approved_by,
+                'executed_by' => $userId,
+            ]);
+            $request->update([
+                'status' => 'InTransit', 'executed_by' => $userId, 'executed_at' => now(),
+                'finance_transaction_id' => $txn->id,
+                'source_cash_account_id' => $srcType === 'cash' ? $srcId : null,
+                'source_bank_account_id' => $srcType === 'bank' ? $srcId : null,
+                'meta' => $meta + ['in_transit_account_id' => $transit->id],
+            ]);
+        });
+
+        return $request->fresh();
+    }
+
+    /**
+     * Step 2 of a cross-branch transfer: the destination branch confirms the
+     * cash arrived. Moves it out of in-transit into the destination account
+     * and closes the request.
+     */
+    public static function receive(FinanceRequest $request, int $userId): FinanceRequest
+    {
+        if ($request->status !== 'InTransit') {
+            throw new FinancePostingException('This transfer is not in transit.');
+        }
+        if ((int) $request->executed_by === $userId) {
+            throw new FinancePostingException('The person who released a transfer cannot also confirm its receipt.');
+        }
+        $meta = $request->meta ?? [];
+        $amount = (string) $request->amount;
+        $transit = \App\Models\CashAccount::findOrFail($meta['in_transit_account_id'] ?? 0);
+        $transitLeaf = ChartOfAccount::forCashTill($transit);
+        [$dType, $dId, $dLeaf] = self::resolveTransferEndpoint('dest', [], $meta);
+
+        DB::transaction(function () use ($request, $userId, $amount, $transit, $transitLeaf, $dType, $dId, $dLeaf) {
+            $txn = FinancePostingService::execute([
+                'txn_type' => 'TRANSFER',
+                'amount' => $amount,
+                'entry_date' => now()->toDateString(),
+                'branch_id' => $dType === 'cash' ? (\App\Models\CashAccount::find($dId)?->branch_id ?? $request->branch_id) : $request->branch_id,
+                'movements' => [
+                    ['account_type' => 'cash', 'account_id' => (int) $transit->id, 'delta' => '-' . $amount],
+                    ['account_type' => $dType, 'account_id' => $dId, 'delta' => $amount],
+                ],
+                'gl_lines' => [
+                    ['account_id' => $dLeaf->id, 'debit' => $amount, 'credit' => 0],
+                    ['account_id' => $transitLeaf->id, 'debit' => 0, 'credit' => $amount],
+                ],
+                'description' => "Transfer received - {$request->code}",
+                'finance_request_id' => $request->id,
+                'idempotency_key' => "finance-request-{$request->id}-receive",
+                'received_by' => $userId,
+            ]);
+            $request->update([
+                'status' => 'Completed', 'received_by' => $userId, 'closed_at' => now(),
+                'finance_transaction_id' => $txn->id,
+            ]);
+        });
+
+        $request = $request->fresh();
+        FinanceRequestSettled::dispatch($request, 'paid');
+
+        return $request;
+    }
+
+    /**
+     * Recall a released-but-not-received cross-branch transfer: reverses the
+     * release (cash goes back to the source account) and cancels the request.
+     */
+    public static function recall(FinanceRequest $request, int $userId, string $reason): FinanceRequest
+    {
+        if ($request->status !== 'InTransit') {
+            throw new FinancePostingException('Only an in-transit transfer can be recalled.');
+        }
+        $releaseTxn = \App\Models\FinanceTransaction::where('finance_request_id', $request->id)
+            ->where('status', 'InTransit')->latest('id')->first();
+        if (!$releaseTxn) {
+            throw new FinancePostingException('The release transaction for this transfer could not be found.');
+        }
+
+        DB::transaction(function () use ($request, $releaseTxn, $userId, $reason) {
+            FinancePostingService::reverse($releaseTxn, "Recalled: {$request->code} — {$reason}", $userId);
+            $request->update(['status' => 'Cancelled', 'reject_reason' => $reason, 'closed_at' => now()]);
+        });
+
+        $request = $request->fresh();
+        FinanceRequestSettled::dispatch($request, 'cancelled');
+
+        return $request;
+    }
+
+    /** Resolves a transfer endpoint ('source'|'dest') from an exec override then the request meta. @return array{0:string,1:int,2:ChartOfAccount} */
+    private static function resolveTransferEndpoint(string $side, array $exec, array $meta): array
+    {
+        $cashId = $exec["{$side}_cash_account_id"] ?? $meta["{$side}_cash_account_id"] ?? null;
+        $bankId = $exec["{$side}_bank_account_id"] ?? $meta["{$side}_bank_account_id"] ?? null;
+        if (!$cashId && !$bankId) {
+            throw new FinancePostingException("The transfer is missing its {$side} account.");
+        }
+
+        return self::resolveAccount($cashId ? 'Cash' : 'Bank', $cashId ? (int) $cashId : null, $bankId ? (int) $bankId : null);
     }
 
     /** @return array{0:string,1:int,2:ChartOfAccount} */

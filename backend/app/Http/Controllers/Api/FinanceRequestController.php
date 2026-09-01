@@ -37,7 +37,7 @@ class FinanceRequestController extends Controller
             $q->whereIn('status', explode(',', $s));
         }
         if ($t = $request->query('request_type')) {
-            $q->where('request_type', $t);
+            $q->whereIn('request_type', explode(',', $t));
         }
         if ($p = $request->query('priority')) {
             $q->where('priority', $p);
@@ -109,10 +109,12 @@ class FinanceRequestController extends Controller
     public function execute(Request $request, FinanceRequest $financeRequest)
     {
         $data = $request->validate([
-            'method' => ['required', Rule::in(['Cash', 'Bank'])],
-            'cash_account_id' => 'required_if:method,Cash|nullable|exists:cash_accounts,id',
-            'bank_account_id' => 'required_if:method,Bank|nullable|exists:bank_accounts,id',
+            'method' => ['nullable', Rule::in(['Cash', 'Bank'])],
+            'cash_account_id' => 'nullable|exists:cash_accounts,id',
+            'bank_account_id' => 'nullable|exists:bank_accounts,id',
             'offset_account_id' => 'nullable|exists:chart_of_accounts,id',
+            'source_cash_account_id' => 'nullable|exists:cash_accounts,id',
+            'source_bank_account_id' => 'nullable|exists:bank_accounts,id',
             'dest_cash_account_id' => 'nullable|exists:cash_accounts,id',
             'dest_bank_account_id' => 'nullable|exists:bank_accounts,id',
             'amount' => 'nullable|numeric|min:0.01',
@@ -120,5 +122,25 @@ class FinanceRequestController extends Controller
         ]);
 
         return FinanceRequestService::execute($financeRequest, $data, $request->user()->id)->load(self::WITH);
+    }
+
+    /** Cross-branch transfer — step 1: the sending branch releases the cash into transit. */
+    public function release(Request $request, FinanceRequest $financeRequest)
+    {
+        return FinanceRequestService::release($financeRequest, $request->user()->id)->load(self::WITH);
+    }
+
+    /** Cross-branch transfer — step 2: the destination branch confirms receipt. */
+    public function receive(Request $request, FinanceRequest $financeRequest)
+    {
+        return FinanceRequestService::receive($financeRequest, $request->user()->id)->load(self::WITH);
+    }
+
+    /** Pull back a released-but-not-received transfer — reverses the release and cancels it. */
+    public function recall(Request $request, FinanceRequest $financeRequest)
+    {
+        $data = $request->validate(['reason' => 'required|string|max:255']);
+
+        return FinanceRequestService::recall($financeRequest, $request->user()->id, $data['reason'])->load(self::WITH);
     }
 }

@@ -39,6 +39,8 @@ export const ROUTE_MODULE: Record<string, string> = {
   'finance/calculator': 'Loan Calculator',
   'finance/dashboard': 'Finance Dashboard',
   'finance/requests': 'Finance Requests',
+  'finance/transfers': 'Finance Transfers',
+  'finance/floats': 'Cash Floats',
   'loan/apps': 'Loan Applications',
   'loan/active': 'Active Loans',
   'loan/overdue': 'Overdue Loans',
