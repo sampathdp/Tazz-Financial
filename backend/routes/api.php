@@ -31,7 +31,9 @@ use App\Http\Controllers\Api\PettyCashReplenishmentController;
 use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\CashFloatController;
+use App\Http\Controllers\Api\CashSessionController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
+use App\Http\Controllers\Api\FinanceSettingController;
 use App\Http\Controllers\Api\FinanceDashboardController;
 use App\Http\Controllers\Api\FinanceRequestController;
 use App\Http\Controllers\Api\JournalEntryController;
@@ -428,10 +430,22 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('cash-reconciliations', [CashReconciliationController::class, 'index'])->middleware('perm:Cash Reconciliation,View');
     Route::get('cash-reconciliations/summary', [CashReconciliationController::class, 'summary'])->middleware('perm:Cash Reconciliation,View');
     Route::post('cash-reconciliations', [CashReconciliationController::class, 'store'])->middleware('perm:Cash Reconciliation,Create');
+    Route::post('cash-reconciliations/{cashReconciliation}/verify', [CashReconciliationController::class, 'verify'])->middleware('perm:Cash Reconciliation,Edit');
     Route::delete('cash-reconciliations/{cashReconciliation}', [CashReconciliationController::class, 'destroy'])->middleware('perm:Cash Reconciliation,Delete');
 
     // --- Finance: Dashboard (cash control at a glance) ---
     Route::get('finance-dashboard', [FinanceDashboardController::class, 'index'])->middleware('perm:Finance Dashboard,View');
+
+    // --- Finance: Daily Cash Sessions (open / close / verify per cash account) ---
+    Route::get('cash-sessions', [CashSessionController::class, 'index'])->middleware('perm:Cash Sessions,View');
+    Route::get('cash-sessions/current', [CashSessionController::class, 'current'])->middleware('perm:Cash Sessions,View');
+    Route::post('cash-sessions/open', [CashSessionController::class, 'open'])->middleware('perm:Cash Sessions,Create');
+    Route::post('cash-sessions/{cashSession}/close', [CashSessionController::class, 'close'])->middleware('perm:Cash Sessions,Create');
+    Route::post('cash-sessions/{cashSession}/verify', [CashSessionController::class, 'verify'])->middleware('perm:Cash Sessions,Edit');
+
+    // --- Finance: Settings ---
+    Route::get('finance-settings', [FinanceSettingController::class, 'index'])->middleware('perm:Finance Settings,View');
+    Route::put('finance-settings', [FinanceSettingController::class, 'update'])->middleware('perm:Finance Settings,Edit');
 
     // --- Finance: Cash Floats (a float is a cash_accounts row, type CashierFloat) ---
     Route::get('cash-floats', [CashFloatController::class, 'index'])->middleware('perm:Cash Floats,View');

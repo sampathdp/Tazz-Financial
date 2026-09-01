@@ -9,12 +9,12 @@ import {
 } from '../components/ui'
 import {
   financeRequestsApi, financeDashboardApi, cashAccountsApi, bankAccountsApi, chartOfAccountsApi, branchesApi,
-  cashFloatsApi, api,
+  cashFloatsApi, cashSessionsApi, financeSettingsApi, api,
   type FinanceRequest, type FinanceRequestType, type FinanceRequestStatus, type FinanceDashboard,
   type CashAccount, type BankAccount, type ChartOfAccount, type Branch, type AuthUser,
-  type CashFloat,
+  type CashFloat, type CashSession, type FinanceSettings,
 } from '../api'
-import { Can, canApprove } from '../lib/permissions'
+import { Can, canApprove, userCan } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -637,6 +637,140 @@ export function CashFloatsScreen({ user: me }: { go: Go; user?: AuthUser | null 
           </p>
         )}
       </Modal>
+    </div>
+  )
+}
+
+/* =========================== Daily Cash Sessions =========================== */
+
+export function CashSessionsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [rows, setRows] = useState<CashSession[]>([])
+  const [loading, setLoading] = useState(true)
+  const [tills, setTills] = useState<CashAccount[]>([])
+  const [openForm, setOpenForm] = useState(false)
+  const [oForm, setOForm] = useState({ account: '', opening: '' })
+  const [closeFor, setCloseFor] = useState<CashSession | null>(null)
+  const [counted, setCounted] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    cashAccountsApi.list().then((a) => setTills(a.filter((x) => x.status !== 'Inactive' && x.accountType !== 'InTransit'))).catch(() => setTills([]))
+  }, [])
+  const refresh = () => { setLoading(true); cashSessionsApi.list({ page: 1 }).then((p) => setRows(p.data)).catch(() => setRows([])).finally(() => setLoading(false)) }
+  useEffect(refresh, [])
+
+  const doOpen = async () => {
+    if (!oForm.account || oForm.opening === '') { setErr('Pick the account and enter the opening count.'); return }
+    setBusy(true); setErr('')
+    try {
+      await cashSessionsApi.open({ cashAccountId: Number(oForm.account), openingAmount: oForm.opening })
+      setOpenForm(false); setOForm({ account: '', opening: '' }); refresh()
+      notify.success('Session opened')
+    } catch (ex: any) { setErr(getErrorText(ex, 'Could not open the session')) }
+    finally { setBusy(false) }
+  }
+  const doClose = async () => {
+    if (!closeFor) return
+    if (counted === '') { setErr('Enter the counted amount.'); return }
+    setBusy(true); setErr('')
+    try {
+      await cashSessionsApi.close(closeFor.id, { countedClosing: counted })
+      setCloseFor(null); setCounted(''); refresh()
+      notify.success('Session closed', 'Awaiting a manager to verify')
+    } catch (ex: any) { setErr(getErrorText(ex, 'Could not close the session')) }
+    finally { setBusy(false) }
+  }
+  const verify = async (s: CashSession) => {
+    try { await cashSessionsApi.verify(s.id); refresh(); notify.success('Session verified') }
+    catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
+  }
+
+  const tone = (s: CashSession['status']) => s === 'Verified' ? 'green' : s === 'Closed' ? 'amber' : 'blue'
+
+  return (
+    <div>
+      <PageHead crumbs="Finance" title="Daily Cash Sessions" icon="clock" sub="Open, count and verify each cash account by day"
+        actions={<Can user={me} module="Cash Sessions" action="Create"><Btn variant="primary" icon="plus" onClick={() => { setErr(''); setOpenForm(true) }}>Open Session</Btn></Can>} />
+      <Card pad={0}>
+        {loading ? <LoadingBlock /> :
+        <Table cols={[{ label: 'Date' }, { label: 'Account' }, { label: 'Opening', align: 'right' }, { label: 'Expected', align: 'right' }, { label: 'Counted', align: 'right' }, { label: 'Variance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 170 }]}
+          empty="No sessions" rows={rows}
+          render={(s) => <>
+            <Td>{dateOnly(s.businessDate)}</Td>
+            <Td c="var(--tx-0)">{s.cashAccount?.name || '—'}</Td>
+            <Td align="right" mono>{money(s.openingAmount)}</Td>
+            <Td align="right" mono>{s.expectedClosing == null ? '—' : money(s.expectedClosing)}</Td>
+            <Td align="right" mono>{s.countedClosing == null ? '—' : money(s.countedClosing)}</Td>
+            <Td align="right" mono c={Number(s.variance) < 0 ? 'var(--bad)' : Number(s.variance) > 0 ? 'var(--warn)' : undefined}>{s.status === 'Open' ? '—' : money(s.variance)}</Td>
+            <Td align="center"><Badge tone={tone(s.status)} dot>{s.status}</Badge></Td>
+            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+              {s.status === 'Open' && me?.id === s.opener?.id && <Btn variant="primary" size="sm" onClick={() => { setCloseFor(s); setCounted(String(s.openingAmount)); setErr('') }}>Close</Btn>}
+              {s.status === 'Closed' && me?.id !== s.closer?.id && <Can user={me} module="Cash Sessions" action="Edit"><Btn variant="primary" size="sm" icon="check" onClick={() => verify(s)}>Verify</Btn></Can>}
+            </div></Td>
+          </>} />}
+      </Card>
+
+      <Modal open={openForm} onClose={() => setOpenForm(false)} width={420} title="Open Cash Session"
+        footer={<><Btn variant="plain" onClick={() => setOpenForm(false)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={doOpen} disabled={busy}>{busy ? 'Opening…' : 'Open'}</Btn></>}>
+        <ErrorBanner error={err} />
+        <div className="col gap-3">
+          <Field label="Cash account"><Select value={oForm.account} onChange={(e) => setOForm((s) => ({ ...s, account: e.target.value }))}>
+            <option value="">Select…</option>{tills.map((a) => <option key={a.id} value={a.id}>{a.name} — books {money(a.currentBalance)}</option>)}
+          </Select></Field>
+          <Field label="Opening cash counted"><Input type="number" step="0.01" value={oForm.opening} onChange={(e) => setOForm((s) => ({ ...s, opening: e.target.value }))} /></Field>
+        </div>
+      </Modal>
+
+      <Modal open={!!closeFor} onClose={() => setCloseFor(null)} width={420} title="Close Cash Session"
+        sub={closeFor ? `${closeFor.cashAccount?.name} — ${dateOnly(closeFor.businessDate)}` : undefined}
+        footer={<><Btn variant="plain" onClick={() => setCloseFor(null)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={doClose} disabled={busy}>{busy ? 'Closing…' : 'Close'}</Btn></>}>
+        <ErrorBanner error={err} />
+        <Field label="Closing cash counted"><Input type="number" step="0.01" value={counted} onChange={(e) => setCounted(e.target.value)} /></Field>
+      </Modal>
+    </div>
+  )
+}
+
+/* =========================== Finance Settings =========================== */
+
+const BOOL_SETTINGS: { key: string; label: string; help: string }[] = [
+  { key: 'require_cash_session', label: 'Require an open cash session for cash collections', help: 'A cashier must open the day’s session before recording cash loan payments.' },
+  { key: 'reversal_requires_approval', label: 'Reversing a completed finance transaction needs approval', help: 'Routes every reversal through the finance_reversal maker-checker.' },
+]
+
+export function FinanceSettingsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [settings, setSettings] = useState<FinanceSettings>({})
+  const [loading, setLoading] = useState(true)
+  const canEdit = userCan(me, 'Finance Settings', 'Edit')
+
+  useEffect(() => { financeSettingsApi.get().then(setSettings).catch(() => setSettings({})).finally(() => setLoading(false)) }, [])
+
+  const toggle = async (key: string, on: boolean) => {
+    setSettings((s) => ({ ...s, [key]: on ? '1' : '0' }))
+    try { setSettings(await financeSettingsApi.update({ [key]: on })); notify.success('Setting saved') }
+    catch (ex: any) { notify.error('Save failed', getErrorText(ex)); financeSettingsApi.get().then(setSettings) }
+  }
+
+  return (
+    <div>
+      <PageHead crumbs="Finance" title="Finance Settings" icon="shield" sub="Module-wide controls" />
+      {loading ? <LoadingBlock /> :
+      <Card>
+        <div className="col gap-4">
+          {BOOL_SETTINGS.map((s) => (
+            <label key={s.key} className="row gap-3" style={{ alignItems: 'flex-start', cursor: canEdit ? 'pointer' : 'default' }}>
+              <input type="checkbox" disabled={!canEdit} checked={(settings[s.key] ?? '0') === '1'} onChange={(e) => toggle(s.key, e.target.checked)} style={{ marginTop: 3 }} />
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tx-0)' }}>{s.label}</div>
+                <div className="t-2" style={{ fontSize: 12 }}>{s.help}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+      </Card>}
     </div>
   )
 }

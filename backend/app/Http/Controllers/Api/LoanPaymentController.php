@@ -84,6 +84,14 @@ class LoanPaymentController extends Controller
             'allocations.od_charge' => 'nullable|numeric|min:0',
             'allocations.other_charges' => 'nullable|numeric|min:0',
         ]);
+        // A cash collection needs an open cash session for the branch till when
+        // the Finance module requires it (off by default — see FinanceSetting).
+        if (($data['payment_method'] ?? 'Cash') === 'Cash' && \App\Models\FinanceSetting::bool('require_cash_session')) {
+            $till = \App\Models\CashAccount::branchPrimary((int) $loan->branch_id);
+            if ($till && !\App\Support\CashSessionService::openFor($till->id)) {
+                return response()->json(['message' => "Open today's cash session for {$till->name} before recording cash payments."], 422);
+            }
+        }
         $isSettlement = (bool) ($data['is_settlement'] ?? false);
         $isManual = ($data['allocation_mode'] ?? 'auto') === 'manual';
         $isCheque = ($data['payment_method'] ?? 'Cash') === 'Cheque';

@@ -903,6 +903,9 @@ export interface CashReconciliation {
   countedTotal?: number | string; variance?: number | string;
   notes?: string | null;
   reconciler?: { id: number; name: string } | null;
+  status?: 'Draft' | 'Verified';
+  verifier?: { id: number; name: string } | null;
+  verifiedAt?: string | null; lockedAt?: string | null;
 }
 
 export interface CashReconciliationSummary {
@@ -942,6 +945,7 @@ export const cashReconciliationsApi = {
   summary: (branchId: number, asAtDate: string) =>
     http.get('/cash-reconciliations/summary', { params: { branch_id: branchId, as_at_date: asAtDate } }).then((r) => camelize(r.data) as CashReconciliationSummary),
   save: (body: Partial<CashReconciliation>) => http.post('/cash-reconciliations', snakeize(body)).then((r) => camelize(r.data) as CashReconciliation),
+  verify: (id: number) => http.post(`/cash-reconciliations/${id}/verify`).then((r) => camelize(r.data) as CashReconciliation),
   remove: (id: number) => http.delete(`/cash-reconciliations/${id}`).then((r) => r.data),
 }
 
@@ -1053,6 +1057,42 @@ export interface CashFloatSettlement {
   settler?: { id: number; name: string } | null;
   approvalRequest?: FinanceApprovalRequest | null;
   openedAt?: string | null; closedAt?: string | null;
+}
+
+export interface CashSession {
+  id: number; cashAccountId: number; businessDate: string;
+  cashAccount?: { id: number; code: string | null; name: string; accountType?: CashAccountType } | null;
+  branch?: { id: number; name: string; code: string } | null;
+  openingAmount: number | string; openingExpected: number | string;
+  expectedClosing?: number | string | null; countedClosing?: number | string | null;
+  variance: number | string; shortage: number | string; excess: number | string;
+  denominations?: Record<string, number> | null; coinsAmount: number | string;
+  status: 'Open' | 'Closed' | 'Verified';
+  notes?: string | null;
+  opener?: { id: number; name: string } | null;
+  closer?: { id: number; name: string } | null;
+  verifier?: { id: number; name: string } | null;
+  openedAt?: string | null; closedAt?: string | null; verifiedAt?: string | null;
+}
+
+export const cashSessionsApi = {
+  list: (params?: { status?: string; cashAccountId?: number; from?: string; to?: string; page?: number }) =>
+    http.get('/cash-sessions', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as Paginated<CashSession>),
+  current: (cashAccountId: number) =>
+    http.get('/cash-sessions/current', { params: { cash_account_id: cashAccountId } }).then((r) => r.status === 204 ? null : (camelize(r.data) as CashSession)),
+  open: (body: { cashAccountId: number; openingAmount: number | string; notes?: string }) =>
+    http.post('/cash-sessions/open', snakeize(body)).then((r) => camelize(r.data) as CashSession),
+  close: (id: number, body: { countedClosing: number | string; denominations?: Record<string, number>; coinsAmount?: number | string }) =>
+    http.post(`/cash-sessions/${id}/close`, snakeize(body)).then((r) => camelize(r.data) as CashSession),
+  verify: (id: number, postVariance = true) =>
+    http.post(`/cash-sessions/${id}/verify`, { post_variance: postVariance }).then((r) => camelize(r.data) as CashSession),
+}
+
+export type FinanceSettings = Record<string, string>
+export const financeSettingsApi = {
+  get: () => http.get('/finance-settings').then((r) => r.data as FinanceSettings),
+  update: (settings: Record<string, string | boolean>) =>
+    http.put('/finance-settings', { settings }).then((r) => r.data as FinanceSettings),
 }
 
 export const cashFloatsApi = {

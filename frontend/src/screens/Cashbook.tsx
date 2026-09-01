@@ -461,6 +461,13 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
     } catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
+  const verify = async (r: CashReconciliation) => {
+    const ok = await notify.confirm({ title: `Verify and lock ${r.asAtDate}?`, msg: 'The count is frozen once verified — no more edits for this day.', okText: 'Verify' })
+    if (!ok) return
+    try { await cashReconciliationsApi.verify(r.id); loadHistory(); notify.success('Reconciliation verified') }
+    catch (ex: any) { notify.error('Verify failed', getErrorText(ex)) }
+  }
+
   return (
     <div>
       <PageHead crumbs="Cashbook Management" title="Cash Reconciliation" icon="adjust" sub="Daily cash-in-hand entry" />
@@ -569,7 +576,7 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
       </Card>
 
       <Card pad={0}>
-        <Table cols={[{ label: 'Date' }, { label: 'Total Cash', align: 'right' }, { label: 'Counted', align: 'right' }, { label: 'Variance', align: 'right' }, { label: 'Reconciled By' }, { label: '', align: 'right', w: 60 }]}
+        <Table cols={[{ label: 'Date' }, { label: 'Total Cash', align: 'right' }, { label: 'Counted', align: 'right' }, { label: 'Variance', align: 'right' }, { label: 'Reconciled By' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 120 }]}
           rows={history} empty="No reconciliations recorded yet."
           render={(r) => <>
             <Td><button className="mms-act" style={{ padding: '2px 6px', fontWeight: r.asAtDate === date ? 700 : 400 }} onClick={() => setDate(r.asAtDate)}>{r.asAtDate}</button></Td>
@@ -577,7 +584,17 @@ export function CashReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
             <Td align="right" mono>{money(r.countedTotal)}</Td>
             <Td align="right" mono c={Number(r.variance || 0) === 0 ? 'var(--ok)' : 'var(--bad)'}>{money(r.variance)}</Td>
             <Td>{r.reconciler?.name || '—'}</Td>
-            <Td align="right"><Can user={me} module="Cash Reconciliation" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(r)}><Icon n="trash" s={15} /></button></Can></Td>
+            <Td align="center">{r.status === 'Verified'
+              ? <span title={`by ${r.verifier?.name || '—'}`} style={{ fontSize: 11.5, color: 'var(--ok)', fontWeight: 600 }}>Verified</span>
+              : <span style={{ fontSize: 11.5, color: 'var(--tx-3)' }}>Draft</span>}</Td>
+            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+              {r.status !== 'Verified' && r.reconciler?.id !== me?.id && (
+                <Can user={me} module="Cash Reconciliation" action="Edit"><Btn size="sm" variant="primary" icon="check" onClick={() => verify(r)}>Verify</Btn></Can>
+              )}
+              {r.status !== 'Verified' && (
+                <Can user={me} module="Cash Reconciliation" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(r)}><Icon n="trash" s={15} /></button></Can>
+              )}
+            </div></Td>
           </>} />
       </Card>
     </div>

@@ -28,6 +28,8 @@ export const NAV: NavNode[] = [
     { id: 'finance/requests', label: 'Finance Requests', icon: 'receipt' },
     { id: 'finance/transfers', label: 'Transfers', icon: 'swap' },
     { id: 'finance/floats', label: 'Cash Floats', icon: 'coins' },
+    { id: 'finance/sessions', label: 'Daily Cash Sessions', icon: 'clock' },
+    { id: 'finance/settings', label: 'Finance Settings', icon: 'shield' },
     { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
   ] },
 
