@@ -15,6 +15,7 @@ class ApprovalRequest extends Model
     protected $fillable = [
         'approval_type_id', 'subject_id', 'requested_by', 'requested_at', 'reason', 'required_approvals',
         'status', 'first_approved_by', 'first_approved_at', 'second_approved_by', 'second_approved_at',
+        'third_approved_by', 'third_approved_at', 'fourth_approved_by', 'fourth_approved_at',
         'rejected_by', 'rejected_at', 'reject_reason',
     ];
 
@@ -22,8 +23,20 @@ class ApprovalRequest extends Model
         'requested_at' => 'datetime',
         'first_approved_at' => 'datetime',
         'second_approved_at' => 'datetime',
+        'third_approved_at' => 'datetime',
+        'fourth_approved_at' => 'datetime',
         'rejected_at' => 'datetime',
         'required_approvals' => 'integer',
+    ];
+
+    /** The four approver-slot column pairs, in order. Requests that need only
+     *  1–2 approvals never touch the last two — the existing controllers fill
+     *  first_/second_ inline; recordApproval() covers all four for Finance. */
+    public const APPROVER_SLOTS = [
+        ['first_approved_by', 'first_approved_at'],
+        ['second_approved_by', 'second_approved_at'],
+        ['third_approved_by', 'third_approved_at'],
+        ['fourth_approved_by', 'fourth_approved_at'],
     ];
 
     public function approvalType()
@@ -44,6 +57,22 @@ class ApprovalRequest extends Model
     public function secondApprover()
     {
         return $this->belongsTo(User::class, 'second_approved_by');
+    }
+
+    public function thirdApprover()
+    {
+        return $this->belongsTo(User::class, 'third_approved_by');
+    }
+
+    public function fourthApprover()
+    {
+        return $this->belongsTo(User::class, 'fourth_approved_by');
+    }
+
+    /** Only meaningful for the finance_request_payment / finance_transfer / finance_float_* buckets. */
+    public function financeRequest()
+    {
+        return $this->hasOne(FinanceRequest::class, 'approval_request_id');
     }
 
     public function rejecter()
@@ -85,13 +114,49 @@ class ApprovalRequest extends Model
 
     public function approvalsCount(): int
     {
-        return ($this->first_approved_by ? 1 : 0) + ($this->second_approved_by ? 1 : 0);
+        $count = 0;
+        foreach (self::APPROVER_SLOTS as [$byCol]) {
+            if ($this->$byCol) {
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
-    /** True once every user who has approved so far is accounted for — used to
-     *  refuse the same person a second approval slot on the same request. */
+    /** True once this user occupies an approver slot — used to refuse the same
+     *  person a second approval slot on the same request. */
     public function hasApproved(int $userId): bool
     {
-        return $this->first_approved_by === $userId || $this->second_approved_by === $userId;
+        foreach (self::APPROVER_SLOTS as [$byCol]) {
+            if ((int) $this->$byCol === $userId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Fills the next free approver slot with this user and stamps the time.
+     * Returns true once the request has reached required_approvals (the
+     * caller then executes / flips status). Throws if the user already
+     * approved or every slot is taken.
+     */
+    public function recordApproval(int $userId): bool
+    {
+        if ($this->hasApproved($userId)) {
+            throw new \RuntimeException('You have already approved this request.');
+        }
+        foreach (self::APPROVER_SLOTS as [$byCol, $atCol]) {
+            if (!$this->$byCol) {
+                $this->$byCol = $userId;
+                $this->$atCol = now();
+                $this->save();
+
+                return $this->approvalsCount() >= $this->required_approvals;
+            }
+        }
+        throw new \RuntimeException('This request already has every approval slot filled.');
     }
 }

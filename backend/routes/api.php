@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\PettyCashReplenishmentController;
 use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
+use App\Http\Controllers\Api\FinanceRequestController;
 use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\ManualJournalEntryController;
 use App\Http\Controllers\Api\BorrowingController;
@@ -421,6 +422,20 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('cash-reconciliations/summary', [CashReconciliationController::class, 'summary'])->middleware('perm:Cash Reconciliation,View');
     Route::post('cash-reconciliations', [CashReconciliationController::class, 'store'])->middleware('perm:Cash Reconciliation,Create');
     Route::delete('cash-reconciliations/{cashReconciliation}', [CashReconciliationController::class, 'destroy'])->middleware('perm:Cash Reconciliation,Delete');
+
+    // --- Finance: Requests (the single outbound-payment / transfer queue) ---
+    // Create / submit / cancel are requester actions; approve / reject are
+    // gated inline by ApprovalType::isAuthorized() on the request's approval
+    // code (finance_request_payment / finance_transfer / finance_float_issue),
+    // same maker-checker pattern as expense_approval; execute releases money.
+    Route::get('finance-requests', [FinanceRequestController::class, 'index'])->middleware('perm:Finance Requests,View');
+    Route::get('finance-requests/{financeRequest}', [FinanceRequestController::class, 'show'])->middleware('perm:Finance Requests,View');
+    Route::post('finance-requests', [FinanceRequestController::class, 'store'])->middleware('perm:Finance Requests,Create');
+    Route::post('finance-requests/{financeRequest}/submit', [FinanceRequestController::class, 'submit'])->middleware('perm:Finance Requests,Create');
+    Route::post('finance-requests/{financeRequest}/cancel', [FinanceRequestController::class, 'cancel'])->middleware('perm:Finance Requests,Create');
+    Route::post('finance-requests/{financeRequest}/approve', [FinanceRequestController::class, 'approve']);
+    Route::post('finance-requests/{financeRequest}/reject', [FinanceRequestController::class, 'reject']);
+    Route::post('finance-requests/{financeRequest}/execute', [FinanceRequestController::class, 'execute'])->middleware('perm:Finance Requests,Edit');
 
     // --- Masters: Expense Categories — a dedicated table, used by the
     // Expense Management module's category picker. ---
