@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\FinanceAuditController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\FinanceSettingController;
 use App\Http\Controllers\Api\FinanceDashboardController;
+use App\Http\Controllers\Api\FinanceReportController;
 use App\Http\Controllers\Api\FinanceRequestController;
 use App\Http\Controllers\Api\FinanceTransactionController;
 use App\Http\Controllers\Api\JournalEntryController;
@@ -448,6 +449,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Finance: Audit Log ---
     Route::get('finance-audit', [FinanceAuditController::class, 'index'])->middleware('perm:Finance Audit,View');
+
+    // --- Finance: Reports (daily-cash, cash-position, cash-flow, transfers, floats,
+    //     requests-pending, requests-unpaid, reversals, variance, audit) ---
+    Route::get('finance-reports/{type}', [FinanceReportController::class, 'show'])->middleware('perm:Finance Reports,View');
+    Route::get('finance-reports/{type}/pdf', [FinanceReportController::class, 'exportPdf'])->middleware('perm:Finance Reports,View');
 
     // --- Finance: Daily Cash Sessions (open / close / verify per cash account) ---
     Route::get('cash-sessions', [CashSessionController::class, 'index'])->middleware('perm:Cash Sessions,View');

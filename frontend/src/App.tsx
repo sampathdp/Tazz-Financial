@@ -59,6 +59,7 @@ const CashSessionsScreen = named(() => import('./screens/Finance'), 'CashSession
 const FinanceSettingsScreen = named(() => import('./screens/Finance'), 'FinanceSettingsScreen')
 const CashTransactionsScreen = named(() => import('./screens/Finance'), 'CashTransactionsScreen')
 const AuditLogScreen = named(() => import('./screens/Finance'), 'AuditLogScreen')
+const FinanceReportsScreen = named(() => import('./screens/FinanceReports'), 'FinanceReportsScreen')
 
 const CashbookScreen = named(() => import('./screens/Cashbook'), 'CashbookScreen')
 const CashTransfersScreen = named(() => import('./screens/Cashbook'), 'CashTransfersScreen')
@@ -162,6 +163,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'finance/settings': FinanceSettingsScreen,
   'finance/transactions': CashTransactionsScreen,
   'finance/audit': AuditLogScreen,
+  'finance/reports': FinanceReportsScreen,
   'loan/apps': LoanApplicationsScreen,
   'loan/active': ActiveLoansScreen,
   'loan/overdue': OverdueLoansScreen,

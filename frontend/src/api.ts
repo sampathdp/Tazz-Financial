@@ -2172,6 +2172,17 @@ export const cashBankReportsApi = {
   pdf: (type: CashBankReportType, params?: Record<string, any>) => reportPdf('cash-bank', type, params),
 }
 
+export type FinanceReportType =
+  | 'daily-cash' | 'cash-position' | 'cash-flow' | 'transfers' | 'floats'
+  | 'requests-pending' | 'requests-unpaid' | 'reversals' | 'variance' | 'audit'
+
+/** Finance & cash reports — see backend FinanceReportController. Each type returns its own JSON shape; screens read it untyped. */
+export const financeReportsApi = {
+  get: (type: FinanceReportType, params?: Record<string, any>) =>
+    http.get(`/finance-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: FinanceReportType, params?: Record<string, any>) => reportPdf('finance', type, params),
+}
+
 export type ExpenseReportType = 'summary' | 'list' | 'by-vendor'
 
 export const expenseReportsApi = {
