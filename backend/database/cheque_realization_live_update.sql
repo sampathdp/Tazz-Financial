@@ -15,7 +15,7 @@ ALTER TABLE `loan_post_dated_cheques` ADD CONSTRAINT `loan_post_dated_cheques_lo
 
 -- Keep Laravel's migration history in sync so `php artisan migrate` on this
 -- server doesn't try to re-run this file (and so `migrate:rollback` can undo
--- it later). Adjust the batch number if this server is already past 20.
+-- it later). Adjust the batch number if this server is already   past 20.
 INSERT INTO `migrations` (`migration`, `batch`) VALUES
   ('2026_07_29_000001_add_realized_at_to_cheque_tables', 20);
 
