@@ -133,6 +133,10 @@ per-line zero/double-sided rows before insert.
 
 ## F-3 — Per-account opening-balance entries are posted with `source_type = NULL`, not `'OpeningBalance'`
 
+> **STATUS: FIXED.** `OpeningBalanceLedgerPoster::post()` now passes
+> `'source_type' => 'OpeningBalance'` to `LedgerPoster::post()`. `INV-05` opening-balance test
+> now passes. Existing NULL-tagged rows in live data are cosmetic — re-tagging them is optional.
+
 **Severity:** P2 — audit-trail / traceability defect; no direct money misstatement.
 
 **Found by:** `tests/Feature/LedgerInvariantsCoreTest.php::test_inv05_manual_and_opening_balance_entries_are_exempt...` (plan INV-05).

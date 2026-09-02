@@ -49,6 +49,7 @@ class OpeningBalanceLedgerPoster
             ['account_id' => $leaf->id, 'debit' => $positive ? $abs : 0, 'credit' => $positive ? 0 : $abs],
             ['account_id' => $equity->id, 'debit' => $positive ? 0 : $abs, 'credit' => $positive ? $abs : 0],
         ], ($asOf ?? now())->toDateString(), [
+            'source_type' => 'OpeningBalance',
             'description' => "Opening balance - {$accountName}",
             'branch_id' => $branchId,
         ]);
