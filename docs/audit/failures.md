@@ -208,6 +208,12 @@ key (customer + amount + date + reference) within a short window.
 
 ## F-5 — Pawning auction shortfall is debited to the `1190` contra-asset (never funded for this ticket), so the loss never reaches the P&L
 
+> **STATUS: FIXED.** `PawningLedgerPoster::postAuctionSale()` now debits the shortfall to `5300`
+> (a P&L expense — direct write-off, appropriate since pawning has no provision build-up) instead
+> of `1190`. The loss lands on the income statement in the period the lot sells. `PWN-11` P&L test
+> now passes. (`5300` is named "Provision for Loan Losses" — renaming it to a generic
+> "Credit / Impairment Losses" line is a cosmetic follow-up.)
+
 **Severity:** P1 — same family as `ledger-matrix.md` Risk 2 (loss recognition), pawning path.
 
 **Found by:** `tests/Feature/PawningLedgerTest.php::test_pwn11_auction_shortfall_loss_is_not_recognised_in_the_pnl` (plan PWN-11).
@@ -269,6 +275,13 @@ leaves its advance stranded in `1120` forever and its interest income unrecorded
 ---
 
 ## F-7 — Pawning auction sale, surplus refund and forfeiture bypass FinancePostingService — the till GL leaf moves but `cash_accounts.current_balance` does not (confirms Risk 3)
+
+> **STATUS: FIXED.** `PawningLedgerPoster::postAuctionSale()` now runs through
+> `FinancePostingService::execute` (txn_type `COLLECTION`, till `+proceeds`) and
+> `postSurplusRefund()` through it (`CASH_OUT`, till `-surplus`) — so `cash_accounts.current_balance`
+> moves with the GL and a `cashbook_entries` mirror is written, both idempotent. `postSurplusForfeiture()`
+> stays a `LedgerPoster`-only entry (`Dr 2110 / Cr 4900`) — correct, it is not a cash event.
+> `PWN-11/12/13` cash tests now pass.
 
 **Severity:** P0 — `ledger-matrix.md` Risk 3, now empirically confirmed.
 

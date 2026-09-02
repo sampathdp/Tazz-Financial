@@ -137,14 +137,16 @@ class PawningLedgerPoster
     /**
      * A lot's hammer price, split by a strict waterfall so the entry always
      * balances regardless of whether proceeds cover the debt, land short, or
-     * run over: capital is recovered first (any shortfall debited to 1190,
-     * the same provision account Loan already uses for uncollectable
-     * balances — this is the same kind of loss, not a new category),
-     * interest is recognised only out of what's left after capital (never
-     * more than what was actually quoted at sale time), and anything beyond
-     * the full debt is credited to 2110 as owed back to the pledger, not
-     * kept as income. All three outcomes reduce to the same six-line shape;
-     * zero-amount legs are simply omitted rather than branched on.
+     * run over: capital is recovered first (any shortfall expensed to 5300 as
+     * a credit loss — pawning has no provision build-up, so this is a direct
+     * write-off straight to P&L, not a contra-asset relief), interest is
+     * recognised only out of what's left after capital (never more than what
+     * was actually quoted at sale time), and anything beyond the full debt is
+     * credited to 2110 as owed back to the pledger, not kept as income.
+     *
+     * Routed through FinancePostingService (txn_type COLLECTION) so the branch
+     * till's current_balance moves with the GL and a cashbook mirror is
+     * written — the auction proceeds are real cash into the drawer.
      */
     public static function postAuctionSale(PawningAuctionItem $item, ?int $userId = null): void
     {
@@ -173,7 +175,7 @@ class PawningLedgerPoster
 
         $lines = [['account_id' => $tillAccount->id, 'debit' => $proceeds, 'credit' => 0]];
         if ($capitalShortfall > 0) {
-            $lines[] = ['account_id' => ChartOfAccount::system('1190')->id, 'debit' => $capitalShortfall, 'credit' => 0];
+            $lines[] = ['account_id' => ChartOfAccount::system('5300')->id, 'debit' => $capitalShortfall, 'credit' => 0];
         }
         if ($capital > 0) {
             $lines[] = ['account_id' => ChartOfAccount::system('1120')->id, 'debit' => 0, 'credit' => $capital];
@@ -185,16 +187,29 @@ class PawningLedgerPoster
             $lines[] = ['account_id' => ChartOfAccount::system('2110')->id, 'debit' => 0, 'credit' => $surplus];
         }
 
-        LedgerPoster::post($lines, $entryDate, [
-            'source_type' => 'PawningAuctionItem',
-            'source_id' => $item->id,
-            'description' => "Pawning auction sale - {$pawning->code}",
+        FinancePostingService::execute([
+            'txn_type' => 'COLLECTION',
+            'amount' => (string) $proceeds,
+            'entry_date' => $entryDate,
             'branch_id' => $pawning->branch_id,
-            'posted_by' => $userId,
+            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => (string) $proceeds]],
+            'gl_lines' => $lines,
+            'gl_source_type' => 'PawningAuctionItem',
+            'gl_source_id' => $item->id,
+            'gl_description' => "Pawning auction sale - {$pawning->code}",
+            'description' => "Pawning auction sale - {$pawning->code}",
+            'source_module' => 'PawningAuctionItem',
+            'source_id' => $item->id,
+            'idempotency_key' => "pawning-auction-sale-{$item->id}",
+            'executed_by' => $userId,
         ]);
     }
 
-    /** Surplus actually paid out to the pledger — Dr 2110 (liability relieved), Cr till. */
+    /**
+     * Surplus actually paid out to the pledger — Dr 2110 (liability relieved),
+     * Cr till. Routed through FinancePostingService (CASH_OUT) so the till's
+     * current_balance drops with the GL.
+     */
     public static function postSurplusRefund(PawningAuctionItem $item, ?int $userId = null): void
     {
         $surplus = (float) $item->surplus_amount;
@@ -209,16 +224,26 @@ class PawningLedgerPoster
         if (!$till) {
             return;
         }
+        $tillLeaf = ChartOfAccount::forCashTill($till);
 
-        LedgerPoster::post([
-            ['account_id' => ChartOfAccount::system('2110')->id, 'debit' => $surplus, 'credit' => 0],
-            ['account_id' => ChartOfAccount::forCashTill($till)->id, 'debit' => 0, 'credit' => $surplus],
-        ], now()->toDateString(), [
-            'source_type' => 'PawningAuctionItem',
-            'source_id' => $item->id,
-            'description' => "Pawning auction surplus refunded - {$pawning->code}",
+        FinancePostingService::execute([
+            'txn_type' => 'CASH_OUT',
+            'amount' => (string) $surplus,
+            'entry_date' => now()->toDateString(),
             'branch_id' => $pawning->branch_id,
-            'posted_by' => $userId,
+            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => '-' . $surplus]],
+            'gl_lines' => [
+                ['account_id' => ChartOfAccount::system('2110')->id, 'debit' => $surplus, 'credit' => 0],
+                ['account_id' => $tillLeaf->id, 'debit' => 0, 'credit' => $surplus],
+            ],
+            'gl_source_type' => 'PawningAuctionItem',
+            'gl_source_id' => $item->id,
+            'gl_description' => "Pawning auction surplus refunded - {$pawning->code}",
+            'description' => "Pawning auction surplus refunded - {$pawning->code}",
+            'source_module' => 'PawningAuctionItem',
+            'source_id' => $item->id,
+            'idempotency_key' => "pawning-surplus-refund-{$item->id}",
+            'executed_by' => $userId,
         ]);
     }
 

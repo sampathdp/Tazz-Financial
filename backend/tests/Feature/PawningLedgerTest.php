@@ -465,7 +465,7 @@ class PawningLedgerTest extends TestCase
     public function test_pwn11_auction_shortfall_posts_the_documented_lines(): void
     {
         $c1120 = $this->acct('1120');
-        $c1190 = $this->acct('1190');
+        $c5300 = $this->acct('5300');
         [, $item] = $this->auctionedForShortfall();
 
         $this->assertBc('100000.00', (string) $item->outstanding_capital);
@@ -480,7 +480,7 @@ class PawningLedgerTest extends TestCase
 
         $lines = $this->linesFor('PawningAuctionItem', $item->id);
         $this->assertBc('90000.00', $lines[$this->tillLeaf->id]['debit'], 'Dr till leaf 90,000');
-        $this->assertBc('10000.00', $lines[$c1190]['debit'], 'Dr 1190 shortfall 10,000');
+        $this->assertBc('10000.00', $lines[$c5300]['debit'], 'Dr 5300 shortfall loss 10,000');
         $this->assertBc('100000.00', $lines[$c1120]['credit'], 'Cr 1120 100,000');
 
         // The entry balances on its own: 90,000 + 10,000 = 100,000.
@@ -492,10 +492,9 @@ class PawningLedgerTest extends TestCase
         $this->assertBc('-100000.00', bcsub($this->glBalance($c1120), $before1120, 2));
     }
 
-    /** F-5: the auction shortfall (real economic loss) is debited to the 1190
-     *  contra-asset — which was never funded for this ticket — instead of a P&L
-     *  expense, so the loss never reaches the income statement. */
-    public function test_pwn11_auction_shortfall_loss_is_not_recognised_in_the_pnl(): void
+    /** F-5 fixed: the auction shortfall is expensed to 5300 (P&L), not buried
+     *  in the unfunded 1190 contra-asset. */
+    public function test_pwn11_auction_shortfall_loss_is_recognised_in_the_pnl(): void
     {
         $c1190 = $this->acct('1190');
         $c5300 = $this->acct('5300');
@@ -506,18 +505,13 @@ class PawningLedgerTest extends TestCase
 
         $this->postJson("/api/pawning-auction-items/{$item->id}/sale", ['hammer_price' => 90000])->assertStatus(200);
 
-        // Actual: 1190 (Credit-normal) reduced by 10,000 -> delta -10,000.
-        $this->assertBc('-10000.00', bcsub($this->glBalance($c1190), $before1190, 2),
-            'the shortfall is debited to the 1190 contra-asset, driving it abnormally negative for this ticket');
-
-        // Correct: the 10,000 loss should land in a P&L expense (5300 or similar).
-        $this->assertBc('10000.00', bcsub($this->glBalance($c5300), $before5300, 2),
-            'F-5: pawning auction shortfall never hits P&L — it is buried in the unfunded 1190 contra-asset. See docs/audit/failures.md#f-5');
+        $this->assertBc('10000.00', bcsub($this->glBalance($c5300), $before5300, 2), '5300 credit-loss expense +10,000');
+        $this->assertBc('0.00', bcsub($this->glBalance($c1190), $before1190, 2), '1190 contra-asset untouched');
     }
 
-    /** F (Risk 3): the auction sale credits the till GL leaf but never moves
-     *  cash_accounts.current_balance, and writes no cashbook mirror. */
-    public function test_pwn11_auction_sale_does_not_move_physical_cash(): void
+    /** F-7 fixed: the auction sale now moves cash_accounts.current_balance
+     *  (routed through FinancePostingService) and writes a cashbook mirror. */
+    public function test_pwn11_auction_sale_moves_physical_cash(): void
     {
         [, $item] = $this->auctionedForShortfall();
 
@@ -526,18 +520,16 @@ class PawningLedgerTest extends TestCase
 
         $this->postJson("/api/pawning-auction-items/{$item->id}/sale", ['hammer_price' => 90000])->assertStatus(200);
 
-        // GL leaf DID move (LedgerPoster::post).
-        $this->assertBc(bcadd($tillLeafBefore, '90000.00', 2), $this->glBalance($this->tillLeaf->id), 'till leaf GL moved +90,000');
-
-        // F (Risk 3): the physical balance did NOT.
+        $this->assertBc(bcadd($tillLeafBefore, '90000.00', 2), $this->glBalance($this->tillLeaf->id), 'till leaf GL +90,000');
         $this->assertBc(bcadd($tillCashBefore, '90000.00', 2), (string) $this->till->fresh()->current_balance,
-            'F: auction sale never moves cash_accounts.current_balance (Risk 3). See docs/audit/failures.md');
+            'cash_accounts.current_balance +90,000 (F-7 fixed)');
+        $this->assertDatabaseHas('cashbook_entries', ['cash_account_id' => $this->till->id, 'direction' => 'In', 'amount' => '90000.00']);
     }
 
     // =============================================================
-    // PWN-12 — auction sale, surplus: GL only, till NOT moved (F: Risk 3)
+    // PWN-12 — auction sale, surplus: cash moves through FPS (F-7 fixed)
     // =============================================================
-    public function test_pwn12_auction_sale_surplus_gl_only_till_not_moved(): void
+    public function test_pwn12_auction_sale_surplus_moves_cash(): void
     {
         $c1120 = $this->acct('1120');
         $c4025 = $this->acct('4025');
@@ -571,15 +563,15 @@ class PawningLedgerTest extends TestCase
         $this->assertBc('21000.00', bcsub($this->glBalance($c2110), $before2110, 2), '2110 surplus payable +21,000');
         $this->assertBc('9000.00', bcsub($this->glBalance($c4025), $before4025, 2));
 
-        // F (Risk 3): physical cash not moved.
+        // F-7 fixed: physical cash moves with the GL.
         $this->assertBc(bcadd($tillCashBefore, '130000.00', 2), (string) $this->till->fresh()->current_balance,
-            'F: auction sale surplus does not move cash_accounts.current_balance (Risk 3)');
+            'cash_accounts.current_balance +130,000');
     }
 
     // =============================================================
-    // PWN-13 — surplus refund: Dr 2110 / Cr till leaf; till cash NOT moved (F: Risk 3)
+    // PWN-13 — surplus refund: cash moves through FPS (F-7 fixed)
     // =============================================================
-    public function test_pwn13_surplus_refund_gl_only_till_not_moved(): void
+    public function test_pwn13_surplus_refund_moves_cash(): void
     {
         $c2110 = $this->acct('2110');
         $type = $this->pawningType(['normal_rate_percent' => '9.000', 'special_rate_percent' => null, 'special_rate_days' => null]);
@@ -602,9 +594,9 @@ class PawningLedgerTest extends TestCase
         // 2110 relieved by 21,000 ; till leaf credited 21,000.
         $this->assertBc('-21000.00', bcsub($this->glBalance($c2110), $before2110, 2));
 
-        // F (Risk 3): physical cash paid out is invisible to the till.
+        // F-7 fixed: physical cash paid out drops the till balance with the GL.
         $this->assertBc(bcsub($tillCashBefore, '21000.00', 2), (string) $this->till->fresh()->current_balance,
-            'F: surplus refund does not move cash_accounts.current_balance (Risk 3)');
+            'cash_accounts.current_balance -21,000');
     }
 
     // =============================================================
