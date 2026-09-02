@@ -340,6 +340,14 @@ overstates the loan receivable and understates interest income by the amount col
 
 ## F-9 — Loan write-off credits `1100` for the full all-in outstanding, over-stating bad-debt expense (confirms Risk 2)
 
+> **STATUS: FIXED.** `LoanLedgerPoster::postWriteOff()` now recomputes the loan's remaining
+> PRINCIPAL from the schedule (`LoanPaymentAllocator::outstandingByBucket()['capital']`) and
+> credits `1100` for that only. Unpaid interest / penalty / charges were never recognised as
+> income or booked to a receivable, so writing the loan off just means they are never collected —
+> nothing to post. The `$amount` param (all-in outstanding) is now only an upper-bound hint.
+> Entry is `Dr 1190 min(provision, principal) / Dr 5300 remainder / Cr 1100 principal`.
+> `LOAN-18` now passes.
+
 **Severity:** P0 — `ledger-matrix.md` Risk 2, empirically confirmed.
 
 **Found by:** `tests/Feature/LoanLedgerTest.php::test_loan18_writeoff_over_credits_1100` (plan LOAN-18).
@@ -374,6 +382,15 @@ balance.
 ---
 
 ## F-10 — Loan principal waiver posts nothing to the GL; `1100` stays overstated, no loss in P&L (confirms Risk 8)
+
+> **STATUS: FIXED (GL side).** `LoanWaiverController::store()` now posts `Dr 5300 / Cr 1100` for a
+> `Principal` waiver, capped at the loan's remaining principal
+> (`LoanPaymentAllocator::outstandingByBucket()['capital']`) so an over-sized `amount` can't
+> credit more than what's on the books. Interest / Penalty / Charge waivers still post nothing
+> (unrecognised income — correct). `store()`/`destroy()` are now transactional, and `destroy()`
+> reverses the principal-waiver entry. `LOAN-27` now passes.
+> **Still open:** no maker-checker on waivers (route is `admin`-only, unlike write-off's two-person
+> approval) and `amount` is still unbounded at validation — tracked as a governance follow-up.
 
 **Severity:** P1 — `ledger-matrix.md` Risk 8, empirically confirmed.
 

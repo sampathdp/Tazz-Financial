@@ -118,23 +118,34 @@ class LoanLedgerPoster
     }
 
     /**
-     * A bad-debt write-off — allowance method: relieves whatever's already
-     * been provisioned via 1190 first (Dr 1190/Cr 1100), since that portion
-     * was already expensed when the provision was posted (see
-     * LoanProvisioning::post()) and hitting 5300 again here would double-
-     * count it. Only the uncovered remainder (e.g. not-yet-due installments,
-     * which the arrears-based provision base never included) is expensed
-     * directly (Dr 5300/Cr 1100), same as this method used to do for the
-     * whole amount before provisioning existed. LoanController::writeOff()
-     * gates on the provision already being fully posted before calling this.
+     * A bad-debt write-off — allowance method. Only the loan's remaining
+     * PRINCIPAL is relieved from 1100: unpaid interest / penalty / other
+     * charges were never recognised as income or booked to a receivable (this
+     * ledger recognises them only as collected — see splitLines()), so writing
+     * the loan off simply means they are never collected, exactly like a
+     * waiver of unrecognised income — nothing to post for them.
+     *
+     * Of that principal, whatever's already been provisioned is relieved
+     * against 1190 first (Dr 1190/Cr 1100), since that portion was already
+     * expensed when the provision was posted (LoanProvisioning::post()) and
+     * hitting 5300 again would double-count it. The uncovered remainder is
+     * expensed directly (Dr 5300/Cr 1100).
+     *
+     * `$amount` is the loan's all-in outstanding (what the caller passes) but
+     * is used here only as an upper bound / short-circuit — the principal to
+     * write off is recomputed from the schedule (LoanPaymentAllocator).
      */
     public static function postWriteOff(Loan $loan, float $amount, ?int $userId = null): void
     {
         if ($amount <= 0) {
             return;
         }
-        $fromProvision = min((float) $loan->provision_posted_amount, $amount);
-        $direct = round($amount - $fromProvision, 2);
+        $principal = round((float) LoanPaymentAllocator::outstandingByBucket($loan)['capital'], 2);
+        if ($principal <= 0) {
+            return;
+        }
+        $fromProvision = min((float) $loan->provision_posted_amount, $principal);
+        $direct = round($principal - $fromProvision, 2);
 
         $lines = [];
         if ($fromProvision > 0) {
@@ -143,7 +154,7 @@ class LoanLedgerPoster
         if ($direct > 0) {
             $lines[] = ['account_id' => ChartOfAccount::system('5300')->id, 'debit' => $direct, 'credit' => 0];
         }
-        $lines[] = ['account_id' => ChartOfAccount::system('1100')->id, 'debit' => 0, 'credit' => $amount];
+        $lines[] = ['account_id' => ChartOfAccount::system('1100')->id, 'debit' => 0, 'credit' => $principal];
 
         LedgerPoster::post($lines, now()->toDateString(), [
             'source_type' => 'Loan',

@@ -502,9 +502,9 @@ class LoanLedgerTest extends TestCase
     }
 
     // =============================================================
-    // LOAN-18 — write-off over-credits 1100 with never-booked interest/penalty (F: Risk 2)
+    // LOAN-18 — write-off relieves 1100 for principal only (F-9 fixed)
     // =============================================================
-    public function test_loan18_writeoff_over_credits_1100(): void
+    public function test_loan18_writeoff_relieves_only_the_principal(): void
     {
         $c1100 = $this->acct('1100');
         $c1190 = $this->acct('1190');
@@ -512,21 +512,18 @@ class LoanLedgerTest extends TestCase
 
         $loan = $this->approvedLoan(
             ['principal_amount' => '100000.00', 'interest_rate_percent' => '2.000', 'term_months' => 10],
-            ['interest_method' => 'flat'],
+            ['interest_method' => 'flat'], // default_charge_rate_percent 0 -> no penalty
         );
         $loan = $this->disburse($loan);
 
-        // Pay instalments 1-3 (principal 30,000 collected) -> this loan's 1100 contribution = 70,000.
+        // Pay instalments 1-3 (int 2,000 + pri 10,000 each) -> principal collected 30,000,
+        // this loan's 1100 contribution = 70,000, remaining principal = 70,000.
         $this->postJson("/api/loans/{$loan->id}/payments", ['amount' => 36000, 'payment_method' => 'Cash', 'paid_at' => '2026-06-01'])
             ->assertStatus(201);
         $loan->refresh();
 
-        // Simulate the write-off state: cache = unpaid principal 70,000 + unpaid interest 14,000
-        //   + accrued penalty 8,000 + charges 0 = 92,000 ; provision posted 45,000.
-        DB::table('credit_facilities')->where('id', $loan->id)->update([
-            'outstanding_balance_cache' => '92000.00', 'provision_posted_amount' => '45000.00',
-        ]);
-        // Post the provision that was "already expensed" (Dr 5300 / Cr 1190 45,000).
+        // Provision of 45,000 already posted+expensed (Dr 5300 / Cr 1190).
+        DB::table('credit_facilities')->where('id', $loan->id)->update(['provision_posted_amount' => '45000.00']);
         \App\Support\LedgerPoster::post([
             ['account_id' => $c5300, 'debit' => '45000.00', 'credit' => 0],
             ['account_id' => $c1190, 'debit' => 0, 'credit' => '45000.00'],
@@ -536,26 +533,22 @@ class LoanLedgerTest extends TestCase
         $before5300 = $this->glBalance($c5300);
         $before1190 = $this->glBalance($c1190);
 
-        // amount = outstanding_balance_cache = 92,000
+        // Caller passes the all-in outstanding, but postWriteOff recomputes principal from the schedule.
         LoanLedgerPoster::postWriteOff($loan->fresh(), 92000.00, $this->admin->id);
 
-        $lines = $this->linesFor('Loan', $loan->id); // write-off is source_type='Loan'
-        // Current behaviour: Dr 1190 45,000 + Dr 5300 47,000 / Cr 1100 92,000
         $writeOffEntry = DB::table('journal_entries')->where('source_type', 'Loan')->where('source_id', $loan->id)
             ->where('description', 'like', '%written off%')->value('id');
         $woLines = DB::table('journal_lines')->where('journal_entry_id', $writeOffEntry)->get()->keyBy('account_id');
-        $this->assertBc('45000.00', (string) $woLines[$c1190]->debit);
-        $this->assertBc('47000.00', (string) $woLines[$c5300]->debit);
-        $this->assertBc('92000.00', (string) $woLines[$c1100]->credit);
+        // Dr 1190 45,000 / Dr 5300 25,000 / Cr 1100 70,000
+        $this->assertBc('45000.00', (string) $woLines[$c1190]->debit, 'Dr 1190 relieve provision');
+        $this->assertBc('25000.00', (string) $woLines[$c5300]->debit, 'Dr 5300 uncovered remainder');
+        $this->assertBc('70000.00', (string) $woLines[$c1100]->credit, 'Cr 1100 principal only');
 
-        // This loan only had 70,000 of principal in 1100 -> crediting 92,000 drives its contribution to -22,000.
-        $this->assertBc('-92000.00', bcsub($this->glBalance($c1100), $before1100, 2),
-            'write-off credits 1100 for the full all-in outstanding, not just principal on the books');
-
-        // F (Risk 2): 5300 charged 47,000 for this write-off, but the real principal loss is only
-        // 70,000 - 45,000 already provided = 25,000. Over-expensed by 22,000.
-        $this->assertBc('25000.00', bcsub($this->glBalance($c5300), $before5300, 2),
-            'F-Risk2: bad-debt expense over-stated by the never-booked interest/penalty portion. See docs/audit/failures.md');
+        // This loan's 1100 contribution goes 70,000 -> 0 (not negative).
+        $this->assertBc('-70000.00', bcsub($this->glBalance($c1100), $before1100, 2));
+        // Total bad-debt expense for this loan = 45,000 (provision) + 25,000 (write-off) = 70,000 = the real principal loss.
+        $this->assertBc('25000.00', bcsub($this->glBalance($c5300), $before5300, 2), '5300 +25,000 (not 47,000)');
+        $this->assertBc('-45000.00', bcsub($this->glBalance($c1190), $before1190, 2), '1190 provision fully relieved');
     }
 
     // =============================================================
@@ -644,9 +637,9 @@ class LoanLedgerTest extends TestCase
     }
 
     // =============================================================
-    // LOAN-27 — principal waiver never hits the GL (F: Risk 8)
+    // LOAN-27 — principal waiver posts Dr 5300 / Cr 1100 (F-10 fixed)
     // =============================================================
-    public function test_loan27_principal_waiver_never_hits_the_gl(): void
+    public function test_loan27_principal_waiver_posts_to_the_gl(): void
     {
         $c1100 = $this->acct('1100');
         $c5300 = $this->acct('5300');
@@ -663,21 +656,38 @@ class LoanLedgerTest extends TestCase
 
         $before1100 = $this->glBalance($c1100);
         $before5300 = $this->glBalance($c5300);
-        $entriesBefore = DB::table('journal_entries')->count();
 
-        $this->postJson("/api/loans/{$loan->id}/waivers", [
+        $res = $this->postJson("/api/loans/{$loan->id}/waivers", [
             'waiver_type' => 'Principal', 'amount' => 70000, 'reason' => 'goodwill',
         ])->assertStatus(201);
 
-        // No journal entry at all.
-        $this->assertSame($entriesBefore, DB::table('journal_entries')->count(),
-            'F-Risk8: a Principal waiver posts NO ledger entry. See docs/audit/failures.md');
+        // Dr 5300 70,000 / Cr 1100 70,000
+        $lines = $this->linesFor('Loan', $loan->id);
+        $entryId = DB::table('journal_entries')->where('source_type', 'Loan')->where('source_id', $loan->id)
+            ->where('description', 'like', 'Principal waived%')->value('id');
+        $wl = DB::table('journal_lines')->where('journal_entry_id', $entryId)->get()->keyBy('account_id');
+        $this->assertBc('70000.00', (string) $wl[$c5300]->debit, 'Dr 5300');
+        $this->assertBc('70000.00', (string) $wl[$c1100]->credit, 'Cr 1100');
 
-        // Outstanding drops but 1100 is untouched -> asset overstated, no bad-debt expense.
-        $loan->refresh();
-        LoanPaymentAllocator::outstandingBalance($loan); // recompute
-        $this->assertBc('0.00', bcsub($this->glBalance($c1100), $before1100, 2), 'F-Risk8: 1100 not relieved by the principal waiver');
-        $this->assertBc('70000.00', bcsub($this->glBalance($c5300), $before5300, 2),
-            'F-Risk8: the 70,000 loss should hit P&L (5300 or a waiver-expense account) — it does not');
+        $this->assertBc('-70000.00', bcsub($this->glBalance($c1100), $before1100, 2), '1100 relieved by the waiver');
+        $this->assertBc('70000.00', bcsub($this->glBalance($c5300), $before5300, 2), 'loss recognised in P&L');
+
+        // A waiver amount larger than remaining principal is capped at the principal.
+        $loan2 = $this->disburse($this->approvedLoan(
+            ['principal_amount' => '50000.00', 'interest_rate_percent' => '2.000', 'term_months' => 5],
+            ['interest_method' => 'flat'],
+        ));
+        $b1100 = $this->glBalance($c1100);
+        $this->postJson("/api/loans/{$loan2->id}/waivers", ['waiver_type' => 'Principal', 'amount' => 999999])->assertStatus(201);
+        $this->assertBc('-50000.00', bcsub($this->glBalance($c1100), $b1100, 2), 'capped at remaining principal');
+
+        // Interest waiver posts nothing (unrecognised income).
+        $loan3 = $this->disburse($this->approvedLoan(
+            ['principal_amount' => '50000.00', 'interest_rate_percent' => '2.000', 'term_months' => 5],
+            ['interest_method' => 'flat'],
+        ));
+        $entriesBefore = DB::table('journal_entries')->count();
+        $this->postJson("/api/loans/{$loan3->id}/waivers", ['waiver_type' => 'Interest', 'amount' => 1000])->assertStatus(201);
+        $this->assertSame($entriesBefore, DB::table('journal_entries')->count(), 'interest waiver -> no GL entry');
     }
 }
