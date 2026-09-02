@@ -168,36 +168,69 @@ class LedgerInvariantsConcurrencyIdempotencyTest extends TestCase
     }
 
     /**
-     * F-4: replaying a logical FD deposit (two rows, identical data — what a
-     * client retry produces) posts TWICE. The idempotency key is derived from
-     * the fd_deposits row id, which is fresh each time, so it protects nothing
-     * at the request level.
+     * F-4 fixed: an Idempotency-Key header makes a retried create request replay
+     * the first response instead of posting a second time.
      */
-    public function test_inv11b_a_replayed_fd_deposit_should_post_once(): void
+    public function test_inv11b_idempotency_key_makes_a_retried_fd_deposit_post_once(): void
     {
+        $admin = \App\Models\User::whereHas('role', fn ($q) => $q->where('slug', 'admin'))->first()
+            ?? $this->markTestSkipped('No admin user seeded.');
+        $this->actingAs($admin, 'sanctum');
+
         $customerId = DB::table('customers')->insertGetId([
             'public_uuid' => (string) Str::uuid(), 'branch_id' => $this->branchId, 'code' => 'C' . Str::random(7),
             'full_name' => 'INV CC Customer', 'status' => 'Active', 'created_at' => now(), 'updated_at' => now(),
         ]);
-
-        $mk = fn () => FdDeposit::create([
-            'deposit_number' => 'DEP-' . Str::random(8), 'branch_id' => $this->branchId, 'customer_id' => $customerId,
-            'deposit_date' => now()->toDateString(), 'amount' => '500000.00', 'payment_method' => 'Cash',
-            'status' => 'Available', 'created_by' => 1,
-        ]);
-
+        $body = [
+            'branch_id' => $this->branchId, 'customer_id' => $customerId,
+            'deposit_date' => now()->toDateString(), 'amount' => 500000, 'payment_method' => 'Cash',
+        ];
+        $key = 'idem-' . Str::random(16);
         $tillBefore = (string) $this->till->fresh()->current_balance;
 
-        FdLedgerPoster::postDepositReceived($mk());
-        FdLedgerPoster::postDepositReceived($mk());   // the "retry"
+        $first = $this->withHeader('Idempotency-Key', $key)->postJson('/api/fd-deposits', $body)->assertStatus(201);
+        $retry = $this->withHeader('Idempotency-Key', $key)->postJson('/api/fd-deposits', $body)->assertStatus(201);
 
-        $posted = FinanceTransaction::where('source_module', 'FdDeposit')->where('branch_id', $this->branchId)->count();
+        // Same response replayed, one deposit row, one posting, till moved once.
+        $this->assertSame($first->json('id'), $retry->json('id'));
+        $this->assertSame('true', $retry->headers->get('Idempotency-Replayed'));
+        $this->assertSame(1, FdDeposit::where('customer_id', $customerId)->count(), 'one deposit row');
+        $this->assertSame(1, FinanceTransaction::where('source_module', 'FdDeposit')->where('branch_id', $this->branchId)->count(), 'one posting');
+        $this->assertSame(bcadd($tillBefore, '500000.00', 2), (string) $this->till->fresh()->current_balance, 'till moved once');
 
-        // Desired: one logical deposit -> one posting, till moved once.
-        $this->assertSame(1, $posted,
-            'F-4: no request-level idempotency on FD deposits — a retried deposit posts twice (Risk 6). See docs/audit/failures.md#f-4');
-        $this->assertSame(bcadd($tillBefore, '500000.00', 2), (string) $this->till->fresh()->current_balance,
-            'F-4: till moved twice for one logical FD deposit');
+        // The same key with a different body is rejected.
+        $this->withHeader('Idempotency-Key', $key)->postJson('/api/fd-deposits', ['amount' => 111] + $body)->assertStatus(422);
+
+        // Without the header, behaviour is unchanged (a genuine second deposit is allowed).
+        $this->flushHeaders();
+        $this->postJson('/api/fd-deposits', $body)->assertStatus(201);
+        $this->assertSame(2, FdDeposit::where('customer_id', $customerId)->count());
+    }
+
+    /** The same middleware covers bank transactions (and cashbook / commission pay). */
+    public function test_inv11b_idempotency_key_covers_bank_transactions(): void
+    {
+        $admin = \App\Models\User::whereHas('role', fn ($q) => $q->where('slug', 'admin'))->first()
+            ?? $this->markTestSkipped('No admin user seeded.');
+        $this->actingAs($admin, 'sanctum');
+
+        $bankRowId = DB::table('banks')->insertGetId(['name' => 'ICC Bank', 'created_at' => now(), 'updated_at' => now()]);
+        $bank = \App\Models\BankAccount::create([
+            'branch_id' => $this->branchId, 'bank_id' => $bankRowId, 'name' => 'ICC Bank Acc',
+            'account_number' => 'ACC' . Str::random(10), 'account_type' => 'Current', 'currency' => 'LKR',
+            'opening_balance' => 0, 'current_balance' => '100000.00', 'status' => 'Active',
+        ]);
+        $body = [
+            'bank_account_id' => $bank->id, 'txn_date' => now()->toDateString(), 'transaction_type' => 'Deposit',
+            'amount' => 50000, 'status' => 'Cleared', 'contra_kind' => 'Cash', 'contra_cash_account_id' => $this->till->id,
+        ];
+        $key = 'idem-' . Str::random(16);
+
+        $this->withHeader('Idempotency-Key', $key)->postJson('/api/bank-transactions', $body)->assertStatus(201);
+        $this->withHeader('Idempotency-Key', $key)->postJson('/api/bank-transactions', $body)->assertStatus(201);
+
+        $this->assertSame('150000.00', (string) $bank->fresh()->current_balance, 'bank moved once, not twice');
+        $this->assertSame(1, DB::table('bank_transactions')->where('bank_account_id', $bank->id)->count());
     }
 
     /** INV-11 event replay: re-dispatching the settled event does not re-run completion for an already-finished facility. */

@@ -269,7 +269,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Loan Management: Sales Executive Commissions ---
     Route::get('sales-executive-commissions', [SalesExecutiveCommissionController::class, 'index'])->middleware('perm:Sales Executive Commissions,View');
     // Admin-only, like other one-shot financial-payout actions (clear-cheque, waivers) — bypasses the permission grid entirely.
-    Route::post('sales-executive-commissions/{commission}/pay', [SalesExecutiveCommissionController::class, 'pay'])->middleware('admin');
+    Route::post('sales-executive-commissions/{commission}/pay', [SalesExecutiveCommissionController::class, 'pay'])->middleware(['admin', 'idempotency']);
     Route::post('sales-executive-commissions/{commission}/void', [SalesExecutiveCommissionController::class, 'void'])->middleware('admin');
 
     // --- Loan Management: Charges (Document/Legal/Valuation/Other due-type breakdown) ---
@@ -399,7 +399,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Bank Management: Bank Transactions (immutable ledger entries — void by deleting, never edited) ---
     Route::get('bank-transactions', [BankTransactionController::class, 'index'])->middleware('perm:Bank Transactions,View');
-    Route::post('bank-transactions', [BankTransactionController::class, 'store'])->middleware('perm:Bank Transactions,Create');
+    Route::post('bank-transactions', [BankTransactionController::class, 'store'])->middleware(['perm:Bank Transactions,Create', 'idempotency']);
     Route::post('bank-transactions/{bankTransaction}/clear', [BankTransactionController::class, 'clear'])->middleware('perm:Bank Transactions,Edit');
     Route::delete('bank-transactions/{bankTransaction}', [BankTransactionController::class, 'destroy'])->middleware('perm:Bank Transactions,Delete');
 
@@ -416,7 +416,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('cash-accounts/{cashAccount}', [CashAccountController::class, 'destroy'])->middleware('perm:Cashbook,Delete');
 
     Route::get('cashbook-entries', [CashbookEntryController::class, 'index'])->middleware('perm:Cashbook,View');
-    Route::post('cashbook-entries', [CashbookEntryController::class, 'store'])->middleware('perm:Cashbook,Create');
+    Route::post('cashbook-entries', [CashbookEntryController::class, 'store'])->middleware(['perm:Cashbook,Create', 'idempotency']);
     Route::delete('cashbook-entries/{cashbookEntry}', [CashbookEntryController::class, 'destroy'])->middleware('perm:Cashbook,Delete');
 
     // Cash Transfers retired in Phase 9 — superseded by Finance > Transfers
@@ -522,7 +522,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('fd-deposits', [FdDepositController::class, 'index'])->middleware('perm:Deposits,View');
     Route::get('fd-deposits/next-number', [FdDepositController::class, 'nextDepositNo'])->middleware('perm:Deposits,Create');
     Route::get('fd-deposits/{fdDeposit}', [FdDepositController::class, 'show'])->middleware('perm:Deposits,View');
-    Route::post('fd-deposits', [FdDepositController::class, 'store'])->middleware('perm:Deposits,Create');
+    Route::post('fd-deposits', [FdDepositController::class, 'store'])->middleware(['perm:Deposits,Create', 'idempotency']);
     Route::delete('fd-deposits/{fdDeposit}', [FdDepositController::class, 'destroy'])->middleware('perm:Deposits,Delete');
 
     // --- Funding Management: Fixed Deposits ---

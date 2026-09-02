@@ -2,8 +2,30 @@
 
 Findings discovered while **implementing and running** the test plans in
 [`test-plans/`](test-plans/). Each is a real defect confirmed by an executed test (or by a
-direct DB probe), not a code-review hypothesis. Application code was **not** modified to make any
-test pass — the failing test stays failing and is recorded here.
+direct DB probe), not a code-review hypothesis.
+
+**All 13 findings + O-1 are now FIXED** (F-13 deferred as a feature request). Each section below
+carries a `STATUS` line with the fix; the finding-tests were rewritten to assert the corrected
+behaviour and the full suite is green (134 passing). Fixes are in commits `f8680de`..`HEAD`
+(`git log --grep '(F-'`). The audit was written test-first: every finding-test asserted the
+correct behaviour and failed until its fix landed.
+
+| Finding | Severity | Fix commit subject |
+|---|---|---|
+| F-1 reversals don't net to zero | P0 | count Reversed entries in balance/report queries |
+| F-2 `chk_journal_lines_one_side` missing | P0 | restore constraint + per-line guard in LedgerPoster |
+| F-3 opening-balance `source_type=NULL` | P2 | tag as `OpeningBalance` |
+| F-4 no request idempotency | P1 | `Idempotency-Key` header middleware |
+| F-5 pawning auction shortfall not in P&L | P1 | expense the shortfall to 5300 |
+| F-6 pawning Bank/Cheque receipt posts nothing | P0 | post to 1030 |
+| F-7 auction sale/refund bypass FinancePostingService | P0 | route through FinancePostingService |
+| F-8 loan/SD Bank payment posts nothing | P0 | post to 1030 |
+| F-9 write-off over-credits 1100 | P0 | relieve 1100 for principal only |
+| F-10 principal waiver never hits GL | P1 | post Dr 5300 / Cr 1100 |
+| F-11 Pending bank txn moves balance | P1 | Pending posts nothing until `clear()` |
+| F-12 no expense accrual to 2300 | P1 | full accrual on approval |
+| F-13 no WHT/VAT split | P1 | **deferred** — feature request |
+| O-1 LoanProvisioning N+1 / dev 500 | — | eager-load `schedules.allocations.payment` |
 
 Environment: MySQL 8.4.7, database `tazz` (a persistent, already-populated dev database — **not**
 migrated fresh per test; tests isolate via `DatabaseTransactions` rollback, so every balance
@@ -167,6 +189,17 @@ invariant unverifiable by `source_type` alone.
 ---
 
 ## F-4 — No request-level idempotency: a retried FD deposit (and, by the same mechanism, bank transaction / manual cashbook / commission payment) posts twice
+
+> **STATUS: FIXED (Idempotency-Key header).** New `idempotency` route middleware
+> (`app/Http/Middleware/Idempotency.php` + `idempotency_keys` table, migration
+> `2026_09_02_000002`): a request carrying an `Idempotency-Key` header has its first response
+> stored against (key, method, path) and replayed for every retry — the handler never runs, so
+> it never posts twice. Reusing a key with a different body → 422; an in-flight key → 409;
+> without the header the middleware is a no-op. Applied to `POST /api/fd-deposits`,
+> `/api/bank-transactions`, `/api/cashbook-entries`, and `/api/sales-executive-commissions/{id}/pay`
+> — extend to other create routes by adding `'idempotency'` to their middleware list.
+> Verified by `INV-11b` (FD deposit + bank transaction). Clients should send a fresh UUID per
+> logical operation and reuse it on retry.
 
 **Severity:** P1 — confirms `ledger-matrix.md` Risk 6 empirically for the FD path.
 
@@ -537,11 +570,13 @@ lazy-loading-prevention workaround has been removed from the test files.
 
 ## Status by plan file
 
-| Plan file | Implemented | Pass | Fail (findings) | Notes |
-|---|---|---|---|---|
-| ledger-invariants.md | INV-01…09, 11, 13, 14, 15 | 15 | 5 (F-1, F-2×2, F-3, F-4) | INV-10, INV-12 deferred (see above). 3 test files: `LedgerInvariantsCoreTest`, `LedgerInvariantsRoundingDriftTest`, `LedgerInvariantsConcurrencyIdempotencyTest` |
-| pawning.md | PWN-01…09, 11…15, 18…20 | 14 | 5 (F-5, F-6, F-7×3) | `tests/Feature/PawningLedgerTest.php`. PWN-10/16/17 folded into other cases or n/a (no revaluation feature). |
-| loans.md | LOAN-01…05, 07…09, 12, 13, 15, 18, 21, 22, 23, 27 | 13 | 3 (F-8, F-9, F-10) | `tests/Feature/LoanLedgerTest.php`. LOAN-06/10/11/14/16/17/19/20/24/25/26 not yet implemented (P1/P2). O-1 observation. |
-| cash-floats.md | CF-02, 06(excess), 07, 09, 12, 13, 16, 17 | 7 | 1 (F-11) | `tests/Feature/CashFloatsLedgerTest.php`. CF-01/03/04/05/06(shortage)/08/09(bank)/10/11/15 already covered by the pre-existing suite (CashFloatFlowTest, FinanceTransferFlowTest, CashSessionFlowTest, BankTransactionFinancePostingTest). CF-14 not implemented. |
-| expenses.md | EXP-01, 02, 04, 05, 06, 07, 10, 11, 12, 13, 14 | 9 | 2 (F-12, F-13) | `tests/Feature/ExpenseLedgerTest.php`. EXP-03/08/09/15 covered by pre-existing ExpensePaymentRequestFlowTest or n/a (reimbursement has no dedicated flow). |
-| reconciliation.md | RECON-01, 03, 08, 10 | 4 | 0 | `tests/Feature/ReconciliationLedgerTest.php`. No new findings — the report layer ties correctly to the ledger; the defects are all in the posting layer. RECON-02 (PDF/export parity) needs render-level testing — deferred; RECON-04…07/09 folded into RECON-01/03. |
+All finding-tests have been rewritten to assert the fixed behaviour. **Full suite: 134 passing, 0 failing** (70 pre-existing + 64 new audit tests; no regressions).
+
+| Plan file | Test file(s) | Tests | Notes |
+|---|---|---|---|
+| ledger-invariants.md | `LedgerInvariantsCoreTest`, `LedgerInvariantsRoundingDriftTest`, `LedgerInvariantsConcurrencyIdempotencyTest` | 22 | INV-10 (loan lost-update — needs real parallelism), INV-12 (full-suite determinism — needs a CI scratch-schema job) still deferred. |
+| pawning.md | `PawningLedgerTest` | 19 | PWN-10/16/17 folded into other cases or n/a (no revaluation feature). |
+| loans.md | `LoanLedgerTest` | 16 | LOAN-06/10/11/14/16/17/19/20/24/25/26 (P1/P2) not implemented. |
+| cash-floats.md | `CashFloatsLedgerTest` | 8 | CF-01/03/04/05/06(shortage)/08/09(bank)/10/11/15 covered by the pre-existing suite. CF-14 not implemented. |
+| expenses.md | `ExpenseLedgerTest` | 11 | EXP-03/08/09/15 covered by `ExpensePaymentRequestFlowTest` or n/a. |
+| reconciliation.md | `ReconciliationLedgerTest` | 4 | RECON-02 (PDF/export parity) deferred; RECON-04…07/09 folded into RECON-01/03. |
