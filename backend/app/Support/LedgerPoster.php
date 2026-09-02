@@ -32,9 +32,24 @@ class LedgerPoster
 
         $totalDebit = '0';
         $totalCredit = '0';
-        foreach ($lines as $line) {
-            $totalDebit = bcadd($totalDebit, (string) ($line['debit'] ?? 0), 2);
-            $totalCredit = bcadd($totalCredit, (string) ($line['credit'] ?? 0), 2);
+        foreach ($lines as $i => $line) {
+            $debit = (string) ($line['debit'] ?? 0);
+            $credit = (string) ($line['credit'] ?? 0);
+            // Each line is strictly one-sided and non-zero — mirrors the
+            // chk_journal_lines_one_side DB constraint (see the
+            // 2026_09_02 restore migration). Caught here so a bad line fails
+            // with a clear message instead of a raw driver exception, and so
+            // the guard still holds if the DB constraint is ever missing again.
+            if (bccomp($debit, '0', 2) < 0 || bccomp($credit, '0', 2) < 0) {
+                throw new \RuntimeException("Journal line {$i} has a negative amount.");
+            }
+            $debitPositive = bccomp($debit, '0', 2) > 0;
+            $creditPositive = bccomp($credit, '0', 2) > 0;
+            if ($debitPositive === $creditPositive) {
+                throw new \RuntimeException("Journal line {$i} must have exactly one of debit / credit positive (got debit {$debit}, credit {$credit}).");
+            }
+            $totalDebit = bcadd($totalDebit, $debit, 2);
+            $totalCredit = bcadd($totalCredit, $credit, 2);
         }
         if (bccomp($totalDebit, $totalCredit, 2) !== 0) {
             throw new \RuntimeException("Journal entry does not balance: debit {$totalDebit} != credit {$totalCredit}.");

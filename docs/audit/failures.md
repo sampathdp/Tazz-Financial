@@ -82,6 +82,12 @@ reports for any prior period containing a reversal are retroactively wrong.
 
 ## F-2 — `chk_journal_lines_one_side` CHECK constraint is absent from the live database
 
+> **STATUS: FIXED.** Migration `2026_09_02_000001_restore_journal_lines_one_side_check`
+> re-adds the constraint (verified 0 violating rows first; the migration is idempotent and a
+> no-op if the constraint is already present). `LedgerPoster::post()` now also rejects any
+> per-line zero / two-sided / negative amount before insert, so the guard holds even if the DB
+> constraint goes missing again. `INV-06a` / `INV-06b` now pass.
+
 **Severity:** P0 — removes the only database-level backstop against malformed GL lines.
 
 **Found by:** `tests/Feature/LedgerInvariantsCoreTest.php::test_inv06a_journal_lines_check_constraint_rejects_zero_and_double_sided_rows` and `::test_inv06b...` (plan INV-06), plus a direct `information_schema.CHECK_CONSTRAINTS` probe.
