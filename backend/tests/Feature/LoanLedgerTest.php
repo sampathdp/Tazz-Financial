@@ -298,12 +298,13 @@ class LoanLedgerTest extends TestCase
     }
 
     // =============================================================
-    // LOAN-07 — Bank-method instalment payment posts NO ledger entry (F: Risk 1)
+    // LOAN-07 — Bank-method instalment payment posts Dr 1030 / Cr split (F-8 fixed)
     // =============================================================
-    public function test_loan07_bank_method_payment_posts_no_ledger_entry(): void
+    public function test_loan07_bank_method_payment_posts_to_1030_undeposited_funds(): void
     {
         $c1100 = $this->acct('1100');
         $c4010 = $this->acct('4010');
+        $c1030 = $this->acct('1030');
 
         $loan = $this->approvedLoan(
             ['principal_amount' => '100000.00', 'interest_rate_percent' => '2.000', 'term_months' => 10],
@@ -312,22 +313,26 @@ class LoanLedgerTest extends TestCase
         $loan = $this->disburse($loan);
         $before1100 = $this->glBalance($c1100);
         $before4010 = $this->glBalance($c4010);
+        $before1030 = $this->glBalance($c1030);
 
         $this->postJson("/api/loans/{$loan->id}/payments", [
             'amount' => 12000, 'payment_method' => 'Bank', 'paid_at' => '2026-04-01',
         ])->assertStatus(201);
 
-        // Operational side proceeded.
         $inst1 = $this->schedule($loan->id)->first();
         $this->assertSame('Paid', $inst1->status);
         $this->assertBc('12000.00', (string) $inst1->paid_amount);
 
-        // Correct: a GL entry reducing 1100 and recognising interest.
+        // Dr 1030 12,000 / Cr 1100 10,000 / Cr 4010 2,000
         $payment = DB::table('facility_payments')->where('credit_facility_id', $loan->id)->latest('id')->first();
         $lines = $this->linesFor('LoanPayment', $payment->id);
-        $this->assertNotEmpty($lines,
-            'F: Bank-method loan payment posts NO ledger entry — 1100 not relieved, 4010 not recognised (Risk 1). See docs/audit/failures.md');
-        $this->assertBc('-10000.00', bcsub($this->glBalance($c1100), $before1100, 2), 'F: 1100 not relieved on a Bank payment (Risk 1)');
+        $this->assertBc('12000.00', $lines[$c1030]['debit'], 'Dr 1030 undeposited funds');
+        $this->assertBc('10000.00', $lines[$c1100]['credit'], 'Cr 1100 principal');
+        $this->assertBc('2000.00', $lines[$c4010]['credit'], 'Cr 4010 interest');
+
+        $this->assertBc('-10000.00', bcsub($this->glBalance($c1100), $before1100, 2), '1100 relieved');
+        $this->assertBc('2000.00', bcsub($this->glBalance($c4010), $before4010, 2), '4010 recognised');
+        $this->assertBc('12000.00', bcsub($this->glBalance($c1030), $before1030, 2), '1030 holds the receipt until banked');
     }
 
     // =============================================================

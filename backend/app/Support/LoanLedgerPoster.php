@@ -285,17 +285,48 @@ class LoanLedgerPoster
     }
 
     /**
-     * Cash received right now — a regular payment (already allocated to the
-     * schedule/charges by the caller) or a settlement request (not allocated
-     * yet, held in the 2100 suspense account until approved).
+     * A payment received right now:
+     *   - Cash: through FinancePostingService (txn_type COLLECTION) — the
+     *     branch till's current_balance moves, a finance_transactions row is
+     *     recorded and a cashbook_entries mirror is written, atomic with the GL.
+     *   - Bank: a GL-only entry crediting the schedule split against 1030
+     *     Cheques / Undeposited Funds — the bank transfer has cleared but no
+     *     company bank_accounts row is captured on a plain receipt, so the
+     *     funds sit in 1030 until a Bank Deposit (contra = Ledger 1030) moves
+     *     them into the right bank account. Same landing account a realized
+     *     cheque uses (postChequeRealized).
+     *   - Cheque: nothing here — deferred to postChequeRealized() once it clears.
      *
-     * Since Phase 7 this goes through FinancePostingService (txn_type
-     * COLLECTION): the till's current_balance moves, a finance_transactions
-     * row is recorded and a cashbook_entries mirror is written — the same
-     * work CashbookPoster used to do separately, now atomic with the GL.
+     * A regular payment is already allocated to the schedule/charges by the
+     * caller; a settlement / manual-allocation request is not allocated yet and
+     * is parked in 2100 suspense until approved (see LoanPaymentAllocator).
      */
     public static function postCashReceipt(FacilityPayment $payment): void
     {
+        $isPending = in_array($payment->payment_type, ['Settlement', 'ManualAllocation'], true);
+        $label = $payment->payment_type === 'Settlement' ? 'settlement' : 'manual allocation';
+
+        if ($payment->payment_method === 'Bank') {
+            $credits = $isPending
+                ? [['account_id' => ChartOfAccount::system('2100')->id, 'credit' => (string) $payment->amount]]
+                : self::splitLines($payment);
+            if (!$credits) {
+                return;
+            }
+            $undeposited = ChartOfAccount::system('1030');
+            $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
+            $lines = array_merge(
+                [['account_id' => $undeposited->id, 'debit' => (string) $payment->amount, 'credit' => 0]],
+                array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
+            );
+            LedgerPoster::post($lines, $entryDate, self::meta(
+                $payment,
+                $isPending ? "Bank receipt pending {$label} approval - {$payment->code}" : "Loan payment (Bank) {$payment->code}",
+            ));
+
+            return;
+        }
+
         if ($payment->payment_method !== 'Cash') {
             return;
         }
@@ -304,11 +335,7 @@ class LoanLedgerPoster
             return;
         }
 
-        // Settlement and ManualAllocation hold the cash in 2100 suspense until
-        // approved (see LoanPaymentAllocator) — nothing splitLines() can
-        // credit yet.
-        if (in_array($payment->payment_type, ['Settlement', 'ManualAllocation'], true)) {
-            $label = $payment->payment_type === 'Settlement' ? 'settlement' : 'manual allocation';
+        if ($isPending) {
             self::postCollection($payment, $till, [
                 ['account_id' => ChartOfAccount::system('2100')->id, 'credit' => (string) $payment->amount],
             ], "Cash receipt pending {$label} approval - {$payment->code}");
@@ -350,10 +377,10 @@ class LoanLedgerPoster
         ]);
     }
 
-    /** A pending settlement's cash moves from suspense into what it actually paid off — called once LoanPaymentAllocator::applyAllocation() has run at approval time. Cash-method only, matching postCashReceipt()'s original suspense entry. */
+    /** A pending settlement's receipt moves from 2100 suspense into what it actually paid off — called once LoanPaymentAllocator::applyAllocation() has run at approval time. The reclass (Dr 2100 / Cr split) is method-agnostic; only Cheque defers (postChequeRealized). */
     public static function postSettlementApplied(FacilityPayment $payment): void
     {
-        if ($payment->payment_method !== 'Cash') {
+        if (!in_array($payment->payment_method, ['Cash', 'Bank'], true)) {
             return;
         }
         $credits = self::splitLines($payment);
@@ -368,10 +395,10 @@ class LoanLedgerPoster
     /** A pending manual-allocation payment's cash moves from suspense into
      *  what it was actually allocated to — called once
      *  LoanPaymentAllocator::applyManualAllocation() has run at approval time.
-     *  Cash-method only, same shape as postSettlementApplied(). */
+     *  Same shape as postSettlementApplied(). */
     public static function postManualAllocationApplied(FacilityPayment $payment): void
     {
-        if ($payment->payment_method !== 'Cash') {
+        if (!in_array($payment->payment_method, ['Cash', 'Bank'], true)) {
             return;
         }
         $credits = self::splitLines($payment);

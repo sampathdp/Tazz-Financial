@@ -242,6 +242,13 @@ chart of accounts if none fits — `5300` is loan-specific), not `1190`.
 
 ## F-6 — Pawning renewal / redemption by Bank or Cheque posts nothing (confirms Risk 1)
 
+> **STATUS: FIXED.** `PawningLedgerPoster::postCashReceipt()` now posts a GL-only entry for a
+> non-Cash receipt: `Dr 1030 Cheques / Undeposited Funds` against the `4025` / `1120` split, the
+> same landing account a realized cheque already uses. The receipt sits in `1030` until a Bank
+> Deposit (contra = Ledger `1030`) moves it into the right bank account. `PWN-08` now passes.
+> (Capturing the specific `bank_accounts` row at receipt time is a larger UI/schema change,
+> tracked separately — but the GL is no longer wrong.)
+
 **Severity:** P0 — `ledger-matrix.md` Risk 1, pawning path, now empirically confirmed.
 
 **Found by:** `tests/Feature/PawningLedgerTest.php::test_pwn08_bank_method_redemption_posts_no_ledger_entry` (plan PWN-08).
@@ -292,6 +299,13 @@ teller's drawer are all wrong by the cumulative amount.
 ---
 
 ## F-8 — Loan (and Speed Draft) instalment payment by Bank or Cheque posts nothing (confirms Risk 1)
+
+> **STATUS: FIXED.** `LoanLedgerPoster::postCashReceipt()` and
+> `SpeedDraftLedgerPoster::postCashReceipt()` now post a GL-only entry for a Bank receipt
+> (`Dr 1030 / Cr <schedule split>`), same landing account as a realized cheque; Cheque stays
+> deferred to `postChequeRealized()`. `postSettlementApplied()` / `postManualAllocationApplied()`
+> now also run for Bank so the `2100` suspense reclass happens. `LOAN-07` now passes. Capturing
+> the specific bank account at receipt time is a follow-up UI/schema change.
 
 **Severity:** P0 — `ledger-matrix.md` Risk 1, loan path.
 

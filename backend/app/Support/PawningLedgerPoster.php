@@ -69,21 +69,17 @@ class PawningLedgerPoster
     }
 
     /**
-     * A cash payment received now (renewal interest, or the split of a
-     * redemption) — books the interest (4025) / capital (1120) split as one
-     * COLLECTION transaction through FinancePostingService (till balance + GL
-     * + cashbook mirror). Replaced postInterestReceipt / postCapitalReceipt
-     * in Phase 7.
+     * A payment received now (renewal interest, or the split of a redemption) —
+     * books the interest (4025) / capital (1120) split.
+     *   - Cash: one COLLECTION transaction through FinancePostingService (till
+     *     balance + GL + cashbook mirror).
+     *   - Bank / Cheque: a GL-only entry against 1030 Cheques / Undeposited
+     *     Funds — the counter workflow captures no company bank account, so the
+     *     receipt sits in 1030 until a Bank Deposit (contra = Ledger 1030) moves
+     *     it into the right account.
      */
     public static function postCashReceipt(FacilityPayment $payment): void
     {
-        if ($payment->payment_method !== 'Cash') {
-            return;
-        }
-        $till = CashAccount::branchPrimary((int) $payment->branch_id);
-        if (!$till) {
-            return;
-        }
         $interest = (string) $payment->allocations()->sum('interest_applied');
         $capital = (string) $payment->allocations()->sum('principal_applied');
 
@@ -98,9 +94,24 @@ class PawningLedgerPoster
             return;
         }
         $amount = bcadd($interest, $capital, 2);
-        $tillLeaf = ChartOfAccount::forCashTill($till);
         $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
-        $description = "Pawning payment {$payment->code}";
+        $description = "Pawning payment ({$payment->payment_method}) {$payment->code}";
+
+        if ($payment->payment_method !== 'Cash') {
+            $lines = array_merge(
+                [['account_id' => ChartOfAccount::system('1030')->id, 'debit' => $amount, 'credit' => 0]],
+                array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
+            );
+            LedgerPoster::post($lines, $entryDate, self::meta($payment, $description));
+
+            return;
+        }
+
+        $till = CashAccount::branchPrimary((int) $payment->branch_id);
+        if (!$till) {
+            return;
+        }
+        $tillLeaf = ChartOfAccount::forCashTill($till);
 
         FinancePostingService::execute([
             'txn_type' => 'COLLECTION',

@@ -71,22 +71,16 @@ class SpeedDraftLedgerPoster
     }
 
     /**
-     * A cash payment received now — books the interest (4015) / penalty
-     * (4030) / capital (1110) split in one COLLECTION transaction through
-     * FinancePostingService, so the till balance moves, a
-     * finance_transactions row is recorded and a cashbook mirror is written,
-     * all atomic with the GL. Replaced postInterestReceipt /
-     * postPenaltyReceipt / postCapitalReceipt in Phase 7.
+     * A payment received now — books the interest (4015) / penalty (4030) /
+     * capital (1110) split.
+     *   - Cash: one COLLECTION transaction through FinancePostingService (till
+     *     balance + finance_transactions row + cashbook mirror, atomic with GL).
+     *   - Bank / Cheque: a GL-only entry against 1030 Cheques / Undeposited
+     *     Funds — a plain receipt captures no company bank account, so it sits
+     *     in 1030 until a Bank Deposit (contra = Ledger 1030) moves it.
      */
     public static function postCashReceipt(FacilityPayment $payment): void
     {
-        if ($payment->payment_method !== 'Cash') {
-            return;
-        }
-        $till = CashAccount::branchPrimary((int) $payment->branch_id);
-        if (!$till) {
-            return;
-        }
         $interest = (string) $payment->allocations()->sum('interest_applied');
         $penalty = (string) $payment->allocations()->sum('penalty_applied');
         $capital = (string) $payment->allocations()->sum('principal_applied');
@@ -105,6 +99,22 @@ class SpeedDraftLedgerPoster
             return;
         }
         $amount = bcadd(bcadd($interest, $penalty, 2), $capital, 2);
+
+        if ($payment->payment_method !== 'Cash') {
+            $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
+            $lines = array_merge(
+                [['account_id' => ChartOfAccount::system('1030')->id, 'debit' => $amount, 'credit' => 0]],
+                array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
+            );
+            LedgerPoster::post($lines, $entryDate, self::meta($payment, "Speed Draft payment ({$payment->payment_method}) {$payment->code}"));
+
+            return;
+        }
+
+        $till = CashAccount::branchPrimary((int) $payment->branch_id);
+        if (!$till) {
+            return;
+        }
         self::postCollection($payment, $till, $amount, $credits, "Speed Draft payment {$payment->code}");
     }
 

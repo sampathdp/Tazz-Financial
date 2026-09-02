@@ -382,37 +382,42 @@ class PawningLedgerTest extends TestCase
     }
 
     // =============================================================
-    // PWN-08 — Bank/Cheque redemption posts NOTHING (F: Risk 1)
+    // PWN-08 — Bank/Cheque redemption posts Dr 1030 / Cr split (F-6 fixed)
     // =============================================================
-    public function test_pwn08_bank_method_redemption_posts_no_ledger_entry(): void
+    public function test_pwn08_bank_method_redemption_posts_to_1030(): void
     {
         $c1120 = $this->acct('1120');
+        $c4025 = $this->acct('4025');
+        $c1030 = $this->acct('1030');
         $type = $this->pawningType();
         $ticket = $this->createTicket($type, 200000.00, [
             ['net_weight_grams' => '20.000', 'gross_weight_grams' => '21.000', 'rate_per_gram' => '15000.00'],
         ], startDate: '2026-03-01');
 
         $before1120 = $this->glBalance($c1120);
+        $before4025 = $this->glBalance($c4025);
+        $before1030 = $this->glBalance($c1030);
         $tillCashBefore = (string) $this->till->fresh()->current_balance;
 
+        // Redeem on 2026-03-16 (day 15, normal 3%) -> interest 6,000 ; total 206,000
         $this->postJson("/api/pawnings/{$ticket->id}/redeem", [
             'redemption_type' => 'Full', 'payment_method' => 'Bank', 'paid_at' => '2026-03-16',
         ])->assertStatus(200);
 
         $payment = DB::table('facility_payments')->where('credit_facility_id', $ticket->id)->latest('id')->first();
-
         $ticket->refresh();
-        // Operational side proceeded: ticket closed, article released.
         $this->assertSame('Closed', $ticket->status);
-        $this->assertBc('0.00', (string) $ticket->outstanding_balance_cache);
 
-        // Correct behaviour: a GL entry relieving 1120 + recording the bank receipt.
         $lines = $this->linesFor('PawningPayment', $payment->id);
-        $this->assertNotEmpty($lines,
-            'F: Bank-method pawning redemption posts NO ledger entry — 1120 stays on the books for a released ticket (Risk 1). See docs/audit/failures.md');
-        // And 1120 must have dropped by the capital.
-        $this->assertBc('-200000.00', bcsub($this->glBalance($c1120), $before1120, 2),
-            'F: 1120 not relieved on a Bank-method redemption (Risk 1)');
+        $this->assertBc('206000.00', $lines[$c1030]['debit'], 'Dr 1030 undeposited funds');
+        $this->assertBc('6000.00', $lines[$c4025]['credit'], 'Cr 4025 interest');
+        $this->assertBc('200000.00', $lines[$c1120]['credit'], 'Cr 1120 capital');
+
+        $this->assertBc('-200000.00', bcsub($this->glBalance($c1120), $before1120, 2), '1120 relieved');
+        $this->assertBc('6000.00', bcsub($this->glBalance($c4025), $before4025, 2), '4025 recognised');
+        $this->assertBc('206000.00', bcsub($this->glBalance($c1030), $before1030, 2), '1030 holds the receipt until banked');
+        // No physical till movement for a bank receipt.
+        $this->assertBc($tillCashBefore, (string) $this->till->fresh()->current_balance, 'till not touched');
     }
 
     // =============================================================
