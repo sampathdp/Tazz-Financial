@@ -24,7 +24,11 @@ use Illuminate\Support\Facades\DB;
  */
 class LoanProvisioning
 {
-    private const RELATIONS = ['schedules.allocations', 'charges', 'payments', 'waivers', 'loanDetail.loanType:id,name,code,default_charge_rate_percent,grace_period_days'];
+    // schedules.allocations.payment is required by LoanSummary::activePenaltyPaid()
+    // / collectedInterest(); without it those methods lazy-load `payment` per
+    // allocation — a silent N+1 in production and a hard LazyLoadingViolation
+    // in every non-production environment.
+    private const RELATIONS = ['schedules.allocations.payment:id,status,approval_status', 'charges', 'payments', 'waivers', 'loanDetail.loanType:id,name,code,default_charge_rate_percent,grace_period_days'];
 
     /** Pure calc, no DB writes. $loan is reloaded with exactly what LoanSummary::build() needs, so this never uses a caller's possibly-stale eager-loaded relations. */
     public static function evaluate(Loan $loan): array

@@ -13,7 +13,6 @@ use App\Support\LedgerPoster;
 use App\Support\LoanLedgerPoster;
 use App\Support\PawningLedgerPoster;
 use Carbon\Carbon;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -49,7 +48,6 @@ class ReconciliationLedgerTest extends TestCase
         }
         $this->admin = User::whereHas('role', fn ($q) => $q->where('slug', 'admin'))->first()
             ?? $this->markTestSkipped('No admin user seeded.');
-        Model::preventLazyLoading(false);
         $this->travelTo(Carbon::parse('2026-03-01 09:00:00'));
 
         $this->branchId = DB::table('branches')->insertGetId([

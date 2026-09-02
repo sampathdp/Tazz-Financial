@@ -13,7 +13,6 @@ use App\Support\CashSessionService;
 use App\Support\FinancePostingService;
 use App\Support\LoanLedgerPoster;
 use Carbon\Carbon;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -46,7 +45,6 @@ class CashFloatsLedgerTest extends TestCase
         }
         $this->admin = User::whereHas('role', fn ($q) => $q->where('slug', 'admin'))->first()
             ?? $this->markTestSkipped('No admin user seeded.');
-        Model::preventLazyLoading(false); // see failures.md O-1
         $this->actingAs($this->admin, 'sanctum');
     }
 

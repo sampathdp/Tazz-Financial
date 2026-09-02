@@ -451,14 +451,14 @@ the WHT-payable / VAT-payable control accounts cannot be trusted for tax filing.
 
 ## Observations (not formal findings — no direct money misstatement)
 
-**O-1 — `LoanProvisioning::RELATIONS` omits `schedules.allocations.payment`.**
-`app/Support/LoanProvisioning.php:27` eager-loads `schedules.allocations` but not `.payment`,
+**O-1 — `LoanProvisioning::RELATIONS` omits `schedules.allocations.payment`.** *(FIXED)*
+`app/Support/LoanProvisioning.php:27` eager-loaded `schedules.allocations` but not `.payment`,
 which `LoanSummary::activePenaltyPaid` (`app/Support/LoanSummary.php:329`) accesses. In production
-`Model::preventLazyLoading` is off (`app/Providers/AppServiceProvider.php:25`) so this is a silent
-N+1 on every loan payment; in dev / staging / any non-production environment it throws
-`LazyLoadingViolationException` → **HTTP 500 on recording a loan payment**. `LoanLedgerTest`
-disables lazy-loading prevention in `setUp` to match production and keep the ledger assertions
-meaningful.
+`Model::preventLazyLoading` is off (`app/Providers/AppServiceProvider.php:25`) so this was a silent
+N+1 on every loan payment; in dev / staging / any non-production environment it threw
+`LazyLoadingViolationException` → HTTP 500 on recording a loan payment.
+**Fix:** the relation is now `schedules.allocations.payment:id,status,approval_status`. The
+lazy-loading-prevention workaround has been removed from the test files.
 
 ---
 

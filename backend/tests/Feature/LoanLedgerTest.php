@@ -62,14 +62,6 @@ class LoanLedgerTest extends TestCase
         ]);
         $this->tillLeaf = ChartOfAccount::forCashTill($this->till->fresh());
 
-        // The loan payment path runs LoanProvisioning::evaluate() -> LoanSummary::build(),
-        // and LoanProvisioning::RELATIONS (LoanProvisioning.php:27) omits
-        // 'schedules.allocations.payment' which LoanSummary::activePenaltyPaid needs.
-        // In production Model::preventLazyLoading is OFF so this is a silent N+1;
-        // in dev/test it throws. Match production here — this file tests ledger
-        // correctness, not eager-load hygiene. (Observation O-1 in the report.)
-        \Illuminate\Database\Eloquent\Model::preventLazyLoading(false);
-
         $this->actingAs($this->admin, 'sanctum');
     }
 

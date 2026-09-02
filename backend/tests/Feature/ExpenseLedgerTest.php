@@ -47,7 +47,6 @@ class ExpenseLedgerTest extends TestCase
         }
         $this->admin = User::whereHas('role', fn ($q) => $q->where('slug', 'admin'))->first()
             ?? $this->markTestSkipped('No admin user seeded.');
-        Model::preventLazyLoading(false);
 
         $this->branchId = DB::table('branches')->insertGetId([
             'name' => 'EXP Branch', 'code' => 'EXP' . Str::random(3),
