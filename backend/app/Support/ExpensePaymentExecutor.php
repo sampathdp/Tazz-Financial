@@ -46,6 +46,12 @@ class ExpensePaymentExecutor
         return DB::transaction(function () use ($expense, $category, $spec, $userId, $method, $isCash, $amount, $entryDate) {
             [$srcType, $srcId, $srcLeaf] = self::resolveSource($method, $spec['cash_account_id'] ?? null, $spec['bank_account_id'] ?? null);
 
+            // The expense was recognised against its category account at approval
+            // time (ExpenseController::postAccrual — Dr category / Cr 2300).
+            // Payment relieves the 2300 payable, it does not hit the expense
+            // account again. Backfill the accrual for a pre-accrual expense.
+            \App\Http\Controllers\Api\ExpenseController::postAccrual($expense, $userId);
+
             $txn = FinancePostingService::execute([
                 'txn_type' => 'EXPENSE_PAYMENT',
                 'amount' => $amount,
@@ -53,7 +59,7 @@ class ExpensePaymentExecutor
                 'branch_id' => $expense->branch_id,
                 'movements' => [['account_type' => $srcType, 'account_id' => $srcId, 'delta' => '-' . $amount]],
                 'gl_lines' => [
-                    ['account_id' => $category->chart_of_account_id, 'debit' => $amount, 'credit' => 0, 'description' => $expense->description],
+                    ['account_id' => \App\Models\ChartOfAccount::system('2300')->id, 'debit' => $amount, 'credit' => 0, 'description' => $expense->description],
                     ['account_id' => $srcLeaf->id, 'debit' => 0, 'credit' => $amount],
                 ],
                 'gl_source_type' => 'Expense',

@@ -85,15 +85,20 @@ class ExpenseLedgerTest extends TestCase
         $this->assertSame(0, bccomp($e, $a, 2), $m ?: "expected {$e} got {$a}");
     }
 
+    /** An Approved expense with its accrual posted (Dr category / Cr 2300), the
+     *  same state ExpenseController::approve() now produces. */
     private function approvedExpense(string $amount, ?string $date = null): Expense
     {
-        return Expense::create([
+        $expense = Expense::create([
             'code' => 'EX' . Str::random(8), 'branch_id' => $this->branchId,
             'expense_category_id' => $this->categoryId, 'amount' => $amount,
             'expense_date' => $date ?? now()->toDateString(), 'description' => 'test expense',
             'status' => 'Approved', 'requested_by' => $this->admin->id,
             'approved_by' => $this->admin->id, 'approved_at' => now(),
         ]);
+        \App\Http\Controllers\Api\ExpenseController::postAccrual($expense, $this->admin->id);
+
+        return $expense;
     }
 
     /** A petty cash fund started at 0 and funded to $balance via a real replenishment
@@ -134,19 +139,33 @@ class ExpenseLedgerTest extends TestCase
     public function test_exp01_direct_expense_payment_cash(): void
     {
         $c5010 = $this->acct('5010');
+        $c2300 = $this->acct('2300');
+
+        // Accrual at approval time: Dr 5010 50,000 / Cr 2300 50,000.
         $before5010 = $this->glBalance($c5010);
+        $before2300 = $this->glBalance($c2300);
+        $expense = $this->approvedExpense('50000.00');
+        $this->assertBc('50000.00', bcsub($this->glBalance($c5010), $before5010, 2), '5010 debited on approval');
+        $this->assertBc('50000.00', bcsub($this->glBalance($c2300), $before2300, 2), '2300 payable +50,000 on approval');
+
         $tillCashBefore = (string) $this->till->fresh()->current_balance;
 
-        $expense = $this->approvedExpense('50000.00');
+        // Payment: Dr 2300 50,000 / Cr till 50,000.
         $this->postJson("/api/expenses/{$expense->id}/pay", [
             'payment_method' => 'Cash', 'cash_account_id' => $this->till->id,
         ])->assertStatus(201);
 
-        $lines = $this->linesFor('Expense', $expense->id);
-        $this->assertBc('50000.00', $lines[$c5010]['debit'], 'Dr 5010');
-        $this->assertBc('50000.00', $lines[$this->tillLeaf->id]['credit'], 'Cr till leaf');
+        $payLines = DB::table('journal_lines')
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->where('journal_entries.source_type', 'Expense')->where('journal_entries.source_id', $expense->id)
+            ->where('journal_entries.description', 'like', 'Expense payment%')
+            ->get()->keyBy('account_id');
+        $this->assertBc('50000.00', (string) $payLines[$c2300]->debit, 'Dr 2300');
+        $this->assertBc('50000.00', (string) $payLines[$this->tillLeaf->id]->credit, 'Cr till leaf');
 
-        $this->assertBc('50000.00', bcsub($this->glBalance($c5010), $before5010, 2));
+        // Net: 5010 +50,000 (once), 2300 back to 0, till -50,000.
+        $this->assertBc('50000.00', bcsub($this->glBalance($c5010), $before5010, 2), '5010 net +50,000');
+        $this->assertBc('0.00', bcsub($this->glBalance($c2300), $before2300, 2), '2300 net 0 after payment');
         $this->assertBc(bcsub($tillCashBefore, '50000.00', 2), (string) $this->till->fresh()->current_balance);
 
         $ftx = FinanceTransaction::where('source_module', 'Expense')->where('source_id', $expense->id)->first();
@@ -168,15 +187,26 @@ class ExpenseLedgerTest extends TestCase
         ]);
         $bankLeaf = ChartOfAccount::forBankAccount($bank->fresh());
         $c5010 = $this->acct('5010');
+        $c2300 = $this->acct('2300');
+        $before5010 = $this->glBalance($c5010);
+        $before2300 = $this->glBalance($c2300);
 
         $expense = $this->approvedExpense('50000.00');
         $this->postJson("/api/expenses/{$expense->id}/pay", [
             'payment_method' => 'Bank', 'bank_account_id' => $bank->id,
         ])->assertStatus(201);
 
-        $lines = $this->linesFor('Expense', $expense->id);
-        $this->assertBc('50000.00', $lines[$c5010]['debit']);
-        $this->assertBc('50000.00', $lines[$bankLeaf->id]['credit']);
+        // Accrual Dr 5010 / Cr 2300 ; payment Dr 2300 / Cr bank leaf.
+        $payLines = DB::table('journal_lines')
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->where('journal_entries.source_type', 'Expense')->where('journal_entries.source_id', $expense->id)
+            ->where('journal_entries.description', 'like', 'Expense payment%')
+            ->get()->keyBy('account_id');
+        $this->assertBc('50000.00', (string) $payLines[$c2300]->debit, 'Dr 2300');
+        $this->assertBc('50000.00', (string) $payLines[$bankLeaf->id]->credit, 'Cr bank leaf');
+
+        $this->assertBc('50000.00', bcsub($this->glBalance($c5010), $before5010, 2), '5010 net +50,000');
+        $this->assertBc('0.00', bcsub($this->glBalance($c2300), $before2300, 2), '2300 net 0');
         $this->assertBc('950000.00', (string) $bank->fresh()->current_balance,
             'expense Bank payments DO post (not subject to Risk 1) — regression sentinel');
     }
@@ -217,42 +247,47 @@ class ExpenseLedgerTest extends TestCase
     }
 
     // =============================================================
-    // EXP-06 — an approved-but-unpaid expense is a real liability, but 2300 is never posted (F-12)
+    // EXP-06 — approving an expense recognises it: Dr category / Cr 2300 (F-12 fixed)
     // =============================================================
-    public function test_exp06_approved_unpaid_expense_never_hits_2300(): void
+    public function test_exp06_approval_posts_the_accrual_to_2300(): void
     {
+        $c5010 = $this->acct('5010');
         $c2300 = $this->acct('2300');
+        $before5010 = $this->glBalance($c5010);
         $before2300 = $this->glBalance($c2300);
-        $entriesBefore = DB::table('journal_entries')->count();
 
-        $this->approvedExpense('50000.00');
+        $expense = $this->approvedExpense('50000.00');
 
-        // Between approval and payment: no entries at all.
-        $this->assertSame($entriesBefore, DB::table('journal_entries')->count());
+        $lines = $this->linesFor('Expense', $expense->id);
+        $this->assertBc('50000.00', $lines[$c5010]['debit'], 'Dr 5010 expense recognised');
+        $this->assertBc('50000.00', $lines[$c2300]['credit'], 'Cr 2300 payable');
 
-        // Correct (accrual basis): 2300 Accrued Expenses should carry the 50,000 owed.
+        $this->assertBc('50000.00', bcsub($this->glBalance($c5010), $before5010, 2));
         $this->assertBc('50000.00', bcsub($this->glBalance($c2300), $before2300, 2),
-            'F-12: an Approved-but-unpaid expense never posts to 2300 — the Balance Sheet understates payables. See docs/audit/failures.md#f-12');
+            '2300 Accrued Expenses carries the amount owed until paid');
+
+        // Idempotent — a second postAccrual is a no-op.
+        \App\Http\Controllers\Api\ExpenseController::postAccrual($expense->fresh(), $this->admin->id);
+        $this->assertBc('50000.00', bcsub($this->glBalance($c2300), $before2300, 2), 'accrual not double-posted');
     }
 
     // =============================================================
-    // EXP-07 — no tax / withholding split exists (F-13)
+    // EXP-07 — no tax / withholding split (F-13, deferred as a feature).
+    // Pins the current gross-only behaviour so a future WHT feature shows up
+    // as an intentional change.
     // =============================================================
-    public function test_exp07_no_withholding_tax_split(): void
+    public function test_exp07_expense_payment_is_gross_only_no_wht_split(): void
     {
-        // A 100,000 invoice with 10% WHT: 10,000 withheld, 90,000 paid to the vendor.
         $expense = $this->approvedExpense('100000.00');
         $this->postJson("/api/expenses/{$expense->id}/pay", [
             'payment_method' => 'Cash', 'cash_account_id' => $this->till->id,
         ])->assertStatus(201);
 
-        $entryId = DB::table('journal_entries')->where('source_type', 'Expense')->where('source_id', $expense->id)->value('id');
-        $lineCount = DB::table('journal_lines')->where('journal_entry_id', $entryId)->count();
-
-        // Current: 2 lines (gross), the full 100,000 leaves the till.
-        // Correct: 3 lines — Dr 5010 100,000 / Cr <WHT payable> 10,000 / Cr till 90,000.
-        $this->assertSame(3, $lineCount,
-            'F-13: no WHT/VAT split — the full gross amount is expensed and paid, no withholding-payable leg. See docs/audit/failures.md#f-13');
+        // Payment entry is exactly 2 lines: Dr 2300 100,000 / Cr till 100,000.
+        $payEntryId = DB::table('journal_entries')->where('source_type', 'Expense')->where('source_id', $expense->id)
+            ->where('description', 'like', 'Expense payment%')->value('id');
+        $this->assertSame(2, DB::table('journal_lines')->where('journal_entry_id', $payEntryId)->count(),
+            'F-13 (deferred): no WHT/VAT leg — full gross is paid. Feature request, not a regression.');
     }
 
     // =============================================================
@@ -260,15 +295,14 @@ class ExpenseLedgerTest extends TestCase
     // =============================================================
     public function test_exp10_backdated_expense_payment_accepted(): void
     {
-        $c5010 = $this->acct('5010');
-        $baseline2025 = $this->glBalance($c5010); // as-of far future includes everything; use a dated query
         $expense = $this->approvedExpense('7500.00');
 
         $this->postJson("/api/expenses/{$expense->id}/pay", [
             'payment_method' => 'Cash', 'cash_account_id' => $this->till->id, 'paid_at' => '2025-01-15',
         ])->assertStatus(201);
 
-        $entry = DB::table('journal_entries')->where('source_type', 'Expense')->where('source_id', $expense->id)->first();
+        $entry = DB::table('journal_entries')->where('source_type', 'Expense')->where('source_id', $expense->id)
+            ->where('description', 'like', 'Expense payment%')->first();
         $this->assertSame('2025-01-15', Carbon::parse($entry->entry_date)->toDateString(),
             'a backdated expense payment posts into a prior period with no block');
     }

@@ -133,7 +133,7 @@ change workflow state (application, approval, valuation) are listed where releva
 |43|Expense payment — direct|`pay()` `:162` → `ExpensePaymentExecutor::pay` `:31`|`FinancePostingService::execute` `:49` — Dr `expense_categories.chart_of_account_id` / Cr till or bank leaf. Idempotency `expense-payment-{id}` `:65`|**yes** `ExpensePaymentExecutor.php:46`|`PaymentVoucher` void → FPS reverse|
 |44|Expense payment — request path|`requestPayment()` `:180` → `FinanceRequestService` → `CompleteExpensePaymentOnSettled` listener|`FinanceRequestService::execute` `:236` (offset = category account, from `meta` `ExpenseController.php:211`)|**yes** `FinanceRequestService.php:287`; voucher written in a separate listener txn|contra|
 |45|Payment voucher void|`PaymentVoucherController::void` `:42`|`FinancePostingService::reverse` `:47` (or legacy `LedgerPoster::reverse` `:58`)|**yes** `:42`|self|
-|46|Tax / withholding split|**DOES NOT EXIST** — expense payment posts the gross `expense.amount` with no WHT/VAT leg (`ExpensePaymentExecutor.php:55-58`)|n/a|n/a|n/a|
+|46|Tax / withholding split|**DOES NOT EXIST** — expense payment posts the gross `expense.amount` with no WHT/VAT leg (`ExpensePaymentExecutor.php`). Confirmed by `EXP-07`; deferred as a feature request — see `failures.md` F-13.|n/a|n/a|n/a|
 |47|Reimbursement|no dedicated flow — handled as an ordinary expense (#41–43)|—|—|—|
 
 ### Petty cash (`PettyCashVoucherController.php`, `PettyCashReplenishmentController.php`)

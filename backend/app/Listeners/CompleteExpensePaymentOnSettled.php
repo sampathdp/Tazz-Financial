@@ -37,6 +37,10 @@ class CompleteExpensePaymentOnSettled
 
         try {
             DB::transaction(function () use ($expense, $txn, $method, $meta, $request) {
+                // Backfill the Dr category / Cr 2300 accrual for an expense that
+                // was approved before it started being posted automatically —
+                // the payment above already relieved 2300.
+                \App\Http\Controllers\Api\ExpenseController::postAccrual($expense, $request->executed_by);
                 ExpensePaymentExecutor::recordVoucher($expense, $txn, $method, $meta['cheque_no'] ?? null, $request->executed_by);
                 $request->update(['status' => 'Completed', 'closed_at' => now()]);
             });

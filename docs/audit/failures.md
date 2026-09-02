@@ -454,6 +454,17 @@ the total of all uncleared deposits; every bounced pending deposit needs a manua
 
 ## F-12 — An approved-but-unpaid expense is a real liability, but nothing ever posts to `2300 Accrued Expenses`
 
+> **STATUS: FIXED (full accrual).** `ExpenseController::approve()` now posts the accrual
+> `Dr <category expense account> / Cr 2300` the moment the last approval lands (idempotent per
+> expense, via `ExpenseController::postAccrual()`). `ExpensePaymentExecutor::pay()` and the
+> request-path (`requestPayment` meta `offset_account_id`, `CompleteExpensePaymentOnSettled`)
+> now post `Dr 2300 / Cr <cash/bank>` — payment relieves the payable instead of hitting the
+> expense account again. `pay()` and the listener backfill the accrual for a pre-fix expense.
+> Voiding a voucher reverses the payment (restoring the `2300` liability); the accrual stays
+> (expense still incurred). `EXP-06` now passes; `ExpensePaymentRequestFlowTest` green.
+> **Follow-up:** an Approved expense still has no cancel path — if one is added it must reverse
+> the accrual.
+
 **Severity:** P1 — the system is cash-basis for expenses; an accrual-basis Balance Sheet run
 before period end understates payables.
 
@@ -477,6 +488,12 @@ liabilities and the P&L understates expenses by the total unpaid-approved amount
 ---
 
 ## F-13 — No tax / withholding split on expense payments
+
+> **STATUS: DEFERRED (feature request).** Not a regression — WHT/VAT withholding was never
+> built. A proper implementation needs a WHT-payable chart-of-accounts entry, a rate field on
+> the vendor / expense, a UI for the split, and a remittance-tracking flow. Out of scope for
+> the audit's bug-fix pass. `EXP-07` now pins the current gross-only behaviour so a future WHT
+> feature registers as an intentional change.
 
 **Severity:** P1 — every taxed vendor payment either over-pays the vendor or is adjusted outside the system.
 

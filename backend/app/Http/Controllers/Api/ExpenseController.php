@@ -102,9 +102,39 @@ class ExpenseController extends Controller
 
             $expense->update(['status' => 'Approved', 'approved_by' => $request->user()->id, 'approved_at' => now()]);
             $req->update(['status' => 'Approved']);
+
+            self::postAccrual($expense->fresh(), $request->user()->id);
         });
 
         return $expense->fresh();
+    }
+
+    /**
+     * Recognises an approved expense as it is incurred (accrual basis):
+     * Dr the category's expense account / Cr 2300 Accrued Expenses. Payment
+     * later relieves 2300 rather than hitting the expense account again
+     * (see ExpensePaymentExecutor). Idempotent per expense.
+     */
+    public static function postAccrual(Expense $expense, ?int $userId): void
+    {
+        $category = $expense->category;
+        if (!$category || !$category->chart_of_account_id) {
+            return; // guarded again at pay() time with a clear message
+        }
+        if (\App\Models\JournalEntry::where('source_type', 'Expense')->where('source_id', $expense->id)
+            ->where('description', 'like', 'Expense accrued%')->exists()) {
+            return;
+        }
+        \App\Support\LedgerPoster::post([
+            ['account_id' => $category->chart_of_account_id, 'debit' => (string) $expense->amount, 'credit' => 0, 'description' => $expense->description],
+            ['account_id' => \App\Models\ChartOfAccount::system('2300')->id, 'debit' => 0, 'credit' => (string) $expense->amount],
+        ], ($expense->expense_date ?? now())->toDateString(), [
+            'source_type' => 'Expense',
+            'source_id' => $expense->id,
+            'description' => "Expense accrued {$expense->code}",
+            'branch_id' => $expense->branch_id,
+            'posted_by' => $userId,
+        ]);
     }
 
     public function reject(Request $request, Expense $expense)
@@ -208,7 +238,9 @@ class ExpenseController extends Controller
             'meta' => [
                 'gl_source_type' => 'Expense',
                 'gl_source_id' => $expense->id,
-                'offset_account_id' => $category->chart_of_account_id,
+                // Payment relieves the 2300 payable (recognised at approval time);
+                // it does not hit the category expense account again.
+                'offset_account_id' => \App\Models\ChartOfAccount::system('2300')->id,
                 'payment_method' => $method,
                 'cheque_no' => $data['cheque_no'] ?? null,
                 'source_bank_account_id' => $method === 'Cash' ? null : ($data['bank_account_id'] ?? null),

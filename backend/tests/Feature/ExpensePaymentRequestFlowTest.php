@@ -77,7 +77,8 @@ class ExpensePaymentRequestFlowTest extends TestCase
             'requested_by' => $this->officer->id,
             'meta' => [
                 'gl_source_type' => 'Expense', 'gl_source_id' => $this->expense->id,
-                'offset_account_id' => $this->expense->category->chart_of_account_id,
+                // Payment relieves 2300 (recognised at approval), not the expense account.
+                'offset_account_id' => \App\Models\ChartOfAccount::system('2300')->id,
                 'payment_method' => 'Cash', 'cheque_no' => null, 'source_bank_account_id' => null,
             ],
         ])->fresh();
