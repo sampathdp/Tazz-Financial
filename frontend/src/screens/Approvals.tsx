@@ -1,11 +1,22 @@
 /* Tazz Investment & Credit — Approvals inbox: admin-only consolidated view of
-   every loan-cancel / payment-void request awaiting a second person's sign-off.
+   every request awaiting a second person's sign-off, flattened into one queue
+   ordered oldest-first (FIFO — the order approvers should work through them).
+
+   The backend (ApprovalController::index) still returns eight separate buckets;
+   this screen merges them into a single list, tags each row with its `kind`,
+   and dispatches Approve/Reject to the right endpoint per kind.
+
    Requester and approvers are always different people (enforced server-side —
-   see LoanController::approveCancelRequest() / LoanPaymentController::approveVoidRequest()),
-   so this page hides the Approve/Reject buttons for anyone who submitted or
-   already approved a given request, rather than letting the click round-trip
-   just to bounce off the 422. */
-import { useEffect, useState } from 'react'
+   see each controller's approve* method), so canAct() hides the Approve/Reject
+   buttons for anyone who submitted or already approved a given request, rather
+   than letting the click round-trip just to bounce off the 422.
+
+   The "Mine to approve" filter (default) shows only rows this user can act on;
+   "All pending" shows everything, so a requester can still watch their own
+   request's progress. Loan Applications / Speed Drafts have no approve action
+   here (they're approved from their own detail screens) so they only appear
+   under "All pending", with an Open link. */
+import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Table, Td } from '../components/ui'
 import { approvalsApi, loansApi, loanPaymentsApi, expensesApi, type ApprovalsInbox, type AuthUser } from '../api'
 import { useNotify } from '../components/Notify'
@@ -14,7 +25,7 @@ import type { Go } from './types'
 
 const num = (v: unknown) => Number(v ?? 0)
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
+const when = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 16).replace('T', ' ') : '—')
 
 function progressLabel(requiredApprovals: number, firstApprover?: { name: string } | null) {
   const remaining = requiredApprovals - (firstApprover ? 1 : 0)
@@ -25,10 +36,51 @@ function progressLabel(requiredApprovals: number, firstApprover?: { name: string
 
 const EMPTY_INBOX: ApprovalsInbox = { loanApplicationRequests: [], speedDraftApplicationRequests: [], loanCancelRequests: [], loanWriteOffRequests: [], paymentVoidRequests: [], allocationRequests: [], settlementRequests: [], expenseRequests: [] }
 
+type Kind =
+  | 'loan_application' | 'speed_draft' | 'loan_cancel' | 'loan_write_off'
+  | 'payment_void' | 'payment_manual_allocation' | 'payment_settlement' | 'expense_approval'
+
+type Tone = 'neutral' | 'blue' | 'green' | 'amber' | 'red'
+
+/** The subset of the shared approval_requests row shape every bucket carries. */
+type Req = {
+  id: number
+  requestedAt: string
+  reason?: string | null
+  requiredApprovals: number
+  requester?: { id: number; name: string } | null
+  firstApprover?: { id: number; name: string } | null
+}
+
+type Item = {
+  kind: Kind
+  key: string
+  id: number
+  /** The id the approve/reject endpoint for this kind is bound to — usually the
+   *  approval_requests row (`id`), but the settlement and expense endpoints are
+   *  route-bound to the payment / expense itself. */
+  actionId: number
+  typeLabel: string
+  tone: Tone
+  requestedAt: string
+  requester?: { id: number; name: string } | null
+  firstApprover?: { id: number; name: string } | null
+  requiredApprovals: number
+  ref: string
+  who: string
+  amount: number | null
+  reason: string | null
+  open?: () => void
+}
+
+/** Per-kind approve/reject endpoints. Empty = no action on this screen. */
+type Handler = { approve?: (id: number) => Promise<unknown>; reject?: (id: number, reason?: string) => Promise<unknown> }
+
 export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
   const [data, setData] = useState<ApprovalsInbox>(EMPTY_INBOX)
   const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<'mine' | 'all'>('mine')
 
   const refresh = () => {
     setLoading(true)
@@ -36,246 +88,130 @@ export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   }
   useEffect(() => { refresh() }, [])
 
-  const canAct = (r: { requester?: { id: number } | null; firstApprover?: { id: number } | null }) =>
-    me?.id !== r.requester?.id && me?.id !== r.firstApprover?.id
-
-  const approveLoan = async (id: number, code: string) => {
-    try { await loansApi.approveCancelRequest(id); notify.success('Approved', code); refresh() }
-    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
-  }
-  const rejectLoan = async (id: number, code: string) => {
-    const reason = await notify.prompt({ title: `Reject cancel request for ${code}?`, msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
-    if (reason === null) return
-    try { await loansApi.rejectCancelRequest(id, reason || undefined); notify.success('Rejected', code); refresh() }
-    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
-  }
-  const approveWriteOff = async (id: number, code: string) => {
-    try { await loansApi.approveWriteOffRequest(id); notify.success('Approved', code); refresh() }
-    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
-  }
-  const rejectWriteOff = async (id: number, code: string) => {
-    const reason = await notify.prompt({ title: `Reject write-off request for ${code}?`, msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
-    if (reason === null) return
-    try { await loansApi.rejectWriteOffRequest(id, reason || undefined); notify.success('Rejected', code); refresh() }
-    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
-  }
-  const approvePayment = async (id: number, code: string) => {
-    try { await loanPaymentsApi.approveVoidRequest(id); notify.success('Approved', code); refresh() }
-    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
-  }
-  const rejectPayment = async (id: number, code: string) => {
-    const reason = await notify.prompt({ title: `Reject cancel request for ${code}?`, msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
-    if (reason === null) return
-    try { await loanPaymentsApi.rejectVoidRequest(id, reason || undefined); notify.success('Rejected', code); refresh() }
-    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
+  const HANDLERS: Record<Kind, Handler> = {
+    loan_application: {},
+    speed_draft: {},
+    loan_cancel: { approve: loansApi.approveCancelRequest, reject: loansApi.rejectCancelRequest },
+    loan_write_off: { approve: loansApi.approveWriteOffRequest, reject: loansApi.rejectWriteOffRequest },
+    payment_void: { approve: loanPaymentsApi.approveVoidRequest, reject: loanPaymentsApi.rejectVoidRequest },
+    payment_manual_allocation: { approve: loanPaymentsApi.approveAllocationRequest, reject: loanPaymentsApi.rejectAllocationRequest },
+    payment_settlement: { approve: loanPaymentsApi.approveSettlement, reject: loanPaymentsApi.rejectSettlement },
+    expense_approval: { approve: expensesApi.approve, reject: expensesApi.reject },
   }
 
-  const approveAllocation = async (id: number, code: string) => {
-    try { await loanPaymentsApi.approveAllocationRequest(id); notify.success('Approved', code); refresh() }
+  const canAct = (it: { requester?: { id: number } | null; firstApprover?: { id: number } | null }) =>
+    me?.id !== it.requester?.id && me?.id !== it.firstApprover?.id
+
+  const mk = (
+    kind: Kind, tone: Tone, typeLabel: string, r: Req,
+    ref: string, who: string, amount: number | null,
+    opts: { open?: () => void; actionId?: number } = {},
+  ): Item => ({
+    kind, tone, typeLabel, key: `${kind}-${r.id}`, id: r.id, actionId: opts.actionId ?? r.id,
+    requestedAt: r.requestedAt, requester: r.requester, firstApprover: r.firstApprover,
+    requiredApprovals: r.requiredApprovals, ref, who, amount, reason: r.reason ?? null, open: opts.open,
+  })
+
+  const items = useMemo<Item[]>(() => [
+    ...data.loanApplicationRequests.map((r) => mk('loan_application', 'blue', 'Loan Application', r,
+      r.loan?.code || '—', r.loan?.customer?.fullName || '—', r.loan ? num(r.loan.principalAmount) : null,
+      { open: r.loan ? () => go(`loan/apps/${r.loan!.id}`) : undefined })),
+    ...data.speedDraftApplicationRequests.map((r) => mk('speed_draft', 'blue', 'Speed Draft', r,
+      r.speedDraft?.code || '—', r.speedDraft?.customer?.fullName || '—', r.speedDraft ? num(r.speedDraft.principalAmount) : null,
+      { open: r.speedDraft ? () => go(`sd/drafts/${r.speedDraft!.id}`) : undefined })),
+    ...data.loanCancelRequests.map((r) => mk('loan_cancel', 'amber', 'Loan Cancellation', r,
+      r.loan?.code || '—', r.loan?.customer?.fullName || '—', r.loan ? num(r.loan.principalAmount) : null)),
+    ...data.loanWriteOffRequests.map((r) => mk('loan_write_off', 'red', 'Loan Write-off', r,
+      r.loan?.code || '—', r.loan?.customer?.fullName || '—',
+      r.loan ? num(r.loan.outstandingBalanceCache ?? r.loan.principalAmount) : null)),
+    ...data.paymentVoidRequests.map((r) => mk('payment_void', 'amber', 'Payment Cancellation', r,
+      r.payment?.code || '—', r.payment?.facility?.customer?.fullName || '—', r.payment ? num(r.payment.amount) : null)),
+    ...data.allocationRequests.map((r) => mk('payment_manual_allocation', 'blue', 'Manual Allocation', r,
+      r.payment?.code || '—', r.payment?.facility?.customer?.fullName || '—', r.payment ? num(r.payment.amount) : null)),
+    // approve/reject-settlement is route-bound to the payment, not the approval request.
+    ...data.settlementRequests.map((r) => mk('payment_settlement', 'green', 'Payment Settlement', r,
+      r.payment?.code || '—', r.payment?.facility?.customer?.fullName || '—', r.payment ? num(r.payment.amount) : null,
+      { actionId: r.payment?.id })),
+    // approve/reject expense is route-bound to the expense, not the approval request.
+    ...data.expenseRequests.map((r) => mk('expense_approval', 'amber', 'Expense', r,
+      r.expense?.code || '—', r.expense?.branch?.name || '—', r.expense ? num(r.expense.amount) : null,
+      { actionId: r.expense?.id })),
+  ].sort((a, b) => (a.requestedAt || '').localeCompare(b.requestedAt || '')), [data, go])
+
+  const shown = filter === 'all'
+    ? items
+    : items.filter((it) => HANDLERS[it.kind].approve && canAct(it))
+
+  const doApprove = async (it: Item) => {
+    const h = HANDLERS[it.kind]
+    if (!h.approve) return
+    try { await h.approve(it.actionId); notify.success('Approved', it.ref); refresh() }
     catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
   }
-  const rejectAllocation = async (id: number, code: string) => {
-    const reason = await notify.prompt({ title: `Reject allocation request for ${code}?`, msg: 'Give a reason — the cashier can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
+  const doReject = async (it: Item) => {
+    const h = HANDLERS[it.kind]
+    if (!h.reject) return
+    const reason = await notify.prompt({
+      title: `Reject ${it.typeLabel.toLowerCase()} for ${it.ref}?`,
+      msg: 'Give a reason — the requester can resubmit afterwards.',
+      placeholder: 'Reason for rejecting', danger: true, okText: 'Reject',
+    })
     if (reason === null) return
-    try { await loanPaymentsApi.rejectAllocationRequest(id, reason || undefined); notify.success('Rejected', code); refresh() }
+    try { await h.reject(it.actionId, reason || undefined); notify.success('Rejected', it.ref); refresh() }
     catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
-  const approveSettlement = async (id: number, code: string) => {
-    try { await loanPaymentsApi.approveSettlement(id); notify.success('Approved', code); refresh() }
-    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
+  const actionCell = (it: Item) => {
+    if (HANDLERS[it.kind].approve) {
+      return canAct(it) ? (
+        <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+          <Btn size="sm" variant="primary" icon="check" onClick={() => doApprove(it)}>Approve</Btn>
+          <Btn size="sm" variant="danger" icon="x" onClick={() => doReject(it)}>Reject</Btn>
+        </div>
+      ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>
+    }
+    return it.open ? <Btn size="sm" icon="eye" onClick={it.open}>Open</Btn> : null
   }
-  const rejectSettlement = async (id: number, code: string) => {
-    const reason = await notify.prompt({ title: `Reject settlement request for ${code}?`, msg: 'Give a reason — the cashier can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
-    if (reason === null) return
-    try { await loanPaymentsApi.rejectSettlement(id, reason || undefined); notify.success('Rejected', code); refresh() }
-    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
-  }
-  const approveExpense = async (id: number, code: string) => {
-    try { await expensesApi.approve(id); notify.success('Approved', code); refresh() }
-    catch (ex: any) { notify.error('Approval failed', getErrorText(ex)) }
-  }
-  const rejectExpense = async (id: number, code: string) => {
-    const reason = await notify.prompt({ title: `Reject expense ${code}?`, msg: 'Give a reason — the requester can resubmit afterwards.', placeholder: 'Reason for rejecting', danger: true, okText: 'Reject' })
-    if (reason === null) return
-    try { await expensesApi.reject(id, reason || undefined); notify.success('Rejected', code); refresh() }
-    catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
-  }
-
-  const total = data.loanApplicationRequests.length + data.speedDraftApplicationRequests.length
-    + data.loanCancelRequests.length + data.loanWriteOffRequests.length + data.paymentVoidRequests.length + data.allocationRequests.length
-    + data.settlementRequests.length + data.expenseRequests.length
 
   return (
     <div>
-      <PageHead crumbs="Administration" title="Approvals" icon="shield" sub={`${total} request${total === 1 ? '' : 's'} awaiting approval`} />
-
-      <Card pad={0} style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Loan Applications</div>
-        <Table cols={[{ label: 'Application' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Amount', align: 'right' }, { label: 'Applied' }]}
-          rows={data.loanApplicationRequests} empty={loading ? 'Loading…' : 'No loan applications pending.'}
-          onRow={(r) => r.loan && go(`loan/apps/${r.loan.id}`)}
-          render={(r) => <>
-            <Td mono style={{ fontWeight: 600 }}>{r.loan?.code || '—'}</Td>
-            <Td>{r.loan?.customer?.fullName || '—'}</Td>
-            <Td>{r.loan?.loanDetail?.loanType?.name || '—'}</Td>
-            <Td mono align="right">{r.loan ? money(r.loan.principalAmount) : '—'}</Td>
-            <Td>{dateOnly(r.requestedAt)}</Td>
-          </>} />
-      </Card>
-
-      <Card pad={0} style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Speed Drafts</div>
-        <Table cols={[{ label: 'Draft' }, { label: 'Customer' }, { label: 'Type' }, { label: 'Capital', align: 'right' }, { label: 'Applied' }]}
-          rows={data.speedDraftApplicationRequests} empty={loading ? 'Loading…' : 'No Speed Drafts pending.'}
-          onRow={(r) => r.speedDraft && go(`sd/drafts/${r.speedDraft.id}`)}
-          render={(r) => <>
-            <Td mono style={{ fontWeight: 600 }}>{r.speedDraft?.code || '—'}</Td>
-            <Td>{r.speedDraft?.customer?.fullName || '—'}</Td>
-            <Td>{r.speedDraft?.speedDraftDetail?.speedDraftType?.name || '—'}</Td>
-            <Td mono align="right">{r.speedDraft ? money(r.speedDraft.principalAmount) : '—'}</Td>
-            <Td>{dateOnly(r.requestedAt)}</Td>
-          </>} />
-      </Card>
-
-      <Card pad={0} style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Loan Cancellations</div>
-        <Table cols={[{ label: 'Loan' }, { label: 'Customer' }, { label: 'Amount', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
-          rows={data.loanCancelRequests} empty={loading ? 'Loading…' : 'No loan cancel requests pending.'}
-          render={(r) => <>
-            <Td mono style={{ fontWeight: 600 }}>{r.loan?.code || '—'}</Td>
-            <Td>{r.loan?.customer?.fullName || '—'}</Td>
-            <Td mono align="right">{r.loan ? money(r.loan.principalAmount) : '—'}</Td>
-            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
-            <Td>{r.reason}</Td>
-            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
-            <Td align="right">
-              {canAct(r) ? (
-                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
-                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveLoan(r.id, r.loan?.code || '')}>Approve</Btn>
-                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectLoan(r.id, r.loan?.code || '')}>Reject</Btn>
-                </div>
-              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
-            </Td>
-          </>} />
-      </Card>
-
-      <Card pad={0} style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Loan Write-offs</div>
-        <Table cols={[{ label: 'Loan' }, { label: 'Customer' }, { label: 'Outstanding', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
-          rows={data.loanWriteOffRequests} empty={loading ? 'Loading…' : 'No loan write-off requests pending.'}
-          render={(r) => <>
-            <Td mono style={{ fontWeight: 600 }}>{r.loan?.code || '—'}</Td>
-            <Td>{r.loan?.customer?.fullName || '—'}</Td>
-            <Td mono align="right">{r.loan ? money(r.loan.outstandingBalanceCache ?? r.loan.principalAmount) : '—'}</Td>
-            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
-            <Td>{r.reason}</Td>
-            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
-            <Td align="right">
-              {canAct(r) ? (
-                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
-                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveWriteOff(r.id, r.loan?.code || '')}>Approve</Btn>
-                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectWriteOff(r.id, r.loan?.code || '')}>Reject</Btn>
-                </div>
-              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
-            </Td>
-          </>} />
-      </Card>
+      <PageHead
+        crumbs="Administration" title="Approvals" icon="shield"
+        sub={loading ? 'Loading…' : `${shown.length} of ${items.length} request${items.length === 1 ? '' : 's'} pending`}
+        actions={
+          <div className="row gap-2">
+            <Btn size="sm" active={filter === 'mine'} onClick={() => setFilter('mine')}>Mine to approve</Btn>
+            <Btn size="sm" active={filter === 'all'} onClick={() => setFilter('all')}>All pending</Btn>
+          </div>
+        }
+      />
 
       <Card pad={0}>
-        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Payment Receipt Cancellations</div>
-        <Table cols={[{ label: 'Receipt' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Amount', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
-          rows={data.paymentVoidRequests} empty={loading ? 'Loading…' : 'No payment cancel requests pending.'}
-          render={(r) => <>
-            <Td mono style={{ fontWeight: 600 }}>{r.payment?.code || '—'}</Td>
-            <Td mono>{r.payment?.facility?.code || '—'}</Td>
-            <Td>{r.payment?.facility?.customer?.fullName || '—'}</Td>
-            <Td mono align="right">{r.payment ? money(r.payment.amount) : '—'}</Td>
-            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
-            <Td>{r.reason || '—'}</Td>
-            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
-            <Td align="right">
-              {canAct(r) ? (
-                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
-                  <Btn size="sm" variant="primary" icon="check" onClick={() => approvePayment(r.id, r.payment?.code || '')}>Approve</Btn>
-                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectPayment(r.id, r.payment?.code || '')}>Reject</Btn>
-                </div>
-              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
+        <Table
+          cols={[
+            { label: 'Type' }, { label: 'Reference' }, { label: 'Customer / Branch' },
+            { label: 'Amount', align: 'right' }, { label: 'Requested By' },
+            { label: 'Progress' }, { label: '', align: 'right', w: 200 },
+          ]}
+          rows={shown}
+          empty={loading ? 'Loading…' : filter === 'mine' ? 'Nothing awaiting your approval.' : 'No requests pending.'}
+          render={(it) => <>
+            <Td><Badge tone={it.tone} dot>{it.typeLabel}</Badge></Td>
+            <Td mono style={{ fontWeight: 600 }}>
+              {it.open
+                ? <a onClick={it.open} style={{ cursor: 'pointer', color: 'var(--ac)' }}>{it.ref}</a>
+                : it.ref}
             </Td>
-          </>} />
-      </Card>
-
-      <Card pad={0} style={{ marginTop: 16 }}>
-        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Payment Manual Allocations</div>
-        <Table cols={[{ label: 'Receipt' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Amount', align: 'right' }, { label: 'Requested Split' }, { label: 'Requested By' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
-          rows={data.allocationRequests} empty={loading ? 'Loading…' : 'No allocation requests pending.'}
-          render={(r) => <>
-            <Td mono style={{ fontWeight: 600 }}>{r.payment?.code || '—'}</Td>
-            <Td mono>{r.payment?.facility?.code || '—'}</Td>
-            <Td>{r.payment?.facility?.customer?.fullName || '—'}</Td>
-            <Td mono align="right">{r.payment ? money(r.payment.amount) : '—'}</Td>
-            <Td style={{ fontSize: 11.5 }}>
-              {r.payment?.manualAllocation
-                ? `Int ${money(r.payment.manualAllocation.interest)} · Cap ${money(r.payment.manualAllocation.capital)} · OD ${money(r.payment.manualAllocation.odCharge)} · Oth ${money(r.payment.manualAllocation.otherCharges)}`
-                : '—'}
+            <Td>
+              {it.who}
+              {it.reason ? <div className="t-2" style={{ fontSize: 11, whiteSpace: 'normal', maxWidth: 320 }}>{it.reason}</div> : null}
             </Td>
-            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
-            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
-            <Td align="right">
-              {canAct(r) ? (
-                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
-                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveAllocation(r.id, r.payment?.code || '')}>Approve</Btn>
-                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectAllocation(r.id, r.payment?.code || '')}>Reject</Btn>
-                </div>
-              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
-            </Td>
-          </>} />
-      </Card>
-
-      <Card pad={0} style={{ marginTop: 16 }}>
-        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Loan Payment Settlements</div>
-        <Table cols={[{ label: 'Receipt' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Amount', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
-          rows={data.settlementRequests} empty={loading ? 'Loading…' : 'No settlement requests pending.'}
-          render={(r) => <>
-            <Td mono style={{ fontWeight: 600 }}>{r.payment?.code || '—'}</Td>
-            <Td mono>{r.payment?.facility?.code || '—'}</Td>
-            <Td>{r.payment?.facility?.customer?.fullName || '—'}</Td>
-            <Td mono align="right">{r.payment ? money(r.payment.amount) : '—'}</Td>
-            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
-            <Td>{r.reason || '—'}</Td>
-            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
-            <Td align="right">
-              {canAct(r) ? (
-                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
-                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveSettlement(r.id, r.payment?.code || '')}>Approve</Btn>
-                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectSettlement(r.id, r.payment?.code || '')}>Reject</Btn>
-                </div>
-              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
-            </Td>
-          </>} />
-      </Card>
-
-      <Card pad={0} style={{ marginTop: 16 }}>
-        <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Expenses</div>
-        <Table cols={[{ label: 'Expense' }, { label: 'Branch' }, { label: 'Category' }, { label: 'Amount', align: 'right' }, { label: 'Requested By' }, { label: 'Reason' }, { label: 'Progress' }, { label: '', align: 'right', w: 180 }]}
-          rows={data.expenseRequests} empty={loading ? 'Loading…' : 'No expense requests pending.'}
-          render={(r) => <>
-            <Td mono style={{ fontWeight: 600 }}>{r.expense?.code || '—'}</Td>
-            <Td>{r.expense?.branch?.name || '—'}</Td>
-            <Td>{r.expense?.category?.name || '—'}</Td>
-            <Td mono align="right">{r.expense ? money(r.expense.amount) : '—'}</Td>
-            <Td>{r.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{dateOnly(r.requestedAt)}</div></Td>
-            <Td>{r.reason || '—'}</Td>
-            <Td><Badge tone="amber" dot>{progressLabel(r.requiredApprovals, r.firstApprover)}</Badge></Td>
-            <Td align="right">
-              {canAct(r) ? (
-                <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
-                  <Btn size="sm" variant="primary" icon="check" onClick={() => approveExpense(r.id, r.expense?.code || '')}>Approve</Btn>
-                  <Btn size="sm" variant="danger" icon="x" onClick={() => rejectExpense(r.id, r.expense?.code || '')}>Reject</Btn>
-                </div>
-              ) : <span className="t-2" style={{ fontSize: 11.5 }}>Awaiting another approver</span>}
-            </Td>
-          </>} />
+            <Td mono align="right">{it.amount == null ? '—' : money(it.amount)}</Td>
+            <Td>{it.requester?.name || '—'}<div className="t-2" style={{ fontSize: 11 }}>{when(it.requestedAt)}</div></Td>
+            <Td><Badge tone="amber" dot>{progressLabel(it.requiredApprovals, it.firstApprover)}</Badge></Td>
+            <Td align="right">{actionCell(it)}</Td>
+          </>}
+        />
       </Card>
     </div>
   )
