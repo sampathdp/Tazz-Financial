@@ -244,9 +244,9 @@ class CashFloatsLedgerTest extends TestCase
     }
 
     // =============================================================
-    // CF-12 — a Pending bank transaction still moves the balance immediately (F: Risk 10)
+    // CF-12 — a Pending bank transaction posts nothing until it clears (F-11 fixed)
     // =============================================================
-    public function test_cf12_pending_bank_transaction_moves_the_balance_immediately(): void
+    public function test_cf12_pending_bank_transaction_posts_nothing_until_cleared(): void
     {
         $branchId = $this->branch('PB');
         $till = $this->till($branchId, '2000000.00');
@@ -256,22 +256,31 @@ class CashFloatsLedgerTest extends TestCase
             'account_number' => 'ACC' . Str::random(10), 'account_type' => 'Current', 'currency' => 'LKR',
             'opening_balance' => 0, 'current_balance' => '90000.00', 'status' => 'Active',
         ]);
+        $bankLeaf = ChartOfAccount::forBankAccount($bank->fresh());
+        $tillBefore = (string) $till->fresh()->current_balance;
+        $bankLeafBefore = $this->glBalance($bankLeaf->id);
 
         $res = $this->postJson('/api/bank-transactions', [
             'bank_account_id' => $bank->id, 'txn_date' => now()->toDateString(),
             'transaction_type' => 'Deposit', 'amount' => 500000, 'status' => 'Pending',
             'contra_kind' => 'Cash', 'contra_cash_account_id' => $till->id,
         ])->assertStatus(201);
-
+        $btId = $res->json('id');
         $this->assertSame('Pending', $res->json('status'));
 
-        // Current behaviour (documented): the balance moves immediately.
-        $this->assertBc('590000.00', (string) $bank->fresh()->current_balance);
+        // Pending -> nothing posted: no balance move, no GL entry, no finance_transaction.
+        $this->assertBc('90000.00', (string) $bank->fresh()->current_balance, 'bank balance unchanged while pending');
+        $this->assertBc($tillBefore, (string) $till->fresh()->current_balance, 'till unchanged while pending');
+        $this->assertNull($res->json('journal_entry_id'));
+        $this->assertNull($res->json('finance_transaction_id'));
 
-        // Correct behaviour: an uncleared (Pending) deposit must NOT change the
-        // spendable balance until it clears.
-        $this->assertBc('90000.00', (string) $bank->fresh()->current_balance,
-            'F-11: a Pending bank Deposit inflates current_balance before it clears (Risk 10). See docs/audit/failures.md#f-11');
+        // Clear it -> the movement and GL entry happen now.
+        $this->postJson("/api/bank-transactions/{$btId}/clear", [])->assertStatus(200);
+
+        $this->assertBc('590000.00', (string) $bank->fresh()->current_balance, 'bank +500,000 on clear');
+        $this->assertBc(bcsub($tillBefore, '500000.00', 2), (string) $till->fresh()->current_balance, 'till -500,000 on clear');
+        $this->assertBc('500000.00', bcsub($this->glBalance($bankLeaf->id), $bankLeafBefore, 2), 'bank leaf GL +500,000');
+        $this->assertSame('Cleared', DB::table('bank_transactions')->where('id', $btId)->value('status'));
     }
 
     // =============================================================

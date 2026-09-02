@@ -419,6 +419,11 @@ waived amount; a closed loan can silently owe again if the waiver row is deleted
 
 ## F-11 — A `Pending` (uncleared) bank transaction moves `current_balance` immediately (confirms Risk 10)
 
+> **STATUS: FIXED.** `BankTransactionController::store()` now records a `Pending` row but posts
+> nothing — no balance movement, no GL entry, no `finance_transactions` row. A new
+> `POST /api/bank-transactions/{id}/clear` endpoint flips it to `Cleared` and does the posting at
+> that point. `destroy()` on a still-`Pending` row just deletes it. `CF-12` now passes.
+
 **Severity:** P1 — `ledger-matrix.md` Risk 10.
 
 **Found by:** `tests/Feature/CashFloatsLedgerTest.php::test_cf12_pending_bank_transaction_moves_the_balance_immediately` (plan CF-12).

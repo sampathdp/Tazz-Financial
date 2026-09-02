@@ -84,7 +84,21 @@ class BankTransactionController extends Controller
             . ($contraLabel ? " / {$contraLabel}" : '')
             . (($data['description'] ?? null) ? " - {$data['description']}" : '');
 
-        $txn = DB::transaction(function () use ($data, $account, $amount, $movements, $glLines, $description, $request, $isCredit) {
+        $status = $data['status'] ?? 'Cleared';
+
+        $txn = DB::transaction(function () use ($data, $account, $amount, $movements, $glLines, $description, $request, $status) {
+            // A Pending transaction is recorded but posts nothing — an uncleared
+            // deposit / withdrawal must not move current_balance or the GL until
+            // it clears (see clear()). Only a Cleared one is posted now.
+            if ($status === 'Pending') {
+                return BankTransaction::create($data + [
+                    'status' => 'Pending',
+                    // Nothing has moved yet — snapshot the balance as-is; clear() overwrites it.
+                    'balance_after' => $account->current_balance,
+                    'created_by' => $request->user()->id,
+                ]);
+            }
+
             $ftx = FinancePostingService::execute([
                 'txn_type' => self::TXN_TYPE[$data['transaction_type']],
                 'amount' => $amount,
@@ -102,7 +116,7 @@ class BankTransactionController extends Controller
                 'journal_entry_id' => $ftx->journal_entry_id,
                 'finance_transaction_id' => $ftx->id,
                 'balance_after' => $account->fresh()->current_balance,
-                'status' => $data['status'] ?? 'Cleared',
+                'status' => 'Cleared',
                 'created_by' => $request->user()->id,
             ]);
             // Keep the ledger entry pointed at the bank_transactions row, as it always was.
@@ -112,6 +126,56 @@ class BankTransactionController extends Controller
         });
 
         return response()->json($txn->load(['bankAccount:id,name,bank_id,account_number', 'bankAccount.bank:id,name', 'creator:id,name']), 201);
+    }
+
+    /** Marks a Pending transaction Cleared and posts it — this is the point the
+     *  money actually moves and the GL entry is written. */
+    public function clear(Request $request, BankTransaction $bankTransaction)
+    {
+        if ($bankTransaction->status !== 'Pending') {
+            return response()->json(['message' => 'Only a pending bank transaction can be cleared.'], 422);
+        }
+        $data = $request->validate(['txn_date' => 'nullable|date']);
+
+        $account = BankAccount::findOrFail($bankTransaction->bank_account_id);
+        $isCredit = in_array($bankTransaction->transaction_type, BankTransaction::CREDIT_TYPES, true);
+        $amount = number_format((float) $bankTransaction->amount, 2, '.', '');
+        $bankCoa = ChartOfAccount::forBankAccount($account);
+
+        $movements = [['account_type' => 'bank', 'account_id' => (int) $account->id, 'delta' => ($isCredit ? '' : '-') . $amount]];
+        [$contraCoaId, $contraLabel] = $this->contraAccount($bankTransaction->only([
+            'contra_kind', 'contra_cash_account_id', 'contra_bank_account_id', 'contra_chart_of_account_id',
+        ]), $movements, $isCredit, $amount);
+        $glLines = [
+            ['account_id' => $isCredit ? $bankCoa->id : $contraCoaId, 'debit' => $amount, 'credit' => 0],
+            ['account_id' => $isCredit ? $contraCoaId : $bankCoa->id, 'debit' => 0, 'credit' => $amount],
+        ];
+        $description = "{$bankTransaction->transaction_type} - {$account->name}" . ($contraLabel ? " / {$contraLabel}" : '');
+
+        DB::transaction(function () use ($bankTransaction, $account, $amount, $movements, $glLines, $description, $request, $data) {
+            $ftx = FinancePostingService::execute([
+                'txn_type' => self::TXN_TYPE[$bankTransaction->transaction_type],
+                'amount' => $amount,
+                'entry_date' => $data['txn_date'] ?? $bankTransaction->txn_date,
+                'branch_id' => $account->branch_id,
+                'movements' => $movements,
+                'gl_lines' => $glLines,
+                'description' => $description,
+                'gl_description' => $description,
+                'source_module' => 'BankTransaction',
+                'executed_by' => $request->user()->id,
+            ]);
+            $bankTransaction->update([
+                'status' => 'Cleared',
+                'journal_entry_id' => $ftx->journal_entry_id,
+                'finance_transaction_id' => $ftx->id,
+                'balance_after' => $account->fresh()->current_balance,
+                'txn_date' => $data['txn_date'] ?? $bankTransaction->txn_date,
+            ]);
+            $ftx->journalEntry?->update(['source_type' => 'BankTransaction', 'source_id' => $bankTransaction->id]);
+        });
+
+        return $bankTransaction->fresh()->load(['bankAccount:id,name', 'creator:id,name']);
     }
 
     /**
@@ -154,6 +218,13 @@ class BankTransactionController extends Controller
      */
     public function destroy(BankTransaction $bankTransaction)
     {
+        // A Pending transaction was never posted — just remove the row.
+        if ($bankTransaction->status === 'Pending') {
+            $bankTransaction->delete();
+
+            return response()->noContent();
+        }
+
         if ($bankTransaction->finance_transaction_id) {
             DB::transaction(function () use ($bankTransaction) {
                 $ftx = FinanceTransaction::find($bankTransaction->finance_transaction_id);
