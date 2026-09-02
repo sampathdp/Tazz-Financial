@@ -113,14 +113,17 @@ class AccountingReportController extends Controller
         // Filters/sorts on journal_lines.entry_date directly — the denormalized
         // copy that (account_id, entry_date) is indexed on (see its migration) —
         // instead of a whereHas('entry', ...) join, and orders in SQL instead of
-        // pulling every line into PHP just to sort it. The 'Posted' filter still
-        // needs journal_entries, but as a single indexed join, not a correlated
-        // subquery per row.
+        // pulling every line into PHP just to sort it.
+        //
+        // Both Posted and Reversed entries are shown: a reversed original and
+        // its reversal both belong in the account's ledger and net to zero
+        // there (the `status` column on each row makes the correction visible).
+        // Hiding the reversed original left the reversal looking like an
+        // unexplained one-directional entry and broke the running balance.
         $lines = JournalLine::with('entry:id,code,entry_date,description,source_type,source_id,status')
             ->where('account_id', $accountId)
             ->when($request->query('from'), fn ($q, $d) => $q->whereDate('entry_date', '>=', $d))
             ->when($request->query('to'), fn ($q, $d) => $q->whereDate('entry_date', '<=', $d))
-            ->whereHas('entry', fn ($q) => $q->where('status', 'Posted'))
             ->orderBy('entry_date')->orderBy('id')
             ->get();
 
@@ -268,7 +271,8 @@ class AccountingReportController extends Controller
             ->join('loan_facility_details', 'loan_facility_details.credit_facility_id', '=', 'facility_payments.credit_facility_id')
             ->leftJoin('loan_types', 'loan_types.id', '=', 'loan_facility_details.loan_type_id')
             ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'journal_lines.account_id')
-            ->where('journal_entries.status', 'Posted')
+            // Posted + Reversed both count — a voided payment's original income line
+            // and its reversal net to zero here (see ChartOfAccount::balancesAsOf).
             ->where('journal_entries.source_type', 'LoanPayment')
             ->whereIn('chart_of_accounts.code', ['4010', '4020', '4030'])
             ->when($from, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '>=', $d))
@@ -617,7 +621,8 @@ class AccountingReportController extends Controller
 
         $entryIds = DB::table('journal_lines')
             ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
-            ->where('journal_entries.status', 'Posted')
+            // Posted + Reversed both count — a reversed cash movement and its
+            // reversal net to zero (see ChartOfAccount::balancesAsOf).
             ->whereBetween(DB::raw('DATE(journal_entries.entry_date)'), [$from, $to])
             ->whereIn('journal_lines.account_id', $cashAccountIds)
             ->distinct()->pluck('journal_entries.id');

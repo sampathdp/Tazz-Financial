@@ -118,10 +118,20 @@ class ChartOfAccount extends Model
 
     /**
      * Every account's {total_debit, total_credit, balance} as of a date (all
-     * time if null), from Posted journal_lines only — there is no cached
-     * balance column anywhere, this is the one query every report (Trial
-     * Balance, Balance Sheet, P&L, the account balance shown on Chart of
-     * Accounts) computes from, so they can never disagree with each other.
+     * time if null), from every journal_lines row — there is no cached balance
+     * column anywhere, this is the one query every report (Trial Balance,
+     * Balance Sheet, P&L, the account balance shown on Chart of Accounts)
+     * computes from, so they can never disagree with each other.
+     *
+     * Both Posted AND Reversed entries are counted. A Reversed entry always has
+     * a paired reversal entry (LedgerPoster::reverse() posts the mirror before
+     * flipping the original to Reversed, atomically), so the pair nets to zero
+     * — the reversal cancels the original when both are summed. Excluding the
+     * Reversed original while keeping its Posted reversal (the old behaviour)
+     * left every account at the *opposite* of the reversed transaction instead
+     * of back at zero. There is no draft/void state in journal_entries — a
+     * staged manual entry lives in manual_journal_entries until approved — so
+     * every row here is a real, final posting that must count.
      *
      * $fromDate additionally floors the range — Trial Balance/Balance Sheet
      * leave it null (a cumulative balance since the account was opened); P&L
@@ -147,7 +157,6 @@ class ChartOfAccount extends Model
 
         $totals = DB::table('journal_lines')
             ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
-            ->where('journal_entries.status', 'Posted')
             ->when($asOfDate, fn ($q) => $q->whereDate('journal_entries.entry_date', '<=', $asOfDate))
             ->when($fromDate, fn ($q) => $q->whereDate('journal_entries.entry_date', '>=', $fromDate))
             ->selectRaw('journal_lines.account_id, SUM(journal_lines.debit) as total_debit, SUM(journal_lines.credit) as total_credit')
