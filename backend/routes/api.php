@@ -63,6 +63,11 @@ use App\Http\Controllers\Api\LoanWaiverController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SalesExecutiveCommissionController;
+use App\Http\Controllers\Api\SavingsAccountController;
+use App\Http\Controllers\Api\SavingsCollectionController;
+use App\Http\Controllers\Api\SavingsInterestController;
+use App\Http\Controllers\Api\SavingsProductController;
+use App\Http\Controllers\Api\SavingsReportController;
 use App\Http\Controllers\Api\PawningArticleTypeController;
 use App\Http\Controllers\Api\PawningAuctionController;
 use App\Http\Controllers\Api\PawningController;
@@ -551,6 +556,47 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('borrowings/{borrowing}/transactions', [BorrowingController::class, 'addTransaction'])->middleware('perm:Borrowings,Edit');
     Route::post('borrowing-transactions/{borrowingTransaction}/void', [BorrowingController::class, 'voidTransaction'])->middleware('perm:Borrowings,Delete');
     Route::delete('borrowings/{borrowing}', [BorrowingController::class, 'destroy'])->middleware('perm:Borrowings,Delete');
+
+    // --- Daily Savings: Products ---
+    Route::get('savings-products', [SavingsProductController::class, 'index'])->middleware('perm:Savings Products,View');
+    Route::post('savings-products', [SavingsProductController::class, 'store'])->middleware('perm:Savings Products,Create');
+    Route::put('savings-products/{savingsProduct}', [SavingsProductController::class, 'update'])->middleware('perm:Savings Products,Edit');
+    Route::delete('savings-products/{savingsProduct}', [SavingsProductController::class, 'destroy'])->middleware('perm:Savings Products,Delete');
+
+    // --- Daily Savings: Accounts (open / deposit / withdraw / close / freeze) ---
+    Route::get('savings-accounts', [SavingsAccountController::class, 'index'])->middleware('perm:Savings Accounts,View');
+    Route::get('savings-accounts/next-number', [SavingsAccountController::class, 'nextNumber'])->middleware('perm:Savings Accounts,Create');
+    Route::get('savings-accounts/{savingsAccount}', [SavingsAccountController::class, 'show'])->middleware('perm:Savings Accounts,View');
+    Route::get('savings-accounts/{savingsAccount}/statement', [SavingsAccountController::class, 'statement'])->middleware('perm:Savings Accounts,View');
+    Route::post('savings-accounts', [SavingsAccountController::class, 'store'])->middleware(['perm:Savings Accounts,Create', 'idempotency']);
+    Route::post('savings-accounts/{savingsAccount}/deposit', [SavingsAccountController::class, 'deposit'])->middleware(['perm:Savings Accounts,Edit', 'idempotency']);
+    Route::post('savings-accounts/{savingsAccount}/withdraw', [SavingsAccountController::class, 'withdraw'])->middleware(['perm:Savings Accounts,Edit', 'idempotency']);
+    Route::post('savings-accounts/{savingsAccount}/close', [SavingsAccountController::class, 'close'])->middleware('perm:Savings Accounts,Edit');
+    Route::patch('savings-accounts/{savingsAccount}/status', [SavingsAccountController::class, 'setStatus'])->middleware('perm:Savings Accounts,Edit');
+    // Void the latest posted transaction — gated inline by ApprovalType::isAuthorized('savings_txn_void').
+    Route::post('savings-transactions/{savingsTransaction}/void', [SavingsAccountController::class, 'voidTransaction'])->middleware('perm:Savings Accounts,Delete');
+
+    // --- Daily Savings: Field Collection Sheets ---
+    Route::get('savings-collection-sheets', [SavingsCollectionController::class, 'index'])->middleware('perm:Savings Collection,View');
+    Route::get('savings-collection-sheets/{savingsCollectionSheet}', [SavingsCollectionController::class, 'show'])->middleware('perm:Savings Collection,View');
+    Route::post('savings-collection-sheets', [SavingsCollectionController::class, 'store'])->middleware('perm:Savings Collection,Create');
+    Route::put('savings-collection-sheets/{savingsCollectionSheet}', [SavingsCollectionController::class, 'update'])->middleware('perm:Savings Collection,Edit');
+    Route::post('savings-collection-sheets/{savingsCollectionSheet}/post', [SavingsCollectionController::class, 'post'])->middleware(['perm:Savings Collection,Edit', 'idempotency']);
+    Route::post('savings-collection-sheets/{savingsCollectionSheet}/cancel', [SavingsCollectionController::class, 'cancel'])->middleware('perm:Savings Collection,Delete');
+
+    // --- Daily Savings: Batch Interest Runs ---
+    Route::get('savings-interest-runs', [SavingsInterestController::class, 'index'])->middleware('perm:Savings Interest,View');
+    Route::get('savings-interest-preview', [SavingsInterestController::class, 'preview'])->middleware('perm:Savings Interest,View');
+    Route::get('savings-interest-runs/{savingsInterestRun}', [SavingsInterestController::class, 'show'])->middleware('perm:Savings Interest,View');
+    Route::post('savings-interest-runs', [SavingsInterestController::class, 'store'])->middleware('perm:Savings Interest,Create');
+    Route::delete('savings-interest-runs/{savingsInterestRun}', [SavingsInterestController::class, 'destroy'])->middleware('perm:Savings Interest,Create');
+    // post / void gated inline by ApprovalType::isAuthorized('savings_interest_run').
+    Route::post('savings-interest-runs/{savingsInterestRun}/post', [SavingsInterestController::class, 'post'])->middleware(['perm:Savings Interest,Edit', 'idempotency']);
+    Route::post('savings-interest-runs/{savingsInterestRun}/void', [SavingsInterestController::class, 'voidRun'])->middleware('perm:Savings Interest,Delete');
+
+    // --- Daily Savings: Reports ---
+    Route::get('savings-reports/{type}', [SavingsReportController::class, 'show'])->middleware('perm:Savings Reports,View');
+    Route::get('savings-reports/{type}/pdf', [SavingsReportController::class, 'exportPdf'])->middleware('perm:Savings Reports,View');
 
     // --- Funding Management: Reports & Dashboard ---
     Route::get('funding-reports/{type}', [FundingReportController::class, 'show'])->middleware('perm:Funding Reports,View');

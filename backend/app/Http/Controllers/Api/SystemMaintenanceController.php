@@ -79,6 +79,13 @@ class SystemMaintenanceController extends Controller
         'fd_deposits',
         'fixed_deposits',
 
+        // --- Daily Savings ---
+        'savings_collection_lines',
+        'savings_collection_sheets',
+        'savings_transactions',
+        'savings_interest_runs',
+        'savings_accounts',
+
         // --- Accounting ledger ---
         'journal_lines',
         'journal_entries',

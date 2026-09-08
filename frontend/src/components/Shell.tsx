@@ -70,6 +70,10 @@ export const NAV: NavNode[] = [
     { id: 'fund/deposit-payment', label: 'Deposit Payment', icon: 'receipt' },
     { id: 'fund/interest-due', label: 'Interest Due', icon: 'wallet' },
     { id: 'fund/reports', label: 'Funding Reports', icon: 'chart' },
+    { id: 'fund/savings-products', label: 'Savings Products', icon: 'layers' },
+    { id: 'fund/savings', label: 'Savings Accounts', icon: 'wallet' },
+    { id: 'fund/savings-collection', label: 'Savings Collection', icon: 'receipt' },
+    { id: 'fund/savings-interest', label: 'Savings Interest', icon: 'coins' },
   ] },
 
   { section: 'Pawning Management', icon: 'tag', items: [
@@ -142,6 +146,9 @@ export const NAV: NavNode[] = [
     { group: 'Investor Reports', icon: 'pie', items: [
       { id: 'rep/inv-summary', label: 'Investor Summary', icon: 'pie' },
       { id: 'rep/inv-directory', label: 'Investor Directory', icon: 'list' },
+    ] },
+    { group: 'Savings Reports', icon: 'wallet', items: [
+      { id: 'rep/savings', label: 'Savings Reports', icon: 'wallet' },
     ] },
     { group: 'Pawn Reports', icon: 'tag', items: [
       { id: 'rep/pawn', label: 'Pawn Reports', icon: 'tag', soon: true },
