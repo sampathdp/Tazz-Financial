@@ -400,6 +400,9 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
 
   const installmentAmountOf = (loan: Loan) => (loan.schedules?.length ? num(loan.schedules[0].totalDue) : null)
   const interestAmountOf = (loan: Loan) => loan.summary?.dueBreakdown?.find((r) => r.type === 'Interest')?.due ?? null
+  // Rental + other-charge + default (OD) arrears on installments already past their
+  // due date, net of waivers and overpayment — see LoanSummary::$balancePrePayment.
+  const arrearsAmountOf = (loan: Loan) => (loan.summary?.arrears ? num(loan.summary.arrears.balancePrePayment) : null)
   const payable = loans.filter((l) => l.status === 'Active')
   const disbursedDate = (l: Loan) => (l.disbursedAt ? l.disbursedAt.slice(0, 10) : '')
   const pendingPayment = payable.filter((l) => num(l.totalDueSum) - num(l.paidSum) > 0)
@@ -767,6 +770,20 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
                 <div className="t-2" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em' }}>Installment Amount</div>
                 <div style={{ fontFamily: 'JetBrains Mono', fontSize: 16, fontWeight: 700, marginTop: 3 }}>{installmentAmountOf(selected) != null ? money(installmentAmountOf(selected)) : '—'}</div>
               </div>
+              {(() => {
+                const arrears = arrearsAmountOf(selected)
+                const overdue = arrears != null && arrears > 0
+                return (
+                  <div style={{
+                    padding: '10px 14px', borderRadius: 'var(--r-s)',
+                    background: overdue ? 'var(--warn-dim)' : 'var(--bg-2)',
+                    border: `1px solid ${overdue ? 'var(--warn)' : 'var(--line)'}`,
+                  }}>
+                    <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.06em', color: overdue ? 'var(--warn)' : 'var(--tx-2)' }}>Arrears (as of {todayIso()})</div>
+                    <div style={{ fontFamily: 'JetBrains Mono', fontSize: 16, fontWeight: 700, marginTop: 3, color: overdue ? 'var(--warn)' : 'var(--tx-1)' }}>{arrears != null ? money(arrears) : '—'}</div>
+                  </div>
+                )
+              })()}
               <div style={{
                 padding: '10px 14px', borderRadius: 'var(--r-s)',
                 background: outstanding > 0 ? 'var(--bad-dim)' : 'var(--bg-2)',
