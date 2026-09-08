@@ -2157,6 +2157,8 @@ export const expenseReportsApi = {
 export interface FundingDashboardSummary {
   totalFundingPortfolio: number; activeFds: number; monthlyInterestPayable: number;
   maturingThisMonth: number; newDepositsToday: number; renewalsThisMonth: number;
+  totalSavingsPortfolio: number; activeSavingsAccounts: number; dormantSavingsAccounts: number;
+  savingsDepositsToday: number; savingsWithdrawalsToday: number;
 }
 
 export const fundingDashboardApi = {
@@ -2164,9 +2166,145 @@ export const fundingDashboardApi = {
 }
 
 export const customerFundingApi = {
-  /** Every deposit and Fixed Deposit this customer holds. */
+  /** Every deposit, Fixed Deposit and savings account this customer holds. */
   list: (customerId: number) =>
-    http.get(`/customers/${customerId}/funding`).then((r) => camelize(r.data) as { deposits: FdDeposit[]; fixedDeposits: FixedDeposit[] }),
+    http.get(`/customers/${customerId}/funding`).then((r) => camelize(r.data) as { deposits: FdDeposit[]; fixedDeposits: FixedDeposit[]; savingsAccounts: SavingsAccount[] }),
+}
+
+/* ======================= Daily Savings ======================= */
+
+export type SavingsPaymentMethod = 'Cash' | 'Bank' | 'Cheque'
+export type SavingsCalcMethod = 'min_monthly_balance' | 'daily_balance' | 'average_balance'
+export type SavingsPostingFrequency = 'monthly' | 'quarterly' | 'annually'
+export type SavingsAccountStatus = 'Active' | 'Dormant' | 'Frozen' | 'Closed'
+export type SavingsTxnType = 'Deposit' | 'Withdrawal' | 'InterestPosting' | 'Fee' | 'Adjustment' | 'OpeningBalance'
+
+export interface SavingsProduct {
+  id: number; name: string; code: string;
+  interestRatePercent: number | string;
+  interestCalcMethod: SavingsCalcMethod;
+  interestPostingFrequency: SavingsPostingFrequency;
+  minOpeningDeposit: number | string; minBalance: number | string;
+  withdrawalFee: number | string; ledgerFee: number | string;
+  dormancyDays: number;
+  referenceFormat?: string | null;
+  sortOrder?: number; status?: 'Active' | 'Inactive';
+  accountsCount?: number;
+}
+
+export interface SavingsTransaction {
+  id: number; txnNumber: string; savingsAccountId: number;
+  txnDate: string; type: SavingsTxnType; direction: 'In' | 'Out';
+  amount: number | string; runningBalance: number | string;
+  paymentMethod?: SavingsPaymentMethod | null; bankId?: number | null; bank?: { id: number; name: string } | null;
+  referenceNo?: string | null; collectionSheetId?: number | null; interestRunId?: number | null;
+  notes?: string | null; status: 'Posted' | 'Voided'; voidOfId?: number | null;
+  creator?: { id: number; name: string } | null; createdAt?: string;
+}
+
+export interface SavingsAccount {
+  id: number; accountNumber: string;
+  branchId: number; branch?: { id: number; name: string; code: string };
+  customerId: number; customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null; email?: string | null; address?: string | null };
+  savingsProductId: number; savingsProduct?: SavingsProduct;
+  interestRatePercent: number | string; interestCalcMethod: SavingsCalcMethod; interestPostingFrequency: SavingsPostingFrequency;
+  minBalance: number | string; withdrawalFee: number | string;
+  openDate: string; currentBalance: number | string; interestAccrued: number | string;
+  availableBalance?: number | string;
+  lastInterestPostedOn?: string | null; lastActivityOn?: string | null;
+  status: SavingsAccountStatus; closedOn?: string | null; notes?: string | null;
+  creator?: { id: number; name: string } | null; createdAt?: string;
+}
+
+export interface SavingsCollectionLine {
+  id?: number; savingsAccountId: number; amount: number | string; collected?: boolean;
+  referenceNo?: string | null; savingsTransactionId?: number | null;
+  savingsAccount?: { id: number; accountNumber: string; currentBalance: number | string; customer?: { id: number; fullName: string; code: string } };
+}
+
+export interface SavingsCollectionSheet {
+  id: number; sheetNumber: string;
+  branchId: number; branch?: { id: number; name: string; code: string };
+  collectorId: number; collector?: { id: number; name: string };
+  collectionDate: string; status: 'Open' | 'Posted' | 'Cancelled';
+  totalAmount: number | string; lineCount: number; linesCount?: number;
+  postedAt?: string | null; notes?: string | null;
+  lines?: SavingsCollectionLine[];
+  creator?: { id: number; name: string } | null;
+}
+
+export interface SavingsInterestRun {
+  id: number; runNumber: string;
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  periodFrom: string; periodTo: string; status: 'Draft' | 'Posted' | 'Voided';
+  accountCount: number; totalInterest: number | string; transactionsCount?: number;
+  postedAt?: string | null; notes?: string | null;
+  creator?: { id: number; name: string } | null; poster?: { id: number; name: string } | null;
+}
+
+export interface SavingsInterestPreviewRow {
+  accountId: number; accountNumber: string; customer?: string | null;
+  interest: number | string; basisBalance: number | string; method: SavingsCalcMethod;
+}
+
+export const savingsProductsApi = resource<SavingsProduct>('savings-products')
+
+export const savingsAccountsApi = {
+  list: (params?: { status?: SavingsAccountStatus; customerId?: number; productId?: number }) =>
+    http.get('/savings-accounts', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as SavingsAccount[]),
+  get: (id: number) => http.get(`/savings-accounts/${id}`).then((r) => camelize(r.data) as SavingsAccount),
+  statement: (id: number, params?: { from?: string; to?: string; postedOnly?: boolean }) =>
+    http.get(`/savings-accounts/${id}/statement`, { params: snakeize(params || {}) }).then((r) => camelize(r.data) as { account: SavingsAccount; transactions: SavingsTransaction[] }),
+  nextNumber: (branchId: number, savingsProductId?: number) =>
+    http.get('/savings-accounts/next-number', { params: { branch_id: branchId, savings_product_id: savingsProductId } }).then((r) => r.data.code as string),
+  open: (body: { branchId: number; customerId: number; savingsProductId: number; openDate: string; openingDeposit: number | string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; bankId?: number; notes?: string }) =>
+    http.post('/savings-accounts', snakeize(body)).then((r) => camelize(r.data) as SavingsAccount),
+  deposit: (id: number, body: { amount: number | string; txnDate: string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; bankId?: number; notes?: string }) =>
+    http.post(`/savings-accounts/${id}/deposit`, snakeize(body)).then((r) => camelize(r.data) as { transaction: SavingsTransaction; account: SavingsAccount }),
+  withdraw: (id: number, body: { amount: number | string; txnDate: string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; notes?: string }) =>
+    http.post(`/savings-accounts/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as { transaction: SavingsTransaction; fee: SavingsTransaction | null; account: SavingsAccount }),
+  close: (id: number, body: { txnDate: string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; notes?: string }) =>
+    http.post(`/savings-accounts/${id}/close`, snakeize(body)).then((r) => camelize(r.data) as { payout: SavingsTransaction | null; account: SavingsAccount }),
+  setStatus: (id: number, status: 'Active' | 'Dormant' | 'Frozen') =>
+    http.patch(`/savings-accounts/${id}/status`, { status }).then((r) => camelize(r.data) as SavingsAccount),
+  voidTransaction: (txnId: number) =>
+    http.post(`/savings-transactions/${txnId}/void`).then((r) => camelize(r.data) as SavingsAccount),
+}
+
+export const savingsCollectionApi = {
+  list: (params?: { status?: string; date?: string }) =>
+    http.get('/savings-collection-sheets', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as SavingsCollectionSheet[]),
+  get: (id: number) => http.get(`/savings-collection-sheets/${id}`).then((r) => camelize(r.data) as SavingsCollectionSheet),
+  create: (body: { branchId: number; collectorId: number; collectionDate: string; notes?: string; lines?: { savingsAccountId: number; amount: number | string; referenceNo?: string }[] }) =>
+    http.post('/savings-collection-sheets', snakeize(body)).then((r) => camelize(r.data) as SavingsCollectionSheet),
+  update: (id: number, body: { collectorId?: number; collectionDate?: string; notes?: string; lines: { savingsAccountId: number; amount: number | string; referenceNo?: string; collected?: boolean }[] }) =>
+    http.put(`/savings-collection-sheets/${id}`, snakeize(body)).then((r) => camelize(r.data) as SavingsCollectionSheet),
+  post: (id: number) => http.post(`/savings-collection-sheets/${id}/post`).then((r) => camelize(r.data) as SavingsCollectionSheet),
+  cancel: (id: number) => http.post(`/savings-collection-sheets/${id}/cancel`).then((r) => camelize(r.data) as SavingsCollectionSheet),
+}
+
+export const savingsInterestApi = {
+  list: (params?: { status?: string }) =>
+    http.get('/savings-interest-runs', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as SavingsInterestRun[]),
+  get: (id: number) => http.get(`/savings-interest-runs/${id}`).then((r) => camelize(r.data) as { run: SavingsInterestRun; preview?: SavingsInterestPreviewRow[]; postings?: SavingsTransaction[]; totalInterest?: number | string; accountCount?: number }),
+  preview: (params: { periodFrom: string; periodTo: string; branchId?: number }) =>
+    http.get('/savings-interest-preview', { params: snakeize(params) }).then((r) => camelize(r.data) as { rows: SavingsInterestPreviewRow[]; totalInterest: number | string; accountCount: number }),
+  create: (body: { periodFrom: string; periodTo: string; branchId?: number; notes?: string }) =>
+    http.post('/savings-interest-runs', snakeize(body)).then((r) => camelize(r.data) as SavingsInterestRun),
+  remove: (id: number) => http.delete(`/savings-interest-runs/${id}`).then((r) => r.data),
+  post: (id: number) => http.post(`/savings-interest-runs/${id}/post`).then((r) => camelize(r.data) as SavingsInterestRun),
+  void: (id: number) => http.post(`/savings-interest-runs/${id}/void`).then((r) => camelize(r.data) as SavingsInterestRun),
+}
+
+export type SavingsReportType =
+  | 'active-accounts' | 'dormant-accounts' | 'balance-summary' | 'transaction-history'
+  | 'collection-sheets' | 'interest-posted' | 'account-statement' | 'new-accounts'
+  | 'closed-accounts' | 'below-minimum'
+
+export const savingsReportsApi = {
+  get: (type: SavingsReportType, params?: Record<string, any>) =>
+    http.get(`/savings-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
+  pdf: (type: SavingsReportType, params?: Record<string, any>) => reportPdf('savings', type, params),
 }
 
 /** Internal, CRIB-style credit report for one customer — computed only from this

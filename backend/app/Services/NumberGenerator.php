@@ -84,6 +84,13 @@ class NumberGenerator
         // repayment/interest vouchers — one company-wide series per year each.
         'borrowing' => '{BRANCH}-BRW-{YEAR:2}-{SEQ:5}',
         'borrowing_txn' => '{BRANCH}-BRWV-{YEAR:2}-{SEQ:5}',
+        // Daily Savings: an account is opened once (no {YEAR}); its
+        // transactions and collection sheets reset yearly; interest runs are
+        // one company-wide series per year.
+        'savings_account' => '{BRANCH}-SAV-{SEQ:6}',
+        'savings_txn' => '{BRANCH}-SVT-{YEAR:2}-{SEQ:6}',
+        'savings_collection' => '{BRANCH}-SCS-{YEAR:2}-{SEQ:5}',
+        'savings_interest' => 'SIR-{YEAR:2}-{SEQ:5}',
     ];
 
     // Modules whose {CODE} placeholder is keyed off a funding product (own

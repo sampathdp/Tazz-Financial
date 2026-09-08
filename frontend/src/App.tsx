@@ -38,6 +38,11 @@ const DepositPaymentScreen = lazy(() => import('./screens/DepositPayment').then(
 const BorrowingsScreen = lazy(() => import('./screens/Borrowings').then((m) => ({ default: m.BorrowingsScreen })))
 const FdInterestDueScreen = lazy(() => import('./screens/FdInterestDue').then((m) => ({ default: m.FdInterestDueScreen })))
 const FundingReportsScreen = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingReportsScreen })))
+const SavingsProductsScreen = lazy(() => import('./screens/SavingsProducts').then((m) => ({ default: m.SavingsProductsScreen })))
+const SavingsAccountsScreen = lazy(() => import('./screens/SavingsAccounts').then((m) => ({ default: m.SavingsAccountsScreen })))
+const SavingsCollectionScreen = lazy(() => import('./screens/SavingsCollection').then((m) => ({ default: m.SavingsCollectionScreen })))
+const SavingsInterestScreen = lazy(() => import('./screens/SavingsInterest').then((m) => ({ default: m.SavingsInterestScreen })))
+const SavingsReportsScreen = lazy(() => import('./screens/SavingsReports').then((m) => ({ default: m.SavingsReportsScreen })))
 const named = <M, K extends keyof M>(loader: () => Promise<M>, key: K) =>
   lazy(() => loader().then((m) => ({ default: m[key] as unknown as ComponentType<any> })))
 
@@ -216,6 +221,11 @@ const SCREENS: Record<string, ScreenComp> = {
   'fund/borrowings': BorrowingsScreen,
   'fund/interest-due': FdInterestDueScreen,
   'fund/reports': FundingReportsScreen,
+  'fund/savings-products': SavingsProductsScreen,
+  'fund/savings': SavingsAccountsScreen,
+  'fund/savings-collection': SavingsCollectionScreen,
+  'fund/savings-interest': SavingsInterestScreen,
+  'rep/savings': SavingsReportsScreen,
   'rep/loans-summary': LoanPortfolioSummaryScreen,
   'rep/loans-par': LoanParAgingScreen,
   'rep/loans-arrears': LoanArrearsScreen,

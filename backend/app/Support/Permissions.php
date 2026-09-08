@@ -64,6 +64,12 @@ class Permissions
         'Fixed Deposits',
         'Borrowings',
         'Funding Reports',
+        // --- Daily Savings module ---
+        'Savings Products',
+        'Savings Accounts',
+        'Savings Collection',
+        'Savings Interest',
+        'Savings Reports',
         'Chart of Accounts',
         'Accounting Reports',
         'Manual Journal Entries',

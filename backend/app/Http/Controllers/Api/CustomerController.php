@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\FdDeposit;
 use App\Models\FixedDeposit;
 use App\Models\Loan;
+use App\Models\SavingsAccount;
 use App\Services\NumberGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -83,12 +84,13 @@ class CustomerController extends Controller
         return ['borrower' => $borrower, 'guarantor' => $guarantor];
     }
 
-    /** Full funding history for a customer's profile view: every deposit and Fixed Deposit they hold. */
+    /** Full funding history for a customer's profile view: every deposit, Fixed Deposit and savings account they hold. */
     public function funding(Customer $customer)
     {
         return [
             'deposits' => FdDeposit::where('customer_id', $customer->id)->orderByDesc('id')->get(),
             'fixed_deposits' => FixedDeposit::with('fundingProduct:id,name,code')->where('customer_id', $customer->id)->orderByDesc('id')->get(),
+            'savings_accounts' => SavingsAccount::with('savingsProduct:id,name,code')->where('customer_id', $customer->id)->orderByDesc('id')->get(),
         ];
     }
 

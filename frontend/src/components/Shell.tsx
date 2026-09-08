@@ -72,6 +72,14 @@ export const NAV: NavNode[] = [
     { id: 'fund/reports', label: 'Funding Reports', icon: 'chart' },
   ] },
 
+  { section: 'Daily Savings', icon: 'wallet', items: [
+    { id: 'fund/savings-products', label: 'Savings Products', icon: 'layers' },
+    { id: 'fund/savings', label: 'Savings Accounts', icon: 'wallet' },
+    { id: 'fund/savings-collection', label: 'Savings Collection', icon: 'receipt' },
+    { id: 'fund/savings-interest', label: 'Savings Interest', icon: 'coins' },
+    { id: 'rep/savings', label: 'Savings Reports', icon: 'chart' },
+  ] },
+
   { section: 'Pawning Management', icon: 'tag', items: [
     { id: 'pawn/types', label: 'Pawning Types', icon: 'layers' },
     { id: 'pawn/tickets', label: 'Pawn Tickets', icon: 'tag' },

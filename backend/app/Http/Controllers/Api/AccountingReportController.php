@@ -192,7 +192,9 @@ class AccountingReportController extends Controller
         $interZonalInterest = $bal('4040');
         $totalIncome = bcadd($lendingIncome, $interZonalInterest, 2);
 
-        $interestCost = $bal('5100');
+        // Interest cost = FDs (5100) + Savings Deposits (5120), both a cost of
+        // customer funds. (5110 Borrowings interest is left as it was.)
+        $interestCost = bcadd($bal('5100'), $bal('5120'), 2);
         $netIncomeExOther = bcsub($totalIncome, $interestCost, 2);
 
         $documentationIncome = $bal('4910');

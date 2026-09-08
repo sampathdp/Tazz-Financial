@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\FdInterestPayment;
 use App\Models\FixedDeposit;
+use App\Models\SavingsAccount;
 use App\Support\CurrentBranch;
 use App\Support\ReportExport;
 use Illuminate\Http\Request;
@@ -56,6 +57,8 @@ class InvestorReportController extends Controller
             ['metric' => 'Total Invested', 'value' => number_format($d['totalInvested'], 2)],
             ['metric' => 'Average Investment', 'value' => number_format($d['avgInvestment'], 2)],
             ['metric' => 'New Investors This Month', 'value' => $d['newInvestorsThisMonth']],
+            ['metric' => 'Savings Account Holders', 'value' => $d['savingsHolderCount']],
+            ['metric' => 'Total Savings Balance', 'value' => number_format($d['totalSavingsBalance'], 2)],
         ];
         $sections = [['columns' => [['key' => 'metric', 'label' => 'Metric'], ['key' => 'value', 'label' => 'Value', 'align' => 'right']], 'rows' => $rows]];
 
@@ -69,12 +72,14 @@ class InvestorReportController extends Controller
             ['key' => 'code', 'label' => 'Code'], ['key' => 'fullName', 'label' => 'Name'], ['key' => 'branch', 'label' => 'Branch'], ['key' => 'phone', 'label' => 'Phone'],
             ['key' => 'fdCount', 'label' => 'FDs', 'align' => 'right', 'format' => 'number'], ['key' => 'activeFdCount', 'label' => 'Active FDs', 'align' => 'right', 'format' => 'number'],
             ['key' => 'totalPrincipal', 'label' => 'Total Principal', 'align' => 'right', 'format' => 'money'], ['key' => 'totalInterestPaid', 'label' => 'Interest Paid', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'savingsBalance', 'label' => 'Savings Balance', 'align' => 'right', 'format' => 'money'],
         ];
         $mapped = $rows->map(fn ($r) => [
             'code' => $r['code'], 'fullName' => $r['fullName'], 'branch' => $r['branch']['name'] ?? '—', 'phone' => $r['phone'] ?? '—',
             'fdCount' => $r['fdCount'], 'activeFdCount' => $r['activeFdCount'], 'totalPrincipal' => $r['totalPrincipal'], 'totalInterestPaid' => $r['totalInterestPaid'],
+            'savingsBalance' => $r['savingsBalance'],
         ]);
-        $totalRow = ['fullName' => 'Total', 'totalPrincipal' => $mapped->sum('totalPrincipal'), 'totalInterestPaid' => $mapped->sum('totalInterestPaid')];
+        $totalRow = ['fullName' => 'Total', 'totalPrincipal' => $mapped->sum('totalPrincipal'), 'totalInterestPaid' => $mapped->sum('totalInterestPaid'), 'savingsBalance' => $mapped->sum('savingsBalance')];
         $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No investors found']];
 
         return ['Investor Directory', $sections, null];
@@ -93,6 +98,9 @@ class InvestorReportController extends Controller
             ->groupBy('customer_id')->pluck('first_at', 'customer_id');
         $newInvestorsThisMonth = $firstFdDates->filter(fn ($d) => $d >= $monthStart)->count();
 
+        $savingsHolderCount = CurrentBranch::applyScope(SavingsAccount::where('status', '!=', 'Closed'))->distinct()->count('customer_id');
+        $totalSavingsBalance = (float) CurrentBranch::applyScope(SavingsAccount::where('status', '!=', 'Closed'))->sum('current_balance');
+
         return [
             'asOf' => now()->toDateString(),
             'investorCount' => $investorCount,
@@ -100,6 +108,8 @@ class InvestorReportController extends Controller
             'totalInvested' => round($totalInvested, 2),
             'avgInvestment' => $activeInvestorCount > 0 ? round($totalInvested / $activeInvestorCount, 2) : 0,
             'newInvestorsThisMonth' => $newInvestorsThisMonth,
+            'savingsHolderCount' => $savingsHolderCount,
+            'totalSavingsBalance' => round($totalSavingsBalance, 2),
         ];
     }
 
@@ -121,14 +131,22 @@ class InvestorReportController extends Controller
             ->groupBy('fixed_deposits.customer_id');
         $interestPaid = CurrentBranch::applyScope($interestQuery, 'fixed_deposits.branch_id')->pluck('total_interest_paid', 'customer_id');
 
+        $savingsAgg = CurrentBranch::applyScope(
+            SavingsAccount::select('customer_id')
+                ->selectRaw('count(*) as savings_count')
+                ->selectRaw("sum(case when status != 'Closed' then current_balance else 0 end) as savings_balance")
+                ->groupBy('customer_id')
+        )->get()->keyBy('customer_id');
+
         // Customer already carries BelongsToBranch — no manual branch filter needed.
         return Customer::query()
-            ->whereIn('id', $fdAgg->keys())
+            ->whereIn('id', $fdAgg->keys()->merge($savingsAgg->keys())->unique())
             ->with('branch:id,name,code')
             ->orderBy('full_name')
             ->get(['id', 'code', 'full_name', 'branch_id', 'phone'])
-            ->map(function (Customer $c) use ($fdAgg, $interestPaid) {
+            ->map(function (Customer $c) use ($fdAgg, $interestPaid, $savingsAgg) {
                 $fds = $fdAgg->get($c->id);
+                $sav = $savingsAgg->get($c->id);
 
                 return [
                     'id' => $c->id, 'code' => $c->code, 'fullName' => $c->full_name, 'phone' => $c->phone,
@@ -137,6 +155,8 @@ class InvestorReportController extends Controller
                     'activeFdCount' => (int) ($fds->active_fd_count ?? 0),
                     'totalPrincipal' => round((float) ($fds->total_principal ?? 0), 2),
                     'totalInterestPaid' => round((float) ($interestPaid->get($c->id) ?? 0), 2),
+                    'savingsCount' => (int) ($sav->savings_count ?? 0),
+                    'savingsBalance' => round((float) ($sav->savings_balance ?? 0), 2),
                     'lastDepositAt' => $fds->last_deposit_at ?? null,
                 ];
             })->values();
