@@ -163,11 +163,26 @@ jobs:
           curl -sS -H "X-Ops-Token: $OPS_TOKEN" \
             "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?action=fix-storage"
 
+      # Dry run first: print applied-vs-pending status and the SQL each pending
+      # migration would execute, without touching the DB. Purely informational —
+      # never fails the deploy — so every run's log shows what is about to
+      # happen before the real migrate step commits it.
+      - name: Preview pending migrations (dry run)
+        continue-on-error: true
+        env:
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          curl -sS -H "X-Ops-Token: $OPS_TOKEN" \
+            "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?action=migrate&pretend=1"
+
       # The FTP/lftp deploy ships migration files but cannot run artisan on the
       # host — without this step every schema change sits pending until someone
       # runs it by hand, and the new code 500s against the old schema. The
-      # endpoint runs `migrate --force` (never seeds); this step fails the
-      # deploy if a migration errors so it can't pass silently.
+      # endpoint prints `migrate:status`, then auto-records any pending
+      # create-table migration whose table already exists (the prod DB was
+      # hand-patched before this pipeline existed), then runs `migrate --force`
+      # (never seeds). A real migration error still fails the deploy here so it
+      # can't pass silently.
       - name: Run database migrations
         env:
           OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
