@@ -152,11 +152,49 @@ jobs:
             bye;
           "
 
-      - name: Reset OPcache after deploy
+      # opcache-reset.php authenticates on the X-Ops-Token *header* only — a
+      # ?token= query param is ignored (and would leak into access logs).
+      - name: Recreate storage directories after deploy
         continue-on-error: true
         env:
           OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
         run: |
           sleep 3
-          response=$(curl -sS -w "\n%{http_code}" "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?token=$OPS_TOKEN")
+          curl -sS -H "X-Ops-Token: $OPS_TOKEN" \
+            "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?action=fix-storage"
+
+      # The FTP/lftp deploy ships migration files but cannot run artisan on the
+      # host — without this step every schema change sits pending until someone
+      # runs it by hand, and the new code 500s against the old schema. The
+      # endpoint runs `migrate --force` (never seeds); this step fails the
+      # deploy if a migration errors so it can't pass silently.
+      - name: Run database migrations
+        env:
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          out=$(curl -sS -w $'\n%{http_code}' -H "X-Ops-Token: $OPS_TOKEN" \
+            "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?action=migrate")
+          code=$(printf '%s' "$out" | tail -n1)
+          json=$(printf '%s' "$out" | sed '$d')
+          echo "$json"
+          if [ "$code" != "200" ]; then
+            echo "::error::migrate endpoint returned HTTP $code"
+            exit 1
+          fi
+          if ! printf '%s' "$json" | jq empty >/dev/null 2>&1; then
+            echo "::error::migrate endpoint returned a non-JSON response"
+            exit 1
+          fi
+          if printf '%s' "$json" | jq -e 'has("error")' >/dev/null; then
+            echo "::error::a migration failed — see the output above"
+            exit 1
+          fi
+
+      - name: Reset OPcache after deploy
+        continue-on-error: true
+        env:
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          response=$(curl -sS -w "\n%{http_code}" -H "X-Ops-Token: $OPS_TOKEN" \
+            "https://tazz-investment.salonflow.cloud/api/opcache-reset.php")
           echo "$response"
