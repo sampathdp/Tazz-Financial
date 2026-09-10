@@ -3,10 +3,23 @@
 // this file must keep working even when the app itself is broken), so each
 // environment (prod, demo, ...) can carry its own secret instead of sharing
 // one literal committed to source control.
+//
+// The candidate list must match bootstrap/app.php: on the live server the real
+// env lives outside the webroot at <account home>/envs/tazz-investment.env, and
+// this file sits at .../sites/<site>/api — the same three-levels-up walk the
+// bootstrap does from .../sites/<site>/laravel lands on the same folder. The
+// app-root .env paths are the local / fallback case.
 function ops_token(): ?string
 {
-    $envPath = __DIR__ . '/../laravel/.env';
-    if (is_file($envPath)) {
+    $candidates = [
+        dirname(__DIR__, 3) . '/envs/tazz-investment.env',
+        __DIR__ . '/../laravel/.env',
+        __DIR__ . '/../.env',
+    ];
+    foreach ($candidates as $envPath) {
+        if (!is_file($envPath)) {
+            continue;
+        }
         foreach (file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
             if (preg_match('/^OPS_TOKEN=(.*)$/', trim($line), $m)) {
                 return trim($m[1], " \t\n\r\0\x0B\"'");
