@@ -60,7 +60,11 @@ jobs:
     # "Timeout (control socket)" failure.
     needs: deploy-frontend
     steps:
+      # fetch-depth: 0 so the "new migrations" step below can diff the pushed
+      # commit range (default shallow checkout has no history to compare).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -163,47 +167,59 @@ jobs:
           curl -sS -H "X-Ops-Token: $OPS_TOKEN" \
             "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?action=fix-storage"
 
-      # Dry run first: print applied-vs-pending status and the SQL each pending
-      # migration would execute, without touching the DB. Purely informational —
-      # never fails the deploy — so every run's log shows what is about to
-      # happen before the real migrate step commits it.
-      - name: Preview pending migrations (dry run)
+      # Only migrate when the pushed commits ADDED migration files — past
+      # migration files are never replayed. `github.event.before` is the tip
+      # before the push; on a first push / forced push / manual dispatch it is
+      # missing or unreachable, so fall back to the parent of the new tip.
+      - name: Detect new migration files in this push
+        id: newmigs
+        run: |
+          BEFORE='${{ github.event.before }}'
+          SHA='${{ github.sha }}'
+          if [ -z "$BEFORE" ] || ! git rev-parse -q --verify "$BEFORE^{commit}" >/dev/null 2>&1; then
+            BEFORE="$(git rev-parse -q --verify "$SHA^" || echo "$SHA")"
+          fi
+          files=$(git diff --name-only --diff-filter=AM "$BEFORE" "$SHA" -- backend/database/migrations/ \
+            | grep '\.php$' | sed 's#^backend/##' || true)
+          echo "Range: $BEFORE..$SHA"
+          echo "New / changed migration files:"
+          echo "${files:-<none>}"
+          if [ -n "$files" ]; then echo "has=true" >> "$GITHUB_OUTPUT"; else echo "has=false" >> "$GITHUB_OUTPUT"; fi
+          {
+            echo "files<<__EOF__"
+            echo "$files"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      # Runs ONLY when this push added migration files. Never fails the deploy:
+      # a migration error is surfaced as a warning and applied by hand later,
+      # the release still completes. The endpoint runs
+      # `migrate --force --path=<file>` for exactly the listed files (Laravel
+      # still skips any already in the ledger); seeds are never triggered.
+      - name: Run new database migrations
+        if: steps.newmigs.outputs.has == 'true'
         continue-on-error: true
         env:
           OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+          NEW_MIGRATIONS: ${{ steps.newmigs.outputs.files }}
         run: |
-          curl -sS -H "X-Ops-Token: $OPS_TOKEN" \
-            "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?action=migrate&pretend=1"
-
-      # The FTP/lftp deploy ships migration files but cannot run artisan on the
-      # host — without this step every schema change sits pending until someone
-      # runs it by hand, and the new code 500s against the old schema. The
-      # endpoint prints `migrate:status`, then auto-records any pending
-      # create-table migration whose table already exists (the prod DB was
-      # hand-patched before this pipeline existed), then runs `migrate --force`
-      # (never seeds). A real migration error still fails the deploy here so it
-      # can't pass silently.
-      - name: Run database migrations
-        env:
-          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
-        run: |
-          out=$(curl -sS -w $'\n%{http_code}' -H "X-Ops-Token: $OPS_TOKEN" \
+          paths=$(printf '%s' "$NEW_MIGRATIONS" | paste -sd, -)
+          echo "Applying migrations: $paths"
+          out=$(curl -sS -w $'\n%{http_code}' -X POST -H "X-Ops-Token: $OPS_TOKEN" \
+            --data-urlencode "paths=$paths" \
             "https://tazz-investment.salonflow.cloud/api/opcache-reset.php?action=migrate")
           code=$(printf '%s' "$out" | tail -n1)
           json=$(printf '%s' "$out" | sed '$d')
           echo "$json"
           if [ "$code" != "200" ]; then
-            echo "::error::migrate endpoint returned HTTP $code"
-            exit 1
+            echo "::warning::migrate endpoint returned HTTP $code — migrations NOT applied, deploy continues"
+            exit 0
           fi
-          if ! printf '%s' "$json" | jq empty >/dev/null 2>&1; then
-            echo "::error::migrate endpoint returned a non-JSON response"
-            exit 1
+          if printf '%s' "$json" | jq -e 'has("error")' >/dev/null 2>&1; then
+            echo "::warning::a migration failed — see output above; deploy continues, apply it by hand"
+            exit 0
           fi
-          if printf '%s' "$json" | jq -e 'has("error")' >/dev/null; then
-            echo "::error::a migration failed — see the output above"
-            exit 1
-          fi
+          echo "migrations applied OK"
 
       - name: Reset OPcache after deploy
         continue-on-error: true

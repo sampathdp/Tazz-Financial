@@ -138,12 +138,16 @@ if (($_GET['action'] ?? '') === 'routes') {
     }
 }
 
-// Action: migrate-status — report which migrations are already applied and
-// which are pending, WITHOUT running anything. Every deploy calls this before
-// ?action=migrate so the log always shows the DB's real state first.
+// Action: migrate-status — print `migrate:status` (applied vs pending) and
+// change nothing.
 //
-// Action: migrate — boot Laravel and run pending migrations. Add &pretend=1 to
-// print the SQL that would run without executing it (a dry run).
+// Action: migrate — run migrations. The deploy passes `paths=` (a comma list
+// of migration files, relative to the Laravel base path) so ONLY the files
+// added in the pushed commits run; migrations already recorded in the ledger
+// are skipped by Laravel as usual, and past migration files are never
+// replayed. With no `paths=`, falls back to a normal all-pending
+// `migrate --force`. Add &pretend=1 for a dry run (prints SQL, writes nothing).
+//
 // Seeding is deliberately NOT triggered here — DatabaseSeeder reseeds demo
 // data and must only ever be run intentionally from a trusted shell, never
 // from a web-reachable endpoint.
@@ -160,66 +164,27 @@ if (in_array(($_GET['action'] ?? ''), ['migrate', 'migrate-status'], true)) {
         $result['migrate_status'] = $statusOutput->fetch();
 
         if (($_GET['action'] ?? '') === 'migrate') {
-            $pretend = ($_GET['pretend'] ?? '') === '1';
+            $pretend = ($_GET['pretend'] ?? $_POST['pretend'] ?? '') === '1';
 
-            // Auto-baseline. This prod DB predates the deploy pipeline and had
-            // schema changes applied by hand (see backend/database/*.sql), so
-            // Laravel's `migrations` ledger sits behind the real schema and a
-            // plain `migrate` tries to re-create tables that already exist.
-            //
-            // For each pending migration, look only at its up() body: if that
-            // body does nothing but Schema::create() for tables that ALL
-            // already exist, record it as run instead of executing it. A
-            // migration whose up() also alters/drops/renames a table, runs a
-            // raw statement, or changes a column is left to run normally — a
-            // real failure there still fails the deploy.
-            if (!$pretend) {
-                $migrator = $app->make('migrator');
-                $repo = $migrator->getRepository();
-                $schema = $app->make('db')->connection()->getSchemaBuilder();
-                $ranList = $repo->getRan();
-                $files = $migrator->getMigrationFiles(database_path('migrations'));
-                $batch = $repo->getNextBatchNumber();
-                $baselined = [];
-                foreach ($files as $name => $path) {
-                    if (in_array($name, $ranList, true)) {
-                        continue;
-                    }
-                    $src = (string) file_get_contents($path);
-                    // Isolate the up() method body.
-                    $up = $src;
-                    if (preg_match('/function\s+up\s*\(/', $src, $u, PREG_OFFSET_CAPTURE)) {
-                        $from = $u[0][1];
-                        $to = strlen($src);
-                        if (preg_match('/function\s+down\s*\(/', $src, $d, PREG_OFFSET_CAPTURE, $from)) {
-                            $to = $d[0][1];
-                        }
-                        $up = substr($src, $from, $to - $from);
-                    }
-                    preg_match_all('/Schema::create\(\s*[\'"]([^\'"]+)[\'"]/', $up, $m);
-                    $creates = $m[1];
-                    $touchesOther = preg_match('/Schema::(table|drop|dropIfExists|dropColumns?|rename)\s*\(/', $up)
-                        || preg_match('/DB::(statement|unprepared|raw)\s*\(/', $up)
-                        || strpos($up, '->change()') !== false;
-                    if ($creates && !$touchesOther) {
-                        $allExist = true;
-                        foreach ($creates as $t) {
-                            if (!$schema->hasTable($t)) {
-                                $allExist = false;
-                                break;
-                            }
-                        }
-                        if ($allExist) {
-                            $repo->log($name, $batch);
-                            $baselined[] = $name;
-                        }
-                    }
-                }
-                $result['auto_baselined'] = $baselined;
+            $pathsRaw = $_POST['paths'] ?? $_GET['paths'] ?? '';
+            $paths = array_values(array_filter(array_map('trim', explode(',', $pathsRaw)), function ($p) {
+                // Only accept plain migration file paths under database/migrations.
+                return $p !== ''
+                    && strpos($p, '..') === false
+                    && preg_match('#^(\./)?database/migrations/[\w./-]+\.php$#', $p);
+            }));
+
+            $args = ['--force' => true];
+            if ($pretend) {
+                $args['--pretend'] = true;
+            }
+            if ($paths) {
+                $args['--path'] = $paths;
+                $result['migrate_paths'] = $paths;
             }
 
             $migrateOutput = new Symfony\Component\Console\Output\BufferedOutput();
-            $kernel->call('migrate', ['--force' => true, '--pretend' => $pretend], $migrateOutput);
+            $kernel->call('migrate', $args, $migrateOutput);
             $result['migrate'] = $migrateOutput->fetch();
             $result['pretend'] = $pretend;
         }
