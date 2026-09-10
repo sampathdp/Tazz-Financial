@@ -2404,6 +2404,7 @@ export interface TrialBalanceReport {
   totals: { debit: string; credit: string; difference: string; balanced: boolean };
 }
 export interface PLRow { accountId: number; code: string; name: string; balance: string }
+/** Income and Expense rows both carry cash + accrual: income differs on 4010/4015, expense on 5100/5120 (FD + savings deposit interest). */
 export interface PLIncomeRow { accountId: number; code: string; name: string; cashBalance: string; accrualBalance: string }
 export interface PLWaterfall {
   lendingIncome: string; interZonalInterest: string; totalIncome: string; interestCost: string;
@@ -2417,8 +2418,9 @@ export interface PLProductRow {
   loanType: string; interestCash: string; interestAccrual: string; charges: string; penalty: string; totalCash: string; totalAccrual: string;
 }
 export interface ProfitLossReport {
-  from?: string | null; to?: string | null; income: PLIncomeRow[]; expense: PLRow[];
-  totalIncomeCash: string; totalIncomeAccrual: string; totalExpense: string;
+  from?: string | null; to?: string | null; income: PLIncomeRow[]; expense: PLIncomeRow[];
+  totalIncomeCash: string; totalIncomeAccrual: string;
+  totalExpenseCash: string; totalExpenseAccrual: string;
   netProfitCash: string; netProfitAccrual: string;
   waterfallCash: PLWaterfall; waterfallAccrual: PLWaterfall; incomeByProduct: PLProductRow[];
 }

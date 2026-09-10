@@ -589,8 +589,12 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
       sections: [
         {
           title: 'P&L Waterfall',
-          columns: [{ label: 'Line', key: 'label' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
-          rows: WATERFALL_ROWS.map((r) => ({ label: (r.indent ? '    ' : '') + r.label, cash: Number(getPath(report.waterfallCash, r.key)), accrual: Number(getPath(report.waterfallAccrual, r.key)) })),
+          columns: [{ label: 'Line', key: 'label' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }, { label: 'Total (Cash + Accrual)', key: 'total', align: 'right', format: 'money' }],
+          rows: WATERFALL_ROWS.map((r) => {
+            const cash = Number(getPath(report.waterfallCash, r.key))
+            const accrual = Number(getPath(report.waterfallAccrual, r.key))
+            return { label: (r.indent ? '    ' : '') + r.label, cash, accrual, total: cash + accrual }
+          }),
         },
         {
           title: 'Income by Loan Product',
@@ -615,9 +619,9 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
         },
         {
           title: 'Expense',
-          columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }],
-          rows: report.expense.map((r) => ({ code: r.code, name: r.name, amount: Number(r.balance) })),
-          totalRow: { code: '', name: 'Total Expense', amount: Number(report.totalExpense) },
+          columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
+          rows: report.expense.map((r) => ({ code: r.code, name: r.name, cash: Number(r.cashBalance), accrual: Number(r.accrualBalance) })),
+          totalRow: { code: '', name: 'Total Expense', cash: Number(report.totalExpenseCash), accrual: Number(report.totalExpenseAccrual) },
           emptyText: 'No expense posted in this range',
         },
         {
@@ -653,18 +657,19 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
         </div>
         <div className="t-2" style={{ fontSize: 11.5, marginTop: 10 }}>
-          Cash Basis: income counted when actually collected. Accrual Basis: interest income counted as it's scheduled to be earned, not when collected. Only Interest Income differs between the two — expenses stay the same either way.
+          Cash Basis: income counted when collected, interest cost when paid. Accrual Basis: loan &amp; speed-draft interest income counted as it's scheduled to be earned, and FD / savings-deposit interest cost as it's scheduled to be incurred — not when the cash moves. All other lines are the same on both bases.
         </div>
       </Card>
       {loading ? <Card><LoadingBlock /></Card> : report && (
         <div className="col gap-4">
           <Card pad={0}>
             <div className="eyebrow" style={{ padding: '14px 20px 0' }}>P&L Waterfall</div>
-            <Table cols={[{ label: 'Line' }, { label: 'Cash Basis', align: 'right' }, { label: 'Accrual Basis', align: 'right' }]} rows={WATERFALL_ROWS} empty=""
+            <Table cols={[{ label: 'Line' }, { label: 'Cash Basis', align: 'right' }, { label: 'Accrual Basis', align: 'right' }, { label: 'Total (Cash + Accrual)', align: 'right' }]} rows={WATERFALL_ROWS} empty=""
               render={(r) => <>
                 <Td style={{ paddingLeft: r.indent ? 36 : 20, fontWeight: r.bold ? 700 : 400 }}>{r.label}</Td>
                 <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(getPath(report.waterfallCash, r.key))}</Td>
                 <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(getPath(report.waterfallAccrual, r.key))}</Td>
+                <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(Number(getPath(report.waterfallCash, r.key)) + Number(getPath(report.waterfallAccrual, r.key)))}</Td>
               </>} />
           </Card>
           <Card pad={0}>
@@ -696,10 +701,14 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
           </Card>
           <Card pad={0}>
             <div className="eyebrow" style={{ padding: '14px 20px 0' }}>Expense</div>
-            <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Amount', align: 'right' }]} rows={report.expense} empty="No expense posted in this range"
-              render={(r) => <><Td mono>{r.code}</Td><Td>{r.name}</Td><Td align="right" mono>{money(r.balance)}</Td></>} />
+            <Table cols={[{ label: 'Code' }, { label: 'Name' }, { label: 'Cash Basis', align: 'right' }, { label: 'Accrual Basis', align: 'right' }]} rows={report.expense} empty="No expense posted in this range"
+              render={(r) => <><Td mono>{r.code}</Td><Td>{r.name}</Td><Td align="right" mono>{money(r.cashBalance)}</Td><Td align="right" mono>{money(r.accrualBalance)}</Td></>} />
             <div className="row between" style={{ padding: '10px 20px', borderTop: '1px solid var(--line)', fontWeight: 700 }}>
-              <span>Total Expense</span><span style={{ fontFamily: 'monospace' }}>{money(report.totalExpense)}</span>
+              <span>Total Expense</span>
+              <span className="row gap-4">
+                <span style={{ fontFamily: 'monospace' }} title="Cash Basis">{money(report.totalExpenseCash)}</span>
+                <span style={{ fontFamily: 'monospace' }} title="Accrual Basis">{money(report.totalExpenseAccrual)}</span>
+              </span>
             </div>
           </Card>
           <Card>

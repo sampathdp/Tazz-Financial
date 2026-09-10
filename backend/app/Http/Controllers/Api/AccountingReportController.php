@@ -8,6 +8,7 @@ use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\JournalLine;
 use App\Support\AccrualInterestCalculator;
+use App\Support\AccrualInterestCostCalculator;
 use App\Support\ReportExport;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -154,15 +155,15 @@ class AccountingReportController extends Controller
     {
         $from = $request->query('from');
         $to = $request->query('to');
-        [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpense] = $this->plFiguresBothBases($from, $to);
+        [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpenseCash, $totalExpenseAccrual] = $this->plFiguresBothBases($from, $to);
 
         return [
             'from' => $from, 'to' => $to,
             'income' => $income, 'expense' => $expense,
             'total_income_cash' => $totalIncomeCash, 'total_income_accrual' => $totalIncomeAccrual,
-            'total_expense' => $totalExpense,
-            'net_profit_cash' => bcsub($totalIncomeCash, $totalExpense, 2),
-            'net_profit_accrual' => bcsub($totalIncomeAccrual, $totalExpense, 2),
+            'total_expense_cash' => $totalExpenseCash, 'total_expense_accrual' => $totalExpenseAccrual,
+            'net_profit_cash' => bcsub($totalIncomeCash, $totalExpenseCash, 2),
+            'net_profit_accrual' => bcsub($totalIncomeAccrual, $totalExpenseAccrual, 2),
             'waterfall_cash' => $this->plWaterfall($from, $to, 'cash'),
             'waterfall_accrual' => $this->plWaterfall($from, $to, 'accrual'),
             'income_by_product' => $this->incomeByLoanProduct($from, $to),
@@ -193,8 +194,13 @@ class AccountingReportController extends Controller
         $totalIncome = bcadd($lendingIncome, $interZonalInterest, 2);
 
         // Interest cost = FDs (5100) + Savings Deposits (5120), both a cost of
-        // customer funds. (5110 Borrowings interest is left as it was.)
-        $interestCost = bcadd($bal('5100'), $bal('5120'), 2);
+        // customer funds. (5110 Borrowings interest is left as it was.) On the
+        // accrual basis it is recomputed day-count from the FD schedules and the
+        // savings balance history — the cost-side mirror of accrual interest
+        // income — instead of the cash / run-posted ledger balance.
+        $interestCost = $basis === 'accrual'
+            ? AccrualInterestCostCalculator::forPeriod($from, $to)['total']
+            : bcadd($bal('5100'), $bal('5120'), 2);
         $netIncomeExOther = bcsub($totalIncome, $interestCost, 2);
 
         $documentationIncome = $bal('4910');
@@ -418,9 +424,9 @@ class AccountingReportController extends Controller
     {
         $from = $request->query('from');
         $to = $request->query('to');
-        [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpense] = $this->plFiguresBothBases($from, $to);
-        $netProfitCash = bcsub($totalIncomeCash, $totalExpense, 2);
-        $netProfitAccrual = bcsub($totalIncomeAccrual, $totalExpense, 2);
+        [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpenseCash, $totalExpenseAccrual] = $this->plFiguresBothBases($from, $to);
+        $netProfitCash = bcsub($totalIncomeCash, $totalExpenseCash, 2);
+        $netProfitAccrual = bcsub($totalIncomeAccrual, $totalExpenseAccrual, 2);
         $waterfallCash = $this->plWaterfall($from, $to, 'cash');
         $waterfallAccrual = $this->plWaterfall($from, $to, 'accrual');
         $byProduct = $this->incomeByLoanProduct($from, $to);
@@ -432,11 +438,13 @@ class AccountingReportController extends Controller
                     ['key' => 'label', 'label' => 'Line'],
                     ['key' => 'cash', 'label' => 'Cash Basis', 'align' => 'right', 'format' => 'money'],
                     ['key' => 'accrual', 'label' => 'Accrual Basis', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'total', 'label' => 'Total (Cash + Accrual)', 'align' => 'right', 'format' => 'money'],
                 ],
                 'rows' => collect(self::WATERFALL_ROWS)->map(fn (array $r) => [
                     'label' => str_repeat('    ', $r[2]) . $r[1],
                     'cash' => data_get($waterfallCash, $r[0]),
                     'accrual' => data_get($waterfallAccrual, $r[0]),
+                    'total' => bcadd((string) data_get($waterfallCash, $r[0]), (string) data_get($waterfallAccrual, $r[0]), 2),
                 ])->all(),
             ],
             [
@@ -465,9 +473,13 @@ class AccountingReportController extends Controller
             ],
             [
                 'title' => 'Expense',
-                'columns' => [['key' => 'code', 'label' => 'Code'], ['key' => 'name', 'label' => 'Name'], ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money']],
-                'rows' => collect($expense)->map(fn ($r) => ['code' => $r['code'], 'name' => $r['name'], 'amount' => $r['balance']])->all(),
-                'totalRow' => ['name' => 'Total Expense', 'amount' => $totalExpense],
+                'columns' => [
+                    ['key' => 'code', 'label' => 'Code'], ['key' => 'name', 'label' => 'Name'],
+                    ['key' => 'cash', 'label' => 'Cash Basis', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'accrual', 'label' => 'Accrual Basis', 'align' => 'right', 'format' => 'money'],
+                ],
+                'rows' => collect($expense)->map(fn ($r) => ['code' => $r['code'], 'name' => $r['name'], 'cash' => $r['cash_balance'], 'accrual' => $r['accrual_balance']])->all(),
+                'totalRow' => ['name' => 'Total Expense', 'cash' => $totalExpenseCash, 'accrual' => $totalExpenseAccrual],
                 'emptyText' => 'No expense posted in this range',
             ],
             [
@@ -727,8 +739,11 @@ class AccountingReportController extends Controller
         ];
     }
 
-    /** Accrual Basis only ever touches these two — see AccrualInterestCalculator's docblock for why interest income is the one figure with an equivalent "supposed to earn" computation; other income/expense have no such schedule to compute from. */
+    /** The only Income accounts recomputed on the Accrual Basis — see AccrualInterestCalculator's docblock for why interest income is the figure with an equivalent "supposed to earn" schedule; other income has none. */
     private const ACCRUAL_INCOME_ACCOUNTS = ['4010' => 'Loan', '4015' => 'SpeedDraft'];
+
+    /** The only Expense accounts recomputed on the Accrual Basis — FD (5100) and Savings-deposit (5120) interest, from AccrualInterestCostCalculator; keyed by that class's forPeriod() result key. */
+    private const ACCRUAL_EXPENSE_ACCOUNTS = ['5100' => 'fd', '5120' => 'savings'];
 
     /**
      * Income/Expense account balances for a period, plus their totals — shared
@@ -741,6 +756,7 @@ class AccountingReportController extends Controller
     {
         $balances = ChartOfAccount::balancesAsOf($to, $from);
         $accounts = ChartOfAccount::whereIn('account_type', ['Income', 'Expense'])->orderBy('code')->get();
+        $accrualCost = $basis === 'accrual' ? AccrualInterestCostCalculator::forPeriod($from, $to) : null;
 
         $rows = ['Income' => [], 'Expense' => []];
         $totalIncome = '0.00';
@@ -751,6 +767,12 @@ class AccountingReportController extends Controller
                 $balance = isset(self::ACCRUAL_INCOME_ACCOUNTS[$account->code])
                     ? AccrualInterestCalculator::incomeForPeriod(self::ACCRUAL_INCOME_ACCOUNTS[$account->code], $from, $to)
                     : '0.00';
+            }
+            if ($basis === 'accrual' && isset(self::ACCRUAL_EXPENSE_ACCOUNTS[$account->code])) {
+                // Only 5100 / 5120 are schedule-recomputed; every other expense
+                // (salary, opex, impairment, tax) is incurred regardless of a
+                // schedule, so it keeps its ledger balance on both bases.
+                $balance = $accrualCost[self::ACCRUAL_EXPENSE_ACCOUNTS[$account->code]];
             }
             $rows[$account->account_type][] = ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => $balance];
             if ($account->account_type === 'Income') {
@@ -764,25 +786,37 @@ class AccountingReportController extends Controller
     }
 
     /**
-     * Cash and Accrual side by side, for the single combined P&L view (no
-     * more basis toggle — both figures shown together). Expense never
-     * differs by basis (see ACCRUAL_INCOME_ACCOUNTS), so it's computed once
-     * and shared; only Income needs a cash_balance/accrual_balance per row.
+     * Cash and Accrual side by side, for the single combined P&L view (no more
+     * basis toggle — both figures shown together). Income differs by basis on
+     * 4010/4015 and Expense on 5100/5120 (see the ACCRUAL_*_ACCOUNTS consts),
+     * so each row carries a cash_balance and an accrual_balance.
+     *
+     * @return array{0: array, 1: array, 2: string, 3: string, 4: string, 5: string}
+     *         [income rows, expense rows, total income cash, total income accrual,
+     *          total expense cash, total expense accrual]
      */
     private function plFiguresBothBases(?string $from, ?string $to): array
     {
-        [$cashIncome, $expense, $totalIncomeCash, $totalExpense] = $this->plFigures($from, $to, 'cash');
-        [$accrualIncome, , $totalIncomeAccrual] = $this->plFigures($from, $to, 'accrual');
+        [$cashIncome, $cashExpense, $totalIncomeCash, $totalExpenseCash] = $this->plFigures($from, $to, 'cash');
+        [$accrualIncome, $accrualExpense, $totalIncomeAccrual, $totalExpenseAccrual] = $this->plFigures($from, $to, 'accrual');
 
-        $accrualByCode = collect($accrualIncome)->keyBy('code');
-        $income = collect($cashIncome)->map(fn (array $row) => [
-            'account_id' => $row['account_id'],
-            'code' => $row['code'],
-            'name' => $row['name'],
-            'cash_balance' => $row['balance'],
-            'accrual_balance' => $accrualByCode->get($row['code'])['balance'] ?? $row['balance'],
-        ])->values();
+        $bothBases = function (array $cashRows, array $accrualRows) {
+            $accrualByCode = collect($accrualRows)->keyBy('code');
 
-        return [$income, $expense, $totalIncomeCash, $totalIncomeAccrual, $totalExpense];
+            return collect($cashRows)->map(fn (array $row) => [
+                'account_id' => $row['account_id'],
+                'code' => $row['code'],
+                'name' => $row['name'],
+                'cash_balance' => $row['balance'],
+                'accrual_balance' => $accrualByCode->get($row['code'])['balance'] ?? $row['balance'],
+            ])->values();
+        };
+
+        return [
+            $bothBases($cashIncome, $accrualIncome),
+            $bothBases($cashExpense, $accrualExpense),
+            $totalIncomeCash, $totalIncomeAccrual,
+            $totalExpenseCash, $totalExpenseAccrual,
+        ];
     }
 }
