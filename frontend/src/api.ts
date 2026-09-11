@@ -2435,6 +2435,12 @@ export interface LedgerDriftRow {
   glAccountId: number; glAccountCode: string; bookBalance: string; glBalance: string; variance: string;
 }
 export interface LedgerDriftReport { asOf: string; rows: LedgerDriftRow[]; hasDrift: boolean }
+export interface PLMonthlyRow {
+  month: string; label: string; from: string; to: string;
+  totalIncomeCash: string; totalIncomeAccrual: string; totalExpenseCash: string; totalExpenseAccrual: string;
+  netProfitCash: string; netProfitAccrual: string;
+}
+export interface ProfitLossMonthlyReport { from: string; to: string; months: PLMonthlyRow[] }
 export interface CashFlowRow { code: string; name: string; amount: number }
 export interface CashFlowReport {
   from: string; to: string;
@@ -2448,6 +2454,8 @@ export const accountingReportsApi = {
     http.get('/accounting-reports/general-ledger', { params: snakeize({ accountId, ...params }) }).then((r) => camelize(r.data) as GeneralLedgerReport),
   profitLoss: (params?: { from?: string; to?: string }) =>
     http.get('/accounting-reports/profit-loss', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as ProfitLossReport),
+  profitLossMonthly: (params: { from: string; to: string }) =>
+    http.get('/accounting-reports/profit-loss/monthly', { params: snakeize(params) }).then((r) => camelize(r.data) as ProfitLossMonthlyReport),
   balanceSheet: (asOf?: string) => http.get('/accounting-reports/balance-sheet', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as BalanceSheetReport),
   cashFlow: (params?: { from?: string; to?: string }) =>
     http.get('/accounting-reports/cash-flow', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as CashFlowReport),

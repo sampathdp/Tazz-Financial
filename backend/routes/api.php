@@ -617,6 +617,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('chart-of-accounts', [ChartOfAccountController::class, 'index'])->middleware('perm:Chart of Accounts,View');
     Route::post('chart-of-accounts', [ChartOfAccountController::class, 'store'])->middleware('perm:Chart of Accounts,Create');
     Route::put('chart-of-accounts/{chartOfAccount}', [ChartOfAccountController::class, 'update'])->middleware('perm:Chart of Accounts,Edit');
+    Route::get('accounting-reports/profit-loss/monthly', [AccountingReportController::class, 'profitAndLossMonthly'])->middleware('perm:Accounting Reports,View');
     Route::get('accounting-reports/{type}', [AccountingReportController::class, 'show'])->middleware('perm:Accounting Reports,View');
     Route::get('accounting-reports/{type}/pdf', [AccountingReportController::class, 'exportPdf'])->middleware('perm:Accounting Reports,View');
     Route::get('journal-entries', [JournalEntryController::class, 'index'])->middleware('perm:Accounting Reports,View');

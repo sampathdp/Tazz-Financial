@@ -171,6 +171,55 @@ class AccountingReportController extends Controller
     }
 
     /**
+     * Per-calendar-month totals across [from, to] — the "Monthly Summary"
+     * sheet on the P&L Excel export. Splits the range into calendar months
+     * (the first/last clamped to the actual from/to so partial months don't
+     * overshoot) and re-runs plFiguresBothBases() per month, so each row can
+     * never disagree with what the combined-period report above would show
+     * for that same slice.
+     */
+    public function profitAndLossMonthly(Request $request)
+    {
+        $from = $request->query('from');
+        $to = $request->query('to');
+        if (!$from || !$to) {
+            throw ValidationException::withMessages(['from' => 'from and to are both required for the monthly breakdown.']);
+        }
+
+        $fromDate = Carbon::parse($from);
+        $toDate = Carbon::parse($to);
+        $cursor = $fromDate->copy()->startOfMonth();
+        $lastMonth = $toDate->copy()->startOfMonth();
+
+        $months = [];
+        while ($cursor->lte($lastMonth)) {
+            $monthStart = $cursor->copy();
+            $monthEnd = $cursor->copy()->endOfMonth();
+            $rangeFrom = $monthStart->lt($fromDate) ? $from : $monthStart->toDateString();
+            $rangeTo = $monthEnd->gt($toDate) ? $to : $monthEnd->toDateString();
+
+            [, , $totalIncomeCash, $totalIncomeAccrual, $totalExpenseCash, $totalExpenseAccrual] = $this->plFiguresBothBases($rangeFrom, $rangeTo);
+
+            $months[] = [
+                'month' => $cursor->format('Y-m'),
+                'label' => $cursor->format('M Y'),
+                'from' => $rangeFrom,
+                'to' => $rangeTo,
+                'total_income_cash' => $totalIncomeCash,
+                'total_income_accrual' => $totalIncomeAccrual,
+                'total_expense_cash' => $totalExpenseCash,
+                'total_expense_accrual' => $totalExpenseAccrual,
+                'net_profit_cash' => bcsub($totalIncomeCash, $totalExpenseCash, 2),
+                'net_profit_accrual' => bcsub($totalIncomeAccrual, $totalExpenseAccrual, 2),
+            ];
+
+            $cursor->addMonth();
+        }
+
+        return ['from' => $from, 'to' => $to, 'months' => $months];
+    }
+
+    /**
      * The full management P&L waterfall (Income → Interest Cost → Net Income
      * → Staff Cost/Opex → HO Absorption → Impairment → VAT/NBT/Tax → Net
      * Profit After Tax), built on top of the same account balances plFigures()

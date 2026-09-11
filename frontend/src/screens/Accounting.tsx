@@ -11,7 +11,7 @@ import { DateRangeSelect } from '../components/DateRangeSelect'
 import {
   chartOfAccountsApi, journalEntriesApi, accountingReportsApi, manualJournalEntriesApi,
   type ChartOfAccount, type AccountType, type JournalEntry, type GeneralLedgerReport,
-  type TrialBalanceReport, type ProfitLossReport, type BalanceSheetReport, type CashFlowReport, type LedgerDriftReport, type AuthUser,
+  type TrialBalanceReport, type ProfitLossReport, type PLMonthlyRow, type BalanceSheetReport, type CashFlowReport, type LedgerDriftReport, type AuthUser,
   type ManualJournalEntry, type JournalAccountOption,
 } from '../api'
 import { Can, canApprove } from '../lib/permissions'
@@ -579,58 +579,87 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
   }
   useEffect(refresh, [fromDate, toDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const exportExcel = () => {
+  const [exportingExcel, setExportingExcel] = useState(false)
+  const exportExcel = async () => {
     if (!report) return
-    void exportReportToExcel({
-      sheetName: 'Profit & Loss',
-      reportTitle: 'Profit & Loss Statement',
-      subtitle: 'Cash and Accrual Basis',
-      meta: `Period: ${fromDate || 'Inception'} to ${toDate || 'Today'}  •  Generated: ${new Date().toLocaleString()}`,
-      sections: [
-        {
-          title: 'P&L Waterfall',
-          columns: [{ label: 'Line', key: 'label' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }, { label: 'Total (Cash + Accrual)', key: 'total', align: 'right', format: 'money' }],
-          rows: WATERFALL_ROWS.map((r) => {
-            const cash = Number(getPath(report.waterfallCash, r.key))
-            const accrual = Number(getPath(report.waterfallAccrual, r.key))
-            return { label: (r.indent ? '    ' : '') + r.label, cash, accrual, total: cash + accrual }
-          }),
-        },
-        {
-          title: 'Income by Loan Product',
-          columns: [
-            { label: 'Product', key: 'loanType' }, { label: 'Interest (Cash)', key: 'interestCash', align: 'right', format: 'money' },
-            { label: 'Interest (Accrual)', key: 'interestAccrual', align: 'right', format: 'money' }, { label: 'Charges', key: 'charges', align: 'right', format: 'money' },
-            { label: 'Penalty', key: 'penalty', align: 'right', format: 'money' }, { label: 'Total (Cash)', key: 'totalCash', align: 'right', format: 'money' },
-            { label: 'Total (Accrual)', key: 'totalAccrual', align: 'right', format: 'money' },
-          ],
-          rows: report.incomeByProduct.map((r) => ({
-            loanType: r.loanType, interestCash: Number(r.interestCash), interestAccrual: Number(r.interestAccrual),
-            charges: Number(r.charges), penalty: Number(r.penalty), totalCash: Number(r.totalCash), totalAccrual: Number(r.totalAccrual),
-          })),
-          emptyText: 'No loan payment income posted in this range',
-        },
-        {
-          title: 'Income by Chart of Account',
-          columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
-          rows: report.income.map((r) => ({ code: r.code, name: r.name, cash: Number(r.cashBalance), accrual: Number(r.accrualBalance) })),
-          totalRow: { code: '', name: 'Total Income', cash: Number(report.totalIncomeCash), accrual: Number(report.totalIncomeAccrual) },
-          emptyText: 'No income posted in this range',
-        },
-        {
-          title: 'Expense',
-          columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
-          rows: report.expense.map((r) => ({ code: r.code, name: r.name, cash: Number(r.cashBalance), accrual: Number(r.accrualBalance) })),
-          totalRow: { code: '', name: 'Total Expense', cash: Number(report.totalExpenseCash), accrual: Number(report.totalExpenseAccrual) },
-          emptyText: 'No expense posted in this range',
-        },
-        {
-          title: 'Net Profit',
-          columns: [{ label: 'Basis', key: 'basis' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }],
-          rows: [{ basis: 'Cash Basis', amount: Number(report.netProfitCash) }, { basis: 'Accrual Basis', amount: Number(report.netProfitAccrual) }],
-        },
-      ],
-    }, `profit-loss-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    setExportingExcel(true)
+    try {
+      let monthly: PLMonthlyRow[] = []
+      try {
+        if (fromDate && toDate) monthly = (await accountingReportsApi.profitLossMonthly({ from: fromDate, to: toDate })).months
+      } catch (ex: any) {
+        notify.error('Monthly breakdown failed', getErrorText(ex, 'Could not load month-by-month totals — exporting without them'))
+      }
+
+      await exportReportToExcel({
+        sheetName: 'Profit & Loss',
+        reportTitle: 'Profit & Loss Statement',
+        subtitle: 'Cash and Accrual Basis',
+        meta: `Period: ${fromDate || 'Inception'} to ${toDate || 'Today'}  •  Generated: ${new Date().toLocaleString()}`,
+        sections: [
+          ...(monthly.length > 0 ? [{
+            title: 'Monthly Summary',
+            columns: [
+              { label: 'Month', key: 'label' }, { label: 'Income (Cash)', key: 'incomeCash', align: 'right' as const, format: 'money' as const },
+              { label: 'Income (Accrual)', key: 'incomeAccrual', align: 'right' as const, format: 'money' as const },
+              { label: 'Expense (Cash)', key: 'expenseCash', align: 'right' as const, format: 'money' as const },
+              { label: 'Expense (Accrual)', key: 'expenseAccrual', align: 'right' as const, format: 'money' as const },
+              { label: 'Net Profit (Cash)', key: 'netCash', align: 'right' as const, format: 'money' as const },
+              { label: 'Net Profit (Accrual)', key: 'netAccrual', align: 'right' as const, format: 'money' as const },
+            ],
+            rows: monthly.map((m) => ({
+              label: m.label, incomeCash: Number(m.totalIncomeCash), incomeAccrual: Number(m.totalIncomeAccrual),
+              expenseCash: Number(m.totalExpenseCash), expenseAccrual: Number(m.totalExpenseAccrual),
+              netCash: Number(m.netProfitCash), netAccrual: Number(m.netProfitAccrual),
+            })),
+          }] : []),
+          {
+            title: 'P&L Waterfall',
+            columns: [{ label: 'Line', key: 'label' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }, { label: 'Total (Cash + Accrual)', key: 'total', align: 'right', format: 'money' }],
+            rows: WATERFALL_ROWS.map((r) => {
+              const cash = Number(getPath(report.waterfallCash, r.key))
+              const accrual = Number(getPath(report.waterfallAccrual, r.key))
+              return { label: (r.indent ? '    ' : '') + r.label, cash, accrual, total: cash + accrual }
+            }),
+          },
+          {
+            title: 'Income by Loan Product',
+            columns: [
+              { label: 'Product', key: 'loanType' }, { label: 'Interest (Cash)', key: 'interestCash', align: 'right', format: 'money' },
+              { label: 'Interest (Accrual)', key: 'interestAccrual', align: 'right', format: 'money' }, { label: 'Charges', key: 'charges', align: 'right', format: 'money' },
+              { label: 'Penalty', key: 'penalty', align: 'right', format: 'money' }, { label: 'Total (Cash)', key: 'totalCash', align: 'right', format: 'money' },
+              { label: 'Total (Accrual)', key: 'totalAccrual', align: 'right', format: 'money' },
+            ],
+            rows: report.incomeByProduct.map((r) => ({
+              loanType: r.loanType, interestCash: Number(r.interestCash), interestAccrual: Number(r.interestAccrual),
+              charges: Number(r.charges), penalty: Number(r.penalty), totalCash: Number(r.totalCash), totalAccrual: Number(r.totalAccrual),
+            })),
+            emptyText: 'No loan payment income posted in this range',
+          },
+          {
+            title: 'Income by Chart of Account',
+            columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
+            rows: report.income.map((r) => ({ code: r.code, name: r.name, cash: Number(r.cashBalance), accrual: Number(r.accrualBalance) })),
+            totalRow: { code: '', name: 'Total Income', cash: Number(report.totalIncomeCash), accrual: Number(report.totalIncomeAccrual) },
+            emptyText: 'No income posted in this range',
+          },
+          {
+            title: 'Expense',
+            columns: [{ label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }],
+            rows: report.expense.map((r) => ({ code: r.code, name: r.name, cash: Number(r.cashBalance), accrual: Number(r.accrualBalance) })),
+            totalRow: { code: '', name: 'Total Expense', cash: Number(report.totalExpenseCash), accrual: Number(report.totalExpenseAccrual) },
+            emptyText: 'No expense posted in this range',
+          },
+          {
+            title: 'Net Profit',
+            columns: [{ label: 'Basis', key: 'basis' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }],
+            rows: [{ basis: 'Cash Basis', amount: Number(report.netProfitCash) }, { basis: 'Accrual Basis', amount: Number(report.netProfitAccrual) }],
+          },
+        ],
+      }, `profit-loss-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } finally {
+      setExportingExcel(false)
+    }
   }
 
   const exportPdf = async () => {
@@ -647,7 +676,7 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
     <div>
       <PageHead crumbs="Accounting" title="Profit & Loss" icon="pie"
         actions={report && <div className="row gap-2">
-          <Btn variant="solid" size="sm" icon="download" onClick={exportExcel}>Export Excel</Btn>
+          <Btn variant="solid" size="sm" icon="download" onClick={exportExcel} disabled={exportingExcel}>{exportingExcel ? 'Exporting…' : 'Export Excel'}</Btn>
           <Btn variant="solid" size="sm" icon="download" onClick={exportPdf} disabled={exportingPdf}>{exportingPdf ? 'Exporting…' : 'Export PDF'}</Btn>
         </div>} />
       <Card style={{ marginBottom: 16 }}>
