@@ -73,6 +73,35 @@ class SavingsAccountController extends Controller
         return [
             'account' => $savingsAccount->load(self::DETAIL_RELATIONS),
             'transactions' => $q->get(),
+            'summary' => $this->lifetimeSummary($savingsAccount),
+        ];
+    }
+
+    /** Lifetime totals over every posted movement (ignores the statement date filter). */
+    private function lifetimeSummary(SavingsAccount $account): array
+    {
+        $posted = $account->transactions()->where('status', 'Posted');
+        $byType = (clone $posted)->selectRaw('type, direction, COUNT(*) as n, COALESCE(SUM(amount), 0) as total')
+            ->groupBy('type', 'direction')->get();
+
+        $sum = function (string $type, ?string $direction = null) use ($byType) {
+            return round((float) $byType->filter(function ($r) use ($type, $direction) {
+                return $r->type === $type && ($direction === null || $r->direction === $direction);
+            })->sum('total'), 2);
+        };
+
+        $first = (clone $posted)->min('txn_date');
+        $last = (clone $posted)->max('txn_date');
+
+        return [
+            'totalDeposits' => $sum('Deposit'),
+            'totalWithdrawals' => $sum('Withdrawal'),
+            'totalInterest' => $sum('InterestPosting'),
+            'totalFees' => $sum('Fee'),
+            'transactionCount' => (int) $byType->sum('n'),
+            'collectionDeposits' => (int) (clone $posted)->whereNotNull('collection_sheet_id')->count(),
+            'firstTxnDate' => $first ? substr((string) $first, 0, 10) : null,
+            'lastTxnDate' => $last ? substr((string) $last, 0, 10) : null,
         ];
     }
 

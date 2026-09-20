@@ -5,7 +5,7 @@ import { Icon } from '../components/Icon'
 import {
   savingsAccountsApi, savingsProductsApi, branchesApi, customersApi,
   type SavingsAccount, type SavingsTransaction, type SavingsProduct, type SavingsPaymentMethod,
-  type Branch, type Customer, type AuthUser,
+  type SavingsAccountSummary, type Branch, type Customer, type AuthUser,
 } from '../api'
 import { Can, userCan } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -53,11 +53,20 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
     customersApi.list().then(setCustomers).catch(() => setCustomers([]))
   }, [])
 
-  const loadDetail = (id: number) => {
+  const [summary, setSummary] = useState<SavingsAccountSummary | null>(null)
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [hideVoided, setHideVoided] = useState(false)
+
+  const loadDetail = (id: number, range?: { from?: string; to?: string }) => {
+    const f = range ? range.from : from
+    const t = range ? range.to : to
     setDetailLoading(true)
-    savingsAccountsApi.statement(id).then((d) => { setSelected(d.account); setTxns(d.transactions) })
+    savingsAccountsApi.statement(id, { from: f || undefined, to: t || undefined })
+      .then((d) => { setSelected(d.account); setTxns(d.transactions); setSummary(d.summary) })
       .catch((ex) => notify.error('Load failed', getErrorText(ex))).finally(() => setDetailLoading(false))
   }
+  const openDetail = (id: number) => { setFrom(''); setTo(''); setHideVoided(false); loadDetail(id, {}) }
 
   // ----- open account form -----
   const [openForm, setOpenForm] = useState({
@@ -82,7 +91,7 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
         bankId: openForm.paymentMethod !== 'Cash' ? openForm.bankId : undefined, notes: openForm.notes || undefined,
       })
       setOpenModal(false); refresh(); notify.success('Account opened', acct.accountNumber)
-      loadDetail(acct.id)
+      openDetail(acct.id)
     } catch (ex: any) { setErr(getErrorText(ex, 'Failed to open account')) } finally { setBusy(false) }
   }
 
@@ -120,6 +129,7 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
   // ---------- detail view ----------
   if (selected) {
     const canEdit = userCan(me, 'Savings Accounts', 'Edit')
+    const visibleTxns = hideVoided ? txns.filter((t) => t.status !== 'Voided') : txns
     return (
       <div>
         <div className="row gap-2 no-print" style={{ marginBottom: 16 }}>
@@ -153,23 +163,80 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
             <span>Opened: <b>{dateOnly(selected.openDate)}</b></span>
             <span>Min balance: <b>{money(selected.minBalance)}</b></span>
             <span>Last interest: <b>{dateOnly(selected.lastInterestPostedOn)}</b></span>
+            <span>Withdrawal fee: <b>{money(selected.withdrawalFee)}</b></span>
+            <span>Last activity: <b>{dateOnly(selected.lastActivityOn ?? summary?.lastTxnDate)}</b></span>
             {selected.closedOn && <span>Closed: <b>{dateOnly(selected.closedOn)}</b></span>}
+            {selected.creator && <span>Opened by: <b>{selected.creator.name}</b></span>}
           </div>
+          {selected.notes && <div className="t-2" style={{ fontSize: 12.5, marginTop: 10 }}>Notes: {selected.notes}</div>}
         </Card>
 
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 16 }}>
+          <Card>
+            <div className="eyebrow">Customer</div>
+            <div style={{ fontWeight: 600, marginTop: 4 }}>{selected.customer?.fullName || '—'}</div>
+            <div className="t-2" style={{ fontSize: 12.5, lineHeight: 1.6, marginTop: 4 }}>
+              <div>Code: {selected.customer?.code || '—'}</div>
+              <div>NIC: {selected.customer?.nicNo || '—'}</div>
+              <div>Phone: {selected.customer?.phone || '—'}</div>
+              {selected.customer?.email && <div>Email: {selected.customer.email}</div>}
+              {selected.customer?.address && <div>Address: {selected.customer.address}</div>}
+            </div>
+          </Card>
+          <Card>
+            <div className="eyebrow">Lifetime Totals</div>
+            <div style={{ fontSize: 13, lineHeight: 1.9, marginTop: 4 }}>
+              {([
+                ['Total deposits', summary?.totalDeposits], ['Total withdrawals', summary?.totalWithdrawals],
+                ['Interest credited', summary?.totalInterest], ['Fees charged', summary?.totalFees],
+              ] as [string, number | undefined][]).map(([label, v]) => (
+                <div key={label} className="row between"><span className="t-2">{label}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(v)}</b></div>
+              ))}
+            </div>
+          </Card>
+          <Card>
+            <div className="eyebrow">Activity</div>
+            <div style={{ fontSize: 13, lineHeight: 1.9, marginTop: 4 }}>
+              <div className="row between"><span className="t-2">Transactions</span><b>{summary?.transactionCount ?? 0}</b></div>
+              <div className="row between"><span className="t-2">Field collections</span><b>{summary?.collectionDeposits ?? 0}</b></div>
+              <div className="row between"><span className="t-2">First transaction</span><b>{dateOnly(summary?.firstTxnDate)}</b></div>
+              <div className="row between"><span className="t-2">Last transaction</span><b>{dateOnly(summary?.lastTxnDate)}</b></div>
+              <div className="row between"><span className="t-2">Interest accrued</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(selected.interestAccrued)}</b></div>
+            </div>
+          </Card>
+        </div>
+
         <Card pad={0}>
-          <div style={{ padding: '12px 16px', fontWeight: 600 }}>Pass-book</div>
+          <div className="row between wrap" style={{ padding: '12px 16px', gap: 12 }}>
+            <div style={{ fontWeight: 600 }}>Pass-book <span className="t-2" style={{ fontWeight: 400, fontSize: 12 }}>({visibleTxns.length} entries)</span></div>
+            <div className="row gap-2 wrap no-print" style={{ alignItems: 'flex-end' }}>
+              <div style={{ width: 150 }}><DateInput value={from} onChange={setFrom} /></div>
+              <div style={{ width: 150 }}><DateInput value={to} onChange={setTo} /></div>
+              <Btn size="sm" variant="solid" onClick={() => loadDetail(selected.id)}>Filter</Btn>
+              {(from || to) && <Btn size="sm" variant="ghost" onClick={() => { setFrom(''); setTo(''); loadDetail(selected.id, {}) }}>Clear</Btn>}
+              <label className="row gap-1 t-2" style={{ fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={hideVoided} onChange={(e) => setHideVoided(e.target.checked)} /> Hide voided
+              </label>
+              <Btn size="sm" variant="ghost" icon="receipt" onClick={() => window.print()}>Print</Btn>
+            </div>
+          </div>
           {detailLoading ? <LoadingBlock /> :
-          <Table cols={[{ label: 'Txn No' }, { label: 'Date' }, { label: 'Type' }, { label: 'In', align: 'right' }, { label: 'Out', align: 'right' }, { label: 'Balance', align: 'right' }, { label: '', align: 'right', w: 60 }]}
-            rows={txns} empty="No transactions yet"
+          <Table cols={[{ label: 'Txn No' }, { label: 'Date' }, { label: 'Type' }, { label: 'Method' }, { label: 'Reference' }, { label: 'By' }, { label: 'In', align: 'right' }, { label: 'Out', align: 'right' }, { label: 'Balance', align: 'right' }, { label: '', align: 'right', w: 60 }]}
+            rows={visibleTxns} empty="No transactions yet"
             render={(t, i) => <>
               <Td mono>{t.txnNumber}</Td>
               <Td>{dateOnly(t.txnDate)}</Td>
-              <Td>{t.type}{t.status === 'Voided' && <span style={{ marginLeft: 6 }}><Badge tone="red">Voided</Badge></span>}</Td>
+              <Td>
+                {t.type}{t.status === 'Voided' && <span style={{ marginLeft: 6 }}><Badge tone="red">Voided</Badge></span>}
+                {t.notes && <div className="t-2" style={{ fontSize: 11 }}>{t.notes}</div>}
+              </Td>
+              <Td>{t.paymentMethod || '—'}{t.bank?.name ? ` · ${t.bank.name}` : ''}</Td>
+              <Td>{[t.referenceNo, t.collectionSheet?.sheetNumber, t.interestRun?.runNumber].filter(Boolean).join(' · ') || '—'}</Td>
+              <Td>{t.creator?.name || '—'}</Td>
               <Td align="right" mono>{t.direction === 'In' ? money(t.amount) : '—'}</Td>
               <Td align="right" mono>{t.direction === 'Out' ? money(t.amount) : '—'}</Td>
               <Td align="right" mono>{money(t.runningBalance)}</Td>
-              <Td align="right">{i === 0 && t.status === 'Posted' && t.type !== 'InterestPosting' && canEdit && (
+              <Td align="right">{i === 0 && !from && !to && !hideVoided && t.status === 'Posted' && t.type !== 'InterestPosting' && canEdit && (
                 <button className="mms-act" title="Void" onClick={() => voidTxn(t)}><Icon n="trash" s={14} /></button>
               )}</Td>
             </>} />}
@@ -210,7 +277,7 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
         <Table cols={[{ label: 'Account No' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Opened' }, { label: 'Balance', align: 'right' }, { label: 'Status', align: 'center' }]}
           rows={rows}
           render={(a) => <>
-            <Td mono><button className="mms-linkbtn" onClick={() => loadDetail(a.id)} style={{ background: 'none', border: 'none', color: 'var(--ac-bright)', cursor: 'pointer', padding: 0 }}>{a.accountNumber}</button></Td>
+            <Td mono><button className="mms-linkbtn" onClick={() => openDetail(a.id)} style={{ background: 'none', border: 'none', color: 'var(--ac-bright)', cursor: 'pointer', padding: 0 }}>{a.accountNumber}</button></Td>
             <Td>{a.customer?.fullName || '—'}</Td>
             <Td>{a.savingsProduct?.name || '—'}</Td>
             <Td>{dateOnly(a.openDate)}</Td>

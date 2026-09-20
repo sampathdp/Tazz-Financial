@@ -2200,6 +2200,12 @@ export interface SavingsTransaction {
   referenceNo?: string | null; collectionSheetId?: number | null; interestRunId?: number | null;
   notes?: string | null; status: 'Posted' | 'Voided'; voidOfId?: number | null;
   creator?: { id: number; name: string } | null; createdAt?: string;
+  collectionSheet?: { id: number; sheetNumber: string } | null; interestRun?: { id: number; runNumber: string } | null;
+}
+
+export interface SavingsAccountSummary {
+  totalDeposits: number; totalWithdrawals: number; totalInterest: number; totalFees: number;
+  transactionCount: number; collectionDeposits: number; firstTxnDate: string | null; lastTxnDate: string | null;
 }
 
 export interface SavingsAccount {
@@ -2254,7 +2260,7 @@ export const savingsAccountsApi = {
     http.get('/savings-accounts', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as SavingsAccount[]),
   get: (id: number) => http.get(`/savings-accounts/${id}`).then((r) => camelize(r.data) as SavingsAccount),
   statement: (id: number, params?: { from?: string; to?: string; postedOnly?: boolean }) =>
-    http.get(`/savings-accounts/${id}/statement`, { params: snakeize(params || {}) }).then((r) => camelize(r.data) as { account: SavingsAccount; transactions: SavingsTransaction[] }),
+    http.get(`/savings-accounts/${id}/statement`, { params: snakeize(params || {}) }).then((r) => camelize(r.data) as { account: SavingsAccount; transactions: SavingsTransaction[]; summary: SavingsAccountSummary }),
   nextNumber: (branchId: number, savingsProductId?: number) =>
     http.get('/savings-accounts/next-number', { params: { branch_id: branchId, savings_product_id: savingsProductId } }).then((r) => r.data.code as string),
   open: (body: { branchId: number; customerId: number; savingsProductId: number; openDate: string; openingDeposit: number | string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; bankId?: number; notes?: string }) =>
