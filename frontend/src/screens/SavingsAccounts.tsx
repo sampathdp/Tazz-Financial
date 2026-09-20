@@ -144,65 +144,81 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
           </>}
         </div>
 
-        <Card style={{ marginBottom: 16 }}>
-          <div className="row between wrap" style={{ gap: 16 }}>
-            <div>
-              <div style={{ fontFamily: 'Saira', fontWeight: 800, fontSize: 18 }}>{selected.accountNumber}</div>
-              <div className="t-2" style={{ fontSize: 13 }}>{selected.customer?.fullName} · {selected.savingsProduct?.name} · {selected.branch?.name}</div>
+        <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, var(--bg-1) 55%, var(--ac-dim))' }}>
+          <div className="row between wrap" style={{ gap: 20, alignItems: 'center' }}>
+            <div className="row gap-3" style={{ alignItems: 'center' }}>
+              <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--ac-dim)', color: 'var(--ac-bright)', display: 'grid', placeItems: 'center', fontFamily: 'Saira', fontWeight: 800, fontSize: 20, flexShrink: 0 }}>
+                {(selected.customer?.fullName || '?').replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, '').trim().charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="row gap-2 wrap" style={{ alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'Saira', fontWeight: 800, fontSize: 20 }}>{selected.customer?.fullName}</span>
+                  <Badge tone={statusTone(selected.status) as any} dot>{selected.status}</Badge>
+                </div>
+                <div className="t-2" style={{ fontSize: 13, marginTop: 2 }}>
+                  <span style={{ fontFamily: 'JetBrains Mono' }}>{selected.accountNumber}</span> · {selected.savingsProduct?.name} · {selected.branch?.name}
+                </div>
+              </div>
             </div>
-            <div className="row gap-4" style={{ textAlign: 'right' }}>
-              <div><div className="eyebrow">Balance</div><div style={{ fontFamily: 'JetBrains Mono', fontSize: 20, fontWeight: 700 }}>{money(selected.currentBalance)}</div></div>
-              <div><div className="eyebrow">Available</div><div style={{ fontFamily: 'JetBrains Mono', fontSize: 15 }}>{money(selected.availableBalance ?? (Number(selected.currentBalance) - Number(selected.minBalance)))}</div></div>
-              <div><div className="eyebrow">Status</div><Badge tone={statusTone(selected.status) as any} dot>{selected.status}</Badge></div>
+            <div className="row gap-5" style={{ textAlign: 'right' }}>
+              <div>
+                <div className="eyebrow">Current Balance</div>
+                <div style={{ fontFamily: 'JetBrains Mono', fontSize: 30, fontWeight: 800, lineHeight: 1.15 }}>{money(selected.currentBalance)}</div>
+              </div>
+              <div style={{ paddingLeft: 20, borderLeft: '1px solid var(--line)' }}>
+                <div className="eyebrow">Available</div>
+                <div style={{ fontFamily: 'JetBrains Mono', fontSize: 20, fontWeight: 700, color: 'var(--ok)', lineHeight: 1.6 }}>{money(selected.availableBalance ?? (Number(selected.currentBalance) - Number(selected.minBalance)))}</div>
+              </div>
             </div>
           </div>
-          <div className="row gap-4 wrap t-2" style={{ fontSize: 12, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
-            <span>Rate: <b>{Number(selected.interestRatePercent).toFixed(2)}%</b></span>
-            <span>Basis: <b>{selected.interestCalcMethod.replace(/_/g, ' ')}</b></span>
-            <span>Posting: <b style={{ textTransform: 'capitalize' }}>{selected.interestPostingFrequency}</b></span>
-            <span>Opened: <b>{dateOnly(selected.openDate)}</b></span>
-            <span>Min balance: <b>{money(selected.minBalance)}</b></span>
-            <span>Last interest: <b>{dateOnly(selected.lastInterestPostedOn)}</b></span>
-            <span>Withdrawal fee: <b>{money(selected.withdrawalFee)}</b></span>
-            <span>Last activity: <b>{dateOnly(selected.lastActivityOn ?? summary?.lastTxnDate)}</b></span>
-            {selected.closedOn && <span>Closed: <b>{dateOnly(selected.closedOn)}</b></span>}
-            {selected.creator && <span>Opened by: <b>{selected.creator.name}</b></span>}
-          </div>
-          {selected.notes && <div className="t-2" style={{ fontSize: 12.5, marginTop: 10 }}>Notes: {selected.notes}</div>}
         </Card>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 16 }}>
-          <Card>
-            <div className="eyebrow">Customer</div>
-            <div style={{ fontWeight: 600, marginTop: 4 }}>{selected.customer?.fullName || '—'}</div>
-            <div className="t-2" style={{ fontSize: 12.5, lineHeight: 1.6, marginTop: 4 }}>
-              <div>Code: {selected.customer?.code || '—'}</div>
-              <div>NIC: {selected.customer?.nicNo || '—'}</div>
-              <div>Phone: {selected.customer?.phone || '—'}</div>
-              {selected.customer?.email && <div>Email: {selected.customer.email}</div>}
-              {selected.customer?.address && <div>Address: {selected.customer.address}</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginBottom: 16 }}>
+          {([
+            ['Total Deposits', summary?.totalDeposits, 'var(--ok)', `${summary?.collectionDeposits ?? 0} field collections`],
+            ['Total Withdrawals', summary?.totalWithdrawals, 'var(--bad)', 'paid out'],
+            ['Interest Credited', summary?.totalInterest, 'var(--ac-bright)', `accrued ${money(selected.interestAccrued)}`],
+            ['Fees Charged', summary?.totalFees, 'var(--warn)', `${summary?.transactionCount ?? 0} transactions`],
+          ] as [string, number | undefined, string, string][]).map(([label, v, color, hint]) => (
+            <div key={label} style={{ background: 'var(--bg-1)', border: '1px solid var(--line)', borderLeft: `4px solid ${color}`, borderRadius: 'var(--r-l)', padding: '14px 16px', boxShadow: 'var(--sh-1)' }}>
+              <div className="eyebrow">{label}</div>
+              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 22, fontWeight: 700, margin: '4px 0 2px' }}>{money(v)}</div>
+              <div className="t-2" style={{ fontSize: 11.5 }}>{hint}</div>
             </div>
-          </Card>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14, marginBottom: 16 }}>
           <Card>
-            <div className="eyebrow">Lifetime Totals</div>
-            <div style={{ fontSize: 13, lineHeight: 1.9, marginTop: 4 }}>
+            <div style={{ fontWeight: 600, marginBottom: 12 }}>Account Terms</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px' }}>
               {([
-                ['Total deposits', summary?.totalDeposits], ['Total withdrawals', summary?.totalWithdrawals],
-                ['Interest credited', summary?.totalInterest], ['Fees charged', summary?.totalFees],
-              ] as [string, number | undefined][]).map(([label, v]) => (
-                <div key={label} className="row between"><span className="t-2">{label}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(v)}</b></div>
+                ['Interest rate', `${Number(selected.interestRatePercent).toFixed(2)}% p.a.`],
+                ['Calculation basis', selected.interestCalcMethod.replace(/_/g, ' ')],
+                ['Posting', selected.interestPostingFrequency],
+                ['Last interest posted', dateOnly(selected.lastInterestPostedOn)],
+                ['Minimum balance', money(selected.minBalance)],
+                ['Withdrawal fee', money(selected.withdrawalFee)],
+                ['Opened', dateOnly(selected.openDate)],
+                [selected.closedOn ? 'Closed' : 'Last activity', dateOnly(selected.closedOn ?? selected.lastActivityOn ?? summary?.lastTxnDate)],
+              ] as [string, string][]).map(([k, v]) => (
+                <div key={k}><div className="eyebrow">{k}</div><div style={{ fontWeight: 600, fontSize: 13.5, textTransform: 'capitalize' }}>{v}</div></div>
               ))}
             </div>
+            {selected.notes && <div className="t-2" style={{ fontSize: 12.5, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' }}>{selected.notes}</div>}
           </Card>
           <Card>
-            <div className="eyebrow">Activity</div>
-            <div style={{ fontSize: 13, lineHeight: 1.9, marginTop: 4 }}>
-              <div className="row between"><span className="t-2">Transactions</span><b>{summary?.transactionCount ?? 0}</b></div>
-              <div className="row between"><span className="t-2">Field collections</span><b>{summary?.collectionDeposits ?? 0}</b></div>
-              <div className="row between"><span className="t-2">First transaction</span><b>{dateOnly(summary?.firstTxnDate)}</b></div>
-              <div className="row between"><span className="t-2">Last transaction</span><b>{dateOnly(summary?.lastTxnDate)}</b></div>
-              <div className="row between"><span className="t-2">Interest accrued</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(selected.interestAccrued)}</b></div>
+            <div style={{ fontWeight: 600, marginBottom: 12 }}>Customer</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px' }}>
+              {([
+                ['Code', selected.customer?.code], ['NIC', selected.customer?.nicNo], ['Phone', selected.customer?.phone],
+                ['Email', selected.customer?.email], ['Opened by', selected.creator?.name],
+                ['First transaction', dateOnly(summary?.firstTxnDate)],
+              ] as [string, string | null | undefined][]).map(([k, v]) => (
+                <div key={k}><div className="eyebrow">{k}</div><div style={{ fontWeight: 600, fontSize: 13.5, wordBreak: 'break-word' }}>{v || '—'}</div></div>
+              ))}
             </div>
+            {selected.customer?.address && <div className="t-2" style={{ fontSize: 12.5, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' }}>{selected.customer.address}</div>}
           </Card>
         </div>
 
@@ -210,8 +226,8 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
           <div className="row between wrap" style={{ padding: '12px 16px', gap: 12 }}>
             <div style={{ fontWeight: 600 }}>Pass-book <span className="t-2" style={{ fontWeight: 400, fontSize: 12 }}>({visibleTxns.length} entries)</span></div>
             <div className="row gap-2 wrap no-print" style={{ alignItems: 'flex-end' }}>
-              <div style={{ width: 150 }}><DateInput value={from} onChange={setFrom} /></div>
-              <div style={{ width: 150 }}><DateInput value={to} onChange={setTo} /></div>
+              <div style={{ width: 160 }}><Field label="From"><DateInput value={from} onChange={setFrom} /></Field></div>
+              <div style={{ width: 160 }}><Field label="To"><DateInput value={to} onChange={setTo} /></Field></div>
               <Btn size="sm" variant="solid" onClick={() => loadDetail(selected.id)}>Filter</Btn>
               {(from || to) && <Btn size="sm" variant="ghost" onClick={() => { setFrom(''); setTo(''); loadDetail(selected.id, {}) }}>Clear</Btn>}
               <label className="row gap-1 t-2" style={{ fontSize: 12, cursor: 'pointer' }}>
@@ -227,15 +243,16 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
               <Td mono>{t.txnNumber}</Td>
               <Td>{dateOnly(t.txnDate)}</Td>
               <Td>
-                {t.type}{t.status === 'Voided' && <span style={{ marginLeft: 6 }}><Badge tone="red">Voided</Badge></span>}
+                <Badge tone={(t.type === 'Deposit' || t.type === 'OpeningBalance' ? 'green' : t.type === 'InterestPosting' ? 'blue' : t.type === 'Fee' ? 'amber' : t.type === 'Withdrawal' ? 'red' : 'neutral') as any}>{t.type === 'InterestPosting' ? 'Interest' : t.type}</Badge>
+                {t.status === 'Voided' && <span style={{ marginLeft: 6 }}><Badge tone="red">Voided</Badge></span>}
                 {t.notes && <div className="t-2" style={{ fontSize: 11 }}>{t.notes}</div>}
               </Td>
               <Td>{t.paymentMethod || '—'}{t.bank?.name ? ` · ${t.bank.name}` : ''}</Td>
               <Td>{[t.referenceNo, t.collectionSheet?.sheetNumber, t.interestRun?.runNumber].filter(Boolean).join(' · ') || '—'}</Td>
               <Td>{t.creator?.name || '—'}</Td>
-              <Td align="right" mono>{t.direction === 'In' ? money(t.amount) : '—'}</Td>
-              <Td align="right" mono>{t.direction === 'Out' ? money(t.amount) : '—'}</Td>
-              <Td align="right" mono>{money(t.runningBalance)}</Td>
+              <Td align="right" mono><span style={{ color: t.direction === 'In' ? 'var(--ok)' : undefined, fontWeight: 600 }}>{t.direction === 'In' ? '+' + money(t.amount) : '—'}</span></Td>
+              <Td align="right" mono><span style={{ color: t.direction === 'Out' ? 'var(--bad)' : undefined, fontWeight: 600 }}>{t.direction === 'Out' ? '−' + money(t.amount) : '—'}</span></Td>
+              <Td align="right" mono><b>{money(t.runningBalance)}</b></Td>
               <Td align="right">{i === 0 && !from && !to && !hideVoided && t.status === 'Posted' && t.type !== 'InterestPosting' && canEdit && (
                 <button className="mms-act" title="Void" onClick={() => voidTxn(t)}><Icon n="trash" s={14} /></button>
               )}</Td>
