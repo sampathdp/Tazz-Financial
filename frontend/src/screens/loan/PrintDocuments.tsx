@@ -26,10 +26,12 @@ const yearsSince = (v?: string | null) => {
   return years >= 0 ? Math.floor(years).toString() : ''
 }
 
-type DocKey = 'credit_application'
+type DocKey = 'credit_application' | 'leasing_acceptance'
 
-const DOCS: { key: DocKey; label: string; desc: string; icon: string }[] = [
+const DOCS: { key: DocKey; label: string; desc: string; icon: string; show?: (loan: Loan) => boolean }[] = [
   { key: 'credit_application', label: 'Credit Facility Application', desc: 'Personal/Business application form — applicant, guarantor, employment and income sections pre-filled from system data.', icon: 'doc' },
+  { key: 'leasing_acceptance', label: 'Leasing Facility Acceptance Letter', desc: 'Customer\'s acceptance of the offer letter terms — name, NIC and address pre-filled; witness and signature lines left blank.', icon: 'doc',
+    show: (loan) => loan.loanDetail?.loanType?.category === 'Leasing' },
 ]
 
 export function PrintDocumentsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
@@ -38,23 +40,26 @@ export function PrintDocumentsPanel({ loan, me }: { loan: Loan; me?: AuthUser | 
 
   useEffect(() => { company.branding().then(setBrand).catch(() => {}) }, [])
 
-  if (open === 'credit_application') {
+  if (open) {
+    const docLabel = DOCS.find((d) => d.key === open)?.label || 'Document'
     return (
       <div>
         <div className="row gap-2 no-print" style={{ marginBottom: 16 }}>
           <Btn variant="ghost" icon="list" onClick={() => setOpen(null)}>Back to Documents</Btn>
-          <Btn variant="primary" icon="print" onClick={() => window.print()}>Print</Btn>
+          <Btn variant="primary" icon="print" onClick={() => window.print()}>Print {docLabel}</Btn>
         </div>
-        <CreditFacilityApplication loan={loan} me={me} brand={brand} />
+        {open === 'credit_application' && <CreditFacilityApplication loan={loan} me={me} brand={brand} />}
+        {open === 'leasing_acceptance' && <LeasingAcceptanceLetter loan={loan} brand={brand} />}
       </div>
     )
   }
 
+  const docs = DOCS.filter((d) => !d.show || d.show(loan))
   return (
     <Card>
       <div className="eyebrow" style={{ marginBottom: 12 }}>Print Documents</div>
       <div className="col gap-2">
-        {DOCS.map((d) => (
+        {docs.map((d) => (
           <div key={d.key} className="row between wrap gap-2" style={{ padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
             <div className="row gap-2" style={{ alignItems: 'flex-start' }}>
               <Icon n={d.icon} />
@@ -304,5 +309,75 @@ function CreditFacilityApplication({ loan, me, brand }: { loan: Loan; me?: AuthU
         </div>
       </Sheet>
     </>
+  )
+}
+
+/* ======================= Leasing Facility Acceptance Letter ======================= */
+
+/** An underlined fill-in blank — pre-filled with `value` when known, otherwise
+ *  just the blank line itself for the customer/witness to complete by hand. */
+function Blank({ value, width = 160 }: { value?: string | null; width?: number }) {
+  return (
+    <span style={{ display: 'inline-block', minWidth: width, borderBottom: '1px solid #000', padding: '0 4px 1px', fontWeight: value ? 700 : 400 }}>
+      {value || ' '}
+    </span>
+  )
+}
+
+function LeasingAcceptanceLetter({ loan, brand }: { loan: Loan; brand: { name: string } }) {
+  const c = loan.customer
+  const companyName = brand.name || 'the Company'
+  return (
+    <Sheet>
+      <div style={{ textAlign: 'center', fontWeight: 700, fontSize: 14, textDecoration: 'underline', marginBottom: 26 }}>
+        LEASING FACILITY ACCEPTANCE LETTER
+      </div>
+
+      <div style={{ marginBottom: 18 }}>Date: <Blank width={180} /></div>
+
+      <div style={{ marginBottom: 4 }}>To:</div>
+      <div style={{ fontWeight: 700, marginBottom: 18 }}>{companyName}</div>
+
+      <div style={{ marginBottom: 18 }}>Re: Acceptance of Leasing Facility</div>
+
+      <div style={{ marginBottom: 18, lineHeight: 2 }}>
+        I/We, <Blank value={c?.fullName} width={280} /> (Customer Name), refer to your Offer Letter No.{' '}
+        <Blank width={160} /> dated <Blank width={140} />.
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        I/We hereby confirm that I/we have carefully read and understood all the terms and conditions
+        contained in the Offer Letter and agree to accept the leasing facility on those terms.
+      </div>
+
+      <div style={{ marginBottom: 8 }}>I/We further confirm that:</div>
+      <ol style={{ margin: '0 0 24px', paddingLeft: 20, lineHeight: 1.9 }}>
+        <li>The information and documents provided by me/us are true and accurate.</li>
+        <li>I/We agree to execute the Lease Agreement and all related security documents required by {companyName}.</li>
+        <li>I/We undertake to pay all lease rentals and other charges on or before their due dates.</li>
+        <li>I/We agree to comply with all applicable terms and conditions throughout the lease period.</li>
+      </ol>
+
+      <div style={{ fontWeight: 700, marginBottom: 10 }}>Customer Details</div>
+      <div style={{ lineHeight: 2.3, marginBottom: 26 }}>
+        <div>Name: <Blank value={c?.fullName} width={320} /></div>
+        <div>NIC / Passport No.: <Blank value={c?.nicNo || c?.passportNo} width={260} /></div>
+        <div>Address: <Blank value={c?.address} width={400} /></div>
+        <div>Telephone: <Blank value={c?.phone} width={220} /></div>
+        <div>Customer Signature: <Blank width={260} /></div>
+        <div>Date: <Blank width={180} /></div>
+      </div>
+
+      <div style={{ lineHeight: 2.3, marginBottom: 10 }}>
+        <div>01 Witness Name: <Blank width={280} /></div>
+        <div>Witness Signature: <Blank width={260} /></div>
+        <div>Date: <Blank width={180} /></div>
+      </div>
+      <div style={{ lineHeight: 2.3 }}>
+        <div>02. Witness Name: <Blank width={280} /></div>
+        <div>Witness Signature: <Blank width={260} /></div>
+        <div>Date: <Blank width={180} /></div>
+      </div>
+    </Sheet>
   )
 }
