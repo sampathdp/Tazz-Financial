@@ -47,7 +47,7 @@ class LoanController extends Controller
     ];
 
     private const DETAIL_RELATIONS = [
-        'customer:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income,status,is_guarantor,branch_id',
+        'customer:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income,status,is_guarantor,branch_id,dob',
         'customer.branch:id,name,code',
         'customer.employmentDetail',
         'customer.businessDetail',
@@ -67,7 +67,9 @@ class LoanController extends Controller
         'pendingDisbursementRequest:id,code,source_id,status,amount,requested_by',
         'pendingDisbursementRequest.requester:id,name',
         'coApplicants.coApplicant:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
-        'guarantors.guarantor:id,full_name,code,nic_no,phone',
+        'guarantors.guarantor:id,full_name,code,nic_no,passport_no,driving_license_no,phone,email,address,occupation_type,monthly_income',
+        'guarantors.guarantor.employmentDetail',
+        'guarantors.guarantor.businessDetail',
         'collateral.vehicleDetail',
         'collateral.jewelryDetail',
         'collateral.documents.uploader:id,name',

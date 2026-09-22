@@ -78,9 +78,11 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
   if (mode === 'detail') {
     return (
       <div>
-        <PageHead crumbs="Loan Management / Active Loans" title={detailLoading || !loan ? 'Loading…' : `Loan ${loan.code}`} icon="coins"
-          sub={loan ? `${loan.customer?.fullName} — ${loan.loanDetail?.loanType?.name}` : undefined}
-          actions={<Btn variant="solid" onClick={back}>← Back to Active Loans</Btn>} />
+        <div className="no-print">
+          <PageHead crumbs="Loan Management / Active Loans" title={detailLoading || !loan ? 'Loading…' : `Loan ${loan.code}`} icon="coins"
+            sub={loan ? `${loan.customer?.fullName} — ${loan.loanDetail?.loanType?.name}` : undefined}
+            actions={<Btn variant="solid" onClick={back}>← Back to Active Loans</Btn>} />
+        </div>
         {detailLoading || !loan ? <LoadingBlock />
           : <LoanDetail loan={loan} me={me} onChanged={reloadLoan} go={go} context="active" />}
       </div>

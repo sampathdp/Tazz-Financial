@@ -267,7 +267,12 @@ export interface LoanGuarantorInput {
   id?: number;
   guarantorCustomerId: number;
   guaranteedAmount: number | string;
-  guarantor?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null };
+  guarantor?: {
+    id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null;
+    passportNo?: string | null; drivingLicenseNo?: string | null; email?: string | null; address?: string | null;
+    occupationType?: OccupationType | null; monthlyIncome?: number | string | null;
+    employmentDetail?: CustomerEmploymentDetail | null; businessDetail?: CustomerBusinessDetail | null;
+  };
 }
 
 /** A joint applicant/co-borrower on the loan — customerId on Loan stays the primary applicant. */
@@ -394,9 +399,11 @@ export interface Loan {
   customer?: {
     id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null;
     passportNo?: string | null; drivingLicenseNo?: string | null; email?: string | null; address?: string | null;
+    dob?: string | null;
     occupationType?: OccupationType | null; monthlyIncome?: number | string | null;
     status?: 'Active' | 'Blacklisted' | 'Inactive'; isGuarantor?: boolean;
     branch?: { id: number; name: string; code: string } | null;
+    employmentDetail?: CustomerEmploymentDetail | null; businessDetail?: CustomerBusinessDetail | null;
   };
   principalAmount: number | string;
   interestRatePercent?: number | string;

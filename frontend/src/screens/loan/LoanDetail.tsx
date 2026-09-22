@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, BankSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import { useFilePreview } from '../../components/FilePreview'
+import { PrintDocumentsPanel } from './PrintDocuments'
 import {
   loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, api,
   type Loan, type LoanStatus, type LoanSchedule, type BankAccount,
@@ -51,6 +52,7 @@ const SECTIONS = [
   { id: 'diary', label: 'Diarizing', icon: 'clock' },
   { id: 'waivers', label: 'Waivers', icon: 'refund' },
   { id: 'images', label: 'Contract Images', icon: 'doc' },
+  { id: 'print', label: 'Print Documents', icon: 'print' },
 ]
 
 export function LoanDetail({ loan, me, onChanged, go, context }: {
@@ -187,7 +189,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
 
   return (
     <div>
-      <div className="row between wrap gap-2" style={{ marginBottom: 14 }}>
+      <div className="row between wrap gap-2 no-print" style={{ marginBottom: 14 }}>
         <div className="row gap-2 wrap" style={{ alignItems: 'center' }}>
           <Badge tone={statusTone[loan.status]} dot>{loan.status}</Badge>
           {flags.map((f) => <Badge key={f.label} tone="red">{f.label}{f.at ? ` · ${dateOnly(f.at)}` : ''}</Badge>)}
@@ -252,7 +254,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
       </div>
 
       {(loan.restructuredFrom || loan.restructuredTo) && (
-        <div className="row gap-2 wrap" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
+        <div className="row gap-2 wrap no-print" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
           {loan.restructuredFrom && (
             <span>Rescheduled from{' '}
               <button className="mms-act" style={{ color: 'var(--ac-bright)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}
@@ -269,7 +271,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
       )}
 
       {pendingCancel && (
-        <div className="row between wrap gap-2" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
+        <div className="row between wrap gap-2 no-print" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
           <div style={{ fontSize: 12.5 }}>
             <b>Cancel request pending</b> — {pendingCancel.requester?.name || '—'} · {pendingCancel.reason}
             <div className="t-2" style={{ fontSize: 11.5, marginTop: 2 }}>
@@ -287,7 +289,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
       )}
 
       {pendingWriteOff && (
-        <div className="row between wrap gap-2" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
+        <div className="row between wrap gap-2 no-print" style={{ marginBottom: 16, padding: '10px 14px', background: 'var(--warn-dim)', border: '1px solid var(--warn)', borderRadius: 'var(--r-s)' }}>
           <div style={{ fontSize: 12.5 }}>
             <b>Write-off request pending</b> — {pendingWriteOff.requester?.name || '—'} · {pendingWriteOff.reason}
             <div className="t-2" style={{ fontSize: 11.5, marginTop: 2 }}>
@@ -305,7 +307,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
       )}
 
       {/* Tabs — one section loaded at a time, matching the reference screen's button row without the scroll-everything sprawl. */}
-      <div className="row gap-2" style={{ marginBottom: 16, overflowX: 'auto', paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
+      <div className="row gap-2 no-print" style={{ marginBottom: 16, overflowX: 'auto', paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
         {SECTIONS.map((s) => (
           <Btn key={s.id} size="sm" variant="ghost" active={tab === s.id} icon={s.icon} onClick={() => setTab(s.id)} style={{ flexShrink: 0 }}>{s.label}</Btn>
         ))}
@@ -323,6 +325,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
       {tab === 'diary' && <DiaryPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
       {tab === 'waivers' && <WaiversPanel loan={loan} />}
       {tab === 'images' && <ImagesPanel loan={loan} me={me} />}
+      {tab === 'print' && <PrintDocumentsPanel loan={loan} me={me} />}
 
       <StatusFlagsModal open={statusModal} onClose={() => setStatusModal(false)} loan={loan} onChanged={onChanged} notify={notify} />
     </div>

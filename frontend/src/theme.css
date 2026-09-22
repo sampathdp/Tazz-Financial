@@ -221,3 +221,8 @@ select option{ background:var(--bg-1); color:var(--tx-0); }
   main{ padding:0!important; }
   body,.mms-card{ background:#fff!important; color:#000!important; box-shadow:none!important; }
 }
+/* Zero browser-added page margin — printable pages (e.g. the Loan > Print Documents
+   forms) supply their own margin via padding so the two don't stack into overflow
+   that spills an extra near-blank page. Also suppresses Chrome's default print
+   header/footer (URL/date), since there's no margin left to draw them in. */
+@page{ size:A4; margin:0; }

@@ -331,9 +331,11 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     const reloadViewing = async () => setViewing(await loansApi.get(viewing.id))
     return (
       <div>
-        <PageHead crumbs="Loan Management / Loan Applications" title={`Loan ${viewing.code}`} icon="doc"
-          sub={`${viewing.customer?.fullName} — ${viewing.loanDetail?.loanType?.name}`}
-          actions={<Btn variant="solid" onClick={back}>← Back to Applications</Btn>} />
+        <div className="no-print">
+          <PageHead crumbs="Loan Management / Loan Applications" title={`Loan ${viewing.code}`} icon="doc"
+            sub={`${viewing.customer?.fullName} — ${viewing.loanDetail?.loanType?.name}`}
+            actions={<Btn variant="solid" onClick={back}>← Back to Applications</Btn>} />
+        </div>
         <LoanDetail loan={viewing} me={me} onChanged={reloadViewing} go={go} context="applications" />
       </div>
     )

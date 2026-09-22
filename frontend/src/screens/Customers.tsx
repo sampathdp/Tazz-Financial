@@ -800,9 +800,11 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   if (mode === 'loan') {
     return (
       <div>
-        <PageHead crumbs={`Customers / ${viewing?.fullName || ''}`} title={loanLoading || !viewingLoan ? 'Loading…' : `Loan ${viewingLoan.code}`} icon="coins"
-          sub={viewingLoan ? `${viewingLoan.customer?.fullName} — ${viewingLoan.loanDetail?.loanType?.name}` : undefined}
-          actions={<Btn variant="solid" onClick={backToCustomer}>← Back to Customer</Btn>} />
+        <div className="no-print">
+          <PageHead crumbs={`Customers / ${viewing?.fullName || ''}`} title={loanLoading || !viewingLoan ? 'Loading…' : `Loan ${viewingLoan.code}`} icon="coins"
+            sub={viewingLoan ? `${viewingLoan.customer?.fullName} — ${viewingLoan.loanDetail?.loanType?.name}` : undefined}
+            actions={<Btn variant="solid" onClick={backToCustomer}>← Back to Customer</Btn>} />
+        </div>
         {loanLoading || !viewingLoan ? <LoadingBlock />
           : <LoanDetail loan={viewingLoan} me={me} onChanged={reloadLoan} go={go} context="active" />}
       </div>

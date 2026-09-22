@@ -60,9 +60,11 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
   if (mode === 'detail') {
     return (
       <div>
-        <PageHead crumbs="Loan Management / Overdue Loans" title={detailLoading || !loan ? 'Loading…' : `Loan ${loan.code}`} icon="alert"
-          sub={loan ? `${loan.customer?.fullName} — ${loan.loanDetail?.loanType?.name}` : undefined}
-          actions={<Btn variant="solid" onClick={back}>← Back to Overdue Loans</Btn>} />
+        <div className="no-print">
+          <PageHead crumbs="Loan Management / Overdue Loans" title={detailLoading || !loan ? 'Loading…' : `Loan ${loan.code}`} icon="alert"
+            sub={loan ? `${loan.customer?.fullName} — ${loan.loanDetail?.loanType?.name}` : undefined}
+            actions={<Btn variant="solid" onClick={back}>← Back to Overdue Loans</Btn>} />
+        </div>
         {detailLoading || !loan ? <LoadingBlock />
           : <LoanDetail loan={loan} me={me} onChanged={reloadLoan} go={go} context="active" />}
       </div>
