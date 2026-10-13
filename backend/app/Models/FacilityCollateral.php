@@ -40,6 +40,12 @@ class FacilityCollateral extends Model
         return $this->hasOne(FacilityCollateralPawnDetail::class);
     }
 
+    /** Populated only when collateral_type = FixedDeposit. */
+    public function fdDetail()
+    {
+        return $this->hasOne(FacilityCollateralFdDetail::class);
+    }
+
     public function documents()
     {
         return $this->hasMany(FacilityCollateralDocument::class);

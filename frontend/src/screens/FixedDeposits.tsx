@@ -486,7 +486,7 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [payTarget, setPayTarget] = useState<FdInterestPayment | null>(null)
 
-  const canRenewOrWithdraw = fd.status === 'Active' && fd.isMatured
+  const canRenewOrWithdraw = fd.status === 'Active' && fd.isMatured && !fd.isPledged
   const hasPendingInterest = fd.interestPaymentMethod === 'monthly' && (fd.interestPayments || []).some((p) => p.status === 'Pending')
 
   const voidInterestPayment = async (p: FdInterestPayment) => {
@@ -522,6 +522,7 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
           <div className="row gap-2">
             <Badge tone={statusTone[fd.status] || 'neutral'} dot>{fd.status}</Badge>
             {fd.isMatured && <Badge tone="amber" dot>Matured</Badge>}
+            {fd.isPledged && <Badge tone="red" dot>Pledged — {Number(fd.lienAmount).toLocaleString()} lien</Badge>}
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5 }}>
@@ -670,6 +671,7 @@ export function FixedDepositsScreen({ go: _go, user: me }: { go: Go; user?: Auth
             <Td align="center"><div className="row gap-1" style={{ justifyContent: 'center' }}>
               <Badge tone={statusTone[fd.status] || 'neutral'} dot>{fd.status}</Badge>
               {fd.status === 'Active' && fd.isMatured && <Badge tone="amber">Matured</Badge>}
+              {fd.isPledged && <Badge tone="red">Pledged</Badge>}
             </div></Td>
           </>} />}
       </Card>

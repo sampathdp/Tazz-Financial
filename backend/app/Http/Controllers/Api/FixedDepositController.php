@@ -12,6 +12,7 @@ use App\Models\FundingProduct;
 use App\Services\NumberGenerator;
 use App\Support\FdInterestCalculator;
 use App\Support\FdLedgerPoster;
+use App\Support\FdLienService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -115,6 +116,9 @@ class FixedDepositController extends Controller
     /** Renews a matured FD for a new term, optionally topping up the principal with a fresh deposit (capital enhancement). */
     public function renew(Request $request, FixedDeposit $fixedDeposit)
     {
+        if ($blocked = FdLienService::guard($fixedDeposit)) {
+            return $blocked;
+        }
         if (!$fixedDeposit->is_matured) {
             return response()->json(['message' => 'This FD has not matured yet and cannot be renewed.'], 422);
         }
@@ -217,6 +221,9 @@ class FixedDepositController extends Controller
     /** Pays out principal (+ maturity-method interest) and closes the FD. */
     public function withdraw(Request $request, FixedDeposit $fixedDeposit)
     {
+        if ($blocked = FdLienService::guard($fixedDeposit)) {
+            return $blocked;
+        }
         $fixedDeposit->loadMissing('branch');
         if (!$fixedDeposit->is_matured) {
             return response()->json(['message' => 'This FD has not matured yet and cannot be withdrawn.'], 422);
@@ -282,6 +289,9 @@ class FixedDepositController extends Controller
         if (!$withdrawal) {
             return response()->json(['message' => 'This FD has no withdrawal to void.'], 422);
         }
+        if ($withdrawal->settled_credit_facility_id) {
+            return response()->json(['message' => 'This FD was closed against a loan - the loan repayment and lien settlement cannot be voided from here.'], 422);
+        }
 
         DB::transaction(function () use ($fixedDeposit, $withdrawal, $request) {
             FdLedgerPoster::reverseWithdrawal($withdrawal, $request->user()->id);
@@ -308,6 +318,9 @@ class FixedDepositController extends Controller
      */
     public function partPayment(Request $request, FixedDeposit $fixedDeposit)
     {
+        if ($blocked = FdLienService::guard($fixedDeposit)) {
+            return $blocked;
+        }
         if ($fixedDeposit->status !== 'Active') {
             return response()->json(['message' => 'Only an active FD can be part-paid.'], 422);
         }

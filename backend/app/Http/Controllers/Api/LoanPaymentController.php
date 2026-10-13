@@ -361,6 +361,9 @@ class LoanPaymentController extends Controller
         if ($payment->status === 'Voided') {
             return response()->json(['message' => 'This payment is already voided.'], 422);
         }
+        if ($payment->payment_method === 'FdAdjustment') {
+            return response()->json(['message' => 'This repayment came from the FD being adjusted against the loan and cannot be voided.'], 422);
+        }
         if ($payment->payment_type === 'Settlement' && $payment->approval_status === 'PendingApproval') {
             return response()->json(['message' => 'Reject the pending settlement request instead of voiding it.'], 422);
         }

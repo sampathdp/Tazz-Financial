@@ -31,6 +31,7 @@ const PawningTypesScreen = lazy(() => import('./screens/PawningTypes').then((m) 
 const PawningsScreen = lazy(() => import('./screens/Pawnings').then((m) => ({ default: m.PawningsScreen })))
 const PawningAuctionsScreen = lazy(() => import('./screens/PawningAuctions').then((m) => ({ default: m.PawningAuctionsScreen })))
 const FundingDashboardScreen = lazy(() => import('./screens/FundingDashboard').then((m) => ({ default: m.FundingDashboardScreen })))
+const FdLoanApplicationScreen = lazy(() => import('./screens/FdLoanApplication').then((m) => ({ default: m.FdLoanApplicationScreen })))
 const FundingProductsScreen = lazy(() => import('./screens/FundingProducts').then((m) => ({ default: m.FundingProductsScreen })))
 const DepositsScreen = lazy(() => import('./screens/Deposits').then((m) => ({ default: m.DepositsScreen })))
 const FixedDepositsScreen = lazy(() => import('./screens/FixedDeposits').then((m) => ({ default: m.FixedDepositsScreen })))
@@ -169,6 +170,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'finance/audit': AuditLogScreen,
   'finance/reports': FinanceReportsScreen,
   'loan/apps': LoanApplicationsScreen,
+  'loan/fd-loan': FdLoanApplicationScreen,
   'loan/active': ActiveLoansScreen,
   'loan/overdue': OverdueLoansScreen,
   'loan/provisions': LoanProvisionsScreen,

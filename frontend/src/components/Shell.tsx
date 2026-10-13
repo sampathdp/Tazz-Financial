@@ -39,6 +39,7 @@ export const NAV: NavNode[] = [
   { section: 'Loan Management', icon: 'coins', items: [
     { id: 'loan/types', label: 'Loan Types', icon: 'layers' },
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
+    { id: 'loan/fd-loan', label: 'Loan against FD', icon: 'shield' },
     { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
     { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt' },
     /** Admin-only — cheque realize/reject. Intentionally left out of

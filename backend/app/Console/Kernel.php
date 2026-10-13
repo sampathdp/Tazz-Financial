@@ -20,6 +20,8 @@ class Kernel extends ConsoleKernel
         // Re-assert cash/bank cache == GL every morning; logs + a
         // finance_audit_event on any drift (see CheckLedgerDrift).
         $schedule->command('finance:check-drift')->dailyAt('02:00');
+        // Matured pledged FDs are applied to their loans where the FD policy allows it.
+        $schedule->command('fd-loans:auto-adjust')->dailyAt('01:30');
     }
 
     /**

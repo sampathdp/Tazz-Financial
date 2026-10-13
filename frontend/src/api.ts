@@ -289,15 +289,28 @@ export interface LoanCollateralDocument {
   createdAt?: string;
 }
 
-export type CollateralType = 'Vehicle' | 'Jewelry' | 'PawnedJewelry' | 'Property' | 'Other'
+export type CollateralType = 'Vehicle' | 'Jewelry' | 'PawnedJewelry' | 'FixedDeposit' | 'Property' | 'Other'
 
 export interface LoanCollateralVehicleDetail {
   vehicleType?: string | null; makeModel?: string | null; registrationNo?: string | null;
   chassisNo?: string | null; engineNo?: string | null; yearOfManufacture?: number | string | null;
 }
 
+/** Lien on a customer's FD — read-side only, set by fdLoansApi.create(). */
+export interface LoanCollateralFdDetail {
+  fixedDepositId: number; creditFacilityId: number;
+  fdPrincipalSnapshot: number | string; fdRateSnapshot: number | string; fdMaturitySnapshot: string;
+  ltvPercent: number | string; lienAmount: number | string; maxLoanValue: number | string;
+  lienStatus: 'Active' | 'Released' | 'Settled';
+  markedAt: string; releasedAt?: string | null; releaseReason?: string | null;
+  settledAmount?: number | string | null;
+  fixedDeposit?: { id: number; fdNumber: string; principalAmount: number | string; interestRatePercent?: number | string; maturityDate: string; status?: string; lienAmount?: number | string };
+}
+
 export interface LoanCollateralInput {
   id?: number;
+  /** Present only when collateralType is FixedDeposit. */
+  fdDetail?: LoanCollateralFdDetail | null;
   /** Structural type — drives which extension detail table (vehicleDetail here) applies. */
   collateralType?: CollateralType | null;
   /** Free-text descriptive label (e.g. "Toyota Aqua", replaces the old unconstrained "type" string). */
@@ -1802,6 +1815,9 @@ export interface FdInterestPayment {
 export interface FdWithdrawal {
   id: number; fixedDepositId: number; voucherNo: string;
   principalAmount: number | string; interestAmount: number | string; totalAmount: number | string;
+  /** Part of totalAmount applied to a loan (FD closed against its loan); the rest was paid to the customer. */
+  adjustedAmount?: number | string;
+  settledCreditFacilityId?: number | null;
   paymentMethod: FdPaymentMethod; referenceNo?: string | null; notes?: string | null;
   closedAt: string;
   creator?: { id: number; name: string } | null;
@@ -1844,6 +1860,9 @@ export interface FixedDeposit {
   monthlyInterestAmount?: number | string | null;
   totalInterestAmount: number | string;
   maturityAmount: number | string;
+  /** Amount frozen as loan security; 0 = free. While > 0 renew / withdraw / part-payment are refused. */
+  lienAmount?: number | string;
+  isPledged?: boolean;
   nextInterestDate?: string | null;
   status: FixedDepositStatus;
   /** Derived server-side: status === 'Active' && maturityDate <= today. Not a stored value. */
@@ -2921,3 +2940,57 @@ export const api = {
 }
 
 export default api
+
+
+/* ============================ Loan against FD ============================ */
+
+export interface FdLoanQuote {
+  eligible: boolean; reason: string | null;
+  maxLoanAmount: number; minLoanAmount: number;
+  /** Annual rate the loan would carry (FD rate + spread, or the policy's fixed rate). */
+  interestRatePercent: number | null; ratePeriod: 'annual';
+  ltvPercent: number | null;
+  /** Longest term allowed (months) when the policy caps the loan at FD maturity; null = no cap. */
+  maxTermMonths: number | null;
+}
+
+export type EligibleFd = FixedDeposit & { loanQuote: FdLoanQuote }
+
+export interface FdLoanPolicy {
+  id?: number; fundingProductId: number;
+  maxLtvPercent: number | string;
+  rateMode: 'spread' | 'fixed';
+  rateSpreadPercent: number | string; fixedRatePercent?: number | string | null;
+  minLoanAmount?: number | string; maxLoanAmount?: number | string | null;
+  processingFeePercent?: number | string;
+  minDaysToMaturity?: number;
+  capTermToMaturity: boolean;
+  /** Matured pledged FDs are applied to their loan automatically (daily job). */
+  autoAdjustOnMaturity: boolean;
+  status?: 'Active' | 'Inactive';
+}
+
+export interface FdLoanCreateInput {
+  branchId: number; fixedDepositId: number; loanTypeId: number;
+  principalAmount: number | string; termMonths: number;
+  installmentFrequency: 'daily' | 'weekly' | 'monthly';
+  purpose?: string; applicationDate?: string; loanOfficerId?: number | null;
+}
+
+export interface FdLoanSettleResult {
+  appliedToLoan: number; paidToCustomer: number; remainingLoanBalance: number;
+  voucherNo: string; paymentCode: string; loan: Loan;
+}
+
+export const fdLoansApi = {
+  eligibleFds: (customerId: number) =>
+    http.get('/fd-loans/eligible-fds', { params: { customer_id: customerId } }).then((r) => camelize(r.data) as EligibleFd[]),
+  quote: (fixedDepositId: number) => http.get(`/fd-loans/quote/${fixedDepositId}`).then((r) => camelize(r.data) as FdLoanQuote),
+  create: (body: FdLoanCreateInput) => http.post('/fd-loans', snakeize(body)).then((r) => camelize(r.data) as Loan),
+  /** Closes the pledged FD and applies its payout to the loan; excess goes to the customer. */
+  settle: (loanId: number, body: { excessPaymentMethod?: FdPaymentMethod; referenceNo?: string; notes?: string; allowPremature?: boolean }) =>
+    http.post(`/loans/${loanId}/settle-from-fd`, snakeize(body)).then((r) => camelize(r.data) as FdLoanSettleResult),
+  policies: () => http.get('/fd-loan-policies').then((r) => camelize(r.data) as { id: number; name: string; code: string; status: string; policy: FdLoanPolicy | null }[]),
+  savePolicy: (fundingProductId: number, body: Omit<FdLoanPolicy, 'id' | 'fundingProductId'>) =>
+    http.put(`/fd-loan-policies/${fundingProductId}`, snakeize(body)).then((r) => camelize(r.data) as FdLoanPolicy),
+}

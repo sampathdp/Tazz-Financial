@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ApprovalRequest;
 use App\Models\ApprovalType;
 use App\Models\Branch;
+use App\Models\FacilityCollateralFdDetail;
 use App\Models\FacilityCollateralVehicleDetail;
 use App\Models\FacilityReschedule;
 use App\Models\FacilitySchedule;
@@ -13,6 +14,7 @@ use App\Models\Loan;
 use App\Models\LoanType;
 use App\Models\ChartOfAccount;
 use App\Services\NumberGenerator;
+use App\Support\FdLienService;
 use App\Support\FinanceRequestService;
 use App\Support\LoanAmortizer;
 use App\Support\LoanDisbursementCompleter;
@@ -72,6 +74,7 @@ class LoanController extends Controller
         'guarantors.guarantor.businessDetail',
         'collateral.vehicleDetail',
         'collateral.jewelryDetail',
+        'collateral.fdDetail.fixedDeposit:id,fd_number,principal_amount,interest_rate_percent,maturity_date,status,lien_amount',
         'collateral.documents.uploader:id,name',
         'schedules.allocations.payment:id,status,approval_status',
         'payments.receiver:id,name',
@@ -297,6 +300,18 @@ class LoanController extends Controller
         }
         [$facilityData, $detailData, $guarantors, $collateral, $insurance, $coApplicants] = $this->validated($request, $loan);
 
+        // A loan secured by an FD keeps the customer, rate and rate period that the FD policy set,
+        // and may not be raised past what the pledged FD supports - the edit form must not bypass the lien rules.
+        $lien = FacilityCollateralFdDetail::where('credit_facility_id', $loan->id)->where('lien_status', 'Active')->first();
+        if ($lien) {
+            if ((float) $facilityData['principal_amount'] > (float) $lien->max_loan_value + 0.005) {
+                throw ValidationException::withMessages(['principal_amount' => 'Amount exceeds the maximum of ' . number_format((float) $lien->max_loan_value, 2) . ' allowed against the pledged FD.']);
+            }
+            $facilityData['customer_id'] = $loan->customer_id;
+            $facilityData['interest_rate_percent'] = $loan->interest_rate_percent;
+            $facilityData['rate_period'] = $loan->rate_period;
+        }
+
         DB::transaction(function () use ($loan, $facilityData, $detailData, $guarantors, $collateral, $insurance, $coApplicants) {
             $loan->update($facilityData);
             $loan->loanDetail()->update($detailData);
@@ -313,13 +328,14 @@ class LoanController extends Controller
             // so previously uploaded collateral documents (which cascade-delete with
             // their parent row) survive edits that don't touch that collateral item.
             $keepIds = array_values(array_filter(array_column($collateral, 'id')));
-            $removed = $loan->collateral()->whereNotIn('id', $keepIds ?: [0])->get();
+            $removed = $loan->collateral()->where('collateral_type', '!=', 'FixedDeposit')->whereNotIn('id', $keepIds ?: [0])->get();
             foreach ($removed as $r) {
                 foreach ($r->documents as $doc) {
                     Storage::disk('public')->delete($doc->file_path);
                 }
             }
-            $loan->collateral()->whereNotIn('id', $keepIds ?: [0])->delete();
+            // FixedDeposit collateral is a lien: only the FD-loan flow and loan status changes add/remove it.
+            $loan->collateral()->where('collateral_type', '!=', 'FixedDeposit')->whereNotIn('id', $keepIds ?: [0])->delete();
             foreach ($collateral as $c) {
                 $id = $c['id'] ?? null;
                 unset($c['id']);
@@ -474,8 +490,13 @@ class LoanController extends Controller
                 DB::table('facility_charges')->whereIn('credit_facility_id', $ids)->delete();
 
                 // --- Collateral (+ per-type detail + documents) ---
+                // Free any FD still pledged to these loans before the lien rows go.
+                $pledgedFds = DB::table('facility_collateral_fd_details')->whereIn('credit_facility_id', $ids)->where('lien_status', 'Active')->pluck('fixed_deposit_id');
+                if ($pledgedFds->isNotEmpty()) {
+                    DB::table('fixed_deposits')->whereIn('id', $pledgedFds)->update(['lien_amount' => 0]);
+                }
                 if ($collateralIds) {
-                    foreach (['facility_collateral_documents', 'facility_collateral_vehicle_details', 'facility_collateral_jewelry_details', 'facility_collateral_pawn_details'] as $table) {
+                    foreach (['facility_collateral_documents', 'facility_collateral_vehicle_details', 'facility_collateral_jewelry_details', 'facility_collateral_pawn_details', 'facility_collateral_fd_details'] as $table) {
                         DB::table($table)->whereIn('facility_collateral_id', $collateralIds)->delete();
                     }
                 }
@@ -1160,7 +1181,7 @@ class LoanController extends Controller
             foreach ($loan->coApplicants as $ca) {
                 $newLoan->coApplicants()->create($ca->only(['co_applicant_customer_id', 'share_percent']));
             }
-            foreach ($loan->collateral()->with(['vehicleDetail', 'jewelryDetail'])->get() as $c) {
+            foreach ($loan->collateral()->where('collateral_type', '!=', 'FixedDeposit')->with(['vehicleDetail', 'jewelryDetail'])->get() as $c) {
                 $row = $newLoan->collateral()->create($c->only(['collateral_type', 'collateral_category', 'description', 'estimated_value']));
                 if ($c->vehicleDetail) {
                     $row->vehicleDetail()->create($c->vehicleDetail->only([
@@ -1171,6 +1192,8 @@ class LoanController extends Controller
                     $row->jewelryDetail()->create($c->jewelryDetail->only(['weight_grams', 'purity', 'appraised_value']));
                 }
             }
+            // An FD lien follows the loan: the FD stays pledged to the replacement.
+            FdLienService::transfer($loan, $newLoan);
             if ($loan->insurance) {
                 $newLoan->insurance()->create($loan->insurance->only([
                     'insurance_company', 'policy_no', 'amount', 'contact_person', 'coverage', 'remarks',
@@ -1475,7 +1498,7 @@ class LoanController extends Controller
             'co_applicants.*.share_percent' => 'nullable|numeric|min:0|max:100',
             'collateral' => 'array',
             'collateral.*.id' => 'nullable|integer|exists:facility_collateral,id',
-            'collateral.*.collateral_type' => ['nullable', Rule::in(self::COLLATERAL_TYPES)],
+            'collateral.*.collateral_type' => ['nullable', Rule::in([...self::COLLATERAL_TYPES, 'FixedDeposit'])],
             'collateral.*.collateral_category' => 'nullable|string|max:64',
             'collateral.*.description' => 'required|string|max:255',
             'collateral.*.estimated_value' => 'nullable|numeric|min:0',
@@ -1587,7 +1610,8 @@ class LoanController extends Controller
                     'year_of_manufacture' => $c['year_of_manufacture'] ?? null,
                 ] : null,
             ];
-        }, $validated['collateral'] ?? []);
+        }, array_filter($validated['collateral'] ?? [], fn ($c) => ($c['collateral_type'] ?? null) !== 'FixedDeposit'));
+        $collateral = array_values($collateral);
 
         $guarantors = array_map(fn ($g) => [
             'guarantor_customer_id' => $g['guarantor_customer_id'],

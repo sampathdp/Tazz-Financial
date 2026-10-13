@@ -138,6 +138,65 @@ class FdLedgerPoster
         ]);
     }
 
+    /**
+     * An FD closed against its loan - one balanced entry: Dr 2010 (principal) [+ Dr 5100
+     * maturity interest], Cr the loan's receivable/interest/penalty/charge accounts for the
+     * adjusted part ($loanCredits, from the payment's allocation rows), Cr the branch till
+     * for any Cash excess paid to the customer. A Bank/Cheque excess has no wired account
+     * (same convention as every FD poster here), so the debit is trimmed to what is posted.
+     * Keyed to the withdrawal, so reverseWithdrawal() undoes it.
+     *
+     * @param array<int, array{account_id:int, credit:float|string}> $loanCredits
+     */
+    public static function postLoanAdjustment(FdWithdrawal $withdrawal, array $loanCredits): void
+    {
+        $fd = $withdrawal->fixedDeposit;
+        $adjusted = (float) $withdrawal->adjusted_amount;
+        $excess = round((float) $withdrawal->total_amount - $adjusted, 2);
+        $till = $excess > 0 && $withdrawal->payment_method === 'Cash' ? CashAccount::branchPrimary((int) $fd->branch_id) : null;
+        $cashExcess = $till ? $excess : 0.0;
+        $posted = round($adjusted + $cashExcess, 2);
+        if ($posted <= 0) {
+            return;
+        }
+
+        $principalDebit = min((float) $withdrawal->principal_amount, $posted);
+        $interestDebit = round($posted - $principalDebit, 2);
+        $lines = [['account_id' => ChartOfAccount::system('2010')->id, 'debit' => $principalDebit, 'credit' => 0]];
+        if ($interestDebit > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('5100')->id, 'debit' => $interestDebit, 'credit' => 0];
+        }
+        foreach ($loanCredits as $c) {
+            $lines[] = ['account_id' => $c['account_id'], 'debit' => 0, 'credit' => $c['credit']];
+        }
+        $description = "FD adjusted against loan - {$fd->fd_number} ({$withdrawal->voucher_no})";
+
+        if ($till) {
+            $lines[] = ['account_id' => ChartOfAccount::forCashTill($till)->id, 'debit' => 0, 'credit' => $cashExcess];
+            self::postCashLeg($till, '-' . $cashExcess, $lines, [
+                'txn_type' => 'CASH_OUT',
+                'amount' => $cashExcess,
+                'entry_date' => $withdrawal->closed_at,
+                'branch_id' => $fd->branch_id,
+                'source_type' => 'FdWithdrawal',
+                'source_id' => $withdrawal->id,
+                'idempotency_key' => "fd-withdrawal-{$withdrawal->id}",
+                'description' => $description,
+                'posted_by' => $withdrawal->created_by,
+            ]);
+
+            return;
+        }
+
+        LedgerPoster::post($lines, \Illuminate\Support\Carbon::parse($withdrawal->closed_at)->toDateString(), [
+            'source_type' => 'FdWithdrawal',
+            'source_id' => $withdrawal->id,
+            'description' => $description,
+            'branch_id' => $fd->branch_id,
+            'posted_by' => $withdrawal->created_by,
+        ]);
+    }
+
     /** Reverses a withdrawal's posting — called when a mistaken FD closure is voided (FixedDepositController::voidWithdrawal()). No-op if nothing was ever posted for it (Bank/Cheque). */
     public static function reverseWithdrawal(FdWithdrawal $withdrawal, ?int $userId = null): void
     {

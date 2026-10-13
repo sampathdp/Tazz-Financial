@@ -43,6 +43,7 @@ use App\Http\Controllers\Api\ManualJournalEntryController;
 use App\Http\Controllers\Api\BorrowingController;
 use App\Http\Controllers\Api\FdDepositController;
 use App\Http\Controllers\Api\FdInterestPaymentController;
+use App\Http\Controllers\Api\FdLoanController;
 use App\Http\Controllers\Api\FixedDepositController;
 use App\Http\Controllers\Api\FundingDashboardController;
 use App\Http\Controllers\Api\FundingProductController;
@@ -531,6 +532,15 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('fd-deposits/{fdDeposit}', [FdDepositController::class, 'destroy'])->middleware('perm:Deposits,Delete');
 
     // --- Funding Management: Fixed Deposits ---
+    // --- Loan against FD ---
+    // Flat paths so they never collide with fixed-deposits/{fixedDeposit} or loans/{loan}.
+    Route::get('fd-loans/eligible-fds', [FdLoanController::class, 'eligibleFds'])->middleware('perm:Loan Applications,Create');
+    Route::get('fd-loans/quote/{fixedDeposit}', [FdLoanController::class, 'quote'])->middleware('perm:Loan Applications,Create');
+    Route::post('fd-loans', [FdLoanController::class, 'store'])->middleware('perm:Loan Applications,Create');
+    Route::post('loans/{loan}/settle-from-fd', [FdLoanController::class, 'settle'])->middleware('perm:Active Loans,Approve');
+    Route::get('fd-loan-policies', [FdLoanController::class, 'policies'])->middleware('perm:Funding Products,View');
+    Route::put('fd-loan-policies/{fundingProduct}', [FdLoanController::class, 'savePolicy'])->middleware('perm:Funding Products,Edit');
+
     Route::get('fixed-deposits', [FixedDepositController::class, 'index'])->middleware('perm:Fixed Deposits,View');
     Route::get('fixed-deposits/{fixedDeposit}', [FixedDepositController::class, 'show'])->middleware('perm:Fixed Deposits,View');
     Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->middleware('perm:Fixed Deposits,Create');

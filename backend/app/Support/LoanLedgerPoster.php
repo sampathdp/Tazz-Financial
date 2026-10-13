@@ -463,6 +463,12 @@ class LoanLedgerPoster
     }
 
     /** The principal/interest/penalty/charges split this payment was actually allocated to, as credit lines — sourced from the allocation rows LoanPaymentAllocator just wrote, not from $payment->amount, so this can never post a figure the schedule doesn't agree with. Empty if nothing has been allocated yet (a pending settlement/cheque). */
+    /** The credit side a payment was allocated to (principal / interest / penalty / charges), for callers that build their own balanced entry - e.g. an FD adjusted against its loan. */
+    public static function creditLinesFor(FacilityPayment $payment): array
+    {
+        return self::splitLines($payment);
+    }
+
     private static function splitLines(FacilityPayment $payment): array
     {
         $principal = (float) $payment->allocations()->sum('principal_applied');

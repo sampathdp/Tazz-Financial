@@ -14,7 +14,7 @@ class FixedDeposit extends Model
         'fd_number', 'branch_id', 'customer_id', 'funding_product_id',
         'principal_amount', 'interest_rate_percent', 'interest_payment_method',
         'term_months', 'start_date', 'maturity_date',
-        'monthly_interest_amount', 'total_interest_amount', 'maturity_amount', 'next_interest_date',
+        'monthly_interest_amount', 'total_interest_amount', 'maturity_amount', 'lien_amount', 'next_interest_date',
         'status', 'renewed_from_id', 'renewed_to_id', 'closed_at', 'created_by',
     ];
 
@@ -26,11 +26,12 @@ class FixedDeposit extends Model
         'monthly_interest_amount' => 'decimal:2',
         'total_interest_amount' => 'decimal:2',
         'maturity_amount' => 'decimal:2',
+        'lien_amount' => 'decimal:2',
         'next_interest_date' => 'date:Y-m-d',
         'closed_at' => 'date:Y-m-d',
     ];
 
-    protected $appends = ['is_matured'];
+    protected $appends = ['is_matured', 'is_pledged'];
 
     // Reached its maturity date but hasn't been renewed or withdrawn yet — derived,
     // not a stored status, so there's no cron job needed to flip it (same idea as
@@ -38,6 +39,17 @@ class FixedDeposit extends Model
     public function getIsMaturedAttribute(): bool
     {
         return $this->status === 'Active' && $this->maturity_date && Carbon::parse($this->maturity_date)->lte(Carbon::today());
+    }
+
+    /** Pledged to a loan - lien_amount is the maintained cache of the Active lien row. */
+    public function getIsPledgedAttribute(): bool
+    {
+        return (float) $this->lien_amount > 0;
+    }
+
+    public function liens()
+    {
+        return $this->hasMany(FacilityCollateralFdDetail::class);
     }
 
     public function branch()

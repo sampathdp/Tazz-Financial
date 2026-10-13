@@ -51,7 +51,7 @@ function amountInWords(v: unknown): string {
   return words.join(' ').replace(/\s+/g, ' ').trim()
 }
 
-type DocKey = 'credit_application' | 'loan_agreement' | 'personal_guarantee' | 'promissory_note' | 'leasing_offer' | 'leasing_acceptance'
+type DocKey = 'credit_application' | 'loan_agreement' | 'personal_guarantee' | 'promissory_note' | 'leasing_offer' | 'leasing_acceptance' | 'fd_lien_letter'
 
 const DOCS: { key: DocKey; label: string; desc: string; icon: string; show?: (loan: Loan) => boolean }[] = [
   { key: 'credit_application', label: 'Credit Facility Application', desc: 'Personal/Business application form — applicant, guarantor, employment and income sections pre-filled from system data.', icon: 'doc' },
@@ -63,6 +63,8 @@ const DOCS: { key: DocKey; label: string; desc: string; icon: string; show?: (lo
     show: (loan) => loan.loanDetail?.loanType?.category === 'Leasing' },
   { key: 'leasing_acceptance', label: 'Leasing Facility Acceptance Letter', desc: 'Customer\'s acceptance of the offer letter terms — name, NIC and address pre-filled; witness and signature lines left blank.', icon: 'doc',
     show: (loan) => loan.loanDetail?.loanType?.category === 'Leasing' },
+  { key: 'fd_lien_letter', label: 'FD Lien & Set-off Letter', desc: 'Lien over the pledged Fixed Deposit and authority to set it off against the loan - FD number, amounts, rate and maturity pre-filled; signature and witness lines left blank.', icon: 'doc',
+    show: (loan) => !!loan.collateral?.some((col) => col.fdDetail) },
 ]
 
 export function PrintDocumentsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
@@ -85,6 +87,7 @@ export function PrintDocumentsPanel({ loan, me }: { loan: Loan; me?: AuthUser | 
         {open === 'promissory_note' && <PromissoryNote loan={loan} brand={brand} />}
         {open === 'leasing_offer' && <LeasingOfferLetter loan={loan} brand={brand} />}
         {open === 'leasing_acceptance' && <LeasingAcceptanceLetter loan={loan} brand={brand} />}
+        {open === 'fd_lien_letter' && <FdLienLetter loan={loan} brand={brand} />}
       </div>
     )
   }
@@ -752,6 +755,77 @@ function LeasingAcceptanceLetter({ loan, brand }: { loan: Loan; brand: { name: s
         <div>02. Witness Name: <Blank width={280} /></div>
         <div>Witness Signature: <Blank width={260} /></div>
         <div>Date: <Blank width={180} /></div>
+      </div>
+    </Sheet>
+  )
+}
+
+/* ======================= FD Lien & Set-off Letter ======================= */
+
+function FdLienLetter({ loan, brand }: { loan: Loan; brand: { name: string } }) {
+  const c = loan.customer
+  const companyName = brand.name || 'the Company'
+  // Prefer the live lien; fall back to a released/settled one so the letter can still be reprinted.
+  const dets = (loan.collateral || []).map((col) => col.fdDetail).filter((d): d is NonNullable<typeof d> => !!d)
+  const fd = dets.find((d) => d.lienStatus === 'Active') || dets[0]
+  const fdNo = fd?.fixedDeposit?.fdNumber
+  const lienAmount = fd?.lienAmount
+  const rate = loan.ratePeriod === 'monthly' ? `${loan.interestRatePercent}% per month` : `${loan.interestRatePercent}% per annum`
+
+  return (
+    <Sheet>
+      <div style={{ fontSize: 10.5, lineHeight: 1.7 }}>
+        <div style={{ textAlign: 'center', fontWeight: 700, fontSize: 14, textDecoration: 'underline', marginBottom: 22 }}>
+          LETTER OF LIEN AND AUTHORITY TO SET-OFF - FIXED DEPOSIT
+        </div>
+
+        <div style={{ marginBottom: 14 }}>Date: <Blank value={prettyDate(loan.approvedAt || loan.loanDetail?.applicationDate)} width={200} /></div>
+        <div style={{ marginBottom: 2 }}>To:</div>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>{companyName}</div>
+
+        <div style={{ marginBottom: 14 }}>
+          I/We, <Blank value={c?.fullName} width={260} /> (NIC / Passport No. <Blank value={c?.nicNo || c?.passportNo} width={150} />) of{' '}
+          <Blank value={c?.address} width={340} />, am/are the holder(s) of the Fixed Deposit described below (the &quot;Deposit&quot;).
+        </div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
+          <tbody>
+            <tr><td style={label}>Fixed Deposit No.</td><td style={cell}>{fdNo || blank}</td><td style={label}>Principal amount</td><td style={cell}>Rs. {money(fd?.fdPrincipalSnapshot) || blank}</td></tr>
+            <tr><td style={label}>Deposit interest rate</td><td style={cell}>{fd ? `${fd.fdRateSnapshot}% per annum` : blank}</td><td style={label}>Maturity date</td><td style={cell}>{prettyDate(fd?.fdMaturitySnapshot) || blank}</td></tr>
+            <tr><td style={label}>Amount under lien</td><td style={cell}>Rs. {money(lienAmount) || blank}</td><td style={label}>Maximum loan allowed</td><td style={cell}>Rs. {money(fd?.maxLoanValue) || blank}</td></tr>
+            <tr><td style={label}>Loan reference</td><td style={cell}>{loan.code}</td><td style={label}>Loan amount</td><td style={cell}>Rs. {money(loan.principalAmount)}</td></tr>
+            <tr><td style={label}>Loan interest rate</td><td style={cell}>{rate}</td><td style={label}>Loan term</td><td style={cell}>{loan.termMonths} month(s)</td></tr>
+          </tbody>
+        </table>
+
+        <div style={{ marginBottom: 8 }}>In consideration of {companyName} granting me/us the loan referred to above, I/We hereby:</div>
+        <ol style={{ margin: '0 0 18px', paddingLeft: 20, lineHeight: 1.8, textAlign: 'justify' }}>
+          <li>Create a lien over the Deposit in favour of {companyName} as security for the repayment of the loan, interest, default charges and all other sums due on it.</li>
+          <li>Agree that the Deposit shall not be withdrawn, renewed, part-paid, assigned or otherwise dealt with until the loan is repaid in full and the lien is released in writing by {companyName}.</li>
+          <li>Irrevocably authorise {companyName}, without further notice or consent, on any default in payment or at maturity of the Deposit, to close the Deposit and apply the proceeds towards the outstanding loan and all other sums due. Where the Deposit is closed before its maturity, I/we accept that interest on it is forfeited.</li>
+          <li>Understand that any balance of the Deposit proceeds remaining after the loan and all other sums due have been settled will be paid to me/us, and that if the proceeds are insufficient I/we remain liable for the shortfall.</li>
+          <li>Understand that interest continues to accrue on the Deposit as per its terms while the lien subsists, and that the lien ends only when {companyName} releases it after full settlement of the loan.</li>
+        </ol>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 34, marginBottom: 4 }}>
+          <div style={{ borderBottom: '1px solid #000', width: 230 }} />
+          <div style={{ borderBottom: '1px solid #000', width: 230 }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 26 }}>
+          <div>Depositor / Borrower - Signature</div>
+          <div>Authorized Signatory - {companyName}</div>
+        </div>
+
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>WITNESSES:</div>
+        <div style={{ marginBottom: 6 }}>1. Signature: <Blank width={260} /></div>
+        <div style={{ marginBottom: 14 }}>&nbsp;&nbsp;&nbsp;Name &nbsp; : <Blank width={260} /></div>
+        <div style={{ marginBottom: 6 }}>2. Signature: <Blank width={260} /></div>
+        <div style={{ marginBottom: 20 }}>&nbsp;&nbsp;&nbsp;Name &nbsp; : <Blank width={260} /></div>
+
+        <div style={{ borderTop: '1px dashed #000', paddingTop: 10 }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>FOR OFFICE USE - LIEN RELEASE</div>
+          <div>Loan fully settled on <Blank width={160} /> &nbsp; Lien released by <Blank width={200} /> &nbsp; Signature <Blank width={160} /></div>
+        </div>
       </div>
     </Sheet>
   )

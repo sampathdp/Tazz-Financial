@@ -8,7 +8,7 @@ import { Icon } from '../../components/Icon'
 import { useFilePreview } from '../../components/FilePreview'
 import { PrintDocumentsPanel } from './PrintDocuments'
 import {
-  loansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, api,
+  loansApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, api,
   type Loan, type LoanStatus, type LoanSchedule, type BankAccount,
   type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type DocumentCategory, type LoanDiaryNote,
@@ -122,6 +122,24 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
     catch (ex: any) { notify.error('Rejection failed', getErrorText(ex)) }
   }
 
+  // Loan secured by an FD: the lien row says which FD, and whether it has matured decides if settling is premature.
+  const fdLien = loan.collateral?.map((c) => c.fdDetail).find((d) => d?.lienStatus === 'Active') || null
+  const settleFromFd = async () => {
+    if (!fdLien) return
+    const matured = !!fdLien.fixedDeposit && dateOnly(fdLien.fixedDeposit.maturityDate) <= todayIso()
+    const ok = await notify.confirm({
+      title: `Settle loan ${loan.code} from FD ${fdLien.fixedDeposit?.fdNumber ?? ''}?`,
+      msg: `The FD is closed and its ${matured ? 'payout' : 'principal (interest is forfeited — it has not matured)'} is applied to this loan. Any amount above the loan balance is paid to the customer in cash. This cannot be voided.`,
+      danger: true, okText: 'Settle from FD',
+    })
+    if (!ok) return
+    try {
+      const r = await fdLoansApi.settle(loan.id, { allowPremature: !matured })
+      notify.success('FD adjusted against loan', `Applied ${money(r.appliedToLoan)}${r.paidToCustomer > 0 ? ` · pay customer ${money(r.paidToCustomer)}` : ''}${r.remainingLoanBalance > 0 ? ` · balance left ${money(r.remainingLoanBalance)}` : ''}`)
+      onChanged()
+    } catch (ex: any) { notify.error('Settlement failed', getErrorText(ex)) }
+  }
+
   const writeOffLoan = async () => {
     const reason = await notify.prompt({ title: `Request write-off for loan ${loan.code}?`, msg: `Bad debt — once approved this posts ${money(loan.outstandingBalanceCache)} as a loss and closes the loan. Needs a second person to approve before it takes effect.`, placeholder: 'Reason for write-off', required: true, danger: true, okText: 'Send Request' })
     if (!reason) return
@@ -222,6 +240,11 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
           {loan.status !== 'Pending' && (
             <Can user={me} module="Active Loans" action="Edit">
               <Btn size="sm" variant="solid" icon="flag" onClick={() => setStatusModal(true)}>Contract Status Change</Btn>
+            </Can>
+          )}
+          {loan.status === 'Active' && fdLien && (
+            <Can user={me} module="Active Loans" action="Approve">
+              <Btn size="sm" variant="primary" icon="swap" onClick={settleFromFd}>Settle from FD</Btn>
             </Can>
           )}
           {canCloseLoan && (
@@ -697,6 +720,15 @@ function SecurityPanel({ loan }: { loan: Loan }) {
               <div className="row between" style={{ fontSize: 12.5 }}>
                 <span>{c.collateralType} — {c.description}</span><span className="t-2">{c.estimatedValue ? money(c.estimatedValue) : '—'}</span>
               </div>
+              {c.fdDetail && (
+                <div className="row gap-2 wrap" style={{ marginTop: 4, fontSize: 11.5, alignItems: 'center' }}>
+                  <Badge tone={c.fdDetail.lienStatus === 'Active' ? 'red' : 'neutral'} dot>Lien {c.fdDetail.lienStatus}</Badge>
+                  <span className="t-2">
+                    FD {c.fdDetail.fixedDeposit?.fdNumber} · principal {money(c.fdDetail.fdPrincipalSnapshot)} @ {pct(c.fdDetail.fdRateSnapshot)}% · matures {dateOnly(c.fdDetail.fdMaturitySnapshot)} · max loan {money(c.fdDetail.maxLoanValue)} ({pct(c.fdDetail.ltvPercent)}%)
+                    {c.fdDetail.releasedAt ? ` · ${c.fdDetail.lienStatus === 'Settled' ? 'settled' : 'released'} ${dateOnly(c.fdDetail.releasedAt)}${c.fdDetail.settledAmount ? ` (${money(c.fdDetail.settledAmount)} applied)` : ''}` : ''}
+                  </span>
+                </div>
+              )}
               {!!vehicleBits.length && <div className="t-2" style={{ fontSize: 11.5, marginTop: 2 }}>{vehicleBits.join(' · ')}</div>}
               {!!c.documents?.length && (
                 <div className="row gap-1 wrap" style={{ marginTop: 6 }}>

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { fundingProductsApi, type FundingProduct, type FdInterestMethod, type AuthUser } from '../api'
+import { fundingProductsApi, fdLoansApi, type FundingProduct, type FdInterestMethod, type FdLoanPolicy, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -18,6 +18,11 @@ const blankForm = (): ProductForm => ({
   allowCustomTerm: false, rateIsManual: false, status: 'Active', sortOrder: 0,
 })
 
+const blankPolicy = (productId: number): FdLoanPolicy => ({
+  fundingProductId: productId, maxLtvPercent: 90, rateMode: 'spread', rateSpreadPercent: 2, fixedRatePercent: null,
+  minLoanAmount: 0, maxLoanAmount: null, minDaysToMaturity: 30, capTermToMaturity: true, autoAdjustOnMaturity: false, status: 'Active',
+})
+
 export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
   const [rows, setRows] = useState<FundingProduct[]>([])
@@ -27,10 +32,15 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
   const [modal, setModal] = useState(false)
   const [editing, setEditing] = useState<FundingProduct | null>(null)
   const [form, setForm] = useState<ProductForm>(blankForm())
+  const [policies, setPolicies] = useState<Record<number, FdLoanPolicy | null>>({})
+  const [policyFor, setPolicyFor] = useState<FundingProduct | null>(null)
+  const [policy, setPolicy] = useState<FdLoanPolicy | null>(null)
+  const [policyErr, setPolicyErr] = useState('')
 
   const refresh = () => {
     setLoading(true)
     fundingProductsApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+    fdLoansApi.policies().then((ps) => setPolicies(Object.fromEntries(ps.map((p) => [p.id, p.policy])))).catch(() => setPolicies({}))
   }
   useEffect(() => { refresh() }, [])
 
@@ -41,6 +51,21 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
     setErr(''); setModal(true)
   }
   const close = () => { setModal(false); setEditing(null); setErr('') }
+
+  const openPolicy = (p: FundingProduct) => { setPolicyFor(p); setPolicy(policies[p.id] || blankPolicy(p.id)); setPolicyErr('') }
+  const setPol = (patch: Partial<FdLoanPolicy>) => setPolicy((s) => (s ? { ...s, ...patch } : s))
+  const savePolicy = async () => {
+    if (!policyFor || !policy) return
+    if (!(Number(policy.maxLtvPercent) > 0 && Number(policy.maxLtvPercent) <= 100)) { setPolicyErr('Max loan-to-value must be between 0 and 100%.'); return }
+    if (policy.rateMode === 'fixed' && !(Number(policy.fixedRatePercent) > 0)) { setPolicyErr('Enter the fixed loan rate.'); return }
+    setBusy(true); setPolicyErr('')
+    try {
+      const { id: _id, fundingProductId: _fp, ...body } = policy
+      await fdLoansApi.savePolicy(policyFor.id, body)
+      setPolicyFor(null); refresh()
+      notify.success('Loan policy saved', policyFor.name)
+    } catch (ex: any) { setPolicyErr(getErrorText(ex, 'Save failed')) } finally { setBusy(false) }
+  }
 
   const set = (patch: Partial<ProductForm>) => setForm((s) => ({ ...s, ...patch }))
 
@@ -82,7 +107,7 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
         actions={<Can user={me} module="Funding Products" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Product</Btn></Can>} />
       <Card pad={0}>
         {loading ? <LoadingBlock /> :
-        <Table cols={[{ label: 'Product' }, { label: 'Interest Method' }, { label: 'Annual Rate', align: 'right' }, { label: 'Terms' }, { label: 'Deposit Range', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+        <Table cols={[{ label: 'Product' }, { label: 'Interest Method' }, { label: 'Annual Rate', align: 'right' }, { label: 'Terms' }, { label: 'Deposit Range', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 130 }]}
           rows={rows}
           render={(p) => <>
             <Td c="var(--tx-0)"><div style={{ fontWeight: 600 }}>{p.name}</div><div className="t-2" style={{ fontSize: 11.5 }}>{p.code}</div></Td>
@@ -90,8 +115,9 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
             <Td align="right" mono>{Number(p.annualRatePercent).toFixed(2)}%</Td>
             <Td>{(p.allowedTermsMonths || []).join(', ')} mo{p.allowCustomTerm ? ' (+custom)' : ''}</Td>
             <Td align="right" mono>{Number(p.minDepositAmount).toLocaleString()} – {p.maxDepositAmount ? Number(p.maxDepositAmount).toLocaleString() : '∞'}</Td>
-            <Td align="center"><Badge tone={(p.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{p.status || 'Active'}</Badge></Td>
+            <Td align="center"><Badge tone={(p.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{p.status || 'Active'}</Badge>{policies[p.id]?.status === 'Active' && <div className="t-2" style={{ fontSize: 10.5, marginTop: 4 }}>FD loans on</div>}</Td>
             <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
+              <Can user={me} module="Funding Products" action="Edit"><button className="mms-act" title="Loan against FD policy" onClick={() => openPolicy(p)}><Icon n="shield" s={15} /></button></Can>
               <Can user={me} module="Funding Products" action="Edit"><button className="mms-act" title="Edit" onClick={() => openEdit(p)}><Icon n="edit" s={15} /></button></Can>
               <Can user={me} module="Funding Products" action="Delete"><button className="mms-act" title="Delete" onClick={() => remove(p)}><Icon n="trash" s={15} /></button></Can>
             </div></Td>
@@ -150,6 +176,37 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
           <Field label="Reference Format (optional)"><Input value={form.referenceFormat || ''} onChange={(e) => set({ referenceFormat: e.target.value })} placeholder="{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:6}" /></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => set({ status: e.target.value as any })}><option>Active</option><option>Inactive</option></Select></Field>
         </div>
+      </Modal>
+
+      <Modal open={!!policyFor} onClose={() => setPolicyFor(null)} width={560} title={`Loan against FD — ${policyFor?.name || ''}`}
+        footer={<>
+          <Btn variant="plain" onClick={() => setPolicyFor(null)}>Cancel</Btn>
+          <Btn variant="primary" icon="check" onClick={savePolicy} disabled={busy}>{busy ? 'Saving...' : 'Save Policy'}</Btn>
+        </>}>
+        <ErrorBanner error={policyErr} style={{ marginBottom: 14 }} />
+        {policy && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Field label="Max Loan (% of FD principal)"><Input type="number" step="0.01" value={policy.maxLtvPercent} onChange={(e) => setPol({ maxLtvPercent: e.target.value })} /></Field>
+          <Field label="Status"><Select value={policy.status || 'Active'} onChange={(e) => setPol({ status: e.target.value as 'Active' | 'Inactive' })}><option>Active</option><option>Inactive</option></Select></Field>
+          <Field label="Loan Rate Rule"><Select value={policy.rateMode} onChange={(e) => setPol({ rateMode: e.target.value as 'spread' | 'fixed' })}>
+            <option value="spread">FD rate + spread</option><option value="fixed">Fixed rate</option>
+          </Select></Field>
+          {policy.rateMode === 'spread'
+            ? <Field label="Spread over FD rate (%)"><Input type="number" step="0.001" value={policy.rateSpreadPercent} onChange={(e) => setPol({ rateSpreadPercent: e.target.value })} /></Field>
+            : <Field label="Fixed annual rate (%)"><Input type="number" step="0.001" value={policy.fixedRatePercent ?? ''} onChange={(e) => setPol({ fixedRatePercent: e.target.value || null })} /></Field>}
+          <Field label="Minimum Loan"><Input type="number" step="0.01" value={policy.minLoanAmount ?? 0} onChange={(e) => setPol({ minLoanAmount: e.target.value })} /></Field>
+          <Field label="Maximum Loan (optional)"><Input type="number" step="0.01" value={policy.maxLoanAmount ?? ''} onChange={(e) => setPol({ maxLoanAmount: e.target.value || null })} /></Field>
+          <Field label="Min days left to FD maturity"><Input type="number" value={policy.minDaysToMaturity ?? 30} onChange={(e) => setPol({ minDaysToMaturity: Number(e.target.value) })} /></Field>
+          <Field label="">
+            <label className="row gap-2" style={{ fontSize: 12.5, marginTop: 22 }}>
+              <input type="checkbox" checked={policy.capTermToMaturity} onChange={(e) => setPol({ capTermToMaturity: e.target.checked })} /> Loan term cannot pass FD maturity
+            </label>
+          </Field>
+          <Field label="" full>
+            <label className="row gap-2" style={{ fontSize: 12.5 }}>
+              <input type="checkbox" checked={policy.autoAdjustOnMaturity} onChange={(e) => setPol({ autoAdjustOnMaturity: e.target.checked })} /> When the pledged FD matures, apply it to the loan automatically (daily job)
+            </label>
+          </Field>
+        </div>}
       </Modal>
     </div>
   )

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasPublicUuid;
+use App\Support\FdLienService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -62,6 +63,13 @@ class Loan extends Model
 
         static::creating(function (Loan $loan) {
             $loan->facility_type = 'Loan';
+        });
+
+        // A loan that ends without using its FD (rejected, cancelled, or fully repaid) frees the FD.
+        static::updated(function (Loan $loan) {
+            if ($loan->wasChanged('status') && in_array($loan->status, FdLienService::RELEASING_STATUSES, true)) {
+                FdLienService::releaseForLoan($loan, "Loan {$loan->status}");
+            }
         });
     }
 
