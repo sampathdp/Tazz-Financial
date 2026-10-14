@@ -788,6 +788,24 @@ class LoanController extends Controller
         'cash_account_id' => ['nullable', 'exists:cash_accounts,id'],
     ];
 
+    /**
+     * Loans are paid out only from a Head Office bank account: no cash, and no other branch's account. Whatever
+     * branch owns the loan, the ledger settles it with Head Office through the inter-branch accounts.
+     */
+    private function headOfficeBankError(array $data): ?string
+    {
+        if (!config('finance.disburse_from_head_office_bank', true)) {
+            return null;
+        }
+        if (($data['disbursement_method'] ?? null) === 'Cash') {
+            return 'Loans are paid out from the Head Office bank account. Choose Bank or Cheque and pick that account.';
+        }
+        $bank = \App\Models\BankAccount::withoutGlobalScopes()->find($data['disbursement_bank_account_id'] ?? 0);
+        $isHo = $bank && \App\Models\Branch::whereKey($bank->branch_id)->where('is_head_office', true)->exists();
+
+        return $isHo ? null : 'Pick a Head Office bank account. Loans are paid out only from Head Office.';
+    }
+
     /** Sanity checks on the disburse form values - the amount can't exceed what was approved and the first installment can't fall before the money goes out. */
     private function disbursementInputError(Loan $loan, array $data): ?string
     {
@@ -844,7 +862,7 @@ class LoanController extends Controller
     public function disburse(Request $request, Loan $loan)
     {
         $data = $request->validate(array_merge(self::DISBURSE_RULES, ['disbursed_amount' => ['nullable', 'numeric', 'gt:0', new \App\Rules\Money]]));
-        if ($invalid = $this->disbursementInputError($loan, $data)) {
+        if ($invalid = $this->disbursementInputError($loan, $data) ?? $this->headOfficeBankError($data)) {
             return response()->json(['message' => $invalid], 422);
         }
         if ($block = $this->disbursementBlockReason($loan, isset($data['disbursed_amount']) ? (float) $data['disbursed_amount'] : null)) {
@@ -876,7 +894,7 @@ class LoanController extends Controller
     public function requestDisbursement(Request $request, Loan $loan)
     {
         $data = $request->validate(array_merge(self::DISBURSE_RULES, ['disbursed_amount' => ['nullable', 'numeric', 'gt:0', new \App\Rules\Money]]));
-        if ($invalid = $this->disbursementInputError($loan, $data)) {
+        if ($invalid = $this->disbursementInputError($loan, $data) ?? $this->headOfficeBankError($data)) {
             return response()->json(['message' => $invalid], 422);
         }
         if ($block = $this->disbursementBlockReason($loan, isset($data['disbursed_amount']) ? (float) $data['disbursed_amount'] : null)) {

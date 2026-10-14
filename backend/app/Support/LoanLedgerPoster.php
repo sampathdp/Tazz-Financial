@@ -105,8 +105,9 @@ class LoanLedgerPoster
     public static function disbursementTarget(?string $method, int $branchId, ?int $bankAccountId, ?int $cashAccountId = null): ?array
     {
         if ($method === 'Cash') {
-            // An explicit till (chosen on the disburse form) wins; otherwise the branch's disbursement till.
-            $till = $cashAccountId ? CashAccount::where('branch_id', $branchId)->find($cashAccountId) : CashAccount::branchPrimary($branchId, CashAccount::PURPOSE_DISBURSEMENTS);
+            // An explicit till (chosen on the disburse form) wins; otherwise the branch's General till. (Loans are normally paid
+            // out of the Head Office bank account - see LoanController::headOfficeBankError - so this is the legacy path.)
+            $till = $cashAccountId ? CashAccount::where('branch_id', $branchId)->find($cashAccountId) : CashAccount::branchPrimary($branchId);
 
             return $till ? ['leaf' => ChartOfAccount::forCashTill($till), 'phys_type' => 'cash', 'phys_id' => (int) $till->id] : null;
         }

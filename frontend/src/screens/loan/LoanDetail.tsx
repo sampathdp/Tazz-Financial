@@ -8,7 +8,7 @@ import { Icon } from '../../components/Icon'
 import { useFilePreview } from '../../components/FilePreview'
 import { PrintDocumentsPanel } from './PrintDocuments'
 import {
-  loansApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, cashAccountsApi, type CashAccount, api,
+  loansApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, branchesApi, api,
   type Loan, type LoanStatus, type LoanSchedule, type BankAccount,
   type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type DocumentCategory, type LoanDiaryNote,
@@ -1061,16 +1061,22 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const [amount, setAmount] = useState<string>(String(financedAmount))
   const [disbursedAt, setDisbursedAt] = useState(loan.disbursementIncomplete && loan.disbursedAt ? loan.disbursedAt.slice(0, 10) : todayIso())
   const [firstDate, setFirstDate] = useState('')
-  const [method, setMethod] = useState<'Cash' | 'Bank' | 'Cheque'>('Cash')
+  // Loans are paid out only from a Head Office bank account: no cash, no other branch's account.
+  const [method, setMethod] = useState<'Bank' | 'Cheque'>('Bank')
   const [bankAccountId, setBankAccountId] = useState<number | ''>('')
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
-  const [tills, setTills] = useState<CashAccount[]>([])
-  const [cashAccountId, setCashAccountId] = useState<number | ''>('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { bankAccountsApi.list().then(setBankAccounts).catch(() => setBankAccounts([])) }, [])
-  useEffect(() => { cashAccountsApi.list().then((a) => setTills(a.filter((t) => t.branchId === loan.branchId && t.status !== 'Inactive' && (t.accountType === 'BranchMain' || t.accountType === 'HeadOfficeMain')))).catch(() => setTills([])) }, [loan.branchId])
+  useEffect(() => {
+    Promise.all([bankAccountsApi.list(), branchesApi.list()]).then(([banks, branches]) => {
+      const hoIds = new Set(branches.filter((b) => b.isHeadOffice).map((b) => b.id))
+      const hoBanks = banks.filter((a) => a.branchId != null && hoIds.has(a.branchId) && a.status !== 'Inactive')
+      setBankAccounts(hoBanks)
+      const preferred = hoBanks.find((a) => /operation/i.test(a.name)) ?? (hoBanks.length === 1 ? hoBanks[0] : undefined)
+      if (preferred) setBankAccountId(preferred.id)
+    }).catch(() => setBankAccounts([]))
+  }, [])
 
   const feePercent = num(loan.loanDetail?.loanType?.processingFeePercent)
   const computedDocCharge = Math.round(num(amount) * feePercent) / 100
@@ -1081,13 +1087,12 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
 
   const disburseBody = () => ({
     disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate, disbursementMethod: method,
-    disbursementBankAccountId: method === 'Cash' ? null : Number(bankAccountId),
-    cashAccountId: method === 'Cash' && cashAccountId ? Number(cashAccountId) : undefined,
+    disbursementBankAccountId: Number(bankAccountId),
   })
   const validateForm = () => {
     if (!firstDate) { setErr('Pick the first installment date.'); return false }
     if (chargeBlocking) { setErr('Settle the document charge before disbursing this loan.'); return false }
-    if (method !== 'Cash' && !bankAccountId) { setErr('Pick which bank account this loan is paid out of.'); return false }
+    if (!bankAccountId) { setErr('Pick which bank account this loan is paid out of.'); return false }
     return true
   }
 
@@ -1190,21 +1195,13 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         <Field label="Disbursed Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <Field label="Disbursed Date"><Input type="date" value={disbursedAt} onChange={(e) => setDisbursedAt(e.target.value)} /></Field>
         <Field label="First Installment Date"><Input type="date" value={firstDate} onChange={(e) => setFirstDate(e.target.value)} /></Field>
-        <Field label="Disbursement Method"><Select value={method} onChange={(e) => setMethod(e.target.value as any)}>
-          <option value="Cash">Cash</option><option value="Bank">Bank Transfer</option><option value="Cheque">Cheque</option>
+        <Field label="Disbursement Method"><Select value={method} onChange={(e) => setMethod(e.target.value as 'Bank' | 'Cheque')}>
+          <option value="Bank">Bank Transfer</option><option value="Cheque">Cheque</option>
         </Select></Field>
-        {method === 'Cash' && tills.length > 1 && (
-          <Field label="Paid Out Of (Till)"><Select value={cashAccountId} onChange={(e) => setCashAccountId(Number(e.target.value) || '')}>
-            <option value="">Branch disbursement till (default)</option>
-            {tills.map((t) => <option key={t.id} value={t.id}>{t.name} — books {money(t.currentBalance)}</option>)}
-          </Select></Field>
-        )}
-        {method !== 'Cash' && (
-          <Field label="Paid Out Of (Bank Account)"><Select value={bankAccountId} onChange={(e) => setBankAccountId(Number(e.target.value) || '')}>
-            <option value="">Select bank account…</option>
-            {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
-          </Select></Field>
-        )}
+        <Field label="Paid Out Of (Head Office Bank Account)"><Select value={bankAccountId} onChange={(e) => setBankAccountId(Number(e.target.value) || '')}>
+          <option value="">Select bank account…</option>
+          {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+        </Select></Field>
       </div>
       <div className="t-2" style={{ fontSize: 12, marginBottom: 16 }}>
         {loan.termMonths} months · {loan.loanDetail?.installmentFrequency} · {loan.loanDetail?.interestMethod === 'reducing_balance' ? 'Reducing balance' : 'Flat'} interest at {loan.interestRatePercent}%

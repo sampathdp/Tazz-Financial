@@ -21,6 +21,7 @@
         <server name="APP_ENV" value="testing"/>
         <server name="BCRYPT_ROUNDS" value="4"/>
         <server name="FINANCE_STRICT_TILL_PURPOSES" value="false"/>
+        <server name="FINANCE_DISBURSE_FROM_HO_BANK" value="false"/>
         <server name="CACHE_DRIVER" value="array"/>
         <!-- <server name="DB_CONNECTION" value="sqlite"/> -->
         <!-- <server name="DB_DATABASE" value=":memory:"/> -->

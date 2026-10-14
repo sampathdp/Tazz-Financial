@@ -61,7 +61,17 @@ class BankAccountController extends Controller
         if ($bankAccount->reconciliations()->exists()) {
             return response()->json(['message' => 'This account has reconciliation records and cannot be deleted.'], 422);
         }
-        $bankAccount->delete();
+        $leafId = $bankAccount->chart_of_account_id;
+        if ($leafId && \App\Models\JournalLine::where('account_id', $leafId)->exists()) {
+            return response()->json(['message' => 'This account has ledger postings and cannot be deleted. Mark it Inactive instead.'], 422);
+        }
+        \Illuminate\Support\Facades\DB::transaction(function () use ($bankAccount, $leafId) {
+            $bankAccount->delete();
+            // Its ledger account (1020-n) goes with it, so the chart does not keep a bank account that no longer exists.
+            if ($leafId) {
+                \App\Models\ChartOfAccount::whereKey($leafId)->where('is_system', false)->delete();
+            }
+        });
 
         return response()->noContent();
     }

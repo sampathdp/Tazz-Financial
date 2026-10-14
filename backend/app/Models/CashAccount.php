@@ -15,14 +15,13 @@ class CashAccount extends Model
     public const PURPOSE_GENERAL = 'General';
     public const PURPOSE_COLLECTIONS = 'Collections';
     public const PURPOSE_DOCUMENT_CHARGES = 'DocumentCharges';
-    public const PURPOSE_DISBURSEMENTS = 'Disbursements';
     public const PURPOSE_FD = 'FixedDeposits';
     public const PURPOSE_SAVINGS = 'Savings';
     public const PURPOSE_PAWNING = 'Pawning';
     public const PURPOSE_EXPENSES = 'Expenses';
     /** Purposes that own exactly one primary till per branch (enforced by the purpose_key unique index). */
     public const DEDICATED_PURPOSES = [
-        self::PURPOSE_COLLECTIONS, self::PURPOSE_DOCUMENT_CHARGES, self::PURPOSE_DISBURSEMENTS,
+        self::PURPOSE_COLLECTIONS, self::PURPOSE_DOCUMENT_CHARGES,
         self::PURPOSE_FD, self::PURPOSE_SAVINGS, self::PURPOSE_PAWNING, self::PURPOSE_EXPENSES,
     ];
     public const PURPOSES = [self::PURPOSE_GENERAL, ...self::DEDICATED_PURPOSES];
@@ -33,7 +32,6 @@ class CashAccount extends Model
         '/collect/i' => self::PURPOSE_COLLECTIONS,
         '/saving/i' => self::PURPOSE_SAVINGS,
         '/pawn/i' => self::PURPOSE_PAWNING,
-        '/disburs/i' => self::PURPOSE_DISBURSEMENTS,
         '/expens/i' => self::PURPOSE_EXPENSES,
     ];
 
@@ -107,7 +105,7 @@ class CashAccount extends Model
     /**
      * The branch's till for a kind of cash.
      *
-     *  - A dedicated purpose (Collections, DocumentCharges, Disbursements, FixedDeposits, Savings, Pawning,
+     *  - A dedicated purpose (Collections, DocumentCharges, FixedDeposits, Savings, Pawning,
      *    Expenses) resolves to that purpose's active primary till and nothing else. If the branch has none
      *    this throws: posting the cash to some other till would hide the mistake in the books.
      *  - No purpose, or General, resolves to the branch's active General primary till (the oldest), or null.
@@ -146,7 +144,6 @@ class CashAccount extends Model
         return [
             self::PURPOSE_COLLECTIONS => 'Collections',
             self::PURPOSE_DOCUMENT_CHARGES => 'Document Charges',
-            self::PURPOSE_DISBURSEMENTS => 'Disbursements',
             self::PURPOSE_FD => 'Fixed Deposits',
             self::PURPOSE_SAVINGS => 'Savings',
             self::PURPOSE_PAWNING => 'Pawning',
