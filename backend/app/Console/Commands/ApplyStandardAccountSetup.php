@@ -49,16 +49,6 @@ class ApplyStandardAccountSetup extends Command
         'service charges' => '4950',
     ];
 
-    /** till name pattern => purpose. */
-    private const PURPOSE_PATTERNS = [
-        '/\bfd\b|fixed deposit/i' => CashAccount::PURPOSE_FD,
-        '/doc/i' => CashAccount::PURPOSE_DOCUMENT_CHARGES,
-        '/collect/i' => CashAccount::PURPOSE_COLLECTIONS,
-        '/saving/i' => CashAccount::PURPOSE_SAVINGS,
-        '/pawn/i' => CashAccount::PURPOSE_PAWNING,
-        '/disburs/i' => CashAccount::PURPOSE_DISBURSEMENTS,
-    ];
-
     public function handle(): int
     {
         $apply = (bool) $this->option('apply');
@@ -106,22 +96,17 @@ class ApplyStandardAccountSetup extends Command
 
         // B-6 till purposes (primary tills with none set)
         foreach (CashAccount::withoutGlobalScopes()->whereIn('account_type', CashAccount::PRIMARY_TYPES)->where(fn ($q) => $q->whereNull('purpose')->orWhere('purpose', ''))->get() as $till) {
-            $purpose = CashAccount::PURPOSE_GENERAL;
-            foreach (self::PURPOSE_PATTERNS as $pattern => $p) {
-                if (preg_match($pattern, $till->name)) {
-                    $purpose = $p;
-                    break;
-                }
-            }
+            $purpose = CashAccount::purposeFromName((string) $till->name);
             $plan[] = ['B-6', "Till \"{$till->name}\" (branch {$till->branch_id})", "purpose {$purpose}"];
             $changes[] = fn () => $till->update(['purpose' => $purpose]);
         }
 
-        // Branches created before default accounts existed: give each the main till it is missing.
+        // B-NEW branches missing any till (General or a dedicated purpose): create them.
         foreach (\App\Models\Branch::where('status', 'Active')->get() as $branch) {
-            $has = CashAccount::withoutGlobalScopes()->where('branch_id', $branch->id)->whereIn('account_type', CashAccount::PRIMARY_TYPES)->where('status', 'Active')->exists();
-            if (!$has) {
-                $plan[] = ['B-NEW', "Branch \"{$branch->name}\"", 'create its main till and ledger account'];
+            $have = CashAccount::withoutGlobalScopes()->where('branch_id', $branch->id)->whereIn('account_type', CashAccount::PRIMARY_TYPES)->pluck('purpose')->all();
+            $missing = array_diff(CashAccount::PURPOSES, $have);
+            if ($missing) {
+                $plan[] = ['B-NEW', "Branch \"{$branch->name}\"", 'create tills: ' . implode(', ', $missing)];
                 $changes[] = fn () => \App\Support\BranchProvisioner::provision($branch);
             }
         }

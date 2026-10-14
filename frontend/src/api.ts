@@ -857,7 +857,7 @@ export const bankReconciliationsApi = {
 export type CashAccountType =
   | 'HeadOfficeMain' | 'BranchMain' | 'PettyCash' | 'CashierFloat' | 'CollectionCash' | 'InTransit' | 'Other'
 
-export type CashAccountPurpose = 'General' | 'Collections' | 'DocumentCharges' | 'Disbursements' | 'FixedDeposits' | 'Savings' | 'Pawning'
+export type CashAccountPurpose = 'General' | 'Collections' | 'DocumentCharges' | 'Disbursements' | 'FixedDeposits' | 'Savings' | 'Pawning' | 'Expenses'
 export const CASH_ACCOUNT_PURPOSES: { value: CashAccountPurpose; label: string }[] = [
   { value: 'General', label: 'General (anything not covered below)' },
   { value: 'Collections', label: 'Loan / draft / pawn collections' },
@@ -866,6 +866,7 @@ export const CASH_ACCOUNT_PURPOSES: { value: CashAccountPurpose; label: string }
   { value: 'FixedDeposits', label: 'Fixed deposits' },
   { value: 'Savings', label: 'Savings' },
   { value: 'Pawning', label: 'Pawning' },
+  { value: 'Expenses', label: 'Expense payments' },
 ]
 
 export interface CashAccount {

@@ -19,6 +19,10 @@ class CashAccountController extends Controller
     public function store(Request $request)
     {
         $data = $this->validated($request);
+        $data['purpose'] = $data['purpose'] ?? CashAccount::PURPOSE_GENERAL;
+        if ($error = $this->purposeTaken($data['branch_id'], $data['purpose'], null)) {
+            return response()->json(['message' => $error], 422);
+        }
         $data['current_balance'] = $data['opening_balance'] ?? 0;
 
         $account = DB::transaction(function () use ($data) {
@@ -37,6 +41,14 @@ class CashAccountController extends Controller
     public function update(Request $request, CashAccount $cashAccount)
     {
         $data = $this->validated($request, $cashAccount);
+        $data['purpose'] = $data['purpose'] ?? $cashAccount->purpose ?? CashAccount::PURPOSE_GENERAL;
+        $isPrimary = in_array($cashAccount->account_type, CashAccount::PRIMARY_TYPES, true);
+        if ($data['purpose'] !== CashAccount::PURPOSE_GENERAL && !$isPrimary) {
+            return response()->json(['message' => 'Only a main till can be dedicated to a purpose.'], 422);
+        }
+        if ($error = $this->purposeTaken($data['branch_id'], $data['purpose'], $cashAccount->id)) {
+            return response()->json(['message' => $error], 422);
+        }
 
         // Branch and opening balance are fixed once the till has any history: changing them would move past
         // cash to another branch, or change the opening figure, without a journal entry.
@@ -71,6 +83,18 @@ class CashAccountController extends Controller
         $cashAccount->delete();
 
         return response()->noContent();
+    }
+
+    /** A dedicated purpose has one main till per branch; says which till already holds it. */
+    private function purposeTaken(int|string $branchId, string $purpose, ?int $exceptId): ?string
+    {
+        if ($purpose === CashAccount::PURPOSE_GENERAL) {
+            return null;
+        }
+        $other = CashAccount::withoutGlobalScopes()->where('branch_id', $branchId)->whereIn('account_type', CashAccount::PRIMARY_TYPES)
+            ->where('purpose', $purpose)->when($exceptId, fn ($q) => $q->where('id', '!=', $exceptId))->first();
+
+        return $other ? "This branch already has a " . CashAccount::purposeLabel($purpose) . " cash account (\"{$other->name}\"). Each purpose has one till per branch." : null;
     }
 
     private function validated(Request $request, ?CashAccount $cashAccount = null): array

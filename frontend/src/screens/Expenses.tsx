@@ -199,7 +199,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
     e.pendingApprovalRequest ? e.pendingApprovalRequest.requiredApprovals - (e.pendingApprovalRequest.firstApprover ? 1 : 0) : 0
 
   const [payMode, setPayMode] = useState<'direct' | 'request'>('direct')
-  const openPay = (e: Expense, mode: 'direct' | 'request') => { setPayTarget(e); setPayMode(mode); setPayForm(blankPayForm()); setErr('') }
+  const openPay = (e: Expense, mode: 'direct' | 'request') => { setPayTarget(e); setPayMode(mode); setPayForm({ ...blankPayForm(), cashAccountId: cashAccounts.find((a) => a.branchId === e.branchId && a.purpose === 'Expenses' && a.status !== 'Inactive')?.id ?? '' }); setErr('') }
   const closePay = () => { setPayTarget(null); setErr('') }
 
   const savePay = async () => {
