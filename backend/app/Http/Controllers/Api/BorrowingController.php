@@ -97,7 +97,7 @@ class BorrowingController extends Controller
             'lender_name' => 'required|string|max:160',
             'source' => 'nullable|string|max:255',
             'purpose' => 'nullable|string',
-            'principal_amount' => 'required|numeric|min:0.01',
+            'principal_amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'interest_rate_percent' => 'nullable|numeric|min:0|max:999',
             'term_months' => 'nullable|integer|min:1|max:600',
             'borrowing_date' => 'required|date',
@@ -238,7 +238,7 @@ class BorrowingController extends Controller
 
         $data = $request->validate([
             'kind' => ['required', Rule::in(self::TXN_KINDS)],
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'txn_date' => 'required|date',
             'payment_method' => ['required', Rule::in(self::METHODS)],
             'cash_account_id' => 'nullable|exists:cash_accounts,id|required_if:payment_method,Cash',

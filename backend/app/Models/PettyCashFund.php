@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class PettyCashFund extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
+
     protected $fillable = [
         'code', 'branch_id', 'custodian_id', 'chart_of_account_id', 'name',
         'float_limit', 'current_balance', 'status',

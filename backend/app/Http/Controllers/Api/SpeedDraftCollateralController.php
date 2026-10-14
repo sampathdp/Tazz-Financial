@@ -21,10 +21,14 @@ class SpeedDraftCollateralController extends Controller
     public function store(Request $request, SpeedDraft $speedDraft)
     {
         [$data, $jewelry] = $this->validated($request);
-        $row = $speedDraft->collateral()->create($data);
-        if ($row->collateral_type === 'Jewelry' && $jewelry) {
-            $row->jewelryDetail()->create($jewelry);
-        }
+        $row = \Illuminate\Support\Facades\DB::transaction(function () use ($speedDraft, $data, $jewelry) {
+            $row = $speedDraft->collateral()->create($data);
+            if ($row->collateral_type === 'Jewelry' && $jewelry) {
+                $row->jewelryDetail()->create($jewelry);
+            }
+
+            return $row;
+        });
 
         return response()->json($row->load('jewelryDetail'), 201);
     }
@@ -32,10 +36,12 @@ class SpeedDraftCollateralController extends Controller
     public function update(Request $request, FacilityCollateral $collateral)
     {
         [$data, $jewelry] = $this->validated($request);
-        $collateral->update($data);
-        if ($collateral->collateral_type === 'Jewelry' && $jewelry) {
-            FacilityCollateralJewelryDetail::updateOrCreate(['facility_collateral_id' => $collateral->id], $jewelry);
-        }
+        \Illuminate\Support\Facades\DB::transaction(function () use ($collateral, $data, $jewelry) {
+            $collateral->update($data);
+            if ($collateral->collateral_type === 'Jewelry' && $jewelry) {
+                FacilityCollateralJewelryDetail::updateOrCreate(['facility_collateral_id' => $collateral->id], $jewelry);
+            }
+        });
 
         return $collateral->fresh()->load('jewelryDetail');
     }

@@ -95,10 +95,12 @@ class FdDepositController extends Controller
             'branch_id' => 'required|exists:branches,id',
             'customer_id' => 'required|exists:customers,id',
             'deposit_date' => 'required|date',
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
             'reference_no' => 'nullable|string|max:64',
             'bank_id' => 'nullable|exists:banks,id|required_unless:payment_method,Cash',
+            // The company bank account the money reached (Bank / Cheque). Left blank, the receipt is parked in 1030 Undeposited Funds.
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id'],
             'notes' => 'nullable|string',
         ]);
     }

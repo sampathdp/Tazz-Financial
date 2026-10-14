@@ -164,7 +164,7 @@ class LoanPostDatedChequeController extends Controller
             'cheque_no' => 'required|string|max:20',
             'bank_id' => 'required|exists:banks,id',
             'cheque_date' => 'required|date',
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'notes' => 'nullable|string|max:255',
         ]);
 

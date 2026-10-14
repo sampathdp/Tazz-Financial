@@ -19,7 +19,7 @@ class FinanceCalculatorController extends Controller
         $data = $request->validate([
             'loan_type_id' => 'nullable|integer|exists:loan_types,id',
             'loan_amount' => 'required|numeric|min:0.01',
-            'down_payment' => 'nullable|numeric|min:0|lte:loan_amount',
+            'down_payment' => ['nullable', 'numeric', 'min:0', 'lte:loan_amount', new \App\Rules\Money],
             'term_months' => 'required|integer|min:1',
             'interest_method' => 'required|in:flat,reducing_balance',
             'interest_rate_percent' => 'required|numeric|min:0.01',

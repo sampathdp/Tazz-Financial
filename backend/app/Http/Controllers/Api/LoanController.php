@@ -17,6 +17,7 @@ use App\Services\NumberGenerator;
 use App\Support\FdLienService;
 use App\Support\FinanceRequestService;
 use App\Support\LoanAmortizer;
+use App\Support\DocStore;
 use App\Support\LoanDisbursementCompleter;
 use App\Support\LoanLedgerPoster;
 use App\Support\LoanPaymentAllocator;
@@ -331,7 +332,7 @@ class LoanController extends Controller
             $removed = $loan->collateral()->where('collateral_type', '!=', 'FixedDeposit')->whereNotIn('id', $keepIds ?: [0])->get();
             foreach ($removed as $r) {
                 foreach ($r->documents as $doc) {
-                    Storage::disk('public')->delete($doc->file_path);
+                    DocStore::delete($doc->file_path);
                 }
             }
             // FixedDeposit collateral is a lien: only the FD-loan flow and loan status changes add/remove it.
@@ -404,6 +405,14 @@ class LoanController extends Controller
      */
     public function purge(Request $request, Loan $loan)
     {
+        // A hard delete of financial records: refused in production unless explicitly switched on
+        // (LOAN_PURGE_ENABLED=true), the same guard the Maintenance data-wipe uses.
+        abort_unless(
+            !app()->isProduction() || config('app.loan_purge_enabled', false),
+            403,
+            'Hard-deleting loans is disabled in production. Set LOAN_PURGE_ENABLED=true to allow it.'
+        );
+
         $ids = $this->restructureChainIds($loan->id);
 
         $paymentIds = DB::table('facility_payments')->whereIn('credit_facility_id', $ids)->pluck('id')->all();
@@ -533,7 +542,7 @@ class LoanController extends Controller
         });
 
         foreach ($ids as $id) {
-            Storage::disk('public')->deleteDirectory("loans/{$id}");
+            DocStore::deleteDirectory("loans/{$id}");
         }
 
         Log::warning('Loan purged via temporary admin tool', [
@@ -664,11 +673,15 @@ class LoanController extends Controller
         if (!in_array($loan->status, ['Approved', 'Active'], true)) {
             return response()->json(['message' => 'Only approved (not yet disbursed) or freshly disbursed (no payments yet) loans can be cancelled.'], 422);
         }
-        if ($loan->status === 'Active' && $loan->payments()->exists()) {
+        if ($loan->status === 'Active' && $loan->hasCollectionHistory()) {
             return response()->json(['message' => 'This loan already has payments recorded — cancel is only for loans with no collection history yet. Use Contract Status Change instead.'], 422);
         }
         if ($loan->cancelRequests()->where('status', 'PendingApproval')->exists()) {
             return response()->json(['message' => 'A cancel request is already pending approval for this loan.'], 422);
+        }
+        // An undisbursed loan holding a paid Document charge would be cancelled with the customer's cash kept - void that receipt first.
+        if ($loan->status === 'Approved' && $loan->payments()->reorder()->where(fn ($q) => $q->whereNull('status')->orWhere('status', '!=', 'Voided'))->exists()) {
+            return response()->json(['message' => 'This loan has a payment recorded (the document charge). Void that receipt first, then cancel the loan.'], 422);
         }
         $data = $request->validate(['cancelled_reason' => 'required|string|max:255']);
         $type = ApprovalType::where('code', 'loan_cancel')->firstOrFail();
@@ -705,7 +718,7 @@ class LoanController extends Controller
         $loan = Loan::findOrFail($cancelRequest->subject_id);
         // Re-check nothing changed since the request was submitted — a payment
         // could have been recorded on this loan in the meantime.
-        if ($loan->status === 'Active' && $loan->payments()->exists()) {
+        if ($loan->status === 'Active' && $loan->hasCollectionHistory()) {
             $cancelRequest->update(['status' => 'Rejected', 'rejected_by' => $request->user()->id, 'rejected_at' => now(), 'reject_reason' => 'Payments were recorded on this loan after the request was submitted.']);
 
             return response()->json(['message' => 'This loan now has payments recorded — the request has been auto-rejected. Use Contract Status Change instead.'], 422);
@@ -764,16 +777,33 @@ class LoanController extends Controller
 
     /** Shared validation rules for the disburse / request-disbursement forms. */
     private const DISBURSE_RULES = [
-        'disbursed_amount' => 'nullable|numeric|min:0',
+        'disbursed_amount' => 'nullable|numeric|gt:0',
         'disbursed_at' => 'nullable|date',
         'first_installment_date' => 'required|date',
         'disbursement_method' => ['required', 'in:Cash,Bank,Cheque'],
         // The account the money leaves from — required for Bank/Cheque.
         'disbursement_bank_account_id' => ['required_if:disbursement_method,Bank,Cheque', 'nullable', 'exists:bank_accounts,id'],
+        // Cash only: which till pays it out. Omitted = the branch's disbursement till.
+        'cash_account_id' => ['nullable', 'exists:cash_accounts,id'],
     ];
 
+    /** Sanity checks on the disburse form values - the amount can't exceed what was approved and the first installment can't fall before the money goes out. */
+    private function disbursementInputError(Loan $loan, array $data): ?string
+    {
+        $max = round((float) $loan->principal_amount - (float) ($loan->loanDetail?->down_payment ?? 0), 2);
+        if (isset($data['disbursed_amount']) && round((float) $data['disbursed_amount'], 2) > $max) {
+            return 'The disbursed amount (' . number_format((float) $data['disbursed_amount'], 2) . ') cannot exceed the approved financed amount (' . number_format($max, 2) . ').';
+        }
+        $disbursedOn = Carbon::parse($data['disbursed_at'] ?? now())->startOfDay();
+        if (Carbon::parse($data['first_installment_date'])->startOfDay()->lt($disbursedOn)) {
+            return 'The first installment date cannot be before the disbursed date.';
+        }
+
+        return null;
+    }
+
     /** Why this loan can't be disbursed yet — status, unsettled document charge, or a disbursement request already in flight. Null when it's clear. */
-    private function disbursementBlockReason(Loan $loan): ?string
+    private function disbursementBlockReason(Loan $loan, ?float $financed = null): ?string
     {
         if ($loan->status !== 'Approved') {
             return 'Only approved loans can be disbursed.';
@@ -786,6 +816,16 @@ class LoanController extends Controller
         }
         if ($documentCharges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount)) > 0) {
             return 'Settle the document charge before disbursing this loan.';
+        }
+        // The charge must cover the processing fee on what is actually being paid out - a hand-keyed
+        // 1.00 (or a charge raised before the disbursed amount was changed) must not unlock the loan.
+        if ($loanType && (float) $loanType->processing_fee_percent > 0) {
+            $financed ??= (float) $loan->principal_amount - (float) $loan->loanDetail->down_payment;
+            $expected = round($financed * (float) $loanType->processing_fee_percent / 100, 2);
+            $paid = (float) $documentCharges->sum('due_amount');
+            if ($paid + 0.005 < $expected) {
+                return 'The document charge (' . number_format($paid, 2) . ') is less than the ' . rtrim(rtrim(number_format((float) $loanType->processing_fee_percent, 3), '0'), '.') . '% processing fee on the disbursed amount (' . number_format($expected, 2) . '). Correct the charge before disbursing.';
+            }
         }
         if ($loan->pendingDisbursementRequest()->exists()) {
             return 'A disbursement request for this loan is already awaiting finance approval or payment.';
@@ -802,15 +842,18 @@ class LoanController extends Controller
      */
     public function disburse(Request $request, Loan $loan)
     {
-        if ($block = $this->disbursementBlockReason($loan)) {
+        $data = $request->validate(array_merge(self::DISBURSE_RULES, ['disbursed_amount' => ['nullable', 'numeric', 'gt:0', new \App\Rules\Money]]));
+        if ($invalid = $this->disbursementInputError($loan, $data)) {
+            return response()->json(['message' => $invalid], 422);
+        }
+        if ($block = $this->disbursementBlockReason($loan, isset($data['disbursed_amount']) ? (float) $data['disbursed_amount'] : null)) {
             return response()->json(['message' => $block], 422);
         }
-        $data = $request->validate(self::DISBURSE_RULES);
 
         $executedBy = $request->user()->id;
         DB::transaction(function () use ($loan, $data, $executedBy) {
             LoanDisbursementCompleter::complete($loan, $data);
-            LoanLedgerPoster::postDisbursement($loan->fresh(), $executedBy);
+            LoanLedgerPoster::postDisbursement($loan->fresh(), $executedBy, $data['disbursement_method'] === 'Cash' ? ($data['cash_account_id'] ?? null) : null);
         });
 
         return $loan->load(self::DETAIL_RELATIONS);
@@ -825,10 +868,13 @@ class LoanController extends Controller
      */
     public function requestDisbursement(Request $request, Loan $loan)
     {
-        if ($block = $this->disbursementBlockReason($loan)) {
+        $data = $request->validate(array_merge(self::DISBURSE_RULES, ['disbursed_amount' => ['nullable', 'numeric', 'gt:0', new \App\Rules\Money]]));
+        if ($invalid = $this->disbursementInputError($loan, $data)) {
+            return response()->json(['message' => $invalid], 422);
+        }
+        if ($block = $this->disbursementBlockReason($loan, isset($data['disbursed_amount']) ? (float) $data['disbursed_amount'] : null)) {
             return response()->json(['message' => $block], 422);
         }
-        $data = $request->validate(self::DISBURSE_RULES);
 
         $detail = $loan->loanDetail;
         $financed = $data['disbursed_amount'] ?? ((float) $loan->principal_amount - (float) $detail->down_payment);
@@ -1471,8 +1517,8 @@ class LoanController extends Controller
             'branch_id' => 'required|exists:branches,id',
             'customer_id' => 'required|exists:customers,id',
             'loan_type_id' => 'required|exists:loan_types,id',
-            'principal_amount' => 'required|numeric|min:0',
-            'down_payment' => 'nullable|numeric|min:0',
+            'principal_amount' => ['required', 'numeric', 'min:0', new \App\Rules\Money],
+            'down_payment' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
             'interest_rate_percent' => 'nullable|numeric|min:0|max:999',
             'term_months' => 'required|integer|min:1',
             'installment_frequency' => ['required', Rule::in(self::FREQUENCIES)],

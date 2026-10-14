@@ -25,7 +25,7 @@ class LoanWaiverController extends Controller
     {
         $data = $request->validate([
             'waiver_type' => ['required', Rule::in(self::WAIVER_TYPES)],
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'reason' => 'nullable|string|max:255',
             'waived_at' => 'nullable|date',
         ]);

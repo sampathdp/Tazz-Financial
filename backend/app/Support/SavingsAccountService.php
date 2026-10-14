@@ -57,6 +57,7 @@ class SavingsAccountService
             'running_balance' => $newBalance,
             'payment_method' => $spec['payment_method'] ?? null,
             'bank_id' => $spec['bank_id'] ?? null,
+            'bank_account_id' => $spec['bank_account_id'] ?? null,
             'reference_no' => $spec['reference_no'] ?? null,
             'collection_sheet_id' => $spec['collection_sheet_id'] ?? null,
             'interest_run_id' => $spec['interest_run_id'] ?? null,

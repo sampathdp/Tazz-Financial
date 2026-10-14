@@ -8,7 +8,7 @@ import { Icon } from '../../components/Icon'
 import { useFilePreview } from '../../components/FilePreview'
 import { PrintDocumentsPanel } from './PrintDocuments'
 import {
-  loansApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, api,
+  loansApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, cashAccountsApi, type CashAccount, api,
   type Loan, type LoanStatus, type LoanSchedule, type BankAccount,
   type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type DocumentCategory, type LoanDiaryNote,
@@ -1064,10 +1064,13 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const [method, setMethod] = useState<'Cash' | 'Bank' | 'Cheque'>('Cash')
   const [bankAccountId, setBankAccountId] = useState<number | ''>('')
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  const [tills, setTills] = useState<CashAccount[]>([])
+  const [cashAccountId, setCashAccountId] = useState<number | ''>('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => { bankAccountsApi.list().then(setBankAccounts).catch(() => setBankAccounts([])) }, [])
+  useEffect(() => { cashAccountsApi.list().then((a) => setTills(a.filter((t) => t.branchId === loan.branchId && t.status !== 'Inactive' && (t.accountType === 'BranchMain' || t.accountType === 'HeadOfficeMain')))).catch(() => setTills([])) }, [loan.branchId])
 
   const feePercent = num(loan.loanDetail?.loanType?.processingFeePercent)
   const computedDocCharge = Math.round(num(amount) * feePercent) / 100
@@ -1079,6 +1082,7 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   const disburseBody = () => ({
     disbursedAmount: amount, disbursedAt, firstInstallmentDate: firstDate, disbursementMethod: method,
     disbursementBankAccountId: method === 'Cash' ? null : Number(bankAccountId),
+    cashAccountId: method === 'Cash' && cashAccountId ? Number(cashAccountId) : undefined,
   })
   const validateForm = () => {
     if (!firstDate) { setErr('Pick the first installment date.'); return false }
@@ -1184,6 +1188,12 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
         <Field label="Disbursement Method"><Select value={method} onChange={(e) => setMethod(e.target.value as any)}>
           <option value="Cash">Cash</option><option value="Bank">Bank Transfer</option><option value="Cheque">Cheque</option>
         </Select></Field>
+        {method === 'Cash' && tills.length > 1 && (
+          <Field label="Paid Out Of (Till)"><Select value={cashAccountId} onChange={(e) => setCashAccountId(Number(e.target.value) || '')}>
+            <option value="">Branch disbursement till (default)</option>
+            {tills.map((t) => <option key={t.id} value={t.id}>{t.name} — books {money(t.currentBalance)}</option>)}
+          </Select></Field>
+        )}
         {method !== 'Cash' && (
           <Field label="Paid Out Of (Bank Account)"><Select value={bankAccountId} onChange={(e) => setBankAccountId(Number(e.target.value) || '')}>
             <option value="">Select bank account…</option>
@@ -1318,6 +1328,11 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
         <span style={{ fontSize: 12.5 }}>Due {money(docCharge.dueAmount)} · Paid {money(docCharge.paidAmount)} · Balance <b style={{ fontFamily: 'JetBrains Mono' }}>{money(docBalance)}</b></span>
       </div>
       <ErrorBanner error={payErr} style={{ marginBottom: 10 }} />
+      {/cash session/i.test(payErr) && (
+        <div className="t-2" style={{ fontSize: 12.5, marginBottom: 10 }}>
+          <b>How to fix:</b> go to <b>Finance → Daily Cash Sessions</b>, click <b>Open Session</b>, choose the cash account and enter the opening amount, then come back and record this payment.
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
         <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
           {DOC_CHARGE_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}

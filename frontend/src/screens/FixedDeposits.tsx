@@ -4,7 +4,7 @@
    action (create/renew/withdraw/pay-interest) prints a document following the
    same window.print()/.no-print pattern as PaymentReceipt.tsx. */
 import { useEffect, useMemo, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock , BankAccountSelect } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   fixedDepositsApi, fdDepositsApi, fundingProductsApi, fdInterestPaymentsApi, company,
@@ -285,6 +285,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
   const [enhance, setEnhance] = useState(false)
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')
+  const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
   const [refNo, setRefNo] = useState('')
   const [bankId, setBankId] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -293,7 +294,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
   useEffect(() => {
     if (!open || !fd) return
     setTerm(fd.termMonths); setCustomTerm(''); setNotes(''); setEnhance(false)
-    setAmount(''); setMethod('Cash'); setRefNo(''); setBankId(undefined); setErr('')
+    setAmount(''); setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setBankId(undefined); setErr('')
   }, [open, fd])
 
   if (!fd) return null
@@ -310,7 +311,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
     try {
       const result = await fixedDepositsApi.renew(fd.id, {
         termMonths: effectiveTerm, notes: notes || undefined,
-        enhancement: enhance ? { amount, paymentMethod: method, referenceNo: refNo || undefined, bankId: method !== 'Cash' ? bankId : undefined } : undefined,
+        enhancement: enhance ? { amount, paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, bankId: method !== 'Cash' ? bankId : undefined } : undefined,
       })
       onRenewed(result.fixedDeposit, result.enhancementDeposit)
       notify.success('Fixed Deposit renewed', result.fixedDeposit.fdNumber)
@@ -346,6 +347,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
             <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as FdPaymentMethod)}>
               {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </Select></Field>
+            {method !== 'Cash' && <Field label="Received into — company bank account (optional)"><BankAccountSelect value={bankAccountId} onChange={setBankAccountId} /></Field>}
             <Field label="Reference No"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
             {method !== 'Cash' && <Field label="Bank Name"><BankSelect value={bankId} onChange={setBankId} /></Field>}
           </div>
@@ -372,22 +374,24 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
 function WithdrawModal({ fd, open, onClose, onWithdrawn }: { fd: FixedDeposit | null; open: boolean; onClose: () => void; onWithdrawn: (withdrawal: FdWithdrawal, fd: FixedDeposit) => void }) {
   const notify = useNotify()
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')
+  const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
   const [refNo, setRefNo] = useState('')
   const [notes, setNotes] = useState('')
   const [closedAt, setClosedAt] = useState(todayIso())
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (open) { setMethod('Cash'); setRefNo(''); setNotes(''); setClosedAt(todayIso()); setErr('') } }, [open])
+  useEffect(() => { if (open) { setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setNotes(''); setClosedAt(todayIso()); setErr('') } }, [open])
   if (!fd) return null
 
   const interestPayable = fd.interestPaymentMethod === 'maturity' ? Number(fd.totalInterestAmount) : 0
   const total = Number(fd.principalAmount) + interestPayable
 
   const save = async () => {
+    if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     setBusy(true); setErr('')
     try {
-      const result = await fixedDepositsApi.withdraw(fd.id, { paymentMethod: method, referenceNo: refNo || undefined, notes: notes || undefined, closedAt })
+      const result = await fixedDepositsApi.withdraw(fd.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, notes: notes || undefined, closedAt })
       onWithdrawn(result, result.fixedDeposit)
       notify.success('Fixed Deposit withdrawn', fd.fdNumber)
     } catch (ex: any) {
@@ -412,6 +416,7 @@ function WithdrawModal({ fd, open, onClose, onWithdrawn }: { fd: FixedDeposit | 
           <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as FdPaymentMethod)}>
             {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select></Field>
+          {method !== 'Cash' && <Field label="Paid from — company bank account"><BankAccountSelect value={bankAccountId} onChange={setBankAccountId} /></Field>}
           <Field label="Closed Date"><DateInput value={closedAt} onChange={setClosedAt} /></Field>
           <Field label="Reference No"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
         </div>
@@ -426,19 +431,21 @@ function WithdrawModal({ fd, open, onClose, onWithdrawn }: { fd: FixedDeposit | 
 function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInterestPayment | null; open: boolean; onClose: () => void; onPaid: () => void }) {
   const notify = useNotify()
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')
+  const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
   const [refNo, setRefNo] = useState('')
   const [paidAt, setPaidAt] = useState(todayIso())
   const [backDated, setBackDated] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (open) { setMethod('Cash'); setRefNo(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
+  useEffect(() => { if (open) { setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
   if (!payment) return null
 
   const save = async () => {
+    if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     setBusy(true); setErr('')
     try {
-      await fdInterestPaymentsApi.pay(payment.id, { paymentMethod: method, referenceNo: refNo || undefined, paidAt })
+      await fdInterestPaymentsApi.pay(payment.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, paidAt })
       onPaid()
       notify.success('Interest payment recorded')
     } catch (ex: any) {
@@ -457,6 +464,7 @@ function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInter
         <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as FdPaymentMethod)}>
           {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
         </Select></Field>
+        {method !== 'Cash' && <Field label="Paid from — company bank account"><BankAccountSelect value={bankAccountId} onChange={setBankAccountId} /></Field>}
         <Field label="Date">
           <DateInput value={paidAt} disabled={!backDated} onChange={setPaidAt} />
           <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>

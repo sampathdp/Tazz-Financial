@@ -857,11 +857,24 @@ export const bankReconciliationsApi = {
 export type CashAccountType =
   | 'HeadOfficeMain' | 'BranchMain' | 'PettyCash' | 'CashierFloat' | 'CollectionCash' | 'InTransit' | 'Other'
 
+export type CashAccountPurpose = 'General' | 'Collections' | 'DocumentCharges' | 'Disbursements' | 'FixedDeposits' | 'Savings' | 'Pawning'
+export const CASH_ACCOUNT_PURPOSES: { value: CashAccountPurpose; label: string }[] = [
+  { value: 'General', label: 'General (anything not covered below)' },
+  { value: 'Collections', label: 'Loan / draft / pawn collections' },
+  { value: 'DocumentCharges', label: 'Document charges' },
+  { value: 'Disbursements', label: 'Loan disbursements' },
+  { value: 'FixedDeposits', label: 'Fixed deposits' },
+  { value: 'Savings', label: 'Savings' },
+  { value: 'Pawning', label: 'Pawning' },
+]
+
 export interface CashAccount {
   id: number;
   code?: string | null;
   branchId: number; branch?: { id: number; name: string; code: string } | null;
   accountType?: CashAccountType;
+  /** What cash this till is for - each module's receipts/payouts go to the till dedicated to them. */
+  purpose?: CashAccountPurpose | null;
   responsibleUserId?: number | null; responsibleUser?: { id: number; name: string } | null;
   parentCashAccountId?: number | null;
   name: string;
@@ -1276,7 +1289,7 @@ export const loansApi = {
    *  'Restructured' and returns the new linked loan (code {original}-R1, -R2 …). */
   reschedule: (id: number, body: RescheduleInput) =>
     http.post(`/loans/${id}/reschedule`, snakeize(body)).then((r) => camelize(r.data) as Loan),
-  disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque'; disbursementBankAccountId?: number | null }) =>
+  disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque'; disbursementBankAccountId?: number | null; cashAccountId?: number }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   /** Loan-officer path: raises a LoanDisbursement finance request instead of disbursing directly. Finance approves + executes it. */
   requestDisbursement: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque'; disbursementBankAccountId?: number | null }) =>
@@ -1888,14 +1901,14 @@ export const fdDepositsApi = {
    *  actually created, so it can shift if another deposit lands first. */
   nextDepositNo: (branchId: number) =>
     http.get('/fd-deposits/next-number', { params: { branch_id: branchId } }).then((r) => r.data.code as string),
-  create: (body: { branchId: number; customerId: number; depositDate: string; amount: number | string; paymentMethod: FdPaymentMethod; referenceNo?: string; bankId?: number; notes?: string }) =>
+  create: (body: { branchId: number; customerId: number; depositDate: string; amount: number | string; paymentMethod: FdPaymentMethod; referenceNo?: string; bankId?: number; bankAccountId?: number; notes?: string }) =>
     http.post('/fd-deposits', snakeize(body)).then((r) => camelize(r.data) as FdDeposit),
   remove: (id: number) => http.delete(`/fd-deposits/${id}`).then((r) => r.data),
 }
 
 export interface FdEnhancementInput {
   amount: number | string; paymentMethod: FdPaymentMethod;
-  depositDate?: string; referenceNo?: string; bankId?: number; notes?: string;
+  depositDate?: string; referenceNo?: string; bankId?: number; bankAccountId?: number; notes?: string;
 }
 
 export const fixedDepositsApi = {
@@ -1906,12 +1919,12 @@ export const fixedDepositsApi = {
     http.post('/fixed-deposits', snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
   renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput }) =>
     http.post(`/fixed-deposits/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { fixedDeposit: FixedDeposit; enhancementDeposit: FdDeposit | null }),
-  withdraw: (id: number, body: { paymentMethod: FdPaymentMethod; referenceNo?: string; notes?: string; closedAt?: string }) =>
+  withdraw: (id: number, body: { paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; closedAt?: string }) =>
     http.post(`/fixed-deposits/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
   /** Undoes a mistaken closure — reverses GL/Cashbook and reopens the FD (see backend FixedDepositController::voidWithdrawal). */
   voidWithdrawal: (id: number) => http.post(`/fixed-deposits/${id}/void-withdrawal`).then((r) => camelize(r.data) as FixedDeposit),
   /** Premature partial withdrawal — FD stays open on the reduced principal (see backend FixedDepositController::partPayment). */
-  partPayment: (id: number, body: { amount: number | string; paymentMethod: FdPaymentMethod; referenceNo?: string; notes?: string; paidAt?: string }) =>
+  partPayment: (id: number, body: { amount: number | string; paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; paidAt?: string }) =>
     http.post(`/fixed-deposits/${id}/part-payment`, snakeize(body)).then((r) => camelize(r.data) as FdPartPayment & { fixedDeposit: FixedDeposit }),
   /** Undoes a mistaken part payment — only allowed on the FD's most recent one (see backend FixedDepositController::voidPartPayment). */
   voidPartPayment: (partPaymentId: number) => http.post(`/fd-part-payments/${partPaymentId}/void`).then((r) => camelize(r.data) as FixedDeposit),
@@ -2077,7 +2090,7 @@ export const fdInterestPaymentsApi = {
   list: (fixedDepositId: number) => http.get(`/fixed-deposits/${fixedDepositId}/interest-payments`).then((r) => camelize(r.data) as FdInterestPayment[]),
   /** Pending monthly interest installments due by month end, split into Overdue / Today / This Week / This Month release buckets (see backend FdInterestPaymentController::due). */
   due: () => http.get('/fd-interest-payments/due').then((r) => camelize(r.data) as FdInterestDue),
-  pay: (id: number, body: { paidAt?: string; paymentMethod: FdPaymentMethod; referenceNo?: string }) =>
+  pay: (id: number, body: { paidAt?: string; paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string }) =>
     http.post(`/fd-interest-payments/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as FdInterestPayment),
   /** Undoes a mistaken interest payment — reverses GL/Cashbook and puts the installment back to Pending (see backend FdInterestPaymentController::void). */
   void: (id: number) => http.post(`/fd-interest-payments/${id}/void`).then((r) => camelize(r.data) as FdInterestPayment),
@@ -2289,13 +2302,13 @@ export const savingsAccountsApi = {
     http.get(`/savings-accounts/${id}/statement`, { params: snakeize(params || {}) }).then((r) => camelize(r.data) as { account: SavingsAccount; transactions: SavingsTransaction[]; summary: SavingsAccountSummary }),
   nextNumber: (branchId: number, savingsProductId?: number) =>
     http.get('/savings-accounts/next-number', { params: { branch_id: branchId, savings_product_id: savingsProductId } }).then((r) => r.data.code as string),
-  open: (body: { branchId: number; customerId: number; savingsProductId: number; openDate: string; openingDeposit: number | string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; bankId?: number; notes?: string }) =>
+  open: (body: { branchId: number; customerId: number; savingsProductId: number; openDate: string; openingDeposit: number | string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; bankId?: number; bankAccountId?: number; notes?: string }) =>
     http.post('/savings-accounts', snakeize(body)).then((r) => camelize(r.data) as SavingsAccount),
-  deposit: (id: number, body: { amount: number | string; txnDate: string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; bankId?: number; notes?: string }) =>
+  deposit: (id: number, body: { amount: number | string; txnDate: string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; bankId?: number; bankAccountId?: number; notes?: string }) =>
     http.post(`/savings-accounts/${id}/deposit`, snakeize(body)).then((r) => camelize(r.data) as { transaction: SavingsTransaction; account: SavingsAccount }),
-  withdraw: (id: number, body: { amount: number | string; txnDate: string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; notes?: string }) =>
+  withdraw: (id: number, body: { amount: number | string; txnDate: string; paymentMethod: SavingsPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string }) =>
     http.post(`/savings-accounts/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as { transaction: SavingsTransaction; fee: SavingsTransaction | null; account: SavingsAccount }),
-  close: (id: number, body: { txnDate: string; paymentMethod: SavingsPaymentMethod; referenceNo?: string; notes?: string }) =>
+  close: (id: number, body: { txnDate: string; paymentMethod: SavingsPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string }) =>
     http.post(`/savings-accounts/${id}/close`, snakeize(body)).then((r) => camelize(r.data) as { payout: SavingsTransaction | null; account: SavingsAccount }),
   setStatus: (id: number, status: 'Active' | 'Dormant' | 'Frozen') =>
     http.patch(`/savings-accounts/${id}/status`, { status }).then((r) => camelize(r.data) as SavingsAccount),

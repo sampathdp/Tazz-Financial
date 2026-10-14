@@ -43,7 +43,7 @@ class CashbookEntryController extends Controller
             'direction' => ['required', Rule::in(CashbookEntry::DIRECTIONS)],
             'category' => ['required', Rule::in(CashbookEntry::CATEGORIES)],
             'description' => 'nullable|string|max:255',
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'offset_account_id' => 'required|exists:chart_of_accounts,id',
         ]);
 
@@ -90,6 +90,7 @@ class CashbookEntryController extends Controller
         if ($cashbookEntry->source_type === 'FinanceTransaction' && $cashbookEntry->source_id) {
             $txn = FinanceTransaction::find($cashbookEntry->source_id);
             if ($txn && $txn->status !== 'Reversed' && !$txn->reversal_of_id) {
+                FinancePostingService::assertDirectReversalAllowed();
                 FinancePostingService::reverse($txn, 'Manual cashbook entry reversed', request()->user()?->id);
             }
 

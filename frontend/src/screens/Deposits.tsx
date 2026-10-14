@@ -2,7 +2,7 @@
    Record a deposit, print its Deposit Slip, and later allocate it to an FD
    from the Fixed Deposits screen (fdDepositsApi status flips Available -> Allocated). */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock , BankAccountSelect } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   fdDepositsApi, branchesApi, customersApi, company,
@@ -28,10 +28,10 @@ const REF_LABEL: Record<FdPaymentMethod, string> = { Cash: 'Receipt No.', Cheque
 interface DepositForm {
   branchId?: number; customerId?: number; customerLabel?: string
   depositDate: string; amount: string; paymentMethod: FdPaymentMethod
-  referenceNo: string; bankId?: number; notes: string
+  referenceNo: string; bankId?: number; bankAccountId?: number; notes: string
 }
 const blankForm = (branchId?: number): DepositForm => ({
-  branchId, depositDate: todayIso(), amount: '', paymentMethod: 'Cash', referenceNo: '', bankId: undefined, notes: '',
+  branchId, depositDate: todayIso(), amount: '', paymentMethod: 'Cash', referenceNo: '', bankId: undefined, bankAccountId: undefined, notes: '',
 })
 
 export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
@@ -82,7 +82,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
       const deposit = await fdDepositsApi.create({
         branchId: form.branchId, customerId: form.customerId, depositDate: form.depositDate, amount: form.amount,
         paymentMethod: form.paymentMethod, referenceNo: form.paymentMethod !== 'Cash' ? (form.referenceNo || undefined) : undefined,
-        bankId: form.paymentMethod !== 'Cash' ? form.bankId : undefined, notes: form.notes || undefined,
+        bankId: form.paymentMethod !== 'Cash' ? form.bankId : undefined, bankAccountId: form.paymentMethod !== 'Cash' ? form.bankAccountId : undefined, notes: form.notes || undefined,
       })
       close(); refresh()
       setSlip(deposit)
@@ -200,6 +200,7 @@ export function DepositsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
           <Field label="Payment Method"><Select value={form.paymentMethod} onChange={(e) => setForm((s) => ({ ...s, paymentMethod: e.target.value as FdPaymentMethod }))}>
             {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select></Field>
+          {form.paymentMethod !== 'Cash' && <Field label="Received into — company bank account (optional)"><BankAccountSelect value={form.bankAccountId} onChange={(v) => setForm((s) => ({ ...s, bankAccountId: v }))} /></Field>}
           <Field label={REF_LABEL[form.paymentMethod]}>
             {form.paymentMethod === 'Cash'
               ? <Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} />

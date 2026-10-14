@@ -35,6 +35,14 @@ return [
             'root' => storage_path('app'),
         ],
 
+        // Customer KYC, loan and collateral documents. NOT web-reachable (unlike 'public'): files are
+        // only ever served through the authenticated document controllers (see App\Support\DocStore).
+        'documents' => [
+            'driver' => 'local',
+            'root' => storage_path('app/documents'),
+            'visibility' => 'private',
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

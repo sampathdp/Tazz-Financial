@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\DocStore;
 use App\Models\FacilityCollateral;
 use App\Models\FacilityCollateralDocument;
 use App\Models\Loan;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -21,7 +21,7 @@ class LoanCollateralDocumentController extends Controller
             'file' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
         ]);
 
-        $path = $request->file('file')->store("loans/{$loan->id}/collateral/{$collateral->id}/documents", 'public');
+        $path = DocStore::store($request->file('file'), "loans/{$loan->id}/collateral/{$collateral->id}/documents");
 
         $document = $collateral->documents()->create([
             'file_path' => $path,
@@ -35,9 +35,9 @@ class LoanCollateralDocumentController extends Controller
     {
         abort_if($collateral->credit_facility_id !== $loan->id, 404);
         abort_if($document->facility_collateral_id !== $collateral->id, 404);
-        abort_unless(Storage::disk('public')->exists($document->file_path), 404);
+        abort_unless(DocStore::exists($document->file_path), 404);
 
-        return Storage::disk('public')->response($document->file_path, Str::afterLast($document->file_path, '/'));
+        return DocStore::response($document->file_path);
     }
 
     public function destroy(Loan $loan, FacilityCollateral $collateral, FacilityCollateralDocument $document)
@@ -45,7 +45,7 @@ class LoanCollateralDocumentController extends Controller
         abort_if($collateral->credit_facility_id !== $loan->id, 404);
         abort_if($document->facility_collateral_id !== $collateral->id, 404);
 
-        Storage::disk('public')->delete($document->file_path);
+        DocStore::delete($document->file_path);
         $document->delete();
 
         return response()->noContent();

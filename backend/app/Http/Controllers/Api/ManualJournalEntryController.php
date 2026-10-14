@@ -161,7 +161,7 @@ class ManualJournalEntryController extends Controller
             return response()->json(['message' => 'Only a pending manual journal entry can be rejected.'], 422);
         }
         $req = $manualJournalEntry->pendingApprovalRequest;
-        if ($req && !ApprovalType::isAuthorized($request->user(), 'manual_journal_entry')) {
+        if (!ApprovalType::isAuthorized($request->user(), 'manual_journal_entry')) {
             return response()->json(['message' => 'You are not an approver for manual journal entries.'], 403);
         }
         $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);

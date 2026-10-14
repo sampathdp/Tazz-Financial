@@ -98,6 +98,16 @@ class NumberGenerator
     // product and a loan type are different tables with different id spaces.
     private const PRODUCT_SCOPED_MODULES = ['fixed_deposit'];
 
+    // module => [table, column] holding the issued numbers, used to detect a counter that fell behind its data.
+    private const CODE_COLUMNS = [
+        'loan' => ['credit_facilities', 'code'],
+        'customer' => ['customers', 'code'],
+        'payment' => ['facility_payments', 'code'],
+        'journal' => ['journal_entries', 'code'],
+        'finance_transaction' => ['finance_transactions', 'code'],
+        'finance_request' => ['finance_requests', 'code'],
+    ];
+
     public static function next(string $module, array $context = [], ?string $format = null): string
     {
         $format ??= self::formatFor($module);
@@ -109,9 +119,19 @@ class NumberGenerator
         DB::table('number_sequences')->insertOrIgnore([$key + ['last_sequence' => 0, 'created_at' => now(), 'updated_at' => now()]]);
         $seqRow = NumberSequence::where($key)->lockForUpdate()->first();
         $sequence = $seqRow->last_sequence + 1;
-        $seqRow->update(['last_sequence' => $sequence]);
-
         $number = self::format($format, $context, $sequence);
+
+        // The counter can fall behind the real records (restored/seeded DB, a counter row lost or
+        // rolled back while the record it numbered survived). Skip any number that is already
+        // taken instead of failing the whole request on the unique index.
+        if (isset(self::CODE_COLUMNS[$module])) {
+            [$table, $column] = self::CODE_COLUMNS[$module];
+            for ($i = 0; $i < 1000 && DB::table($table)->where($column, $number)->exists(); $i++) {
+                $sequence++;
+                $number = self::format($format, $context, $sequence);
+            }
+        }
+        $seqRow->update(['last_sequence' => $sequence]);
 
         // source_type/source_id start null and are filled in shortly after by
         // attach(), once the record this number is for actually has an id —

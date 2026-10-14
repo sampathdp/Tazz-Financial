@@ -55,7 +55,7 @@ class LoanDisbursementCompleter
                 : ($params['disbursement_bank_account_id'] ?? null),
         ]);
 
-        $rows = LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $params['first_installment_date']);
+        $rows = LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $params['first_installment_date'], (float) $financed);
         $loan->schedules()->insert($rows);
         self::applyEffectiveRate($detail->fresh(), $rows);
         self::generateSalesExecutiveCommission($loan->fresh(), $detail);
@@ -68,7 +68,7 @@ class LoanDisbursementCompleter
             return;
         }
         try {
-            $principal = (float) $detail->loan->principal_amount - (float) $detail->down_payment;
+            $principal = (float) ($detail->loan->disbursed_amount ?? ((float) $detail->loan->principal_amount - (float) $detail->down_payment));
             $rental = (float) $rows[0]['total_due'];
             $weekdaysOnly = $detail->installment_frequency === 'daily' && $detail->loanType?->collection_days === 'week_days';
             $periodsPerMonth = LoanAmortizer::periodsPerMonth($detail->installment_frequency, $weekdaysOnly);

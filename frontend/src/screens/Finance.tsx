@@ -775,7 +775,7 @@ export function CashSessionsScreen({ user: me }: { go: Go; user?: AuthUser | nul
   const [loading, setLoading] = useState(true)
   const [tills, setTills] = useState<CashAccount[]>([])
   const [openForm, setOpenForm] = useState(false)
-  const [oForm, setOForm] = useState({ account: '', opening: '' })
+  const [oForm, setOForm] = useState({ account: '', opening: '', notes: '' })
   const [closeFor, setCloseFor] = useState<CashSession | null>(null)
   const [counted, setCounted] = useState('')
   const [busy, setBusy] = useState(false)
@@ -791,8 +791,8 @@ export function CashSessionsScreen({ user: me }: { go: Go; user?: AuthUser | nul
     if (!oForm.account || oForm.opening === '') { setErr('Pick the account and enter the opening count.'); return }
     setBusy(true); setErr('')
     try {
-      await cashSessionsApi.open({ cashAccountId: Number(oForm.account), openingAmount: oForm.opening })
-      setOpenForm(false); setOForm({ account: '', opening: '' }); refresh()
+      await cashSessionsApi.open({ cashAccountId: Number(oForm.account), openingAmount: oForm.opening, notes: oForm.notes || undefined })
+      setOpenForm(false); setOForm({ account: '', opening: '', notes: '' }); refresh()
       notify.success('Session opened')
     } catch (ex: any) { setErr(getErrorText(ex, 'Could not open the session')) }
     finally { setBusy(false) }
@@ -846,6 +846,13 @@ export function CashSessionsScreen({ user: me }: { go: Go; user?: AuthUser | nul
             <option value="">Select…</option>{tills.map((a) => <option key={a.id} value={a.id}>{a.name} — books {money(a.currentBalance)}</option>)}
           </Select></Field>
           <Field label="Opening cash counted"><Input type="number" step="0.01" value={oForm.opening} onChange={(e) => setOForm((s) => ({ ...s, opening: e.target.value }))} /></Field>
+          {(() => {
+            const till = tills.find((a) => String(a.id) === oForm.account)
+            const diff = till && oForm.opening !== '' ? Number(oForm.opening) - Number(till.currentBalance) : 0
+            return Math.abs(diff) >= 0.005
+              ? <Field label={`Counted differs from the books by ${money(diff)} — explain why`}><Input value={oForm.notes} onChange={(e) => setOForm((s) => ({ ...s, notes: e.target.value }))} placeholder="e.g. cash brought in from head office" /></Field>
+              : null
+          })()}
         </div>
       </Modal>
 

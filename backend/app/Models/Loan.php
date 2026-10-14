@@ -178,6 +178,22 @@ class Loan extends Model
         return $this->hasMany(FacilityPayment::class, 'credit_facility_id')->orderByDesc('paid_at');
     }
 
+    /**
+     * True once real money has been collected against the loan itself - schedule allocations, a
+     * pending settlement/manual allocation or a cheque. The mandatory Document-charge receipt
+     * (charge-only, no schedule allocation) does not count, otherwise every loan with a processing
+     * fee would be uncancellable the moment it is disbursed.
+     */
+    public function hasCollectionHistory(): bool
+    {
+        return $this->payments()->reorder()
+            ->where(fn ($q) => $q->whereNull('status')->orWhere('status', '!=', 'Voided'))
+            ->where(fn ($q) => $q->whereHas('allocations')
+                ->orWhereIn('payment_type', ['Settlement', 'ManualAllocation'])
+                ->orWhere('payment_method', 'Cheque'))
+            ->exists();
+    }
+
     /** Impairment provision Post/Reverse audit trail — see LoanProvisioning. */
     public function provisions()
     {

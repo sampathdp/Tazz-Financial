@@ -60,7 +60,8 @@ class CashAccountController extends Controller
         return $request->validate([
             'branch_id' => 'required|exists:branches,id',
             'name' => ['required', 'string', 'max:128'],
-            'opening_balance' => 'nullable|numeric',
+            'purpose' => ['nullable', Rule::in(CashAccount::PURPOSES)],
+            'opening_balance' => ['nullable', 'numeric', new \App\Rules\Money],
             'status' => [Rule::in(['Active', 'Inactive'])],
         ]);
     }

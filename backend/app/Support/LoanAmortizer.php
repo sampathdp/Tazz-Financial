@@ -18,7 +18,7 @@ use Carbon\Carbon;
 class LoanAmortizer
 {
     /** @return array<int, array<string, mixed>> rows ready for FacilitySchedule::insert() */
-    public static function generate(Loan $loan, LoanFacilityDetail $detail, string $firstInstallmentDate): array
+    public static function generate(Loan $loan, LoanFacilityDetail $detail, string $firstInstallmentDate, ?float $principalOverride = null): array
     {
         $detail->loadMissing('loanType');
         $frequency = $detail->installment_frequency;
@@ -36,7 +36,8 @@ class LoanAmortizer
 
         // The schedule amortizes what's actually financed — the down payment
         // is settled upfront and never part of the installment plan.
-        $principal = (float) $loan->principal_amount - (float) $detail->down_payment;
+        // A disbursement for less than the approved amount amortizes what was actually paid out.
+        $principal = $principalOverride ?? ((float) $loan->principal_amount - (float) $detail->down_payment);
         $rows = $detail->interest_method === 'reducing_balance'
             ? self::reducingBalance($principal, $periodRate, $n)
             : self::flat($principal, $monthlyRate, $loan->term_months, $n);

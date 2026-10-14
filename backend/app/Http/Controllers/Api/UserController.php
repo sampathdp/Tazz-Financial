@@ -81,7 +81,12 @@ class UserController extends Controller
         if (isset($data['email'])) $user->email = $data['email'];
         if (array_key_exists('status', $data)) $user->status = $data['status'] ?? $user->status;
         if (!empty($data['password'])) $user->password = Hash::make($data['password']);
+        $revokeSessions = $user->isDirty(['password', 'status', 'role_id', 'branch_id']);
         $user->save();
+        // A disabled, re-roled, moved or re-passworded account must not keep working on a token issued before the change.
+        if ($revokeSessions) {
+            $user->tokens()->delete();
+        }
 
         return $this->present($user->load(['role', 'branch']));
     }
@@ -92,6 +97,7 @@ class UserController extends Controller
             return response()->json(['message' => 'You cannot delete your own account.'], 422);
         }
         $this->guardLastAdmin($user, 'delete');
+        $user->tokens()->delete();
         $user->delete();
 
         return response()->noContent();
@@ -104,7 +110,7 @@ class UserController extends Controller
         return $request->validate([
             'name' => "{$required}|string|max:255",
             'email' => [$required, 'email', Rule::unique('users', 'email')->ignore($user?->id)],
-            'password' => ($user ? 'nullable' : 'required') . '|string|min:6',
+            'password' => [$user ? 'nullable' : 'required', 'string', new \App\Rules\StrongPassword($request->input('email', $user?->email), $request->input('name', $user?->name))],
             'role_id' => "{$required}|integer|exists:roles,id",
             'branch_id' => 'nullable|integer|exists:branches,id',
             'status' => ['nullable', Rule::in(['Active', 'Inactive'])],

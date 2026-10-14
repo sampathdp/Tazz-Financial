@@ -306,7 +306,10 @@ class SpeedDraftController extends Controller
         if ($block = $this->disbursementBlockReason($speedDraft)) {
             return response()->json(['message' => $block], 422);
         }
-        $data = $request->validate(self::DISBURSE_RULES);
+        $data = $request->validate(array_merge(self::DISBURSE_RULES, ['disbursed_amount' => ['nullable', 'numeric', 'gt:0', new \App\Rules\Money]]));
+        if (isset($data['disbursed_amount']) && round((float) $data['disbursed_amount'], 2) > round((float) $speedDraft->principal_amount, 2)) {
+            return response()->json(['message' => 'The disbursed amount cannot exceed the approved amount (' . number_format((float) $speedDraft->principal_amount, 2) . ').'], 422);
+        }
 
         $executedBy = $request->user()->id;
         DB::transaction(function () use ($speedDraft, $data, $executedBy) {
@@ -323,7 +326,10 @@ class SpeedDraftController extends Controller
         if ($block = $this->disbursementBlockReason($speedDraft)) {
             return response()->json(['message' => $block], 422);
         }
-        $data = $request->validate(self::DISBURSE_RULES);
+        $data = $request->validate(array_merge(self::DISBURSE_RULES, ['disbursed_amount' => ['nullable', 'numeric', 'gt:0', new \App\Rules\Money]]));
+        if (isset($data['disbursed_amount']) && round((float) $data['disbursed_amount'], 2) > round((float) $speedDraft->principal_amount, 2)) {
+            return response()->json(['message' => 'The disbursed amount cannot exceed the approved amount (' . number_format((float) $speedDraft->principal_amount, 2) . ').'], 422);
+        }
 
         $financed = $data['disbursed_amount'] ?? $speedDraft->principal_amount;
         $bankAccountId = $data['disbursement_method'] === 'Cash' ? null : ($data['disbursement_bank_account_id'] ?? null);

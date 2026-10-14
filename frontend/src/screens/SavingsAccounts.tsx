@@ -1,6 +1,6 @@
 /* Daily Savings — Accounts: open, pass-book (ledger), deposit / withdraw / close. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner, LoadingBlock } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner, LoadingBlock , BankAccountSelect } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   savingsAccountsApi, savingsProductsApi, branchesApi, customersApi,
@@ -72,10 +72,10 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
   const [openForm, setOpenForm] = useState({
     branchId: undefined as number | undefined, customerId: undefined as number | undefined, customerLabel: '',
     savingsProductId: undefined as number | undefined, openDate: todayIso(), openingDeposit: '',
-    paymentMethod: 'Cash' as SavingsPaymentMethod, referenceNo: '', bankId: undefined as number | undefined, notes: '',
+    paymentMethod: 'Cash' as SavingsPaymentMethod, referenceNo: '', bankId: undefined as number | undefined, bankAccountId: undefined as number | undefined, notes: '',
   })
   const startOpen = () => {
-    setOpenForm({ branchId: branches[0]?.id, customerId: undefined, customerLabel: '', savingsProductId: products[0]?.id, openDate: todayIso(), openingDeposit: '', paymentMethod: 'Cash', referenceNo: '', bankId: undefined, notes: '' })
+    setOpenForm({ branchId: branches[0]?.id, customerId: undefined, customerLabel: '', savingsProductId: products[0]?.id, openDate: todayIso(), openingDeposit: '', paymentMethod: 'Cash', referenceNo: '', bankId: undefined, bankAccountId: undefined, notes: '' })
     setErr(''); setOpenModal(true)
   }
   const submitOpen = async () => {
@@ -88,7 +88,7 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
         branchId: openForm.branchId, customerId: openForm.customerId, savingsProductId: openForm.savingsProductId,
         openDate: openForm.openDate, openingDeposit: openForm.openingDeposit, paymentMethod: openForm.paymentMethod,
         referenceNo: openForm.paymentMethod !== 'Cash' ? openForm.referenceNo || undefined : undefined,
-        bankId: openForm.paymentMethod !== 'Cash' ? openForm.bankId : undefined, notes: openForm.notes || undefined,
+        bankId: openForm.paymentMethod !== 'Cash' ? openForm.bankId : undefined, bankAccountId: openForm.paymentMethod !== 'Cash' ? openForm.bankAccountId : undefined, notes: openForm.notes || undefined,
       })
       setOpenModal(false); refresh(); notify.success('Account opened', acct.accountNumber)
       openDetail(acct.id)
@@ -96,17 +96,18 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
   }
 
   // ----- deposit / withdraw / close form -----
-  const [actForm, setActForm] = useState({ amount: '', txnDate: todayIso(), paymentMethod: 'Cash' as SavingsPaymentMethod, referenceNo: '', bankId: undefined as number | undefined, notes: '' })
-  const startAction = (kind: ActionKind) => { setActForm({ amount: '', txnDate: todayIso(), paymentMethod: 'Cash', referenceNo: '', bankId: undefined, notes: '' }); setErr(''); setAction(kind) }
+  const [actForm, setActForm] = useState({ amount: '', txnDate: todayIso(), paymentMethod: 'Cash' as SavingsPaymentMethod, referenceNo: '', bankId: undefined as number | undefined, bankAccountId: undefined as number | undefined, notes: '' })
+  const startAction = (kind: ActionKind) => { setActForm({ amount: '', txnDate: todayIso(), paymentMethod: 'Cash', referenceNo: '', bankId: undefined, bankAccountId: undefined, notes: '' }); setErr(''); setAction(kind) }
   const submitAction = async () => {
     if (!selected || !action) return
     if (action !== 'close' && (!actForm.amount || Number(actForm.amount) <= 0)) { setErr('Enter an amount greater than zero.'); return }
     if (action === 'deposit' && actForm.paymentMethod !== 'Cash' && !actForm.bankId) { setErr('Bank is required for Cheque / Bank Transfer.'); return }
+    if (action !== 'deposit' && actForm.paymentMethod !== 'Cash' && !actForm.bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     setBusy(true); setErr('')
     try {
       if (action === 'deposit') await savingsAccountsApi.deposit(selected.id, { amount: actForm.amount, txnDate: actForm.txnDate, paymentMethod: actForm.paymentMethod, referenceNo: actForm.paymentMethod !== 'Cash' ? actForm.referenceNo || undefined : undefined, bankId: actForm.paymentMethod !== 'Cash' ? actForm.bankId : undefined, notes: actForm.notes || undefined })
-      else if (action === 'withdraw') await savingsAccountsApi.withdraw(selected.id, { amount: actForm.amount, txnDate: actForm.txnDate, paymentMethod: actForm.paymentMethod, referenceNo: actForm.referenceNo || undefined, notes: actForm.notes || undefined })
-      else await savingsAccountsApi.close(selected.id, { txnDate: actForm.txnDate, paymentMethod: actForm.paymentMethod, referenceNo: actForm.referenceNo || undefined, notes: actForm.notes || undefined })
+      else if (action === 'withdraw') await savingsAccountsApi.withdraw(selected.id, { amount: actForm.amount, txnDate: actForm.txnDate, paymentMethod: actForm.paymentMethod, bankAccountId: actForm.paymentMethod !== 'Cash' ? actForm.bankAccountId : undefined, referenceNo: actForm.referenceNo || undefined, notes: actForm.notes || undefined })
+      else await savingsAccountsApi.close(selected.id, { txnDate: actForm.txnDate, paymentMethod: actForm.paymentMethod, bankAccountId: actForm.paymentMethod !== 'Cash' ? actForm.bankAccountId : undefined, referenceNo: actForm.referenceNo || undefined, notes: actForm.notes || undefined })
       setAction(null); refresh(); loadDetail(selected.id)
       notify.success(action === 'deposit' ? 'Deposit recorded' : action === 'withdraw' ? 'Withdrawal recorded' : 'Account closed', selected.accountNumber)
     } catch (ex: any) { setErr(getErrorText(ex, 'Action failed')) } finally { setBusy(false) }
@@ -271,6 +272,7 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
               {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </Select></Field>
             {actForm.paymentMethod !== 'Cash' && <Field label="Reference"><Input value={actForm.referenceNo} onChange={(e) => setActForm((s) => ({ ...s, referenceNo: e.target.value }))} /></Field>}
+            {actForm.paymentMethod !== 'Cash' && <Field label={action === 'deposit' ? 'Received into — company bank account (optional)' : 'Paid from — company bank account'}><BankAccountSelect value={actForm.bankAccountId} onChange={(v) => setActForm((s) => ({ ...s, bankAccountId: v }))} /></Field>}
             {action === 'deposit' && actForm.paymentMethod !== 'Cash' && <Field label="Bank"><BankSelect value={actForm.bankId} onChange={(v) => setActForm((s) => ({ ...s, bankId: v }))} /></Field>}
             <Field label="Notes" full><textarea value={actForm.notes} onChange={(e) => setActForm((s) => ({ ...s, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
           </div>
@@ -325,6 +327,7 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
           {openForm.paymentMethod !== 'Cash' && <>
             <Field label="Reference"><Input value={openForm.referenceNo} onChange={(e) => setOpenForm((s) => ({ ...s, referenceNo: e.target.value }))} /></Field>
             <Field label="Bank"><BankSelect value={openForm.bankId} onChange={(v) => setOpenForm((s) => ({ ...s, bankId: v }))} /></Field>
+            <Field label="Received into — company bank account (optional)"><BankAccountSelect value={openForm.bankAccountId} onChange={(v) => setOpenForm((s) => ({ ...s, bankAccountId: v }))} /></Field>
           </>}
           <Field label="Notes" full><textarea value={openForm.notes} onChange={(e) => setOpenForm((s) => ({ ...s, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
         </div>

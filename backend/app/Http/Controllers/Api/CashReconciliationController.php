@@ -68,7 +68,7 @@ class CashReconciliationController extends Controller
             'other_branch_cheque_branch_id' => 'nullable|exists:branches,id',
             'denominations' => 'nullable|array',
             'denominations.*' => 'nullable|integer|min:0',
-            'coins_amount' => 'nullable|numeric',
+            'coins_amount' => ['nullable', 'numeric', new \App\Rules\Money],
             'notes' => 'nullable|string|max:255',
         ]);
 

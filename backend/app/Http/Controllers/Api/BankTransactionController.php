@@ -55,7 +55,7 @@ class BankTransactionController extends Controller
             'transaction_type' => ['required', Rule::in(self::TYPES)],
             'reference_no' => 'nullable|string|max:64',
             'description' => 'nullable|string|max:255',
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'status' => ['nullable', Rule::in(['Cleared', 'Pending'])],
             'contra_kind' => ['required', Rule::in(['Cash', 'Bank', 'Ledger'])],
             'contra_cash_account_id' => 'required_if:contra_kind,Cash|nullable|exists:cash_accounts,id',
@@ -229,6 +229,7 @@ class BankTransactionController extends Controller
             DB::transaction(function () use ($bankTransaction) {
                 $ftx = FinanceTransaction::find($bankTransaction->finance_transaction_id);
                 if ($ftx && $ftx->status !== 'Reversed' && !$ftx->reversal_of_id) {
+                    FinancePostingService::assertDirectReversalAllowed();
                     FinancePostingService::reverse($ftx, "Deleted: bank transaction #{$bankTransaction->id}", request()->user()?->id);
                 }
                 $bankTransaction->delete();

@@ -43,7 +43,7 @@ class LoanLedgerPoster
      * unknown method, a branch with no till, or a Bank/Cheque disbursement
      * with no bank account recorded (a pre-cutover loan).
      */
-    public static function postDisbursement(Loan $loan, ?int $executedBy = null): void
+    public static function postDisbursement(Loan $loan, ?int $executedBy = null, ?int $cashAccountId = null): void
     {
         $detail = $loan->loanDetail;
         $method = $detail?->disbursement_method;
@@ -51,6 +51,7 @@ class LoanLedgerPoster
             $method,
             (int) $loan->branch_id,
             $detail?->disbursement_bank_account_id ? (int) $detail->disbursement_bank_account_id : null,
+            $cashAccountId,
         );
         if (!$target) {
             return;
@@ -101,10 +102,11 @@ class LoanLedgerPoster
      *
      * @return array{leaf: ChartOfAccount, phys_type: string, phys_id: int}|null
      */
-    public static function disbursementTarget(?string $method, int $branchId, ?int $bankAccountId): ?array
+    public static function disbursementTarget(?string $method, int $branchId, ?int $bankAccountId, ?int $cashAccountId = null): ?array
     {
         if ($method === 'Cash') {
-            $till = CashAccount::branchPrimary($branchId);
+            // An explicit till (chosen on the disburse form) wins; otherwise the branch's disbursement till.
+            $till = $cashAccountId ? CashAccount::where('branch_id', $branchId)->find($cashAccountId) : CashAccount::branchPrimary($branchId, CashAccount::PURPOSE_DISBURSEMENTS);
 
             return $till ? ['leaf' => ChartOfAccount::forCashTill($till), 'phys_type' => 'cash', 'phys_id' => (int) $till->id] : null;
         }
@@ -341,7 +343,7 @@ class LoanLedgerPoster
         if ($payment->payment_method !== 'Cash') {
             return;
         }
-        $till = CashAccount::branchPrimary((int) $payment->branch_id);
+        $till = CashAccount::branchPrimary((int) $payment->branch_id, self::receiptPurpose($payment->facility));
         if (!$till) {
             return;
         }
@@ -358,6 +360,12 @@ class LoanLedgerPoster
         if ($credits) {
             self::postCollection($payment, $till, $credits, "Loan payment {$payment->code}");
         }
+    }
+
+    /** Which till a loan receipt belongs in: before disbursement the only thing collected is the document charge. */
+    public static function receiptPurpose(?Loan $loan): string
+    {
+        return $loan && $loan->status === 'Approved' ? CashAccount::PURPOSE_DOCUMENT_CHARGES : CashAccount::PURPOSE_COLLECTIONS;
     }
 
     /** Books a cash collection through the one money writer. $credits is the Cr side (each ['account_id'=>, 'credit'=>]); the till Dr and the +movement are added here. */

@@ -38,18 +38,29 @@ class SavingsLedgerPoster
 {
     public static function postDeposit(SavingsTransaction $txn): void
     {
-        if ($txn->payment_method !== 'Cash') {
-            return;
-        }
         $account = $txn->savingsAccount;
-        $till = CashAccount::branchPrimary((int) $account->branch_id);
-        if (!$till) {
+        $leg = MoneyLeg::resolve($txn->payment_method, (int) $account->branch_id, CashAccount::PURPOSE_SAVINGS, $txn->bank_account_id);
+        if (!$leg) {
+            // Bank/Cheque with no company bank account named: park the receipt in 1030 Undeposited Funds.
+            if (in_array($txn->payment_method, ['Bank', 'Cheque'], true)) {
+                LedgerPoster::post([
+                    ['account_id' => ChartOfAccount::system('1030')->id, 'debit' => $txn->amount, 'credit' => 0],
+                    ['account_id' => ChartOfAccount::system('2050')->id, 'debit' => 0, 'credit' => $txn->amount],
+                ], (string) $txn->txn_date, [
+                    'source_type' => 'SavingsTransaction',
+                    'source_id' => $txn->id,
+                    'description' => "Savings deposit ({$txn->payment_method}) - {$account->account_number} ({$txn->txn_number})",
+                    'branch_id' => $account->branch_id,
+                    'posted_by' => $txn->created_by,
+                ]);
+            }
+
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
+        $tillAccount = $leg['leaf'];
         $payable = ChartOfAccount::system('2050');
 
-        self::postCashLeg($till, '+' . $txn->amount, [
+        self::postCashLeg($leg, '+' . $txn->amount, [
             ['account_id' => $tillAccount->id, 'debit' => $txn->amount, 'credit' => 0],
             ['account_id' => $payable->id, 'debit' => 0, 'credit' => $txn->amount],
         ], [
@@ -67,18 +78,15 @@ class SavingsLedgerPoster
     /** A Cash-method withdrawal or closure payout — Dr 2050, Cr the branch till. */
     public static function postWithdrawal(SavingsTransaction $txn): void
     {
-        if ($txn->payment_method !== 'Cash') {
-            return;
-        }
         $account = $txn->savingsAccount;
-        $till = CashAccount::branchPrimary((int) $account->branch_id);
-        if (!$till) {
+        $leg = MoneyLeg::resolve($txn->payment_method, (int) $account->branch_id, CashAccount::PURPOSE_SAVINGS, $txn->bank_account_id);
+        if (!$leg) {
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
+        $tillAccount = $leg['leaf'];
         $payable = ChartOfAccount::system('2050');
 
-        self::postCashLeg($till, '-' . $txn->amount, [
+        self::postCashLeg($leg, '-' . $txn->amount, [
             ['account_id' => $payable->id, 'debit' => $txn->amount, 'credit' => 0],
             ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $txn->amount],
         ], [
@@ -145,16 +153,16 @@ class SavingsLedgerPoster
     /**
      * @param array{txn_type:string, amount:numeric, entry_date:mixed, branch_id:?int, source_id:int, idempotency_key:string, description:string, posted_by:?int} $ctx
      */
-    private static function postCashLeg(CashAccount $till, string $delta, array $glLines, array $ctx): void
+    private static function postCashLeg(array $leg, string $delta, array $glLines, array $ctx): void
     {
         FinancePostingService::execute([
-            'txn_type' => $ctx['txn_type'],
+            'txn_type' => MoneyLeg::txnType($leg, $ctx['txn_type']),
             'amount' => $ctx['amount'],
             'entry_date' => $ctx['entry_date'] instanceof \DateTimeInterface
                 ? $ctx['entry_date']->format('Y-m-d')
                 : (string) \Illuminate\Support\Carbon::parse($ctx['entry_date'])->toDateString(),
             'branch_id' => $ctx['branch_id'],
-            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $delta]],
+            'movements' => [['account_type' => $leg['type'], 'account_id' => $leg['id'], 'delta' => $delta]],
             'gl_lines' => $glLines,
             'gl_source_type' => 'SavingsTransaction',
             'gl_source_id' => $ctx['source_id'],

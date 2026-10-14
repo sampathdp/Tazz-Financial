@@ -40,17 +40,29 @@ class FdLedgerPoster
     /** Cash received for a deposit — Dr the branch till, Cr 2010 (money now owed back to the depositor). */
     public static function postDepositReceived(FdDeposit $deposit): void
     {
-        if ($deposit->payment_method !== 'Cash') {
+        $leg = MoneyLeg::resolve($deposit->payment_method, (int) $deposit->branch_id, CashAccount::PURPOSE_FD, $deposit->bank_account_id);
+        if (!$leg) {
+            // A Bank/Cheque deposit with no company bank account named: the money has arrived, so book it
+            // to 1030 Undeposited Funds (same convention as loan receipts) until a Bank Deposit moves it.
+            if (in_array($deposit->payment_method, ['Bank', 'Cheque'], true)) {
+                LedgerPoster::post([
+                    ['account_id' => ChartOfAccount::system('1030')->id, 'debit' => $deposit->amount, 'credit' => 0],
+                    ['account_id' => ChartOfAccount::system('2010')->id, 'debit' => 0, 'credit' => $deposit->amount],
+                ], \Illuminate\Support\Carbon::parse($deposit->deposit_date)->toDateString(), [
+                    'source_type' => 'FdDeposit',
+                    'source_id' => $deposit->id,
+                    'description' => "FD deposit received ({$deposit->payment_method}) - {$deposit->deposit_number}",
+                    'branch_id' => $deposit->branch_id,
+                    'posted_by' => $deposit->created_by,
+                ]);
+            }
+
             return;
         }
-        $till = CashAccount::branchPrimary((int) $deposit->branch_id);
-        if (!$till) {
-            return;
-        }
-        $tillAccount = ChartOfAccount::forCashTill($till);
+        $tillAccount = $leg['leaf'];
         $payable = ChartOfAccount::system('2010');
 
-        self::postCashLeg($till, '+' . $deposit->amount, [
+        self::postCashLeg($leg, '+' . $deposit->amount, [
             ['account_id' => $tillAccount->id, 'debit' => $deposit->amount, 'credit' => 0],
             ['account_id' => $payable->id, 'debit' => 0, 'credit' => $deposit->amount],
         ], [
@@ -75,18 +87,15 @@ class FdLedgerPoster
     /** A Cash-method interest installment paid out — Dr 5100 Interest Expense - FDs, Cr the branch till. */
     public static function postInterestPaid(FdInterestPayment $payment): void
     {
-        if ($payment->payment_method !== 'Cash') {
-            return;
-        }
         $fd = $payment->fixedDeposit;
-        $till = CashAccount::branchPrimary((int) $fd->branch_id);
-        if (!$till) {
+        $leg = MoneyLeg::resolve($payment->payment_method, (int) $fd->branch_id, CashAccount::PURPOSE_FD, $payment->bank_account_id);
+        if (!$leg) {
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
+        $tillAccount = $leg['leaf'];
         $expense = ChartOfAccount::system('5100');
 
-        self::postCashLeg($till, '-' . $payment->paid_amount, [
+        self::postCashLeg($leg, '-' . $payment->paid_amount, [
             ['account_id' => $expense->id, 'debit' => $payment->paid_amount, 'credit' => 0],
             ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $payment->paid_amount],
         ], [
@@ -105,15 +114,12 @@ class FdLedgerPoster
     /** A Cash-method withdrawal — Dr 2010 (principal, liability settled) [+ Dr 5100 if this is a maturity-method FD's accrued interest], Cr the branch till for the total. */
     public static function postWithdrawal(FdWithdrawal $withdrawal): void
     {
-        if ($withdrawal->payment_method !== 'Cash') {
-            return;
-        }
         $fd = $withdrawal->fixedDeposit;
-        $till = CashAccount::branchPrimary((int) $fd->branch_id);
-        if (!$till) {
+        $leg = MoneyLeg::resolve($withdrawal->payment_method, (int) $fd->branch_id, CashAccount::PURPOSE_FD, $withdrawal->bank_account_id);
+        if (!$leg) {
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
+        $tillAccount = $leg['leaf'];
         $payable = ChartOfAccount::system('2010');
 
         $lines = [
@@ -125,7 +131,7 @@ class FdLedgerPoster
         }
         $lines[] = ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $withdrawal->total_amount];
 
-        self::postCashLeg($till, '-' . $withdrawal->total_amount, $lines, [
+        self::postCashLeg($leg, '-' . $withdrawal->total_amount, $lines, [
             'txn_type' => 'CASH_OUT',
             'amount' => $withdrawal->total_amount,
             'entry_date' => $withdrawal->closed_at,
@@ -153,8 +159,8 @@ class FdLedgerPoster
         $fd = $withdrawal->fixedDeposit;
         $adjusted = (float) $withdrawal->adjusted_amount;
         $excess = round((float) $withdrawal->total_amount - $adjusted, 2);
-        $till = $excess > 0 && $withdrawal->payment_method === 'Cash' ? CashAccount::branchPrimary((int) $fd->branch_id) : null;
-        $cashExcess = $till ? $excess : 0.0;
+        $leg = $excess > 0 ? MoneyLeg::resolve($withdrawal->payment_method, (int) $fd->branch_id, CashAccount::PURPOSE_FD, $withdrawal->bank_account_id) : null;
+        $cashExcess = $leg ? $excess : 0.0;
         $posted = round($adjusted + $cashExcess, 2);
         if ($posted <= 0) {
             return;
@@ -171,9 +177,9 @@ class FdLedgerPoster
         }
         $description = "FD adjusted against loan - {$fd->fd_number} ({$withdrawal->voucher_no})";
 
-        if ($till) {
-            $lines[] = ['account_id' => ChartOfAccount::forCashTill($till)->id, 'debit' => 0, 'credit' => $cashExcess];
-            self::postCashLeg($till, '-' . $cashExcess, $lines, [
+        if ($leg) {
+            $lines[] = ['account_id' => $leg['leaf']->id, 'debit' => 0, 'credit' => $cashExcess];
+            self::postCashLeg($leg, '-' . $cashExcess, $lines, [
                 'txn_type' => 'CASH_OUT',
                 'amount' => $cashExcess,
                 'entry_date' => $withdrawal->closed_at,
@@ -218,15 +224,12 @@ class FdLedgerPoster
      */
     public static function postPartPayment(FdPartPayment $partPayment): void
     {
-        if ($partPayment->payment_method !== 'Cash') {
-            return;
-        }
         $fd = $partPayment->fixedDeposit;
-        $till = CashAccount::branchPrimary((int) $fd->branch_id);
-        if (!$till) {
+        $leg = MoneyLeg::resolve($partPayment->payment_method, (int) $fd->branch_id, CashAccount::PURPOSE_FD, $partPayment->bank_account_id);
+        if (!$leg) {
             return;
         }
-        $tillAccount = ChartOfAccount::forCashTill($till);
+        $tillAccount = $leg['leaf'];
         $payable = ChartOfAccount::system('2010');
         $expense = ChartOfAccount::system('5100');
 
@@ -241,7 +244,7 @@ class FdLedgerPoster
         }
         $lines[] = ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $partPayment->net_amount_paid];
 
-        self::postCashLeg($till, '-' . $partPayment->net_amount_paid, $lines, [
+        self::postCashLeg($leg, '-' . $partPayment->net_amount_paid, $lines, [
             'txn_type' => 'CASH_OUT',
             'amount' => $partPayment->net_amount_paid,
             'entry_date' => $partPayment->paid_at,
@@ -267,16 +270,16 @@ class FdLedgerPoster
      *
      * @param array{txn_type:string, amount:numeric, entry_date:mixed, branch_id:?int, source_type:string, source_id:int, idempotency_key:string, description:string, posted_by:?int} $ctx
      */
-    private static function postCashLeg(CashAccount $till, string $delta, array $glLines, array $ctx): void
+    private static function postCashLeg(array $leg, string $delta, array $glLines, array $ctx): void
     {
         FinancePostingService::execute([
-            'txn_type' => $ctx['txn_type'],
+            'txn_type' => MoneyLeg::txnType($leg, $ctx['txn_type']),
             'amount' => $ctx['amount'],
             'entry_date' => $ctx['entry_date'] instanceof \DateTimeInterface
                 ? $ctx['entry_date']->format('Y-m-d')
                 : (string) \Illuminate\Support\Carbon::parse($ctx['entry_date'])->toDateString(),
             'branch_id' => $ctx['branch_id'],
-            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $delta]],
+            'movements' => [['account_type' => $leg['type'], 'account_id' => $leg['id'], 'delta' => $delta]],
             'gl_lines' => $glLines,
             'gl_source_type' => $ctx['source_type'],
             'gl_source_id' => $ctx['source_id'],

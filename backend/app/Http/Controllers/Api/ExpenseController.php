@@ -35,7 +35,7 @@ class ExpenseController extends Controller
             'branch_id' => 'required|exists:branches,id',
             'expense_category_id' => 'required|exists:expense_categories,id',
             'vendor_id' => 'nullable|exists:vendors,id',
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'expense_date' => 'required|date',
             'description' => 'nullable|string|max:255',
         ]);
@@ -143,7 +143,7 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'Only a pending expense can be rejected.'], 422);
         }
         $req = $expense->pendingApprovalRequest;
-        if ($req && !ApprovalType::isAuthorized($request->user(), 'expense_approval')) {
+        if (!ApprovalType::isAuthorized($request->user(), 'expense_approval')) {
             return response()->json(['message' => 'You are not an approver for expenses.'], 403);
         }
         $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);

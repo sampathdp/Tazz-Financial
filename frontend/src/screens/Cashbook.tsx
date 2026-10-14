@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
-  branchesApi, cashAccountsApi, cashbookEntriesApi, cashReconciliationsApi, chartOfAccountsApi,
+  branchesApi, cashAccountsApi, CASH_ACCOUNT_PURPOSES, type CashAccountPurpose, cashbookEntriesApi, cashReconciliationsApi, chartOfAccountsApi,
   type Branch, type AuthUser, type CashAccount, type CashbookEntry, type CashEntryType, type CashEntryCategory,
   type CashReconciliation, type CashReconciliationSummary, type Denominations, DENOMINATION_VALUES,
   type ChartOfAccount,
@@ -205,6 +205,9 @@ export function CashbookScreen({ go: _go, user: me }: { go: Go; user?: AuthUser 
                 {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </Select></Field>
               <Field label="Opening Balance"><Input type="number" step="0.01" value={acctForm.openingBalance ?? 0} disabled={!!acctEditing} onChange={(e) => setAcctForm((s) => ({ ...s, openingBalance: e.target.value }))} /></Field>
+              <Field label="Used for" full><Select value={acctForm.purpose || 'General'} onChange={(e) => setAcctForm((s) => ({ ...s, purpose: e.target.value as CashAccountPurpose }))}>
+                {CASH_ACCOUNT_PURPOSES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </Select></Field>
               <Field label="Status"><Select value={acctForm.status || 'Active'} onChange={(e) => setAcctForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
             </div>
           </>

@@ -12,9 +12,10 @@ use Illuminate\Support\Facades\Auth;
  * head office, auditors, ...) see everything unless CurrentBranch::filter()
  * narrows it via an explicit ?branch_id= request param.
  *
- * No business-data model uses this yet (none exist), but every future
- * branch-scoped model (Loan, PawnTicket, CashbookEntry, ...) should `use`
- * this trait to get isolation for free rather than re-implementing scoping.
+ * Every model that holds a branch's data (loans, payments, cash and bank accounts, cashbook, petty
+ * cash, ...) must `use` this trait, so isolation covers lists AND route-model-bound single records
+ * (a record of another branch simply 404s) without each controller re-implementing it. A model whose
+ * rows may legitimately have no branch can set `public static $sharedWhenNoBranch = true`.
  */
 trait BelongsToBranch
 {
@@ -34,7 +35,14 @@ trait BelongsToBranch
                 return;
             }
             // Branch-scoped users are always forced to their own branch — never trust client input.
-            $builder->where($builder->getModel()->getTable() . '.branch_id', $user->branch_id);
+            $column = $builder->getModel()->getTable() . '.branch_id';
+            if (property_exists($builder->getModel(), 'sharedWhenNoBranch') && $builder->getModel()::$sharedWhenNoBranch) {
+                // A company-level row (no branch, e.g. a head-office bank account) stays visible to every branch.
+                $builder->where(fn ($q) => $q->where($column, $user->branch_id)->orWhereNull($column));
+
+                return;
+            }
+            $builder->where($column, $user->branch_id);
         });
     }
 }

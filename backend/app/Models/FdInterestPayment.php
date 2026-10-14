@@ -8,7 +8,7 @@ class FdInterestPayment extends Model
 {
     protected $fillable = [
         'fixed_deposit_id', 'installment_no', 'due_date', 'amount',
-        'status', 'paid_amount', 'paid_at', 'payment_method', 'reference_no', 'paid_by',
+        'status', 'paid_amount', 'paid_at', 'payment_method', 'reference_no', 'bank_account_id', 'paid_by',
     ];
 
     protected $casts = [

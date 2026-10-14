@@ -3,7 +3,7 @@ import { Children, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
-import { banksApi, type Bank } from '../api'
+import { banksApi, bankAccountsApi, type Bank, type BankAccount } from '../api'
 
 /* ---------- primitives ---------- */
 type Variant = 'primary' | 'solid' | 'ghost' | 'danger' | 'ok' | 'plain'
@@ -274,6 +274,27 @@ export function BankSelect({ value, onChange, style, disabled, placeholder = 'Se
     <Select value={value ?? ''} onChange={(e) => onChange(Number(e.target.value) || undefined)} style={style} disabled={disabled}>
       <option value="">{placeholder}</option>
       {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+    </Select>
+  )
+}
+
+/** BankAccountSelect — picks one of OUR company bank accounts (Finance > Bank Accounts): the account a
+ *  Bank / Cheque payment is received into or paid out of. Distinct from BankSelect, which is the customer's
+ *  bank name. Shown whenever a payment method other than Cash is chosen so the movement posts to the right
+ *  bank balance and ledger account. */
+export function BankAccountSelect({ value, onChange, style, disabled, placeholder = 'Select company bank account…' }: {
+  value: number | '' | null | undefined
+  onChange: (v: number | undefined) => void
+  style?: CSSProperties
+  disabled?: boolean
+  placeholder?: string
+}) {
+  const [rows, setRows] = useState<BankAccount[]>([])
+  useEffect(() => { bankAccountsApi.list().then((r) => setRows(r.filter((a) => (a.status || 'Active') === 'Active'))).catch(() => setRows([])) }, [])
+  return (
+    <Select value={value ?? ''} onChange={(e) => onChange(Number(e.target.value) || undefined)} style={style} disabled={disabled}>
+      <option value="">{placeholder}</option>
+      {rows.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
     </Select>
   )
 }

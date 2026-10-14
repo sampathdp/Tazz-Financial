@@ -48,7 +48,7 @@ class CashSessionController extends Controller
     {
         $data = $request->validate([
             'cash_account_id' => 'required|exists:cash_accounts,id',
-            'opening_amount' => 'required|numeric|min:0',
+            'opening_amount' => ['required', 'numeric', 'min:0', new \App\Rules\Money],
             'notes' => 'nullable|string|max:255',
         ]);
 
@@ -61,10 +61,10 @@ class CashSessionController extends Controller
     public function close(Request $request, CashSession $cashSession)
     {
         $data = $request->validate([
-            'counted_closing' => 'required|numeric|min:0',
+            'counted_closing' => ['required', 'numeric', 'min:0', new \App\Rules\Money],
             'denominations' => 'nullable|array',
             'denominations.*' => 'nullable|integer|min:0',
-            'coins_amount' => 'nullable|numeric|min:0',
+            'coins_amount' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
         ]);
 
         return CashSessionService::close(

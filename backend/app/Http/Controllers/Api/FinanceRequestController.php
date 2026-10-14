@@ -64,7 +64,7 @@ class FinanceRequestController extends Controller
     {
         $data = $request->validate([
             'request_type' => ['required', Rule::in(FinanceRequest::REQUEST_TYPES)],
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'branch_id' => 'nullable|exists:branches,id',
             'source_module' => 'nullable|string|max:64',
             'source_id' => 'nullable|integer',
@@ -117,7 +117,7 @@ class FinanceRequestController extends Controller
             'source_bank_account_id' => 'nullable|exists:bank_accounts,id',
             'dest_cash_account_id' => 'nullable|exists:cash_accounts,id',
             'dest_bank_account_id' => 'nullable|exists:bank_accounts,id',
-            'amount' => 'nullable|numeric|min:0.01',
+            'amount' => ['nullable', 'numeric', 'min:0.01', new \App\Rules\Money],
             'entry_date' => 'nullable|date',
         ]);
 

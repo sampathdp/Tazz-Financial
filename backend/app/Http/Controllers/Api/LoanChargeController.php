@@ -19,17 +19,22 @@ class LoanChargeController extends Controller
     {
         $data = $request->validate([
             'charge_category_id' => ['required', 'exists:charge_categories,id'],
-            'due_amount' => 'required|numeric|min:0',
-            'paid_amount' => 'nullable|numeric|min:0',
+            'due_amount' => ['required', 'numeric', 'min:0', new \App\Rules\Money],
             'charged_at' => 'nullable|date',
             'notes' => 'nullable|string|max:255',
         ]);
 
+        // A Document charge gates disbursement, so it must carry a real amount.
+        if ((float) $data['due_amount'] <= 0 && \App\Models\ChargeCategory::whereKey($data['charge_category_id'])->where('name', 'Document')->exists()) {
+            return response()->json(['message' => 'A document charge must be greater than zero.'], 422);
+        }
+
+        // paid_amount is only ever raised by a real payment (LoanPaymentAllocator) - a charge can never be created already "paid".
         $charge = $loan->charges()->create([
             'branch_id' => $loan->branch_id,
             'charge_category_id' => $data['charge_category_id'],
             'due_amount' => $data['due_amount'],
-            'paid_amount' => $data['paid_amount'] ?? 0,
+            'paid_amount' => 0,
             'charged_at' => $data['charged_at'] ?? now(),
             'notes' => $data['notes'] ?? null,
             'created_by' => $request->user()->id,
@@ -42,8 +47,8 @@ class LoanChargeController extends Controller
     {
         $data = $request->validate([
             'charge_category_id' => ['sometimes', 'exists:charge_categories,id'],
-            'due_amount' => 'sometimes|numeric|min:0',
-            'paid_amount' => 'sometimes|numeric|min:0',
+            'due_amount' => ['sometimes', 'numeric', 'min:0', new \App\Rules\Money],
+            'paid_amount' => ['sometimes', 'numeric', 'min:0', new \App\Rules\Money],
             'charged_at' => 'sometimes|date',
             'notes' => 'nullable|string|max:255',
         ]);

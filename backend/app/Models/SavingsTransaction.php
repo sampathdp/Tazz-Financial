@@ -8,7 +8,7 @@ class SavingsTransaction extends Model
 {
     protected $fillable = [
         'txn_number', 'savings_account_id', 'txn_date', 'type', 'direction', 'amount', 'running_balance',
-        'payment_method', 'bank_id', 'reference_no', 'collection_sheet_id', 'interest_run_id',
+        'payment_method', 'bank_id', 'bank_account_id', 'reference_no', 'collection_sheet_id', 'interest_run_id',
         'finance_transaction_id', 'notes', 'status', 'void_of_id', 'created_by',
     ];
 

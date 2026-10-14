@@ -132,6 +132,7 @@ class FixedDepositController extends Controller
             'enhancement.payment_method' => ['required_with:enhancement', Rule::in(self::PAYMENT_METHODS)],
             'enhancement.reference_no' => 'nullable|string|max:64',
             'enhancement.bank_id' => 'nullable|exists:banks,id',
+            'enhancement.bank_account_id' => ['nullable', 'exists:bank_accounts,id'],
             'enhancement.notes' => 'nullable|string',
         ]);
 
@@ -177,6 +178,7 @@ class FixedDepositController extends Controller
                     'payment_method' => $data['enhancement']['payment_method'],
                     'reference_no' => $data['enhancement']['reference_no'] ?? null,
                     'bank_id' => $data['enhancement']['bank_id'] ?? null,
+                    'bank_account_id' => $data['enhancement']['bank_account_id'] ?? null,
                     'notes' => $data['enhancement']['notes'] ?? null,
                     // Created already-allocated (unlike FdDepositController::store()'s
                     // normal Available-first flow) since it's funding this new FD
@@ -234,6 +236,8 @@ class FixedDepositController extends Controller
 
         $data = $request->validate([
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
+            // Paying out by Bank/Cheque needs the company account it is paid from.
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id', 'required_if:payment_method,Bank,Cheque'],
             'reference_no' => 'nullable|string|max:64',
             'notes' => 'nullable|string',
             'closed_at' => 'nullable|date',
@@ -257,6 +261,7 @@ class FixedDepositController extends Controller
                 'interest_amount' => $interestAmount,
                 'total_amount' => $principalAmount + $interestAmount,
                 'payment_method' => $data['payment_method'],
+                'bank_account_id' => $data['bank_account_id'] ?? null,
                 'reference_no' => $data['reference_no'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'closed_at' => $closedAt,
@@ -331,8 +336,9 @@ class FixedDepositController extends Controller
         }
 
         $data = $request->validate([
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id', 'required_if:payment_method,Bank,Cheque'],
             'reference_no' => 'nullable|string|max:64',
             'notes' => 'nullable|string',
             'paid_at' => 'nullable|date',
@@ -386,6 +392,7 @@ class FixedDepositController extends Controller
                 'clawback_amount' => $clawback,
                 'net_amount_paid' => $netAmount,
                 'payment_method' => $data['payment_method'],
+                'bank_account_id' => $data['bank_account_id'] ?? null,
                 'reference_no' => $data['reference_no'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'paid_at' => $paidAt,

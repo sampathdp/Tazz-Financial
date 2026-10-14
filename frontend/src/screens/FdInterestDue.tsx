@@ -6,7 +6,7 @@
    fdInterestPaymentsApi.pay endpoint Fixed Deposits' own detail screen uses,
    so schedules and balances stay in sync. */
 import { useEffect, useState } from 'react'
-import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Table, Td, Modal, ErrorBanner, LoadingBlock } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Table, Td, Modal, ErrorBanner, LoadingBlock , BankAccountSelect } from '../components/ui'
 import {
   fdInterestPaymentsApi,
   type FdInterestDue, type FdInterestDueBucket, type FdInterestDueItem, type FdPaymentMethod, type AuthUser,
@@ -32,19 +32,21 @@ function PayInterestModal({ item, open, onClose, onPaid }: {
 }) {
   const notify = useNotify()
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')
+  const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
   const [refNo, setRefNo] = useState('')
   const [paidAt, setPaidAt] = useState(todayIso())
   const [backDated, setBackDated] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (open) { setMethod('Cash'); setRefNo(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
+  useEffect(() => { if (open) { setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
   if (!item) return null
 
   const save = async () => {
+    if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     setBusy(true); setErr('')
     try {
-      await fdInterestPaymentsApi.pay(item.id, { paymentMethod: method, referenceNo: refNo || undefined, paidAt })
+      await fdInterestPaymentsApi.pay(item.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, paidAt })
       onPaid()
       notify.success('Interest payment recorded')
     } catch (ex: any) {
@@ -65,6 +67,7 @@ function PayInterestModal({ item, open, onClose, onPaid }: {
         <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as FdPaymentMethod)}>
           {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
         </Select></Field>
+        {method !== 'Cash' && <Field label="Paid from — company bank account"><BankAccountSelect value={bankAccountId} onChange={setBankAccountId} /></Field>}
         <Field label="Date">
           <DateInput value={paidAt} disabled={!backDated} onChange={setPaidAt} />
           <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>

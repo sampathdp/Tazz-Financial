@@ -68,7 +68,7 @@ class LoanPaymentController extends Controller
             return response()->json(['message' => 'A manual allocation request is already pending approval for this loan — approve or reject it before recording further payments.'], 422);
         }
         $data = $request->validate([
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
             'paid_at' => 'nullable|date',
             'receipt_no' => 'nullable|string|max:32',
@@ -83,11 +83,24 @@ class LoanPaymentController extends Controller
             'allocations.od_charge' => 'nullable|numeric|min:0',
             'allocations.other_charges' => 'nullable|numeric|min:0',
         ]);
+        // A receipt can't be dated in the future, nor before the loan existed (its money went out on
+        // disbursed_at; an undisbursed loan - a Document-charge receipt - dates from its application).
+        if (!empty($data['paid_at'])) {
+            $paidOn = Carbon::parse($data['paid_at'])->startOfDay();
+            $floor = ($loan->disbursed_at ?? $loan->created_at)?->copy()->startOfDay();
+            if ($paidOn->gt(Carbon::today())) {
+                return response()->json(['message' => 'The payment date cannot be in the future.'], 422);
+            }
+            if ($floor && $paidOn->lt($floor)) {
+                return response()->json(['message' => 'The payment date cannot be before ' . $floor->toDateString() . ' (when this loan was ' . ($loan->disbursed_at ? 'disbursed' : 'created') . ').'], 422);
+            }
+        }
         // A cash collection needs an open cash session for the branch till when
         // the Finance module requires it (off by default — see FinanceSetting).
         if (($data['payment_method'] ?? 'Cash') === 'Cash' && \App\Models\FinanceSetting::bool('require_cash_session')) {
-            $till = \App\Models\CashAccount::branchPrimary((int) $loan->branch_id);
-            if ($till && !\App\Support\CashSessionService::openFor($till->id)) {
+            $till = \App\Models\CashAccount::branchPrimary((int) $loan->branch_id, \App\Support\LoanLedgerPoster::receiptPurpose($loan));
+            // Only a session for TODAY counts - one left open from a previous day must be closed first.
+            if ($till && !\App\Support\CashSessionService::openToday($till->id)) {
                 return response()->json(['message' => "Open today's cash session for {$till->name} before recording cash payments."], 422);
             }
         }
@@ -151,6 +164,18 @@ class LoanPaymentController extends Controller
         }
 
         $payment = DB::transaction(function () use ($loan, $data, $isSettlement, $isManual, $isCheque, $allocations, $request) {
+            // Serialize payments on one loan: without this lock two simultaneous receipts (a double
+            // click, two cashiers) both read the same unpaid installment/charge, both allocate to it
+            // and the cash is booked twice against a single amount due.
+            Loan::whereKey($loan->id)->lockForUpdate()->first();
+            if (!$isSettlement && !$isManual) {
+                $outstandingNow = LoanPaymentAllocator::outstandingBalance($loan->fresh());
+                if ((float) $data['amount'] > $outstandingNow + 0.005) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'amount' => "Amount exceeds the outstanding balance ({$outstandingNow}) - another payment may have just been recorded.",
+                    ]);
+                }
+            }
             $branch = Branch::find($loan->branch_id);
             $method = $data['payment_method'] ?? 'Cash';
             $code = NumberGenerator::next('payment', [

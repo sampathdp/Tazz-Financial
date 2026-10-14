@@ -90,6 +90,7 @@ class FdInterestPaymentController extends Controller
         $data = $request->validate([
             'paid_at' => 'nullable|date',
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id', 'required_if:payment_method,Bank,Cheque'],
             'reference_no' => 'nullable|string|max:64',
         ]);
 
@@ -99,6 +100,7 @@ class FdInterestPaymentController extends Controller
                 'paid_amount' => $fdInterestPayment->amount,
                 'paid_at' => $data['paid_at'] ?? now()->format('Y-m-d'),
                 'payment_method' => $data['payment_method'],
+                'bank_account_id' => $data['bank_account_id'] ?? null,
                 'reference_no' => $data['reference_no'] ?? null,
                 'paid_by' => $request->user()->id,
             ]);
@@ -128,6 +130,7 @@ class FdInterestPaymentController extends Controller
                 'paid_amount' => 0,
                 'paid_at' => null,
                 'payment_method' => null,
+                'bank_account_id' => null,
                 'reference_no' => null,
                 'paid_by' => null,
             ]);

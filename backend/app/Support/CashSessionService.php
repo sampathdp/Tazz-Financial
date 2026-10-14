@@ -31,6 +31,17 @@ class CashSessionService
             throw new FinancePostingException("A session for {$account->name} on {$today} already exists.");
         }
 
+        // The opening count should equal what the books say the till holds. If it doesn't, the cashier
+        // must say why: it is the earliest warning of a missing deposit, an unrecorded payout or a
+        // till funded outside the system (the difference then also surfaces as variance at close/verify).
+        $difference = bcsub($openingCount, (string) $account->current_balance, 2);
+        if (bccomp($difference, '0.00', 2) !== 0 && mb_strlen(trim((string) $notes)) < 5) {
+            throw new FinancePostingException(
+                "The counted opening amount ({$openingCount}) differs from the book balance ({$account->current_balance}) by {$difference}. "
+                . 'Recount, or enter a note explaining the difference (for example "cash brought in from head office"). If cash was added outside the system, record it first under Finance > Cash Transactions.'
+            );
+        }
+
         return CashSession::create([
             'cash_account_id' => $account->id,
             'branch_id' => $account->branch_id,
@@ -127,7 +138,15 @@ class CashSessionService
         });
     }
 
-    /** The open session for a cash account today, or null. */
+    /** The open session for a cash account that belongs to TODAY (a session left open from an earlier day does not count), or null. */
+    public static function openToday(int $cashAccountId): ?CashSession
+    {
+        $session = self::openFor($cashAccountId);
+
+        return $session && $session->business_date->isToday() ? $session : null;
+    }
+
+    /** The open session for a cash account (any day), or null. */
     public static function openFor(int $cashAccountId): ?CashSession
     {
         return CashSession::where('cash_account_id', $cashAccountId)->where('status', 'Open')->first();

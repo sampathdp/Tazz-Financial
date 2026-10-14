@@ -64,7 +64,7 @@ class PawningLedgerTest extends TestCase
             'full_name' => 'PWN Customer', 'status' => 'Active', 'created_at' => now(), 'updated_at' => now(),
         ]);
         $this->articleTypeId = DB::table('pawning_article_types')->insertGetId([
-            'name' => 'Gold 22kt', 'code' => 'G22' . Str::random(3), 'created_at' => now(), 'updated_at' => now(),
+            'name' => 'Gold 22kt ' . Str::random(5), 'code' => 'G22' . Str::random(3), 'created_at' => now(), 'updated_at' => now(),
         ]);
 
         $this->actingAs($this->admin, 'sanctum');

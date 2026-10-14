@@ -61,7 +61,7 @@ class FdLoanController extends Controller
             'branch_id' => 'required|exists:branches,id',
             'fixed_deposit_id' => 'required|exists:fixed_deposits,id',
             'loan_type_id' => 'required|exists:loan_types,id',
-            'principal_amount' => 'required|numeric|min:0.01',
+            'principal_amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'term_months' => 'required|integer|min:1',
             'installment_frequency' => ['required', Rule::in(self::FREQUENCIES)],
             'purpose' => 'nullable|string|max:255',

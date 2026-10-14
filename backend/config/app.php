@@ -40,6 +40,7 @@ return [
     */
 
     'db_clean_enabled' => env('DB_CLEAN_ENABLED', false),
+    'loan_purge_enabled' => env('LOAN_PURGE_ENABLED', false),
 
     /*
     |--------------------------------------------------------------------------

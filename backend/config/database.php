@@ -48,7 +48,11 @@ return [
             'url' => env('DATABASE_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '3306'),
-            'database' => env('DB_DATABASE', 'forge'),
+            // The test suite never touches the working database: under APP_ENV=testing it is pointed at
+            // "<DB_DATABASE>_test" (override with DB_DATABASE_TEST). Build that copy with `php artisan db:clone-for-tests`.
+            'database' => env('APP_ENV') === 'testing'
+                ? env('DB_DATABASE_TEST', env('DB_DATABASE', 'forge') . '_test')
+                : env('DB_DATABASE', 'forge'),
             'username' => env('DB_USERNAME', 'forge'),
             'password' => env('DB_PASSWORD', ''),
             'unix_socket' => env('DB_SOCKET', ''),

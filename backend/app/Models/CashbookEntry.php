@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class CashbookEntry extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
+
     protected $fillable = [
         'branch_id', 'cash_account_id', 'journal_entry_id', 'entry_date', 'direction', 'category', 'amount',
         'balance_after', 'source_type', 'source_id', 'description', 'created_by', 'approved_by',

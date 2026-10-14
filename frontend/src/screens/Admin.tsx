@@ -397,7 +397,7 @@ export function UsersScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | n
             {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </Select></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value }))}><option>Active</option><option>Inactive</option></Select></Field>
-          <Field label={editing ? 'New Password (leave blank to keep)' : 'Password'}><Input type="password" value={form.password || ''} onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))} /></Field>
+          <Field label={editing ? 'New Password (min 10 characters; leave blank to keep)' : 'Password (min 10 characters)'}><Input type="password" value={form.password || ''} onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))} /></Field>
         </div>
       </Modal>
     </div>

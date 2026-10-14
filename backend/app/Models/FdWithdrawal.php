@@ -8,7 +8,7 @@ class FdWithdrawal extends Model
 {
     protected $fillable = [
         'fixed_deposit_id', 'voucher_no', 'principal_amount', 'interest_amount', 'total_amount', 'adjusted_amount', 'settled_credit_facility_id',
-        'payment_method', 'reference_no', 'notes', 'closed_at', 'created_by',
+        'payment_method', 'reference_no', 'bank_account_id', 'notes', 'closed_at', 'created_by',
     ];
 
     protected $casts = [

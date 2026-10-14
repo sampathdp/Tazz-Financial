@@ -9,7 +9,7 @@ class FdPartPayment extends Model
     protected $fillable = [
         'fixed_deposit_id', 'voucher_no', 'principal_amount', 'rate_percent', 'held_days',
         'interest_entitlement', 'interest_paid', 'clawback_amount', 'net_amount_paid',
-        'payment_method', 'reference_no', 'notes', 'paid_at',
+        'payment_method', 'reference_no', 'bank_account_id', 'notes', 'paid_at',
         'principal_before', 'monthly_interest_before', 'total_interest_before', 'maturity_amount_before',
         'created_by',
     ];

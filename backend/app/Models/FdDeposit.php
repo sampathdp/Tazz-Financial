@@ -8,7 +8,7 @@ class FdDeposit extends Model
 {
     protected $fillable = [
         'deposit_number', 'branch_id', 'customer_id', 'deposit_date', 'amount',
-        'payment_method', 'reference_no', 'bank_id', 'notes', 'status', 'fixed_deposit_id', 'created_by',
+        'payment_method', 'reference_no', 'bank_id', 'bank_account_id', 'notes', 'status', 'fixed_deposit_id', 'created_by',
     ];
 
     protected $casts = [

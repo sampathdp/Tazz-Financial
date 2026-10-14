@@ -75,6 +75,8 @@ class FinancePostingService
                 }
             }
 
+            self::assertCashSessionOpen($spec);
+
             // 2 + 3 + 5 — lock, validate, move, in a deterministic account order.
             $movements = collect($spec['movements'])
                 ->sortBy(fn ($m) => $m['account_type'] . ':' . str_pad((string) $m['account_id'], 12, '0', STR_PAD_LEFT))
@@ -158,6 +160,42 @@ class FinancePostingService
         });
     }
 
+    /**
+     * For screens that let a user "delete" a posted entry (manual cashbook, bank transactions): that is a
+     * reversal, so it must follow the same maker-checker rule as Cash Transactions. Throws when the Finance
+     * setting requires approval; the approved path (finance_reversal) calls reverse() directly.
+     */
+    public static function assertDirectReversalAllowed(): void
+    {
+        if (\App\Models\FinanceSetting::bool('reversal_requires_approval', true)) {
+            throw new FinancePostingException('Reversals need approval. Open Finance > Cash Transactions, find this entry and use "Request reversal" so an approver can sign it off.');
+        }
+    }
+
+    /** Money-in/out types that need the till's session open when the Finance setting requires one. Transfers, float issue/return, adjustments (incl. a session's own variance) and reversals are deliberately exempt. */
+    private const SESSION_GATED = ['COLLECTION', 'CASH_IN', 'CASH_OUT', 'DISBURSEMENT', 'EXPENSE_PAYMENT'];
+
+    /**
+     * One place for the "no cash through a till without today's session" rule, so every module
+     * (loan, FD, savings, pawning, speed draft, borrowing, expense, disbursement) obeys the same
+     * setting instead of each controller remembering to check it.
+     */
+    private static function assertCashSessionOpen(array $spec): void
+    {
+        if (!in_array($spec['txn_type'], self::SESSION_GATED, true) || !\App\Models\FinanceSetting::bool('require_cash_session')) {
+            return;
+        }
+        foreach ($spec['movements'] as $m) {
+            if ($m['account_type'] !== 'cash') {
+                continue;
+            }
+            $till = CashAccount::find($m['account_id']);
+            if ($till && in_array($till->account_type, CashAccount::PRIMARY_TYPES, true) && !CashSessionService::openToday((int) $till->id)) {
+                throw new FinancePostingException("Open today's cash session for {$till->name} before moving cash through it.");
+            }
+        }
+    }
+
     private const CASHBOOK_CATEGORY = [
         'COLLECTION' => 'Loan Collection',
         'EXPENSE_PAYMENT' => 'Expense',
@@ -220,7 +258,14 @@ class FinancePostingService
             }
             $applied = [];
             foreach (collect($inverse)->sortBy(fn ($m) => $m['account_type'] . ':' . str_pad((string) $m['account_id'], 12, '0', STR_PAD_LEFT)) as $m) {
-                $bal = self::applyMovement($m['account_type'], (int) $m['account_id'], (string) $m['delta'], allowNegativeOverride: true);
+                // Taking money back out must respect the same no-overdraw rule as any other outflow: a void
+                // after the cash was already spent is refused (fund the account first) rather than silently
+                // leaving a negative till that the books then hide.
+                try {
+                    $bal = self::applyMovement($m['account_type'], (int) $m['account_id'], (string) $m['delta']);
+                } catch (InsufficientFundsException $e) {
+                    throw new FinancePostingException("Cannot reverse {$txn->code}: {$e->getMessage()} Put the money back into that account first, then retry.");
+                }
                 $applied[] = ['type' => $m['account_type'], 'id' => (int) $m['account_id'], 'delta' => (string) $m['delta'], 'balance' => $bal];
             }
 

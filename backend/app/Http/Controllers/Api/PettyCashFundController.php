@@ -59,7 +59,7 @@ class PettyCashFundController extends Controller
             'branch_id' => 'required|exists:branches,id',
             'custodian_id' => 'nullable|exists:users,id',
             'name' => ['required', 'string', 'max:128'],
-            'float_limit' => 'required|numeric|min:0.01',
+            'float_limit' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'status' => [Rule::in(['Active', 'Inactive'])],
         ]);
     }

@@ -6,6 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class BankAccount extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
+
+    /** A bank account with no branch is a company-level account every branch may use. */
+    public static $sharedWhenNoBranch = true;
+
     protected $fillable = [
         'branch_id', 'chart_of_account_id', 'bank_id', 'name', 'bank_branch_name', 'account_number',
         'account_type', 'currency', 'opening_balance', 'current_balance', 'status', 'notes', 'overdraft_limit',

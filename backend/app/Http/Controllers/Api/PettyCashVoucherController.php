@@ -40,7 +40,7 @@ class PettyCashVoucherController extends Controller
             'petty_cash_fund_id' => 'required|exists:petty_cash_funds,id',
             'expense_category_id' => 'required|exists:expense_categories,id',
             'vendor_id' => 'nullable|exists:vendors,id',
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'description' => 'nullable|string|max:255',
             'spent_at' => 'nullable|date',
         ]);

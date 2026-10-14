@@ -6,8 +6,23 @@ use Illuminate\Database\Eloquent\Model;
 
 class CashAccount extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
+
     /** Branch/head-office tills that receive auto-posted collections and are the default source for outbound cash at a branch. */
     public const PRIMARY_TYPES = ['BranchMain', 'HeadOfficeMain'];
+
+    /** What a till is for. A module asks for its purpose (branchPrimary($branch, CashAccount::PURPOSE_FD)). */
+    public const PURPOSE_GENERAL = 'General';
+    public const PURPOSE_COLLECTIONS = 'Collections';
+    public const PURPOSE_DOCUMENT_CHARGES = 'DocumentCharges';
+    public const PURPOSE_DISBURSEMENTS = 'Disbursements';
+    public const PURPOSE_FD = 'FixedDeposits';
+    public const PURPOSE_SAVINGS = 'Savings';
+    public const PURPOSE_PAWNING = 'Pawning';
+    public const PURPOSES = [
+        self::PURPOSE_GENERAL, self::PURPOSE_COLLECTIONS, self::PURPOSE_DOCUMENT_CHARGES, self::PURPOSE_DISBURSEMENTS,
+        self::PURPOSE_FD, self::PURPOSE_SAVINGS, self::PURPOSE_PAWNING,
+    ];
 
     /** Every account_type — see the add_finance_metadata_to_cash_accounts migration. */
     public const ACCOUNT_TYPES = [
@@ -16,7 +31,7 @@ class CashAccount extends Model
     ];
 
     protected $fillable = [
-        'code', 'branch_id', 'account_type', 'responsible_user_id', 'parent_cash_account_id',
+        'code', 'branch_id', 'account_type', 'purpose', 'responsible_user_id', 'parent_cash_account_id',
         'chart_of_account_id', 'name', 'opening_balance', 'current_balance',
         'allow_negative', 'last_reconciled_at', 'status',
     ];
@@ -85,12 +100,27 @@ class CashAccount extends Model
      * picked here. Shared by every *Poster so there's one definition of
      * "the branch's till".
      */
-    public static function branchPrimary(int $branchId): ?self
+    public static function branchPrimary(int $branchId, ?string $purpose = null): ?self
     {
         $base = static::where('branch_id', $branchId)->where('status', 'Active');
 
-        return (clone $base)->whereIn('account_type', self::PRIMARY_TYPES)->orderBy('id')->first()
-            ?? $base->orderBy('id')->first();
+        // 1. A till the branch dedicated to this kind of cash.
+        if ($purpose && $purpose !== self::PURPOSE_GENERAL) {
+            $dedicated = (clone $base)->where('purpose', $purpose)->whereIn('account_type', self::PRIMARY_TYPES)->orderBy('id')->first();
+            if ($dedicated) {
+                return $dedicated;
+            }
+        }
+
+        // 2. The branch's general till - one that is not reserved for some other purpose, so a
+        //    dedicated "FD" or "Doc charge" till is never silently used for unrelated cash.
+        $general = fn ($q) => $q->where(fn ($w) => $w->whereNull('purpose')->orWhere('purpose', self::PURPOSE_GENERAL));
+        $primary = (clone $base)->whereIn('account_type', self::PRIMARY_TYPES);
+        $fallback = $general(clone $primary)->orderBy('id')->first()
+            // 3. Every primary till is dedicated to something: the lowest-id one (previous behaviour).
+            ?? (clone $primary)->orderBy('id')->first();
+
+        return $fallback ?? $base->orderBy('id')->first();
     }
 
     /**

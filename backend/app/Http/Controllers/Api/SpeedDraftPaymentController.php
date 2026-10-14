@@ -46,7 +46,7 @@ class SpeedDraftPaymentController extends Controller
             return response()->json(['message' => 'Payments can only be recorded against an active Speed Draft.'], 422);
         }
         $data = $request->validate([
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'payment_type' => ['required', Rule::in(['Interest', 'CapitalReduction', 'Settlement'])],
             'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
             'paid_at' => 'nullable|date',
@@ -56,37 +56,31 @@ class SpeedDraftPaymentController extends Controller
         $type = $data['payment_type'];
         $asOf = isset($data['paid_at']) ? Carbon::parse($data['paid_at']) : Carbon::today();
 
-        if ($type === 'Interest') {
-            $outstanding = round(SpeedDraftPaymentAllocator::outstandingInterest($speedDraft) + SpeedDraftPaymentAllocator::outstandingPenalty($speedDraft, $asOf), 2);
-            if ($outstanding <= 0) {
-                return response()->json(['message' => 'There is no outstanding interest or penalty to pay on this Speed Draft.'], 422);
+        // A receipt can't be dated in the future, nor before the draft was disbursed (or created, if it never was).
+        if (isset($data['paid_at'])) {
+            $floor = ($speedDraft->disbursed_at ?? $speedDraft->created_at)?->copy()->startOfDay();
+            if ($asOf->copy()->startOfDay()->gt(Carbon::today())) {
+                return response()->json(['message' => 'The payment date cannot be in the future.'], 422);
             }
-            if ($data['amount'] > $outstanding) {
-                return response()->json(['message' => "Amount exceeds the outstanding interest and penalty ({$outstanding})."], 422);
+            if ($floor && $asOf->copy()->startOfDay()->lt($floor)) {
+                return response()->json(['message' => 'The payment date cannot be before ' . $floor->toDateString() . '.'], 422);
             }
-        } elseif ($type === 'CapitalReduction') {
-            $outstandingInterest = round(SpeedDraftPaymentAllocator::outstandingInterest($speedDraft) + SpeedDraftPaymentAllocator::outstandingPenalty($speedDraft, $asOf), 2);
-            if ($outstandingInterest > 0) {
-                return response()->json(['message' => "Settle the outstanding interest and penalty ({$outstandingInterest}) before making a capital payment."], 422);
-            }
-            $outstanding = (float) $speedDraft->outstanding_balance_cache;
-            if ($outstanding <= 0) {
-                return response()->json(['message' => 'There is no outstanding capital to reduce on this Speed Draft.'], 422);
-            }
-            if ($data['amount'] > $outstanding) {
-                return response()->json(['message' => "Amount exceeds the outstanding capital ({$outstanding})."], 422);
-            }
-        } else {
-            $outstanding = SpeedDraftPaymentAllocator::outstandingBalance($speedDraft, $asOf);
-            if ($outstanding <= 0) {
-                return response()->json(['message' => 'This Speed Draft has no outstanding balance.'], 422);
-            }
-            // Full settlement always targets the current outstanding balance —
-            // computed server-side so a stale client value can't under/overstate it.
-            $data['amount'] = $outstanding;
         }
 
-        $payment = DB::transaction(function () use ($speedDraft, $data, $type, $request) {
+        $check = $this->amountCheck($speedDraft, $type, (float) $data['amount'], $asOf);
+        if (isset($check['error'])) {
+            return response()->json(['message' => $check['error']], 422);
+        }
+        $data['amount'] = $check['amount'];
+
+        $payment = DB::transaction(function () use ($speedDraft, $data, $type, $request, $asOf) {
+            // Serialize payments on one draft, then re-check against the state we now hold the lock on -
+            // two simultaneous receipts would otherwise both be sized against the same unpaid balance.
+            $speedDraft = SpeedDraft::whereKey($speedDraft->id)->lockForUpdate()->firstOrFail();
+            $recheck = $this->amountCheck($speedDraft, $type, (float) $data['amount'], $asOf);
+            if (isset($recheck['error'])) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['amount' => $recheck['error']]);
+            }
             $branch = Branch::find($speedDraft->branch_id);
             $method = $data['payment_method'] ?? 'Cash';
             $code = NumberGenerator::next('speed_draft_payment', [
@@ -124,6 +118,44 @@ class SpeedDraftPaymentController extends Controller
         });
 
         return response()->json($payment->load('receiver:id,name'), 201);
+    }
+
+    /** The amount rules per payment type, shared by the pre-check and the locked re-check. @return array{amount?: float, error?: string} */
+    private function amountCheck(SpeedDraft $speedDraft, string $type, float $amount, Carbon $asOf): array
+    {
+        if ($type === 'Interest') {
+            $outstanding = round(SpeedDraftPaymentAllocator::outstandingInterest($speedDraft) + SpeedDraftPaymentAllocator::outstandingPenalty($speedDraft, $asOf), 2);
+            if ($outstanding <= 0) {
+                return ['error' => 'There is no outstanding interest or penalty to pay on this Speed Draft.'];
+            }
+            if ($amount > $outstanding + 0.005) {
+                return ['error' => "Amount exceeds the outstanding interest and penalty ({$outstanding})."];
+            }
+
+            return ['amount' => $amount];
+        }
+        if ($type === 'CapitalReduction') {
+            $outstandingInterest = round(SpeedDraftPaymentAllocator::outstandingInterest($speedDraft) + SpeedDraftPaymentAllocator::outstandingPenalty($speedDraft, $asOf), 2);
+            if ($outstandingInterest > 0) {
+                return ['error' => "Settle the outstanding interest and penalty ({$outstandingInterest}) before making a capital payment."];
+            }
+            $outstanding = (float) $speedDraft->outstanding_balance_cache;
+            if ($outstanding <= 0) {
+                return ['error' => 'There is no outstanding capital to reduce on this Speed Draft.'];
+            }
+            if ($amount > $outstanding + 0.005) {
+                return ['error' => "Amount exceeds the outstanding capital ({$outstanding})."];
+            }
+
+            return ['amount' => $amount];
+        }
+        $outstanding = SpeedDraftPaymentAllocator::outstandingBalance($speedDraft, $asOf);
+        if ($outstanding <= 0) {
+            return ['error' => 'This Speed Draft has no outstanding balance.'];
+        }
+
+        // Full settlement always targets the current outstanding balance - computed server-side so a stale client value can't under/overstate it.
+        return ['amount' => $outstanding];
     }
 
     public function destroy(Request $request, FacilityPayment $payment)

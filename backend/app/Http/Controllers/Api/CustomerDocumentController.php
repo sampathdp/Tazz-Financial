@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\DocStore;
 use App\Models\Customer;
 use App\Models\CustomerDocument;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -22,7 +22,7 @@ class CustomerDocumentController extends Controller
             'file' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
         ]);
 
-        $path = $request->file('file')->store("customers/{$customer->id}/documents", 'public');
+        $path = DocStore::store($request->file('file'), "customers/{$customer->id}/documents");
 
         $document = $customer->documents()->create([
             'doc_type' => $data['doc_type'],
@@ -36,16 +36,16 @@ class CustomerDocumentController extends Controller
     public function show(Customer $customer, CustomerDocument $document): StreamedResponse
     {
         abort_if((int) $document->customer_id !== (int) $customer->id, 404);
-        abort_unless(Storage::disk('public')->exists($document->file_path), 404);
+        abort_unless(DocStore::exists($document->file_path), 404);
 
-        return Storage::disk('public')->response($document->file_path, Str::afterLast($document->file_path, '/'));
+        return DocStore::response($document->file_path);
     }
 
     public function destroy(Customer $customer, CustomerDocument $document)
     {
         abort_if($document->customer_id !== $customer->id, 404);
 
-        Storage::disk('public')->delete($document->file_path);
+        DocStore::delete($document->file_path);
         $document->delete();
 
         return response()->noContent();

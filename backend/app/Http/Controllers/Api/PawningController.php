@@ -469,7 +469,7 @@ class PawningController extends Controller
             'branch_id' => 'required|exists:branches,id',
             'customer_id' => 'required|exists:customers,id',
             'pawning_type_id' => 'required|exists:pawning_types,id',
-            'principal_amount' => 'required|numeric|min:1',
+            'principal_amount' => ['required', 'numeric', 'min:1', new \App\Rules\Money],
             'start_date' => 'nullable|date',
             'purpose' => 'nullable|string|max:128',
             'previous_facility_id' => 'nullable|integer|exists:credit_facilities,id',

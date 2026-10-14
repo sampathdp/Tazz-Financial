@@ -111,7 +111,7 @@ class SpeedDraftLedgerPoster
             return;
         }
 
-        $till = CashAccount::branchPrimary((int) $payment->branch_id);
+        $till = CashAccount::branchPrimary((int) $payment->branch_id, CashAccount::PURPOSE_COLLECTIONS);
         if (!$till) {
             return;
         }

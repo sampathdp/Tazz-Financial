@@ -59,7 +59,7 @@ class CashFloatController extends Controller
         $data = $request->validate([
             'home_cash_account_id' => 'required|exists:cash_accounts,id',
             'custodian_id' => 'required|exists:users,id',
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'notes' => 'nullable|string|max:255',
         ]);
 

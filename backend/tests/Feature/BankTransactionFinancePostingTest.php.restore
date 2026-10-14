@@ -65,6 +65,9 @@ class BankTransactionFinancePostingTest extends TestCase
         $this->assertDatabaseHas('cashbook_entries', ['source_type' => 'FinanceTransaction', 'source_id' => $ftx->id, 'direction' => 'Out']);
 
         // Delete → reversal restores both balances.
+        \App\Models\FinanceSetting::put('reversal_requires_approval', '1');
+        $this->deleteJson('/api/bank-transactions/' . $res->json('id'))->assertStatus(422); // maker-checker applies to deletes too
+        \App\Models\FinanceSetting::put('reversal_requires_approval', '0');
         $this->deleteJson('/api/bank-transactions/' . $res->json('id'))->assertNoContent();
         $this->assertSame('100000.00', (string) $this->bank->fresh()->current_balance);
         $this->assertSame('30000.00', (string) $this->till->fresh()->current_balance);

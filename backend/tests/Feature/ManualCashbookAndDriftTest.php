@@ -64,6 +64,9 @@ class ManualCashbookAndDriftTest extends TestCase
 
         // Deleting the mirror reverses (does not hard-delete) — balance restored.
         $entryId = $res->json('id');
+        \App\Models\FinanceSetting::put('reversal_requires_approval', '1');
+        $this->deleteJson("/api/cashbook-entries/{$entryId}")->assertStatus(422); // maker-checker applies to deletes too
+        \App\Models\FinanceSetting::put('reversal_requires_approval', '0');
         $this->deleteJson("/api/cashbook-entries/{$entryId}")->assertNoContent();
         $this->assertSame('10000.00', (string) $this->till->fresh()->current_balance);
         $this->assertSame('Reversed', $txn->fresh()->status);

@@ -131,6 +131,7 @@ class SavingsAccountController extends Controller
             'payment_method' => ['required_with:opening_deposit', Rule::in(self::PAYMENT_METHODS)],
             'reference_no' => 'nullable|string|max:64',
             'bank_id' => 'nullable|exists:banks,id|required_unless:payment_method,Cash',
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id'],
             'notes' => 'nullable|string',
         ]);
 
@@ -173,7 +174,7 @@ class SavingsAccountController extends Controller
             if ($opening > 0) {
                 $txn = SavingsAccountService::record($account, [
                     'type' => 'Deposit', 'direction' => 'In', 'amount' => $opening, 'txn_date' => $data['open_date'],
-                    'payment_method' => $data['payment_method'], 'bank_id' => $data['bank_id'] ?? null,
+                    'payment_method' => $data['payment_method'], 'bank_id' => $data['bank_id'] ?? null, 'bank_account_id' => $data['bank_account_id'] ?? null,
                     'reference_no' => $data['reference_no'] ?? null, 'notes' => 'Opening deposit',
                     'created_by' => $request->user()->id,
                 ]);
@@ -200,11 +201,12 @@ class SavingsAccountController extends Controller
     {
         $this->assertOperable($savingsAccount);
         $data = $request->validate([
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'txn_date' => 'required|date',
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
             'reference_no' => 'nullable|string|max:64',
             'bank_id' => 'nullable|exists:banks,id|required_unless:payment_method,Cash',
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id'],
             'notes' => 'nullable|string',
         ]);
 
@@ -212,7 +214,7 @@ class SavingsAccountController extends Controller
             $savingsAccount->loadMissing('savingsProduct', 'branch');
             $txn = SavingsAccountService::record($savingsAccount, [
                 'type' => 'Deposit', 'direction' => 'In', 'amount' => round((float) $data['amount'], 2), 'txn_date' => $data['txn_date'],
-                'payment_method' => $data['payment_method'], 'bank_id' => $data['bank_id'] ?? null,
+                'payment_method' => $data['payment_method'], 'bank_id' => $data['bank_id'] ?? null, 'bank_account_id' => $data['bank_account_id'] ?? null,
                 'reference_no' => $data['reference_no'] ?? null, 'notes' => $data['notes'] ?? null,
                 'created_by' => $request->user()->id,
             ]);
@@ -230,9 +232,10 @@ class SavingsAccountController extends Controller
         $this->assertOperable($savingsAccount);
         $savingsAccount->loadMissing('savingsProduct', 'branch');
         $data = $request->validate([
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'txn_date' => 'required|date',
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id', 'required_if:payment_method,Bank,Cheque'],
             'reference_no' => 'nullable|string|max:64',
             'notes' => 'nullable|string',
         ]);
@@ -254,7 +257,7 @@ class SavingsAccountController extends Controller
         $result = DB::transaction(function () use ($savingsAccount, $data, $amount, $fee, $request) {
             $txn = SavingsAccountService::record($savingsAccount, [
                 'type' => 'Withdrawal', 'direction' => 'Out', 'amount' => $amount, 'txn_date' => $data['txn_date'],
-                'payment_method' => $data['payment_method'], 'reference_no' => $data['reference_no'] ?? null,
+                'payment_method' => $data['payment_method'], 'bank_account_id' => $data['bank_account_id'] ?? null, 'reference_no' => $data['reference_no'] ?? null,
                 'notes' => $data['notes'] ?? null, 'created_by' => $request->user()->id,
             ]);
             $txn->setRelation('savingsAccount', $savingsAccount);
@@ -288,6 +291,7 @@ class SavingsAccountController extends Controller
         $data = $request->validate([
             'txn_date' => 'required|date',
             'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id', 'required_if:payment_method,Bank,Cheque'],
             'reference_no' => 'nullable|string|max:64',
             'notes' => 'nullable|string',
         ]);
@@ -303,7 +307,7 @@ class SavingsAccountController extends Controller
             if ($balance > 0) {
                 $payout = SavingsAccountService::record($savingsAccount, [
                     'type' => 'Withdrawal', 'direction' => 'Out', 'amount' => $balance, 'txn_date' => $data['txn_date'],
-                    'payment_method' => $data['payment_method'], 'reference_no' => $data['reference_no'] ?? null,
+                    'payment_method' => $data['payment_method'], 'bank_account_id' => $data['bank_account_id'] ?? null, 'reference_no' => $data['reference_no'] ?? null,
                     'notes' => 'Closure payout', 'created_by' => $request->user()->id,
                 ]);
                 $payout->setRelation('savingsAccount', $savingsAccount);

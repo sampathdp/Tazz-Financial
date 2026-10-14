@@ -40,7 +40,7 @@ class PawningLedgerPoster
      */
     public static function postDisbursement(Pawning $pawning, ?int $executedBy = null): void
     {
-        $till = CashAccount::branchPrimary((int) $pawning->branch_id);
+        $till = CashAccount::branchPrimary((int) $pawning->branch_id, CashAccount::PURPOSE_PAWNING);
         if (!$till) {
             return;
         }
@@ -107,7 +107,7 @@ class PawningLedgerPoster
             return;
         }
 
-        $till = CashAccount::branchPrimary((int) $payment->branch_id);
+        $till = CashAccount::branchPrimary((int) $payment->branch_id, CashAccount::PURPOSE_PAWNING);
         if (!$till) {
             return;
         }
@@ -154,7 +154,7 @@ class PawningLedgerPoster
         if (!$pawning) {
             return;
         }
-        $till = CashAccount::branchPrimary((int) $pawning->branch_id);
+        $till = CashAccount::branchPrimary((int) $pawning->branch_id, CashAccount::PURPOSE_PAWNING);
         if (!$till) {
             return;
         }
@@ -220,7 +220,7 @@ class PawningLedgerPoster
         if (!$pawning) {
             return;
         }
-        $till = CashAccount::branchPrimary((int) $pawning->branch_id);
+        $till = CashAccount::branchPrimary((int) $pawning->branch_id, CashAccount::PURPOSE_PAWNING);
         if (!$till) {
             return;
         }
