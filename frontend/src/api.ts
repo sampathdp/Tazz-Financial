@@ -447,6 +447,8 @@ export interface Loan {
   pendingApplicationRequest?: LoanCancelRequest | null;
   /** The LoanDisbursement finance request in flight for this loan, if an officer requested disbursement (see loansApi.requestDisbursement()). */
   pendingDisbursementRequest?: FinanceRequest | null;
+  /** Active but the disbursement never finished (no repayment schedule): the disburse form is offered again. */
+  disbursementIncomplete?: boolean;
   cancelRequests?: LoanCancelRequest[];
   disbursedAmount?: number | string | null;
   disbursedAt?: string | null;

@@ -177,6 +177,7 @@ class LoanController extends Controller
         $loan->load(self::DETAIL_RELATIONS);
         $data = $loan->toArray();
         $data['summary'] = LoanSummary::build($loan);
+        $data['disbursement_incomplete'] = $loan->disbursementIncomplete();
 
         return $data;
     }
@@ -805,7 +806,7 @@ class LoanController extends Controller
     /** Why this loan can't be disbursed yet — status, unsettled document charge, or a disbursement request already in flight. Null when it's clear. */
     private function disbursementBlockReason(Loan $loan, ?float $financed = null): ?string
     {
-        if ($loan->status !== 'Approved') {
+        if ($loan->status !== 'Approved' && !$loan->disbursementIncomplete()) {
             return 'Only approved loans can be disbursed.';
         }
         $detail = $loan->loanDetail()->with('loanType')->first();
@@ -852,6 +853,12 @@ class LoanController extends Controller
 
         $executedBy = $request->user()->id;
         DB::transaction(function () use ($loan, $data, $executedBy) {
+            // Finishing a disbursement that stopped halfway: put the loan back to Approved first, so it goes
+            // through the normal path. The ledger posting is idempotent (one key per loan), so money never moves twice.
+            if ($loan->disbursementIncomplete()) {
+                \App\Models\SalesExecutiveCommission::where('credit_facility_id', $loan->id)->whereNull('paid_at')->delete();
+                $loan->update(['status' => 'Approved', 'disbursed_amount' => null, 'disbursed_at' => null, 'outstanding_balance_cache' => 0]);
+            }
             LoanDisbursementCompleter::complete($loan, $data);
             LoanLedgerPoster::postDisbursement($loan->fresh(), $executedBy, $data['disbursement_method'] === 'Cash' ? ($data['cash_account_id'] ?? null) : null);
         });

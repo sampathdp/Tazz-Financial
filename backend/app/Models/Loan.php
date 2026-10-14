@@ -168,6 +168,15 @@ class Loan extends Model
         return $this->hasMany(FacilityCollateral::class, 'credit_facility_id');
     }
 
+    /**
+     * A disbursement that stopped halfway (a network drop, a failure after the loan row was saved): the loan
+     * is Active with a disbursed date but never got its repayment schedule. It can be disbursed again.
+     */
+    public function disbursementIncomplete(): bool
+    {
+        return $this->status === 'Active' && $this->disbursed_at !== null && !$this->schedules()->exists();
+    }
+
     public function schedules()
     {
         return $this->hasMany(FacilitySchedule::class, 'credit_facility_id')->orderBy('installment_no');

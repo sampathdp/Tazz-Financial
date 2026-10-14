@@ -63,7 +63,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
   const [tab, setTab] = useState(SECTIONS[0].id)
   const [busy, setBusy] = useState(false)
 
-  if (loan.status === 'Approved' && context === 'active') {
+  if ((loan.status === 'Approved' || loan.disbursementIncomplete) && context === 'active') {
     return <DisburseForm loan={loan} me={me} onChanged={onChanged} notify={notify} />
   }
 
@@ -1059,7 +1059,7 @@ function StatusFlagsModal({ open, onClose, loan, onChanged, notify }: {
 function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
   const financedAmount = num(loan.principalAmount) - num(loan.loanDetail?.downPayment)
   const [amount, setAmount] = useState<string>(String(financedAmount))
-  const [disbursedAt, setDisbursedAt] = useState(todayIso())
+  const [disbursedAt, setDisbursedAt] = useState(loan.disbursementIncomplete && loan.disbursedAt ? loan.disbursedAt.slice(0, 10) : todayIso())
   const [firstDate, setFirstDate] = useState('')
   const [method, setMethod] = useState<'Cash' | 'Bank' | 'Cheque'>('Cash')
   const [bankAccountId, setBankAccountId] = useState<number | ''>('')
@@ -1164,6 +1164,11 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
               <Btn size="sm" variant="danger" icon="x" onClick={rejectCancel}>Reject</Btn>
             </div>
           )}
+        </div>
+      )}
+      {loan.disbursementIncomplete && (
+        <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 8, border: '1px solid var(--warn)', background: 'var(--warn-dim)', color: 'var(--warn)', fontSize: 13 }}>
+          The last disbursement for this loan did not finish (no repayment schedule was created). Review the details and disburse again; money is never paid out twice.
         </div>
       )}
       <ErrorBanner error={err} style={{ marginBottom: 14 }} />
