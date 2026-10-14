@@ -54,7 +54,7 @@ class LoanLedgerPoster
             $cashAccountId,
         );
         if (!$target) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('The paying cash or bank account could not be resolved for this disbursement, so nothing was recorded.');
         }
         $amount = (string) $loan->disbursed_amount;
         $entryDate = optional($loan->disbursed_at)->toDateString() ?? now()->toDateString();
@@ -343,9 +343,10 @@ class LoanLedgerPoster
         if ($payment->payment_method !== 'Cash') {
             return;
         }
-        $till = CashAccount::branchPrimary((int) $payment->branch_id, self::receiptPurpose($payment->facility));
+        // Cash goes into the till of the branch that took it (the loan's own branch unless collected elsewhere).
+        $till = CashAccount::branchPrimary((int) ($payment->collected_branch_id ?: $payment->branch_id), self::receiptPurpose($payment->facility));
         if (!$till) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
 
         if ($isPending) {

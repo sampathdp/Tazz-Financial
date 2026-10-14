@@ -36,7 +36,19 @@ class BankAccountController extends Controller
     public function update(Request $request, BankAccount $bankAccount)
     {
         $data = $this->validated($request, $bankAccount);
+
+        if ($bankAccount->transactions()->exists() || \App\Models\JournalLine::where('account_id', $bankAccount->chart_of_account_id)->exists()) {
+            if (array_key_exists('branch_id', $data) && (int) ($data['branch_id'] ?? 0) !== (int) ($bankAccount->branch_id ?? 0)) {
+                return response()->json(['message' => 'This bank account already has transactions, so it cannot be moved to another branch.'], 422);
+            }
+            if (array_key_exists('opening_balance', $data) && $data['opening_balance'] !== null && bccomp((string) $data['opening_balance'], (string) $bankAccount->opening_balance, 2) !== 0) {
+                return response()->json(['message' => 'This bank account already has transactions, so its opening balance cannot be changed. Post an adjustment instead.'], 422);
+            }
+        }
         $bankAccount->update($data);
+        if ($bankAccount->chart_of_account_id) {
+            \App\Models\ChartOfAccount::whereKey($bankAccount->chart_of_account_id)->update(['name' => "Bank - {$bankAccount->name}", 'status' => $bankAccount->status]);
+        }
 
         return $bankAccount->load('branch:id,name,code');
     }

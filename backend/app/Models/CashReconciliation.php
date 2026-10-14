@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class CashReconciliation extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
     protected $fillable = [
         'branch_id', 'as_at_date',
         'system_cash_total', 'cheque_in_hand_total', 'postdated_cheque_total',

@@ -22,7 +22,10 @@ class CashAccountController extends Controller
         $data['current_balance'] = $data['opening_balance'] ?? 0;
 
         $account = DB::transaction(function () use ($data) {
-            $account = CashAccount::create($data);
+            $account = CashAccount::create($data + ['code' => 'NEW-' . \Illuminate\Support\Str::random(10)]); // replaced below once the id is known
+            // A unique, readable code, e.g. HB-CASH-17 (the id makes it unique by construction).
+            $branchCode = optional(\App\Models\Branch::find($account->branch_id))->code ?? 'BR';
+            $account->update(['code' => substr("{$branchCode}-CASH-{$account->id}", 0, 24)]);
             OpeningBalanceLedgerPoster::postForCashAccount($account);
 
             return $account;
@@ -34,7 +37,22 @@ class CashAccountController extends Controller
     public function update(Request $request, CashAccount $cashAccount)
     {
         $data = $this->validated($request, $cashAccount);
+
+        // Branch and opening balance are fixed once the till has any history: changing them would move past
+        // cash to another branch, or change the opening figure, without a journal entry.
+        if ($cashAccount->entries()->exists() || \App\Models\JournalLine::where('account_id', $cashAccount->chart_of_account_id)->exists()) {
+            if (array_key_exists('branch_id', $data) && (int) $data['branch_id'] !== (int) $cashAccount->branch_id) {
+                return response()->json(['message' => 'This till already has transactions, so it cannot be moved to another branch.'], 422);
+            }
+            if (array_key_exists('opening_balance', $data) && $data['opening_balance'] !== null && bccomp((string) $data['opening_balance'], (string) $cashAccount->opening_balance, 2) !== 0) {
+                return response()->json(['message' => 'This till already has transactions, so its opening balance cannot be changed. Post an adjustment instead.'], 422);
+            }
+        }
         $cashAccount->update($data);
+        // Keep the ledger account's name and status in step with the till.
+        if ($cashAccount->chart_of_account_id) {
+            \App\Models\ChartOfAccount::whereKey($cashAccount->chart_of_account_id)->update(['name' => "Cash in Hand - {$cashAccount->name}", 'status' => $cashAccount->status]);
+        }
 
         return $cashAccount->load('branch:id,name,code');
     }

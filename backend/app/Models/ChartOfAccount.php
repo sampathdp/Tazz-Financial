@@ -9,10 +9,11 @@ class ChartOfAccount extends Model
 {
     protected $table = 'chart_of_accounts';
 
-    protected $fillable = ['code', 'name', 'account_type', 'normal_balance', 'parent_id', 'is_system', 'status'];
+    protected $fillable = ['code', 'name', 'account_type', 'normal_balance', 'parent_id', 'is_system', 'is_postable', 'status'];
 
     protected $casts = [
         'is_system' => 'boolean',
+        'is_postable' => 'boolean',
     ];
 
     public function parent()
@@ -67,7 +68,7 @@ class ChartOfAccount extends Model
             'normal_balance' => 'Debit',
             'parent_id' => $parent->id,
             'is_system' => false,
-            'status' => $till->status,
+            'status' => $till->status ?? 'Active',
         ]);
         $till->update(['chart_of_account_id' => $account->id]);
 
@@ -88,7 +89,7 @@ class ChartOfAccount extends Model
             'normal_balance' => 'Debit',
             'parent_id' => $parent->id,
             'is_system' => false,
-            'status' => $bank->status,
+            'status' => $bank->status ?? 'Active',
         ]);
         $bank->update(['chart_of_account_id' => $account->id]);
 
@@ -109,7 +110,7 @@ class ChartOfAccount extends Model
             'normal_balance' => 'Debit',
             'parent_id' => $parent->id,
             'is_system' => false,
-            'status' => $fund->status,
+            'status' => $fund->status ?? 'Active',
         ]);
         $fund->update(['chart_of_account_id' => $account->id]);
 
@@ -142,7 +143,7 @@ class ChartOfAccount extends Model
      */
     private static array $balancesCache = [];
 
-    public static function balancesAsOf(?string $asOfDate = null, ?string $fromDate = null): \Illuminate\Support\Collection
+    public static function balancesAsOf(?string $asOfDate = null, ?string $fromDate = null, ?array $branchIds = null): \Illuminate\Support\Collection
     {
         // Per-request memoization — a single Trial Balance/P&L/Balance Sheet/
         // Cash Flow request calls this with the same (asOfDate, fromDate) pair
@@ -150,7 +151,7 @@ class ChartOfAccount extends Model
         // each for cash/accrual figures and cash/accrual waterfall), and each
         // call is a full journal_lines scan. Safe as a static array: cleared
         // per PHP-FPM/CLI request, never shared across requests.
-        $key = ($asOfDate ?? '') . '|' . ($fromDate ?? '');
+        $key = ($asOfDate ?? '') . '|' . ($fromDate ?? '') . '|' . ($branchIds === null ? '*' : implode(',', $branchIds));
         if (isset(self::$balancesCache[$key])) {
             return self::$balancesCache[$key];
         }
@@ -159,6 +160,8 @@ class ChartOfAccount extends Model
             ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
             ->when($asOfDate, fn ($q) => $q->whereDate('journal_entries.entry_date', '<=', $asOfDate))
             ->when($fromDate, fn ($q) => $q->whereDate('journal_entries.entry_date', '>=', $fromDate))
+            // null = every branch; an array limits the figures to entries tagged with those branches.
+            ->when($branchIds !== null, fn ($q) => $q->whereIn('journal_entries.branch_id', $branchIds))
             ->selectRaw('journal_lines.account_id, SUM(journal_lines.debit) as total_debit, SUM(journal_lines.credit) as total_credit')
             ->groupBy('journal_lines.account_id')
             ->get()

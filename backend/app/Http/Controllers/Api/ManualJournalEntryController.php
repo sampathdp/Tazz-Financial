@@ -25,7 +25,7 @@ class ManualJournalEntryController extends Controller
 {
     public function index(Request $request)
     {
-        return ManualJournalEntry::with(['lines.account:id,code,name', 'requester:id,name', 'branch:id,name', 'journalEntry:id,code'])
+        return \App\Support\CurrentBranch::applyScope(ManualJournalEntry::with(['lines.account:id,code,name', 'requester:id,name', 'branch:id,name', 'journalEntry:id,code']), 'manual_journal_entries.branch_id')
             ->when($request->query('status'), fn ($q, $s) => $q->where('status', $s))
             ->orderByDesc('id')
             ->get();
@@ -72,7 +72,7 @@ class ManualJournalEntryController extends Controller
                 'code' => $code,
                 'entry_date' => $data['entry_date'],
                 'description' => $data['description'] ?? null,
-                'branch_id' => $data['branch_id'] ?? null,
+                'branch_id' => $data['branch_id'] ?? $request->user()->branch_id,
                 'status' => 'PendingApproval',
                 'requested_by' => $request->user()->id,
                 'reason' => $data['reason'] ?? null,

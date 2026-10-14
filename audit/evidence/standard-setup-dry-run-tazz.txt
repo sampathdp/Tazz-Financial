@@ -1,0 +1,25 @@
++------+-----------------------------------+-----------------------------------------------+
+|[32m Item [39m|[32m Target                            [39m|[32m Action                                        [39m|
++------+-----------------------------------+-----------------------------------------------+
+| C-13 | Account 6060 incentive FDs        | renumber to 5230 (Incentive - Fixed Deposits) |
+| C-13 | Account 6061 Incentive Loans      | renumber to 5240 (Incentive - Loans)          |
+| C-13 | Account 6062 Service Charge       | renumber to 4950 (Service Charge Income)      |
+| C-6  | Expense category "Incentive FD"   | post to 5230 incentive FDs                    |
+| C-6  | Expense category "Loan Incentive" | post to 5240 Incentive Loans                  |
+| C-6  | Expense category "Salary"         | post to 5210 Salary / EPF / ETF               |
+| C-5  | Charge category "Legal"           | post to 4020 Loan Charges / Fees              |
+| C-5  | Charge category "Valuation"       | post to 4020 Loan Charges / Fees              |
+| C-5  | Charge category "Other"           | post to 4020 Loan Charges / Fees              |
+| C-5  | Charge category "Postal Charges"  | post to 4020 Loan Charges / Fees              |
+| C-5  | Charge category "LOD Charges"     | post to 4020 Loan Charges / Fees              |
+| C-5  | Charge category "Service Charges" | post to 4950 Service Charge                   |
+| C-5  | Charge category "Visit Charges"   | post to 4020 Loan Charges / Fees              |
+| B-6  | Till "Collection" (branch 1)      | purpose Collections                           |
+| B-6  | Till "Cash Float" (branch 1)      | purpose General                               |
+| B-6  | Till "FD" (branch 4)              | purpose FixedDeposits                         |
+| B-6  | Till "Doc charge" (branch 4)      | purpose DocumentCharges                       |
+| B-10 | Bank account "Head OFZ Operation" | tagged branch 4 - CONFIRM (not changed)       |
+| B-10 | Bank account "DOC Charge"         | tagged branch 1 - CONFIRM (not changed)       |
+| B-10 | Bank account "Expenses Account"   | tagged branch 4 - CONFIRM (not changed)       |
++------+-----------------------------------+-----------------------------------------------+
+[33mDry run: nothing was changed. Re-run with --apply to make these changes.[39m

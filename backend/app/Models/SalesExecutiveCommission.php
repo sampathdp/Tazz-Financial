@@ -6,6 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 class SalesExecutiveCommission extends Model
 {
+    /** The branch comes from the parent record (see the add_branch_id_to_money_child_tables migration). */
+    protected static function booted(): void
+    {
+        static::creating(function ($m) {
+            if (empty($m->branch_id) && $m->credit_facility_id) {
+                $m->branch_id = \App\Models\Loan::withoutGlobalScopes()->whereKey($m->credit_facility_id)->value('branch_id');
+            }
+        });
+    }
+
     public $timestamps = false;
 
     protected $fillable = [

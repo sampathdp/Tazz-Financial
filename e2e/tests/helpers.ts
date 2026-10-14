@@ -1,9 +1,10 @@
 import { Page, expect } from '@playwright/test'
 import { execSync } from 'node:child_process'
+import { resolve } from 'node:path'
 
 export const ADMIN = { email: 'admin@absl.local', password: 'password' }
 
-const BACKEND_DIR = 'h:/React/ABSL-Financial/backend'
+const BACKEND_DIR = process.env.BACKEND_DIR || resolve(process.cwd(), '../backend')
 
 /** Clear the Laravel rate-limiter (login is throttled to 5/min, too tight for E2E). */
 export function resetRateLimit() {
@@ -26,17 +27,16 @@ export const ROUTES: Record<string, { section?: string; label: string; title: st
 }
 
 /**
- * Navigate the SPA to a route. The app reads the active route from
- * localStorage('mms-route') on mount, so we set it and reload — deterministic
- * and immune to the sidebar's expand/scroll animation. Requires an authed
+ * Navigate the SPA to a route. The app uses URL routes (react-router, '/<route id>'),
+ * so we go straight to the URL — deterministic and immune to the sidebar's
+ * expand/scroll animation. Requires an authed
  * session (storageState). Sidebar click-through is covered separately in
  * 03-sidebar.spec.ts.
  */
 export async function nav(page: Page, route: keyof typeof ROUTES | string) {
   const r = ROUTES[route]
   if (!r) throw new Error(`Unknown route ${route}`)
-  await page.evaluate((rt) => localStorage.setItem('mms-route', rt), route as string)
-  await page.reload()
+  await page.goto('/' + route)
   await expect(page.getByRole('heading', { level: 1, name: r.title })).toBeVisible()
 }
 
@@ -62,4 +62,16 @@ export async function login(page: Page, email = ADMIN.email, password = ADMIN.pa
   await page.getByPlaceholder('you@company.com').fill(email)
   await page.getByPlaceholder('••••••••').fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
+  await dismissWhatsNew(page)
+}
+
+/** The "What's new" release-notes modal opens once per user per app version and blocks clicks until dismissed. */
+export async function dismissWhatsNew(page: Page) {
+  const gotIt = page.getByRole('button', { name: 'Got it' })
+  try {
+    await gotIt.waitFor({ state: 'visible', timeout: 4000 })
+    await gotIt.click()
+  } catch {
+    /* already seen for this user and version */
+  }
 }

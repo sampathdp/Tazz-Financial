@@ -107,6 +107,7 @@ export const NAV: NavNode[] = [
     { id: 'acc/pl', label: 'Profit & Loss', icon: 'pie' },
     { id: 'acc/bs', label: 'Balance Sheet', icon: 'grid' },
     { id: 'acc/cf', label: 'Cash Flow', icon: 'swap' },
+    { id: 'acc/ib', label: 'Inter-Branch Balances', icon: 'swap' },
     { id: 'acc/drift', label: 'Ledger Drift', icon: 'adjust' },
   ] },
 

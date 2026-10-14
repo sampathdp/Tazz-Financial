@@ -8,10 +8,11 @@ import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, Pag
 import { Icon } from '../components/Icon'
 import { ExportButtons } from '../components/ExportButtons'
 import { DateRangeSelect } from '../components/DateRangeSelect'
+import { BranchFilter, useBranchFilter } from '../components/BranchFilter'
 import {
   chartOfAccountsApi, journalEntriesApi, accountingReportsApi, manualJournalEntriesApi,
   type ChartOfAccount, type AccountType, type JournalEntry, type GeneralLedgerReport,
-  type TrialBalanceReport, type ProfitLossReport, type PLMonthlyRow, type BalanceSheetReport, type CashFlowReport, type LedgerDriftReport, type AuthUser,
+  type TrialBalanceReport, type InterBranchReport, type ProfitLossReport, type PLMonthlyRow, type BalanceSheetReport, type CashFlowReport, type LedgerDriftReport, type AuthUser,
   type ManualJournalEntry, type JournalAccountOption,
 } from '../api'
 import { Can, canApprove } from '../lib/permissions'
@@ -79,12 +80,12 @@ export function ChartOfAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
             <Td mono>{r.code}</Td>
             <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>
               <span className="row gap-1" style={{ alignItems: 'center', display: 'inline-flex' }}>
-                {r.name}{r.isSystem && <Icon n="shield" s={12} c="var(--tx-3)" />}
+                {r.name}{r.isSystem && <Icon n="shield" s={12} c="var(--tx-3)" />}{r.isPostable === false && <Badge tone="blue">Header</Badge>}
               </span>
             </Td>
             <Td align="center"><Badge tone={typeTone(r.accountType)} dot>{r.accountType}</Badge></Td>
             <Td>{r.parent ? `${r.parent.code} ${r.parent.name}` : '—'}</Td>
-            <Td align="right" mono>{money(r.balance)}</Td>
+            <Td align="right" mono>{r.isPostable === false ? <span title="Total of its child accounts (a header holds no postings of its own)">{money(r.rollupBalance)} <span className="t-2">group</span></span> : money(r.balance)}</Td>
             <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
             <Td align="right"><Can user={me} module="Chart of Accounts" action="Edit">
               <Btn variant="ghost" size="sm" onClick={() => openEdit(r)}>Edit</Btn>
@@ -446,15 +447,16 @@ export function ManualJournalEntriesScreen({ user: me }: { go: Go; user?: AuthUs
 /* ---------------------------- Trial Balance ---------------------------- */
 
 export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
+  const { branches, branchId, setBranchId } = useBranchFilter(_me)
   const [asOf, setAsOf] = useState(today())
   const [report, setReport] = useState<TrialBalanceReport | null>(null)
   const [loading, setLoading] = useState(true)
 
   const refresh = () => {
     setLoading(true)
-    accountingReportsApi.trialBalance(asOf || undefined).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+    accountingReportsApi.trialBalance(asOf || undefined, branchId).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
   }
-  useEffect(refresh, [asOf]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(refresh, [asOf, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = report?.rows ?? []
   const totals = report?.totals
@@ -463,6 +465,7 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
   const totalDebit = Number(totals?.debit ?? 0)
   const totalCredit = Number(totals?.credit ?? 0)
   const balanced = totals?.balanced ?? true
+  const branchView = totals?.balanced === null
   const abnormal = rows.filter((r) => r.isAbnormal)
 
   const exportExcel = () => {
@@ -480,15 +483,15 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
       emptyText: 'No accounts yet',
     }, `trial-balance-${today()}.xlsx`)
   }
-  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('trial-balance', asOf ? { as_of: asOf } : {}), `trial-balance-${today()}.pdf`)
+  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('trial-balance', { ...(asOf ? { as_of: asOf } : {}), ...(branchId ? { branch_id: branchId } : {}) }), `trial-balance-${today()}.pdf`)
 
   return (
     <div>
       <PageHead crumbs="Accounting" title="Trial Balance" icon="chart"
         actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
-      <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field><BranchFilter user={_me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
 
-      {!loading && !balanced && (
+      {!loading && !balanced && !branchView && (
         <Card style={{ marginBottom: 16, borderColor: 'var(--bad)', background: 'var(--bad-dim)' }}>
           <div className="row gap-2" style={{ alignItems: 'center', fontWeight: 600, color: 'var(--bad)' }}>
             <Icon n="alert" /> Ledger is out of balance by {money(totals?.difference ?? 0)} — debit balances {money(totalDebit)} vs credit balances {money(totalCredit)}.
@@ -522,7 +525,7 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
           <div className="row between" style={{ padding: '12px 20px', borderTop: '1px solid var(--line)', fontWeight: 700 }}>
             <span className="row gap-2" style={{ alignItems: 'center' }}>
               Totals
-              <Badge tone={balanced ? 'green' : 'red'} dot>{balanced ? 'balanced' : `off by ${money(totals?.difference ?? 0)}`}</Badge>
+              {branchView ? <Badge tone="blue" dot>branch view</Badge> : <Badge tone={balanced ? 'green' : 'red'} dot>{balanced ? 'balanced' : `off by ${money(totals?.difference ?? 0)}`}</Badge>}
             </span>
             <div className="row gap-4">
               <span style={{ fontFamily: 'monospace' }}>{money(totalDebit)}</span>
@@ -548,6 +551,7 @@ const WATERFALL_ROWS: { key: string; label: string; indent?: boolean; bold?: boo
   { key: 'documentationIncome', label: 'Documentation Income (Other Income)' },
   { key: 'realEstateProfit', label: 'Real Estate Profit' },
   { key: 'refundsOnWriteOffs', label: 'Refunds on Write-offs from General Treasury' },
+  { key: 'miscellaneousIncome', label: 'Miscellaneous Income (Other Income, Cash Overage, other)' },
   { key: 'netIncome', label: 'Net Income/(Expense)', bold: true },
   { key: 'staffCost.salary', label: 'Salary/EPF/ETF', indent: true },
   { key: 'staffCost.allowances', label: 'Allowances', indent: true },
@@ -567,6 +571,7 @@ const WATERFALL_ROWS: { key: string; label: string; indent?: boolean; bold?: boo
 
 export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
+  const { branches, branchId, setBranchId } = useBranchFilter(_me)
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [report, setReport] = useState<ProfitLossReport | null>(null)
@@ -575,9 +580,9 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
 
   const refresh = () => {
     setLoading(true)
-    accountingReportsApi.profitLoss({ from: fromDate || undefined, to: toDate || undefined }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+    accountingReportsApi.profitLoss({ from: fromDate || undefined, to: toDate || undefined, branchId }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
   }
-  useEffect(refresh, [fromDate, toDate]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(refresh, [fromDate, toDate, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [exportingExcel, setExportingExcel] = useState(false)
   const exportExcel = async () => {
@@ -586,7 +591,7 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
     try {
       let monthly: PLMonthlyRow[] = []
       try {
-        if (fromDate && toDate) monthly = (await accountingReportsApi.profitLossMonthly({ from: fromDate, to: toDate })).months
+        if (fromDate && toDate) monthly = (await accountingReportsApi.profitLossMonthly({ from: fromDate, to: toDate, branchId })).months
       } catch (ex: any) {
         notify.error('Monthly breakdown failed', getErrorText(ex, 'Could not load month-by-month totals — exporting without them'))
       }
@@ -682,6 +687,7 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap" style={{ alignItems: 'flex-end' }}>
           <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
+          <BranchFilter user={_me} branches={branches} branchId={branchId} onChange={setBranchId} />
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
         </div>
@@ -774,15 +780,16 @@ function BsSection({ title, rows, total }: { title: string; rows: { code: string
 }
 
 export function BalanceSheetScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
+  const { branches, branchId, setBranchId } = useBranchFilter(_me)
   const [asOf, setAsOf] = useState('')
   const [report, setReport] = useState<BalanceSheetReport | null>(null)
   const [loading, setLoading] = useState(true)
 
   const refresh = () => {
     setLoading(true)
-    accountingReportsApi.balanceSheet(asOf || undefined).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+    accountingReportsApi.balanceSheet(asOf || undefined, branchId).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
   }
-  useEffect(refresh, [asOf]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(refresh, [asOf, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const exportExcel = () => {
     if (!report) return
@@ -799,16 +806,16 @@ export function BalanceSheetScreen({ user: _me }: { go: Go; user?: AuthUser | nu
       ],
     }, `balance-sheet-${today()}.xlsx`)
   }
-  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('balance-sheet', asOf ? { as_of: asOf } : {}), `balance-sheet-${today()}.pdf`)
+  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('balance-sheet', { ...(asOf ? { as_of: asOf } : {}), ...(branchId ? { branch_id: branchId } : {}) }), `balance-sheet-${today()}.pdf`)
 
   return (
     <div>
       <PageHead crumbs="Accounting" title="Balance Sheet" icon="grid"
         actions={report && <div className="row gap-3" style={{ alignItems: 'center' }}>
-          <Badge tone={report.balanced ? 'green' : 'red'} dot>{report.balanced ? 'Balanced' : 'Out of balance'}</Badge>
+          {report.balanced === null ? <Badge tone="blue" dot>Branch view</Badge> : <Badge tone={report.balanced ? 'green' : 'red'} dot>{report.balanced ? 'Balanced' : 'Out of balance'}</Badge>}
           <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />
         </div>} />
-      <Card style={{ marginBottom: 16 }}><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field></Card>
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field><BranchFilter user={_me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
       {loading ? <Card><LoadingBlock /></Card> : report && (
         <div className="col gap-4">
           <BsSection title="Assets" rows={report.assets} total={report.totalAssets} />
@@ -849,6 +856,7 @@ function CfSection({ title, rows, total, tone }: { title: string; rows: { code: 
 }
 
 export function CashFlowScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
+  const { branches, branchId, setBranchId } = useBranchFilter(_me)
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [report, setReport] = useState<CashFlowReport | null>(null)
@@ -856,9 +864,9 @@ export function CashFlowScreen({ user: _me }: { go: Go; user?: AuthUser | null }
 
   const refresh = () => {
     setLoading(true)
-    accountingReportsApi.cashFlow({ from: fromDate || undefined, to: toDate || undefined }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+    accountingReportsApi.cashFlow({ from: fromDate || undefined, to: toDate || undefined, branchId }).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
   }
-  useEffect(refresh, [fromDate, toDate]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(refresh, [fromDate, toDate, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const exportExcel = () => {
     if (!report) return
@@ -879,7 +887,7 @@ export function CashFlowScreen({ user: _me }: { go: Go; user?: AuthUser | null }
       ],
     }, `cash-flow-${today()}.xlsx`)
   }
-  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('cash-flow', { from: fromDate || undefined, to: toDate || undefined }), `cash-flow-${today()}.pdf`)
+  const exportPdf = async () => downloadBlob(await accountingReportsApi.pdf('cash-flow', { from: fromDate || undefined, to: toDate || undefined, branch_id: branchId }), `cash-flow-${today()}.pdf`)
 
   return (
     <div>
@@ -892,6 +900,7 @@ export function CashFlowScreen({ user: _me }: { go: Go; user?: AuthUser | null }
         <div className="row gap-3 wrap">
           <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <BranchFilter user={_me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
       {loading ? <Card><LoadingBlock /></Card> : report && (
@@ -913,6 +922,45 @@ export function CashFlowScreen({ user: _me }: { go: Go; user?: AuthUser | null }
           </Card>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ---------------------------- Inter-Branch Balances ---------------------------- */
+/* When one branch's cash pays or receives money for another branch's transaction, each branch keeps its own
+   balanced entry and the two settle through "due from" (1400) and "due to" (2400) accounts. This lists who
+   owes whom as of a date; across the whole company the net is zero. */
+
+export function InterBranchScreen({ user: _me }: { go: Go; user?: AuthUser | null }) {
+  const { branches, branchId, setBranchId } = useBranchFilter(_me)
+  const [asOf, setAsOf] = useState(today())
+  const [report, setReport] = useState<InterBranchReport | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const refresh = () => {
+    setLoading(true)
+    accountingReportsApi.interBranch(asOf || undefined, branchId).then(setReport).catch(() => setReport(null)).finally(() => setLoading(false))
+  }
+  useEffect(refresh, [asOf, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rows = report?.rows ?? []
+  return (
+    <div>
+      <PageHead crumbs="Accounting" title="Inter-Branch Balances" icon="swap"
+        actions={report && !report.branchFiltered && <Badge tone={Number(report.netTotal) === 0 ? 'green' : 'red'} dot>{Number(report.netTotal) === 0 ? 'Nets to zero' : `Off by ${money(report.netTotal)}`}</Badge>} />
+      <Card style={{ marginBottom: 16 }}>
+        <div className="row gap-3 wrap">
+          <Field label="As Of"><Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /></Field>
+          <BranchFilter user={_me} branches={branches} branchId={branchId} onChange={setBranchId} />
+        </div>
+      </Card>
+      <Card pad={0}>
+        {loading ? <LoadingBlock /> :
+        <Table cols={[{ label: 'Branch' }, { label: 'With branch' }, { label: 'Owed to it', align: 'right' }, { label: 'It owes', align: 'right' }, { label: 'Net', align: 'right' }]}
+          empty="No inter-branch balances" rows={rows}
+          render={(r) => <><Td>{r.branchName}</Td><Td>{r.counterpartyName}</Td><Td align="right" mono>{money(r.receivable)}</Td><Td align="right" mono>{money(r.payable)}</Td>
+            <Td align="right" mono c={Number(r.net) < 0 ? 'var(--danger)' : undefined}>{money(r.net)}</Td></>} />}
+      </Card>
     </div>
   )
 }

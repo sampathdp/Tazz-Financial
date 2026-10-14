@@ -40,7 +40,7 @@ class SpeedDraftLedgerPoster
             $detail?->disbursement_bank_account_id ? (int) $detail->disbursement_bank_account_id : null,
         );
         if (!$target) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('The paying cash or bank account could not be resolved for this disbursement, so nothing was recorded.');
         }
         $amount = (string) $draft->disbursed_amount;
         $entryDate = optional($draft->disbursed_at)->toDateString() ?? now()->toDateString();
@@ -113,7 +113,7 @@ class SpeedDraftLedgerPoster
 
         $till = CashAccount::branchPrimary((int) $payment->branch_id, CashAccount::PURPOSE_COLLECTIONS);
         if (!$till) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
         self::postCollection($payment, $till, $amount, $credits, "Speed Draft payment {$payment->code}");
     }

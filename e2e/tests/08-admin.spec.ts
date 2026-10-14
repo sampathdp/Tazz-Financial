@@ -68,7 +68,8 @@ test.describe('Administration', () => {
     await expect(modal(page).getByRole('heading', { name: 'Add System User' })).toBeVisible()
     await mfield(page, 'Full Name').fill('E2E User')
     await mfield(page, 'Email').fill(email)
-    await mfield(page, 'Password').fill('password123')
+    // Label reads "Password (min 10 characters)"
+    await modal(page).locator('label:has-text("Password") input').fill('Zq7-mV3-kLp9-x')
     await mfield(page, 'Role').selectOption({ label: 'Branch Manager' })
     await mfield(page, 'Branch').selectOption({ label: 'Head Office' })
 

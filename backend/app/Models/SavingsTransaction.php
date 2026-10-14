@@ -6,6 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 class SavingsTransaction extends Model
 {
+    /** The branch comes from the parent record (see the add_branch_id_to_money_child_tables migration). */
+    protected static function booted(): void
+    {
+        static::creating(function ($m) {
+            if (empty($m->branch_id) && $m->savings_account_id) {
+                $m->branch_id = \App\Models\SavingsAccount::withoutGlobalScopes()->whereKey($m->savings_account_id)->value('branch_id');
+            }
+        });
+    }
+
     protected $fillable = [
         'txn_number', 'savings_account_id', 'txn_date', 'type', 'direction', 'amount', 'running_balance',
         'payment_method', 'bank_id', 'bank_account_id', 'reference_no', 'collection_sheet_id', 'interest_run_id',

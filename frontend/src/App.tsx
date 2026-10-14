@@ -87,6 +87,7 @@ const TrialBalanceScreen = named(() => import('./screens/Accounting'), 'TrialBal
 const ProfitLossScreen = named(() => import('./screens/Accounting'), 'ProfitLossScreen')
 const BalanceSheetScreen = named(() => import('./screens/Accounting'), 'BalanceSheetScreen')
 const CashFlowScreen = named(() => import('./screens/Accounting'), 'CashFlowScreen')
+const InterBranchScreen = named(() => import('./screens/Accounting'), 'InterBranchScreen')
 const LedgerDriftScreen = named(() => import('./screens/Accounting'), 'LedgerDriftScreen')
 
 const VendorsScreen = named(() => import('./screens/Expenses'), 'VendorsScreen')
@@ -210,6 +211,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'acc/pl': ProfitLossScreen,
   'acc/bs': BalanceSheetScreen,
   'acc/cf': CashFlowScreen,
+  'acc/ib': InterBranchScreen,
   'acc/drift': LedgerDriftScreen,
   'exp/vendors': VendorsScreen,
   'exp/expenses': ExpensesScreen,

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class Expense extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
     protected $fillable = [
         'code', 'branch_id', 'expense_category_id', 'vendor_id', 'amount', 'expense_date',
         'description', 'status', 'requested_by', 'approved_by', 'approved_at',

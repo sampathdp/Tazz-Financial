@@ -10,7 +10,7 @@ class FacilityPayment extends Model
     use BelongsToBranch;
 
     protected $fillable = [
-        'code', 'credit_facility_id', 'branch_id', 'amount', 'payment_type', 'payment_method',
+        'code', 'credit_facility_id', 'branch_id', 'collected_branch_id', 'amount', 'payment_type', 'payment_method',
         'status', 'approval_status', 'clearance_status', 'receipt_no', 'bank_id',
         'cheque_date', 'realized_at', 'received_by', 'approved_by', 'approved_at', 'paid_at',
         'notes', 'void_reason', 'voided_by', 'voided_at', 'manual_allocation',

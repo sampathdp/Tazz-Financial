@@ -29,20 +29,40 @@ trait BelongsToBranch
             if ($user->role && $user->role->can_view_all_branches) {
                 $filter = \App\Support\CurrentBranch::filterId();
                 if ($filter) {
-                    $builder->where($builder->getModel()->getTable() . '.branch_id', $filter);
+                    $builder->whereIn($builder->getModel()->getTable() . '.branch_id', \App\Support\CurrentBranch::withCenters($filter));
                 }
 
                 return;
             }
             // Branch-scoped users are always forced to their own branch — never trust client input.
             $column = $builder->getModel()->getTable() . '.branch_id';
+            // A branch sees its own rows and those of the Centers that report up to it.
+            $ids = $user->branch_id ? \App\Support\CurrentBranch::withCenters((int) $user->branch_id) : [];
             if (property_exists($builder->getModel(), 'sharedWhenNoBranch') && $builder->getModel()::$sharedWhenNoBranch) {
                 // A company-level row (no branch, e.g. a head-office bank account) stays visible to every branch.
-                $builder->where(fn ($q) => $q->where($column, $user->branch_id)->orWhereNull($column));
+                $builder->where(fn ($q) => $q->whereIn($column, $ids)->orWhereNull($column));
 
                 return;
             }
-            $builder->where($column, $user->branch_id);
+            $builder->whereIn($column, $ids);
+        });
+
+        // Write isolation: a branch-confined user can only create rows in their own branch. A missing
+        // branch_id is filled in; one naming another branch is refused (never trust client input).
+        static::creating(function ($model) {
+            $user = Auth::user();
+            if (!$user || !$user->branch_id || ($user->role && $user->role->can_view_all_branches)) {
+                return;
+            }
+            $requested = $model->getAttribute('branch_id');
+            if ($requested === null || $requested === '') {
+                $model->setAttribute('branch_id', $user->branch_id);
+
+                return;
+            }
+            if (!in_array((int) $requested, \App\Support\CurrentBranch::withCenters((int) $user->branch_id), true)) {
+                abort(403, 'You can only create records for your own branch.');
+            }
         });
     }
 }

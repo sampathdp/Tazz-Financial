@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class PawningAuction extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
     protected $fillable = [
         'branch_id', 'auction_no', 'scheduled_date', 'notice_published_date',
         'auctioneer_name', 'venue', 'status', 'created_by',

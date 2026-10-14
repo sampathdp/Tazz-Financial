@@ -19,6 +19,7 @@ import {
 } from '../api'
 import { Can, canApprove } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { useBranchFilter } from '../components/BranchFilter'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
@@ -307,6 +308,9 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [payOpen, setPayOpen] = useState(false)
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState<PaymentMethod>('Cash')
+  // Roles that work across branches can take the cash at another branch's counter; the two branches then settle through the inter-branch accounts.
+  const { canFilter: canCollectElsewhere, branches: allBranches } = useBranchFilter(me)
+  const [collectedBranchId, setCollectedBranchId] = useState<number | undefined>(undefined)
   const [paidAt, setPaidAt] = useState(todayIso())
   const [payBackDated, setPayBackDated] = useState(false)
   const [refNo, setRefNo] = useState('')
@@ -425,7 +429,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const locked = !!pendingSettlement
 
   const resetPayForm = () => {
-    setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
+    setPayOpen(false); setCollectedBranchId(undefined); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
     setAllocationMode('auto'); setAllocByPercent(false); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges('')
   }
   const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleRefNo(''); setSettleBankId(undefined); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
@@ -446,7 +450,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   }
 
   const openPay = () => {
-    setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
+    setPayOpen(true); setCollectedBranchId(undefined); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
     setAllocationMode('auto'); setAllocByPercent(false); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges(''); setAllocDue(null)
   }
 
@@ -477,6 +481,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
         bankId: method === 'Cheque' ? payBankId : undefined,
         chequeDate: method === 'Cheque' ? payChequeDate : undefined,
         notes: notes || undefined,
+        collectedBranchId: method === 'Cash' ? collectedBranchId : undefined,
         allocationMode: allocationMode === 'manual' ? 'manual' : undefined,
         allocations: allocationMode === 'manual' ? allocSplit : undefined,
       })
@@ -1001,6 +1006,15 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           })()}
           <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} backDated={payBackDated} setBackDated={setPayBackDated} refNo={refNo} setRefNo={setRefNo} nextReceipt={nextReceipt}
             bankId={payBankId} setBankId={setPayBankId} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes} />
+          {canCollectElsewhere && method === 'Cash' && (
+            <Field label="Collected at branch">
+              <Select id="collected-branch" value={collectedBranchId ?? ''} onChange={(e) => setCollectedBranchId(e.target.value ? Number(e.target.value) : undefined)}>
+                <option value="">The loan's own branch</option>
+                {allBranches.filter((b) => b.id !== selected?.branchId).map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}
+              </Select>
+              <div className="t-2" style={{ fontSize: 12, marginTop: 4 }}>Pick another branch if the cash was taken at its counter. Its till is credited and the two branches settle through the inter-branch accounts.</div>
+            </Field>
+          )}
         </div>
       </Modal>
 

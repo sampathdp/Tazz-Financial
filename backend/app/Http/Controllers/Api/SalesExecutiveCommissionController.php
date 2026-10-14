@@ -69,50 +69,76 @@ class SalesExecutiveCommissionController extends Controller
             'notes' => 'nullable|string|max:255',
         ]);
 
-        DB::transaction(function () use ($commission, $data, $request) {
-            $amount = (float) $data['payment_amount'];
-            $isCash = $data['payment_method'] === 'Cash';
+        // A payout can never exceed what the commission has earned (the live figure for a percentage type,
+        // the stored one otherwise) and must be a positive amount.
+        $earned = self::commissionAmount($commission);
+        if ((float) $data['payment_amount'] <= 0) {
+            return response()->json(['message' => 'The payment amount must be greater than zero.'], 422);
+        }
+        if (round((float) $data['payment_amount'], 2) > round($earned, 2) + 0.005) {
+            return response()->json(['message' => 'The payment cannot exceed the commission earned (' . number_format($earned, 2) . ').'], 422);
+        }
 
-            if ($isCash) {
-                $till = CashAccount::lockForUpdate()->findOrFail($data['cash_account_id']);
-                $outAccount = ChartOfAccount::forCashTill($till);
-                $till->update(['current_balance' => bcsub((string) $till->current_balance, (string) $amount, 2)]);
-            } else {
-                $bank = BankAccount::lockForUpdate()->findOrFail($data['bank_account_id']);
-                $outAccount = ChartOfAccount::forBankAccount($bank);
-                $bank->update(['current_balance' => bcsub((string) $bank->current_balance, (string) $amount, 2)]);
-            }
+        try {
+            DB::transaction(function () use ($commission, $data, $request) {
+                $amount = number_format((float) $data['payment_amount'], 2, '.', '');
+                $isCash = $data['payment_method'] === 'Cash';
 
-            $commission->update([
-                // Freeze the live-computed (interest-based) amount at the moment of
-                // payment, so interest collected afterward never retroactively
-                // changes this historical record — see self::commissionAmount().
-                'commission_amount' => self::commissionAmount($commission),
-                'paid_at' => $data['payment_date'],
-                'payment_amount' => $amount,
-                'payment_method' => $data['payment_method'],
-                'cash_account_id' => $isCash ? $data['cash_account_id'] : null,
-                'bank_account_id' => $isCash ? null : $data['bank_account_id'],
-                'reference_no' => $data['reference_no'] ?? null,
-                'notes' => $data['notes'] ?? null,
-                'paid_by' => $request->user()->id,
-            ]);
+                if ($isCash) {
+                    $physType = 'cash';
+                    $physId = (int) CashAccount::findOrFail($data['cash_account_id'])->id;
+                    $outAccount = ChartOfAccount::forCashTill(CashAccount::find($physId));
+                } else {
+                    $physType = 'bank';
+                    $physId = (int) BankAccount::findOrFail($data['bank_account_id'])->id;
+                    $outAccount = ChartOfAccount::forBankAccount(BankAccount::find($physId));
+                }
 
-            LedgerPoster::post([
-                ['account_id' => ChartOfAccount::system('5200')->id, 'debit' => $amount, 'credit' => 0],
-                ['account_id' => $outAccount->id, 'debit' => 0, 'credit' => $amount],
-            ], Carbon::parse($data['payment_date'])->toDateString(), [
-                'source_type' => 'SalesExecutiveCommission',
-                'source_id' => $commission->id,
-                'description' => "Commission paid - {$commission->salesExecutive?->name} - {$commission->facility?->code}",
-                'branch_id' => $commission->facility?->branch_id,
-                'posted_by' => $request->user()->id,
-            ]);
+                // The one money writer: funds check, balance move, finance transaction, cashbook mirror and the
+                // GL entry (Dr 5200 / Cr the paying till or bank) in one transaction. Idempotent per commission cycle.
+                \App\Support\FinancePostingService::execute([
+                    'txn_type' => $isCash ? 'CASH_OUT' : 'BANK_WITHDRAWAL',
+                    'amount' => $amount,
+                    'entry_date' => Carbon::parse($data['payment_date'])->toDateString(),
+                    'branch_id' => $commission->facility?->branch_id,
+                    'movements' => [['account_type' => $physType, 'account_id' => $physId, 'delta' => '-' . $amount]],
+                    'gl_lines' => [
+                        ['account_id' => ChartOfAccount::system('5200')->id, 'debit' => $amount, 'credit' => 0],
+                        ['account_id' => $outAccount->id, 'debit' => 0, 'credit' => $amount],
+                    ],
+                    'gl_source_type' => 'SalesExecutiveCommission',
+                    'gl_source_id' => $commission->id,
+                    'gl_description' => "Commission paid - {$commission->salesExecutive?->name} - {$commission->facility?->code}",
+                    'description' => "Commission paid - {$commission->salesExecutive?->name} - {$commission->facility?->code}",
+                    'source_module' => 'SalesExecutiveCommission',
+                    'source_id' => $commission->id,
+                    // A void followed by a re-payment is a new attempt, so the key carries the attempt number.
+                    'idempotency_key' => "commission-payment-{$commission->id}-" . (\App\Models\FinanceTransaction::where('source_module', 'SalesExecutiveCommission')->where('source_id', $commission->id)->where('txn_type', '!=', 'REVERSAL')->count() + 1),
+                    'executed_by' => $request->user()->id,
+                ]);
 
-            self::maybeStartNextCycle($commission);
-        });
+                $commission->update([
+                    // Freeze the live-computed (interest-based) amount at the moment of
+                    // payment, so interest collected afterward never retroactively
+                    // changes this historical record - see self::commissionAmount().
+                    'commission_amount' => self::commissionAmount($commission),
+                    'paid_at' => $data['payment_date'],
+                    'payment_amount' => $amount,
+                    'payment_method' => $data['payment_method'],
+                    'cash_account_id' => $isCash ? $data['cash_account_id'] : null,
+                    'bank_account_id' => $isCash ? null : $data['bank_account_id'],
+                    'reference_no' => $data['reference_no'] ?? null,
+                    'notes' => $data['notes'] ?? null,
+                    'paid_by' => $request->user()->id,
+                ]);
 
-        return self::present($commission->load(self::RELATIONS));
+                self::maybeStartNextCycle($commission);
+            });
+        } catch (\App\Exceptions\FinancePostingException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return self::present($commission->fresh()->load(self::RELATIONS));
     }
 
     /**
@@ -131,7 +157,13 @@ class SalesExecutiveCommissionController extends Controller
         $amount = (float) $commission->payment_amount;
 
         DB::transaction(function () use ($commission, $amount, $request) {
-            if ($commission->payment_method === 'Cash' && $commission->cash_account_id) {
+            $txn = \App\Models\FinanceTransaction::where('source_module', 'SalesExecutiveCommission')
+                ->where('source_id', $commission->id)->where('status', 'Completed')->latest('id')->first();
+            if ($txn) {
+                // Paid through the money writer: it restores the balance, mirrors the GL and the cashbook.
+                \App\Support\FinancePostingService::reverse($txn, "Voided commission payment - {$commission->facility?->code}", $request->user()->id);
+            } elseif ($commission->payment_method === 'Cash' && $commission->cash_account_id) {
+                // Legacy payment made before commissions used the money writer: restore by hand.
                 $till = CashAccount::lockForUpdate()->find($commission->cash_account_id);
                 $till?->update(['current_balance' => bcadd((string) $till->current_balance, (string) $amount, 2)]);
             } elseif ($commission->bank_account_id) {
@@ -139,7 +171,7 @@ class SalesExecutiveCommissionController extends Controller
                 $bank?->update(['current_balance' => bcadd((string) $bank->current_balance, (string) $amount, 2)]);
             }
 
-            JournalEntry::where('source_type', 'SalesExecutiveCommission')
+            if (!$txn) JournalEntry::where('source_type', 'SalesExecutiveCommission')
                 ->where('source_id', $commission->id)
                 ->where('status', 'Posted')
                 ->whereNull('reversal_of_id')

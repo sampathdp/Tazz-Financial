@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class FixedDeposit extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
     use HasPublicUuid;
 
     protected $fillable = [

@@ -17,6 +17,41 @@ class CurrentBranch
      * The branch id an all-branches user wants to filter to, from
      * ?branch_id=, or null to mean "all branches".
      */
+    /** @var array<int, int[]> branch id => [itself, its centers], memoised for the request */
+    private static array $visible = [];
+
+    /** A branch and the Centers that report up to it: a branch sees its own centers' data. */
+    public static function withCenters(int $branchId): array
+    {
+        return self::$visible[$branchId] ??= array_merge([$branchId], \App\Models\Branch::where('parent_id', $branchId)->pluck('id')->map(fn ($i) => (int) $i)->all());
+    }
+
+    public static function flushCache(): void
+    {
+        self::$visible = [];
+    }
+
+    /**
+     * The branch ids a ledger report should be limited to, or null for every branch. A branch-confined user
+     * is always limited to their own branch (and its centers); an all-branches user may pick one with ?branch_id=.
+     *
+     * @return int[]|null
+     */
+    public static function reportBranchIds(): ?array
+    {
+        $user = Auth::user();
+        if (!$user) {
+            return null;
+        }
+        if ($user->role && $user->role->can_view_all_branches) {
+            $filter = self::filterId();
+
+            return $filter ? self::withCenters($filter) : null;
+        }
+
+        return $user->branch_id ? self::withCenters((int) $user->branch_id) : [];
+    }
+
     public static function filterId(): ?int
     {
         $requested = Request::query('branch_id');
@@ -59,12 +94,12 @@ class CurrentBranch
         if ($user->role && $user->role->can_view_all_branches) {
             $filter = self::filterId();
             if ($filter) {
-                $query->where($column, $filter);
+                $query->whereIn($column, self::withCenters($filter));
             }
 
             return $query;
         }
 
-        return $query->where($column, $user->branch_id);
+        return $query->whereIn($column, $user->branch_id ? self::withCenters((int) $user->branch_id) : []);
     }
 }

@@ -42,7 +42,7 @@ class PawningLedgerPoster
     {
         $till = CashAccount::branchPrimary((int) $pawning->branch_id, CashAccount::PURPOSE_PAWNING);
         if (!$till) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
         $amount = (string) $pawning->disbursed_amount;
         $entryDate = optional($pawning->disbursed_at)->toDateString() ?? now()->toDateString();
@@ -109,7 +109,7 @@ class PawningLedgerPoster
 
         $till = CashAccount::branchPrimary((int) $payment->branch_id, CashAccount::PURPOSE_PAWNING);
         if (!$till) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
         $tillLeaf = ChartOfAccount::forCashTill($till);
 
@@ -156,7 +156,7 @@ class PawningLedgerPoster
         }
         $till = CashAccount::branchPrimary((int) $pawning->branch_id, CashAccount::PURPOSE_PAWNING);
         if (!$till) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
         $proceeds = (float) $item->hammer_price;
         if ($proceeds <= 0) {
@@ -222,7 +222,7 @@ class PawningLedgerPoster
         }
         $till = CashAccount::branchPrimary((int) $pawning->branch_id, CashAccount::PURPOSE_PAWNING);
         if (!$till) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
         $tillLeaf = ChartOfAccount::forCashTill($till);
 

@@ -75,6 +75,7 @@ class LoanPaymentController extends Controller
             'bank_id' => 'required_if:payment_method,Cheque|nullable|exists:banks,id',
             'cheque_date' => 'required_if:payment_method,Cheque|nullable|date',
             'notes' => 'nullable|string|max:255',
+            'collected_branch_id' => 'nullable|exists:branches,id',
             'is_settlement' => 'boolean',
             'allocation_mode' => ['nullable', Rule::in(['auto', 'manual'])],
             'allocations' => 'required_if:allocation_mode,manual|array',
@@ -83,6 +84,12 @@ class LoanPaymentController extends Controller
             'allocations.od_charge' => 'nullable|numeric|min:0',
             'allocations.other_charges' => 'nullable|numeric|min:0',
         ]);
+        // Taking another branch's customer's cash at this counter is for roles that work across branches; the
+        // cash goes to the collecting branch's till and the two branches settle through the inter-branch accounts.
+        if (!empty($data['collected_branch_id']) && (int) $data['collected_branch_id'] !== (int) $loan->branch_id
+            && !($request->user()->role && $request->user()->role->can_view_all_branches)) {
+            return response()->json(['message' => 'Only users who work across branches can record a payment collected at another branch.'], 403);
+        }
         // A receipt can't be dated in the future, nor before the loan existed (its money went out on
         // disbursed_at; an undisbursed loan - a Document-charge receipt - dates from its application).
         if (!empty($data['paid_at'])) {
@@ -98,7 +105,7 @@ class LoanPaymentController extends Controller
         // A cash collection needs an open cash session for the branch till when
         // the Finance module requires it (off by default — see FinanceSetting).
         if (($data['payment_method'] ?? 'Cash') === 'Cash' && \App\Models\FinanceSetting::bool('require_cash_session')) {
-            $till = \App\Models\CashAccount::branchPrimary((int) $loan->branch_id, \App\Support\LoanLedgerPoster::receiptPurpose($loan));
+            $till = \App\Models\CashAccount::branchPrimary((int) ($request->input('collected_branch_id') ?: $loan->branch_id), \App\Support\LoanLedgerPoster::receiptPurpose($loan));
             // Only a session for TODAY counts - one left open from a previous day must be closed first.
             if ($till && !\App\Support\CashSessionService::openToday($till->id)) {
                 return response()->json(['message' => "Open today's cash session for {$till->name} before recording cash payments."], 422);
@@ -188,6 +195,8 @@ class LoanPaymentController extends Controller
                 'code' => $code,
                 'credit_facility_id' => $loan->id,
                 'branch_id' => $loan->branch_id,
+                // Set only when the cash was taken at another branch's counter (see the B-8 migration).
+                'collected_branch_id' => (!empty($data['collected_branch_id']) && (int) $data['collected_branch_id'] !== (int) $loan->branch_id) ? (int) $data['collected_branch_id'] : null,
                 'amount' => $data['amount'],
                 'payment_method' => $method,
                 'payment_type' => $isSettlement ? 'Settlement' : ($isManual ? 'ManualAllocation' : 'Regular'),

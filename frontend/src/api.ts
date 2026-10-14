@@ -1351,7 +1351,7 @@ export const loanPaymentsApi = {
    *  the Make Payment modal. See LoanPaymentAllocator::outstandingByBucket(). */
   outstandingByBucket: (loanId: number, asOf?: string) =>
     http.get(`/loans/${loanId}/outstanding-by-bucket`, { params: snakeize({ asOf }) }).then((r) => camelize(r.data) as PaymentAllocationSplit),
-  create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankId?: number; chequeDate?: string; notes?: string; isSettlement?: boolean; allocationMode?: 'auto' | 'manual'; allocations?: PaymentAllocationSplit }) =>
+  create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankId?: number; chequeDate?: string; notes?: string; collectedBranchId?: number; isSettlement?: boolean; allocationMode?: 'auto' | 'manual'; allocations?: PaymentAllocationSplit }) =>
     http.post(`/loans/${loanId}/payments`, snakeize(body)).then((r) => camelize(r.data) as LoanPayment),
   /** Submits a void request — doesn't void the payment itself, see LoanPaymentVoidRequest. */
   requestVoid: (paymentId: number, voidReason?: string) => http.post(`/loan-payments/${paymentId}/void-request`, { void_reason: voidReason }).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
@@ -2401,6 +2401,7 @@ export interface ChartOfAccount {
   id: number; code: string; name: string; accountType: AccountType; normalBalance: 'Debit' | 'Credit';
   parentId?: number | null; parent?: { id: number; code: string; name: string } | null;
   isSystem?: boolean; status?: 'Active' | 'Inactive';
+  isPostable?: boolean; rollupBalance?: string;
   totalDebit?: string; totalCredit?: string; balance?: string;
 }
 export const chartOfAccountsApi = {
@@ -2446,14 +2447,14 @@ export interface TrialBalanceRow {
 }
 export interface TrialBalanceReport {
   asOf: string; rows: TrialBalanceRow[];
-  totals: { debit: string; credit: string; difference: string; balanced: boolean };
+  totals: { debit: string; credit: string; difference: string; balanced: boolean | null };
 }
 export interface PLRow { accountId: number; code: string; name: string; balance: string }
 /** Income and Expense rows both carry cash + accrual: income differs on 4010/4015, expense on 5100/5120 (FD + savings deposit interest). */
 export interface PLIncomeRow { accountId: number; code: string; name: string; cashBalance: string; accrualBalance: string }
 export interface PLWaterfall {
   lendingIncome: string; interZonalInterest: string; totalIncome: string; interestCost: string;
-  netIncomeExOther: string; documentationIncome: string; realEstateProfit: string; refundsOnWriteOffs: string; netIncome: string;
+  netIncomeExOther: string; documentationIncome: string; realEstateProfit: string; refundsOnWriteOffs: string; miscellaneousIncome: string; netIncome: string;
   staffCost: { salary: string; allowances: string; total: string };
   otherOperatingExpenses: string; profitBeforeHoAbsorption: string; hoExpAbsorption: string;
   netProfitBeforeTaxImpairment: string; provisioningForImpairment: string; badDebtRecovery: string; netProfitAfterImpairment: string;
@@ -2472,7 +2473,7 @@ export interface ProfitLossReport {
 export interface BalanceSheetRow { accountId: number; code: string; name: string; balance: string }
 export interface BalanceSheetReport {
   asOf: string; assets: BalanceSheetRow[]; liabilities: BalanceSheetRow[]; equity: BalanceSheetRow[];
-  totalAssets: string; totalLiabilities: string; totalEquity: string; totalLiabilitiesAndEquity: string; balanced: boolean;
+  totalAssets: string; totalLiabilities: string; totalEquity: string; totalLiabilitiesAndEquity: string; balanced: boolean | null; branchFiltered?: boolean;
 }
 /** One cash till or bank account: its own `current_balance` ("book") against the GL's derived balance for its linked chart_of_accounts leaf ("gl"). Nonzero variance = the two disagree. */
 export interface LedgerDriftRow {
@@ -2480,6 +2481,8 @@ export interface LedgerDriftRow {
   glAccountId: number; glAccountCode: string; bookBalance: string; glBalance: string; variance: string;
 }
 export interface LedgerDriftReport { asOf: string; rows: LedgerDriftRow[]; hasDrift: boolean }
+export interface InterBranchRow { branchId: number; branchName: string; counterpartyBranchId: number; counterpartyName: string; receivable: string; payable: string; net: string }
+export interface InterBranchReport { asOf: string; rows: InterBranchRow[]; netTotal: string; branchFiltered: boolean }
 export interface PLMonthlyRow {
   month: string; label: string; from: string; to: string;
   totalIncomeCash: string; totalIncomeAccrual: string; totalExpenseCash: string; totalExpenseAccrual: string;
@@ -2494,15 +2497,16 @@ export interface CashFlowReport {
   netChangeInCash: string; openingCash: string; closingCash: string; reconciled: boolean;
 }
 export const accountingReportsApi = {
-  trialBalance: (asOf?: string) => http.get('/accounting-reports/trial-balance', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as TrialBalanceReport),
-  generalLedger: (accountId: number, params?: { from?: string; to?: string }) =>
+  trialBalance: (asOf?: string, branchId?: number) => http.get('/accounting-reports/trial-balance', { params: { ...(asOf ? { as_of: asOf } : {}), ...(branchId ? { branch_id: branchId } : {}) } }).then((r) => camelize(r.data) as TrialBalanceReport),
+  generalLedger: (accountId: number, params?: { from?: string; to?: string; branchId?: number }) =>
     http.get('/accounting-reports/general-ledger', { params: snakeize({ accountId, ...params }) }).then((r) => camelize(r.data) as GeneralLedgerReport),
-  profitLoss: (params?: { from?: string; to?: string }) =>
+  profitLoss: (params?: { from?: string; to?: string; branchId?: number }) =>
     http.get('/accounting-reports/profit-loss', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as ProfitLossReport),
-  profitLossMonthly: (params: { from: string; to: string }) =>
+  profitLossMonthly: (params: { from: string; to: string; branchId?: number }) =>
     http.get('/accounting-reports/profit-loss/monthly', { params: snakeize(params) }).then((r) => camelize(r.data) as ProfitLossMonthlyReport),
-  balanceSheet: (asOf?: string) => http.get('/accounting-reports/balance-sheet', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as BalanceSheetReport),
-  cashFlow: (params?: { from?: string; to?: string }) =>
+  balanceSheet: (asOf?: string, branchId?: number) => http.get('/accounting-reports/balance-sheet', { params: { ...(asOf ? { as_of: asOf } : {}), ...(branchId ? { branch_id: branchId } : {}) } }).then((r) => camelize(r.data) as BalanceSheetReport),
+  interBranch: (asOf?: string, branchId?: number) => http.get('/accounting-reports/inter-branch', { params: { ...(asOf ? { as_of: asOf } : {}), ...(branchId ? { branch_id: branchId } : {}) } }).then((r) => camelize(r.data) as InterBranchReport),
+  cashFlow: (params?: { from?: string; to?: string; branchId?: number }) =>
     http.get('/accounting-reports/cash-flow', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as CashFlowReport),
   ledgerDrift: (asOf?: string) => http.get('/accounting-reports/ledger-drift', { params: asOf ? { as_of: asOf } : {} }).then((r) => camelize(r.data) as LedgerDriftReport),
   pdf: (type: 'trial-balance' | 'general-ledger' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ledger-drift', params?: Record<string, any>) =>

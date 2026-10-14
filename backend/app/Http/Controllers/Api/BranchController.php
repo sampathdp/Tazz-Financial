@@ -17,7 +17,13 @@ class BranchController extends Controller
     public function store(Request $request)
     {
         $data = $this->validated($request);
-        $branch = Branch::create($data + ['status' => $data['status'] ?? 'Active', 'branch_type' => $data['branch_type'] ?? 'Branch']);
+        $branch = \Illuminate\Support\Facades\DB::transaction(function () use ($data) {
+            $branch = Branch::create($data + ['status' => $data['status'] ?? 'Active', 'branch_type' => $data['branch_type'] ?? 'Branch']);
+            // The branch's main till and its ledger account, so nothing can fail later for want of one.
+            \App\Support\BranchProvisioner::provision($branch);
+
+            return $branch;
+        });
 
         return response()->json($branch->load('parent:id,name,code'), 201);
     }
@@ -52,7 +58,26 @@ class BranchController extends Controller
         if ($branch->centers()->exists()) {
             return response()->json(['message' => 'This branch has centers under it and cannot be deleted. Delete or move them first.'], 422);
         }
-        $branch->delete();
+        // The default till made with the branch can go with it, but only while it is untouched.
+        $tills = \App\Models\CashAccount::withoutGlobalScopes()->where('branch_id', $branch->id)->get();
+        foreach ($tills as $till) {
+            $used = (float) $till->current_balance !== 0.0
+                || $till->entries()->exists()
+                || ($till->chart_of_account_id && \App\Models\JournalLine::where('account_id', $till->chart_of_account_id)->exists());
+            if ($used) {
+                return response()->json(['message' => "This branch has a till (\"{$till->name}\") with transactions and cannot be deleted. Deactivate the branch instead."], 422);
+            }
+        }
+        \Illuminate\Support\Facades\DB::transaction(function () use ($tills, $branch) {
+            foreach ($tills as $till) {
+                $leafId = $till->chart_of_account_id;
+                $till->delete();
+                if ($leafId) {
+                    \App\Models\ChartOfAccount::whereKey($leafId)->where('is_system', false)->delete();
+                }
+            }
+            $branch->delete();
+        });
 
         return response()->noContent();
     }

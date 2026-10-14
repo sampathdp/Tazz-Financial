@@ -887,6 +887,12 @@ export function FinanceSettingsScreen({ user: me }: { go: Go; user?: AuthUser | 
     catch (ex: any) { notify.error('Save failed', getErrorText(ex)); financeSettingsApi.get().then(setSettings) }
   }
 
+  const saveLock = async (value: string) => {
+    setSettings((s) => ({ ...s, ledger_locked_through: value }))
+    try { setSettings(await financeSettingsApi.update({ ledger_locked_through: value })); notify.success('Setting saved') }
+    catch (ex: any) { notify.error('Save failed', getErrorText(ex)); financeSettingsApi.get().then(setSettings) }
+  }
+
   return (
     <div>
       <PageHead crumbs="Finance" title="Finance Settings" icon="shield" sub="Module-wide controls" />
@@ -902,6 +908,13 @@ export function FinanceSettingsScreen({ user: me }: { go: Go; user?: AuthUser | 
               </div>
             </label>
           ))}
+          <div>
+            <Field label="Books closed through">
+              <Input type="date" id="ledger-lock-date" disabled={!canEdit} value={settings.ledger_locked_through || ''}
+                onChange={(e) => saveLock(e.target.value)} style={{ maxWidth: 220 }} />
+            </Field>
+            <div className="t-2" style={{ fontSize: 12, marginTop: 4 }}>No ledger entry dated on or before this day can be posted. Clear the date to reopen the books.</div>
+          </div>
         </div>
       </Card>}
     </div>

@@ -24,7 +24,7 @@ use Illuminate\Validation\ValidationException;
  */
 class AccountingReportController extends Controller
 {
-    private const TYPES = ['trial-balance', 'general-ledger', 'profit-loss', 'balance-sheet', 'cash-flow', 'ledger-drift'];
+    private const TYPES = ['trial-balance', 'general-ledger', 'profit-loss', 'balance-sheet', 'cash-flow', 'ledger-drift', 'inter-branch'];
 
     /** "Cash and cash equivalents" for the cash flow statement — till + bank, not undeposited cheques (1030), which aren't cash yet. */
     private const CASH_ACCOUNT_CODES = ['1010', '1020'];
@@ -32,6 +32,18 @@ class AccountingReportController extends Controller
     /** Everything else touching cash is Operating for a deposit-taking lender (loan disbursement/collection and customer deposits are the core business — see IAS 7 §15 treatment for financial institutions), so only these two get carved out. */
     private const INVESTING_ACCOUNT_CODES = ['1300'];
     private const FINANCING_ACCOUNT_CODES = ['3010'];
+
+    /** Branch ids the report is limited to (null = every branch); see CurrentBranch::reportBranchIds(). */
+    private function branchIds(): ?array
+    {
+        return \App\Support\CurrentBranch::reportBranchIds();
+    }
+
+    /** Account balances for the report period, limited to the selected / permitted branches. */
+    private function balances(?string $asOf = null, ?string $from = null)
+    {
+        return ChartOfAccount::balancesAsOf($asOf, $from, $this->branchIds());
+    }
 
     public function show(Request $request, string $type)
     {
@@ -46,7 +58,49 @@ class AccountingReportController extends Controller
             'balance-sheet' => $this->balanceSheet($request),
             'cash-flow' => $this->cashFlow($request),
             'ledger-drift' => $this->ledgerDrift($request),
+            'inter-branch' => $this->interBranch($request),
         };
+    }
+
+    /**
+     * Who owes whom between branches: for each branch and counterparty, what it is owed (1400) and what it
+     * owes (2400) as of a date. Company-wide the net is zero; a non-zero total means a one-sided entry.
+     */
+    private function interBranch(Request $request): array
+    {
+        $asOf = $request->query('as_of') ?: now()->toDateString();
+        $ids = ChartOfAccount::whereIn('code', ['1400', '2400'])->pluck('id', 'code');
+        $rows = DB::table('journal_lines')
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->whereIn('journal_lines.account_id', $ids->values())
+            // Only the companion entries (and their reversals) carry a counterparty; each pair is read from the
+            // companion's side and mirrored below, so a balance is never counted twice.
+            ->whereNotNull('journal_entries.counterparty_branch_id')
+            ->whereDate('journal_entries.entry_date', '<=', $asOf)
+            ->groupBy('journal_entries.branch_id', 'journal_entries.counterparty_branch_id')
+            ->selectRaw('journal_entries.branch_id, journal_entries.counterparty_branch_id, '
+                . 'SUM(CASE WHEN journal_lines.account_id = ? THEN journal_lines.debit - journal_lines.credit ELSE 0 END) AS receivable, '
+                . 'SUM(CASE WHEN journal_lines.account_id = ? THEN journal_lines.credit - journal_lines.debit ELSE 0 END) AS payable', [$ids['1400'] ?? 0, $ids['2400'] ?? 0])
+            ->get();
+        $names = DB::table('branches')->pluck('name', 'id');
+        $row = fn ($branch, $other, $receivable, $payable) => [
+            'branch_id' => (int) $branch, 'branch_name' => $names[$branch] ?? '',
+            'counterparty_branch_id' => (int) $other, 'counterparty_name' => $names[$other] ?? '',
+            'receivable' => number_format((float) $receivable, 2, '.', ''), 'payable' => number_format((float) $payable, 2, '.', ''),
+            'net' => number_format((float) $receivable - (float) $payable, 2, '.', ''),
+        ];
+        $out = collect();
+        foreach ($rows as $r) {
+            $out->push($row($r->branch_id, $r->counterparty_branch_id, $r->receivable, $r->payable));
+            $out->push($row($r->counterparty_branch_id, $r->branch_id, $r->payable, $r->receivable)); // the other side's mirror
+        }
+        // One row per branch pair, then limited to the branches the viewer may see.
+        $out = $out->groupBy(fn ($x) => $x['branch_id'] . '-' . $x['counterparty_branch_id'])
+            ->map(fn ($g) => $row($g[0]['branch_id'], $g[0]['counterparty_branch_id'], $g->sum('receivable'), $g->sum('payable')))
+            ->filter(fn ($x) => $this->branchIds() === null || in_array($x['branch_id'], $this->branchIds(), true))
+            ->values();
+
+        return ['as_of' => $asOf, 'rows' => $out, 'net_total' => number_format((float) $out->sum('net'), 2, '.', ''), 'branch_filtered' => $this->branchIds() !== null];
     }
 
     /**
@@ -65,7 +119,7 @@ class AccountingReportController extends Controller
     private function trialBalance(Request $request)
     {
         $asOf = $request->query('as_of') ?: now()->toDateString();
-        $balances = ChartOfAccount::balancesAsOf($asOf);
+        $balances = $this->balances($asOf);
 
         $rows = ChartOfAccount::orderBy('code')->get()->map(function (ChartOfAccount $account) use ($balances) {
             $b = $balances->get($account->id);
@@ -99,8 +153,11 @@ class AccountingReportController extends Controller
                 'debit' => $totalDebit,
                 'credit' => $totalCredit,
                 'difference' => bcsub($totalDebit, $totalCredit, 2),
-                'balanced' => bccomp($totalDebit, $totalCredit, 2) === 0,
+                // A single branch's books do not balance on their own until inter-branch accounts exist, so the
+                // check is only meaningful for the whole company.
+                'balanced' => $this->branchIds() === null ? bccomp($totalDebit, $totalCredit, 2) === 0 : null,
             ],
+            'branch_filtered' => $this->branchIds() !== null,
         ];
     }
 
@@ -123,6 +180,7 @@ class AccountingReportController extends Controller
         // unexplained one-directional entry and broke the running balance.
         $lines = JournalLine::with('entry:id,code,entry_date,description,source_type,source_id,status')
             ->where('account_id', $accountId)
+            ->when($this->branchIds() !== null, fn ($q) => $q->whereIn('journal_entry_id', DB::table('journal_entries')->whereIn('branch_id', $this->branchIds())->select('id')))
             ->when($request->query('from'), fn ($q, $d) => $q->whereDate('entry_date', '>=', $d))
             ->when($request->query('to'), fn ($q, $d) => $q->whereDate('entry_date', '<=', $d))
             ->orderBy('entry_date')->orderBy('id')
@@ -229,15 +287,23 @@ class AccountingReportController extends Controller
      * Salary/Allowances split) come from: they're plain accounts booked
      * through the ordinary Journal Entries screen, not computed here.
      */
+    /** Income accounts the waterfall reads by name; every other Income account is summed into miscellaneous_income. */
+    private const WATERFALL_INCOME_CODES = ['4010', '4015', '4020', '4025', '4030', '4040', '4045', '4050', '4910', '4920', '4930'];
+
+    /** Expense accounts the waterfall reads by name; every other Expense account is summed into other_operating_expenses. */
+    private const WATERFALL_EXPENSE_CODES = ['5010', '5100', '5110', '5120', '5200', '5210', '5220', '5300', '5400', '5500', '5600'];
+
     private function plWaterfall(?string $from, ?string $to, string $basis): array
     {
-        $balances = ChartOfAccount::balancesAsOf($to, $from);
+        $balances = $this->balances($to, $from);
         $bal = fn (string $code) => $balances->get(ChartOfAccount::system($code)->id)->balance ?? '0.00';
 
         $interestIncome = $basis === 'accrual'
             ? bcadd(AccrualInterestCalculator::incomeForPeriod('Loan', $from, $to), AccrualInterestCalculator::incomeForPeriod('SpeedDraft', $from, $to), 2)
             : bcadd($bal('4010'), $bal('4015'), 2);
-        $lendingIncome = bcadd($interestIncome, bcadd($bal('4020'), $bal('4030'), 2), 2);
+        // Pawning interest (4025) and savings fee income (4045) are lending income too. Neither has an
+        // accrual estimate, so both bases use the ledger figure.
+        $lendingIncome = bcadd(bcadd($interestIncome, bcadd($bal('4020'), $bal('4030'), 2), 2), bcadd($bal('4025'), $bal('4045'), 2), 2);
 
         $interZonalInterest = $bal('4040');
         $totalIncome = bcadd($lendingIncome, $interZonalInterest, 2);
@@ -250,18 +316,31 @@ class AccountingReportController extends Controller
         $interestCost = $basis === 'accrual'
             ? AccrualInterestCostCalculator::forPeriod($from, $to)['total']
             : bcadd($bal('5100'), $bal('5120'), 2);
+        // Interest on company borrowings (5110) is a cost of funds as well; no accrual estimate exists for it.
+        $interestCost = bcadd($interestCost, $bal('5110'), 2);
         $netIncomeExOther = bcsub($totalIncome, $interestCost, 2);
 
         $documentationIncome = $bal('4910');
         $realEstateProfit = $bal('4920');
         $refundsOnWriteOffs = $bal('4930');
-        $otherIncome = bcadd(bcadd($documentationIncome, $realEstateProfit, 2), $refundsOnWriteOffs, 2);
+        // Any other income account (4900 Other Income, 4905 Cash Overage, a new account added later...)
+        // lands here so the waterfall always ties to the flat P&L.
+        $miscellaneousIncome = '0.00';
+        foreach (ChartOfAccount::where('account_type', 'Income')->whereNotIn('code', self::WATERFALL_INCOME_CODES)->pluck('id') as $id) {
+            $miscellaneousIncome = bcadd($miscellaneousIncome, $balances->get($id)->balance ?? '0.00', 2);
+        }
+        $otherIncome = bcadd(bcadd(bcadd($documentationIncome, $realEstateProfit, 2), $refundsOnWriteOffs, 2), $miscellaneousIncome, 2);
         $netIncome = bcadd($netIncomeExOther, $otherIncome, 2);
 
         $salary = $bal('5210');
         $allowances = $bal('5220');
         $staffCost = bcadd(bcadd($salary, $allowances, 2), $bal('5200'), 2);
+        // 5010 plus any expense account the waterfall has no named line for (5310 Cash Shortage, a child
+        // of 5200 such as 6061, a new account...), so nothing is dropped from net profit.
         $otherOperatingExpenses = $bal('5010');
+        foreach (ChartOfAccount::where('account_type', 'Expense')->whereNotIn('code', self::WATERFALL_EXPENSE_CODES)->pluck('id') as $id) {
+            $otherOperatingExpenses = bcadd($otherOperatingExpenses, $balances->get($id)->balance ?? '0.00', 2);
+        }
         $profitBeforeHoAbsorption = bcsub(bcsub($netIncome, $staffCost, 2), $otherOperatingExpenses, 2);
 
         $hoExpAbsorption = $bal('5400');
@@ -289,6 +368,7 @@ class AccountingReportController extends Controller
             'documentation_income' => $documentationIncome,
             'real_estate_profit' => $realEstateProfit,
             'refunds_on_write_offs' => $refundsOnWriteOffs,
+            'miscellaneous_income' => $miscellaneousIncome,
             'net_income' => $netIncome,
             'staff_cost' => ['salary' => $salary, 'allowances' => $allowances, 'total' => $staffCost],
             'other_operating_expenses' => $otherOperatingExpenses,
@@ -331,6 +411,7 @@ class AccountingReportController extends Controller
             // Posted + Reversed both count — a voided payment's original income line
             // and its reversal net to zero here (see ChartOfAccount::balancesAsOf).
             ->where('journal_entries.source_type', 'LoanPayment')
+            ->when($this->branchIds() !== null, fn ($q) => $q->whereIn('journal_entries.branch_id', $this->branchIds()))
             ->whereIn('chart_of_accounts.code', ['4010', '4020', '4030'])
             ->when($from, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '>=', $d))
             ->when($to, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '<=', $d))
@@ -452,6 +533,7 @@ class AccountingReportController extends Controller
         ['documentation_income', 'Documentation Income (Other Income)', 0],
         ['real_estate_profit', 'Real Estate Profit', 0],
         ['refunds_on_write_offs', 'Refunds on Write-offs from General Treasury', 0],
+        ['miscellaneous_income', 'Miscellaneous Income (Other Income, Cash Overage, other)', 0],
         ['net_income', 'Net Income/(Expense)', 0],
         ['staff_cost.salary', 'Salary/EPF/ETF', 1],
         ['staff_cost.allowances', 'Allowances', 1],
@@ -604,7 +686,7 @@ class AccountingReportController extends Controller
     private function balanceSheet(Request $request)
     {
         $asOf = $request->query('as_of') ?? now()->toDateString();
-        $balances = ChartOfAccount::balancesAsOf($asOf);
+        $balances = $this->balances($asOf);
         $accounts = ChartOfAccount::whereIn('account_type', ['Asset', 'Liability', 'Equity'])->orderBy('code')->get();
 
         $rows = ['Asset' => [], 'Liability' => [], 'Equity' => []];
@@ -617,6 +699,12 @@ class AccountingReportController extends Controller
                 continue;
             }
             $balance = $balances->get($account->id)->balance ?? '0.00';
+            // A contra account (e.g. 1190 Provision for Loan Losses: an Asset with a Credit normal
+            // balance) is a deduction from its section, so it is shown and totalled as a negative.
+            $naturalSide = $account->account_type === 'Asset' ? 'Debit' : 'Credit';
+            if ($account->normal_balance !== $naturalSide) {
+                $balance = bcmul($balance, '-1', 2);
+            }
             $rows[$account->account_type][] = ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => $balance];
             $totals[$account->account_type] = bcadd($totals[$account->account_type], $balance, 2);
         }
@@ -656,7 +744,8 @@ class AccountingReportController extends Controller
             // Structurally guaranteed by LedgerPoster's balance check on every entry —
             // false here would mean the chart of accounts itself is misconfigured
             // (e.g. an account with the wrong normal_balance), not a data error.
-            'balanced' => bccomp($totals['Asset'], $totalLiabAndEquity, 2) === 0,
+            'balanced' => $this->branchIds() === null ? bccomp($totals['Asset'], $totalLiabAndEquity, 2) === 0 : null,
+            'branch_filtered' => $this->branchIds() !== null,
         ];
     }
 
@@ -680,7 +769,10 @@ class AccountingReportController extends Controller
         $from = $request->query('from') ?? now()->startOfMonth()->toDateString();
         $to = $request->query('to') ?? now()->toDateString();
 
-        $cashAccountIds = ChartOfAccount::whereIn('code', self::CASH_ACCOUNT_CODES)->pluck('id');
+        // Postings go to the per-till / per-bank child accounts (1010-n, 1020-n), never to the
+        // 1010 / 1020 headers themselves, so "cash" is the headers plus all their children.
+        $headerIds = ChartOfAccount::whereIn('code', self::CASH_ACCOUNT_CODES)->pluck('id');
+        $cashAccountIds = $headerIds->merge(ChartOfAccount::whereIn('parent_id', $headerIds)->pluck('id'))->unique()->values();
 
         $entryIds = DB::table('journal_lines')
             ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
@@ -688,12 +780,24 @@ class AccountingReportController extends Controller
             // reversal net to zero (see ChartOfAccount::balancesAsOf).
             ->whereBetween(DB::raw('DATE(journal_entries.entry_date)'), [$from, $to])
             ->whereIn('journal_lines.account_id', $cashAccountIds)
+            ->when($this->branchIds() !== null, fn ($q) => $q->whereIn('journal_entries.branch_id', $this->branchIds()))
             ->distinct()->pluck('journal_entries.id');
+
+        // Company-wide, the branch entries of one transaction are read together and the inter-branch clearing
+        // accounts (1400 / 2400) drop out, so cash that one branch moved for another is attributed to what it
+        // was really for. A single-branch view keeps them: they are that branch's own inter-branch funding.
+        $excluded = $cashAccountIds;
+        if ($this->branchIds() === null) {
+            $mains = DB::table('journal_entries')->whereIn('id', $entryIds)->whereNull('related_entry_id')->pluck('id')
+                ->merge(DB::table('journal_entries')->whereIn('id', $entryIds)->whereNotNull('related_entry_id')->pluck('related_entry_id'))->unique();
+            $entryIds = $mains->merge(DB::table('journal_entries')->whereIn('related_entry_id', $mains)->pluck('id'))->unique()->values();
+            $excluded = $cashAccountIds->merge(ChartOfAccount::whereIn('code', ['1400', '2400'])->pluck('id'));
+        }
 
         $lines = DB::table('journal_lines')
             ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'journal_lines.account_id')
             ->whereIn('journal_lines.journal_entry_id', $entryIds)
-            ->whereNotIn('journal_lines.account_id', $cashAccountIds)
+            ->whereNotIn('journal_lines.account_id', $excluded)
             ->selectRaw('chart_of_accounts.code, chart_of_accounts.name, SUM(journal_lines.credit - journal_lines.debit) as net_amount')
             ->groupBy('chart_of_accounts.code', 'chart_of_accounts.name')
             ->orderBy('chart_of_accounts.code')
@@ -711,8 +815,8 @@ class AccountingReportController extends Controller
 
         $netChangeInCash = bcadd(bcadd($totals['operating'], $totals['investing'], 2), $totals['financing'], 2);
 
-        $openingBalances = ChartOfAccount::balancesAsOf(Carbon::parse($from)->subDay()->toDateString());
-        $closingBalances = ChartOfAccount::balancesAsOf($to);
+        $openingBalances = $this->balances(Carbon::parse($from)->subDay()->toDateString());
+        $closingBalances = $this->balances($to);
         $openingCash = $cashAccountIds->reduce(fn ($sum, $id) => bcadd($sum, $openingBalances->get($id)->balance ?? '0.00', 2), '0.00');
         $closingCash = $cashAccountIds->reduce(fn ($sum, $id) => bcadd($sum, $closingBalances->get($id)->balance ?? '0.00', 2), '0.00');
 
@@ -803,7 +907,7 @@ class AccountingReportController extends Controller
      */
     private function plFigures(?string $from, ?string $to, string $basis = 'cash'): array
     {
-        $balances = ChartOfAccount::balancesAsOf($to, $from);
+        $balances = $this->balances($to, $from);
         $accounts = ChartOfAccount::whereIn('account_type', ['Income', 'Expense'])->orderBy('code')->get();
         $accrualCost = $basis === 'accrual' ? AccrualInterestCostCalculator::forPeriod($from, $to) : null;
 

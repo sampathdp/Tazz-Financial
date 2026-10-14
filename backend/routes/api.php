@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\BankAccountController;
 use App\Http\Controllers\Api\BankController;
 use App\Http\Controllers\Api\BankReconciliationController;
 use App\Http\Controllers\Api\BankTransactionController;
+use App\Http\Controllers\Api\UndepositedFundsController;
 use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\CashAccountController;
 use App\Http\Controllers\Api\CashBankReportController;
@@ -406,6 +407,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Bank Management: Bank Transactions (immutable ledger entries — void by deleting, never edited) ---
     Route::get('bank-transactions', [BankTransactionController::class, 'index'])->middleware('perm:Bank Transactions,View');
     Route::post('bank-transactions', [BankTransactionController::class, 'store'])->middleware(['perm:Bank Transactions,Create', 'idempotency']);
+    Route::get('undeposited-funds', [UndepositedFundsController::class, 'show'])->middleware('perm:Bank Transactions,View');
+    Route::post('undeposited-funds/deposit', [UndepositedFundsController::class, 'deposit'])->middleware(['perm:Bank Transactions,Create', 'idempotency']);
     Route::post('bank-transactions/{bankTransaction}/clear', [BankTransactionController::class, 'clear'])->middleware('perm:Bank Transactions,Edit');
     Route::delete('bank-transactions/{bankTransaction}', [BankTransactionController::class, 'destroy'])->middleware('perm:Bank Transactions,Delete');
 

@@ -8,7 +8,7 @@ class JournalEntry extends Model
 {
     protected $fillable = [
         'code', 'entry_date', 'source_type', 'source_id', 'description',
-        'branch_id', 'posted_by', 'posted_at', 'status', 'reversal_of_id',
+        'branch_id', 'counterparty_branch_id', 'posted_by', 'posted_at', 'status', 'reversal_of_id', 'related_entry_id',
     ];
 
     protected $casts = [

@@ -57,7 +57,7 @@ class BorrowingLedgerPoster
         }
         $till = self::till((int) $borrowing->branch_id, $borrowing->receipt_cash_account_id);
         if (!$till) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
         $tillAccount = ChartOfAccount::forCashTill($till);
         $liability = self::liabilityAccount($borrowing);
@@ -92,7 +92,7 @@ class BorrowingLedgerPoster
         $borrowing = $txn->borrowing;
         $till = self::till((int) $borrowing->branch_id, $txn->cash_account_id);
         if (!$till) {
-            return;
+            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
         $tillAccount = ChartOfAccount::forCashTill($till);
         $liability = self::liabilityAccount($borrowing);

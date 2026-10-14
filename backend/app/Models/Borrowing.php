@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class Borrowing extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
     protected $fillable = [
         'borrowing_number', 'branch_id', 'type', 'lender_name', 'source', 'purpose',
         'principal_amount', 'outstanding_amount', 'interest_rate_percent', 'term_months',

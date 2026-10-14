@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class SavingsAccount extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
     use HasPublicUuid;
 
     protected $fillable = [

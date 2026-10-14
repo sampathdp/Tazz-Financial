@@ -26,7 +26,7 @@ class JournalEntryController extends Controller
      */
     public function index(Request $request)
     {
-        $query = JournalEntry::with(['lines.account:id,code,name', 'branch:id,name,code', 'poster:id,name'])
+        $query = \App\Support\CurrentBranch::applyScope(JournalEntry::with(['lines.account:id,code,name', 'branch:id,name,code', 'poster:id,name']), 'journal_entries.branch_id')
             ->when($request->query('from'), fn ($q, $d) => $q->whereDate('entry_date', '>=', $d))
             ->when($request->query('to'), fn ($q, $d) => $q->whereDate('entry_date', '<=', $d))
             ->when($request->query('branch_id'), fn ($q, $b) => $q->where('branch_id', $b))
