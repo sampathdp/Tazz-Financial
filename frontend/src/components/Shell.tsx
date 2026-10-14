@@ -26,6 +26,8 @@ export const NAV: NavNode[] = [
   { section: 'Finance', icon: 'wallet', items: [
     { id: 'finance/dashboard', label: 'Finance Dashboard', icon: 'wallet' },
     { id: 'finance/requests', label: 'Finance Requests', icon: 'receipt' },
+    { id: 'cash/book', label: 'Cashbook', icon: 'wallet' },
+    { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust' },
     { id: 'finance/transactions', label: 'Cash Transactions', icon: 'receipt' },
     { id: 'finance/transfers', label: 'Transfers', icon: 'swap' },
     { id: 'finance/floats', label: 'Cash Floats', icon: 'coins' },
@@ -85,11 +87,6 @@ export const NAV: NavNode[] = [
     { id: 'pawn/types', label: 'Pawning Types', icon: 'layers' },
     { id: 'pawn/tickets', label: 'Pawn Tickets', icon: 'tag' },
     { id: 'pawn/auctions', label: 'Auctions', icon: 'store' },
-  ] },
-
-  { section: 'Cashbook Management', icon: 'wallet', items: [
-    { id: 'cash/book', label: 'Cashbook', icon: 'wallet' },
-    { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust' },
   ] },
 
   { section: 'Bank Management', icon: 'building', items: [

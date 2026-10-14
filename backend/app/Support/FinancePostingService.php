@@ -176,13 +176,17 @@ class FinancePostingService
     private const SESSION_GATED = ['COLLECTION', 'CASH_IN', 'CASH_OUT', 'DISBURSEMENT', 'EXPENSE_PAYMENT'];
 
     /**
-     * One place for the "no cash through a till without today's session" rule, so every module
+     * One place for the "no cash through a till without today's session" rule (back-dated entries excepted), so every module
      * (loan, FD, savings, pawning, speed draft, borrowing, expense, disbursement) obeys the same
      * setting instead of each controller remembering to check it.
      */
     private static function assertCashSessionOpen(array $spec): void
     {
         if (!in_array($spec['txn_type'], self::SESSION_GATED, true) || !\App\Models\FinanceSetting::bool('require_cash_session')) {
+            return;
+        }
+        // A back-dated entry belongs to an earlier business day; today's session does not apply to it.
+        if (!empty($spec['entry_date']) && \Carbon\Carbon::parse($spec['entry_date'])->startOfDay()->lt(\Carbon\Carbon::today())) {
             return;
         }
         foreach ($spec['movements'] as $m) {
