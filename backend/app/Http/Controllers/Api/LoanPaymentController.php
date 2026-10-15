@@ -94,12 +94,12 @@ class LoanPaymentController extends Controller
         // disbursed_at; an undisbursed loan - a Document-charge receipt - dates from its application).
         if (!empty($data['paid_at'])) {
             $paidOn = Carbon::parse($data['paid_at'])->startOfDay();
-            $floor = ($loan->disbursed_at ?? $loan->created_at)?->copy()->startOfDay();
+            $floor = ($loan->disbursed_at ?? $loan->loanDetail?->application_date ?? $loan->created_at)?->copy()->startOfDay();
             if ($paidOn->gt(Carbon::today())) {
                 return response()->json(['message' => 'The payment date cannot be in the future.'], 422);
             }
             if ($floor && $paidOn->lt($floor)) {
-                return response()->json(['message' => 'The payment date cannot be before ' . $floor->toDateString() . ' (when this loan was ' . ($loan->disbursed_at ? 'disbursed' : 'created') . ').'], 422);
+                return response()->json(['message' => 'The payment date cannot be before ' . $floor->toDateString() . ' (when this loan was ' . ($loan->disbursed_at ? 'disbursed' : 'applied for') . ').'], 422);
             }
         }
         // A cash collection needs an open cash session for the branch till when
