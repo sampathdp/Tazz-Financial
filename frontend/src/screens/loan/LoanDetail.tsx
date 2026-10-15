@@ -1070,8 +1070,11 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
 
   useEffect(() => {
     Promise.all([bankAccountsApi.list(), branchesApi.list()]).then(([banks, branches]) => {
-      const hoIds = new Set(branches.filter((b) => b.isHeadOffice).map((b) => b.id))
-      const hoBanks = banks.filter((a) => a.branchId != null && hoIds.has(a.branchId) && a.status !== 'Inactive')
+      // Keyed by String(id) — some hosts return integer/boolean columns as JSON strings, which
+      // breaks strict comparisons (same issue as loanTypePath in LoanApplications.tsx).
+      const isHo = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true'
+      const hoIds = new Set(branches.filter((b) => isHo(b.isHeadOffice)).map((b) => String(b.id)))
+      const hoBanks = banks.filter((a) => a.branchId != null && hoIds.has(String(a.branchId)) && a.status !== 'Inactive')
       setBankAccounts(hoBanks)
       const preferred = hoBanks.find((a) => /operation/i.test(a.name)) ?? (hoBanks.length === 1 ? hoBanks[0] : undefined)
       if (preferred) setBankAccountId(preferred.id)
