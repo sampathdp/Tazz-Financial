@@ -321,7 +321,11 @@ class AccountingReportController extends Controller
     private function plWaterfall(?string $from, ?string $to, string $basis): array
     {
         $balances = $this->balances($to, $from);
-        $bal = fn (string $code) => $balances->get(ChartOfAccount::system($code)->id)->balance ?? '0.00';
+        $ledgerBal = fn (string $code) => $balances->get(ChartOfAccount::system($code)->id)->balance ?? '0.00';
+        // Only interest has an accrual estimate (income 4010/4015, cost 5100/5120, both computed below). Every other
+        // line (charges, penalties, documentation income, salaries, ...) is recognised when the cash moves, so the
+        // accrual column shows none of it and "Total (Cash + Accrual)" counts each such line once.
+        $bal = fn (string $code) => $basis === 'accrual' ? '0.00' : $ledgerBal($code);
 
         $interestIncome = $basis === 'accrual'
             ? bcadd(AccrualInterestCalculator::incomeForPeriod('Loan', $from, $to), AccrualInterestCalculator::incomeForPeriod('SpeedDraft', $from, $to), 2)
@@ -354,7 +358,7 @@ class AccountingReportController extends Controller
         // lands here so the waterfall always ties to the flat P&L.
         $miscellaneousIncome = '0.00';
         foreach (ChartOfAccount::where('account_type', 'Income')->whereNotIn('code', self::WATERFALL_INCOME_CODES)->pluck('id') as $id) {
-            $miscellaneousIncome = bcadd($miscellaneousIncome, $balances->get($id)->balance ?? '0.00', 2);
+            $miscellaneousIncome = bcadd($miscellaneousIncome, $basis === 'accrual' ? '0.00' : ($balances->get($id)->balance ?? '0.00'), 2);
         }
         $otherIncome = bcadd(bcadd(bcadd($documentationIncome, $realEstateProfit, 2), $refundsOnWriteOffs, 2), $miscellaneousIncome, 2);
         $netIncome = bcadd($netIncomeExOther, $otherIncome, 2);
@@ -366,7 +370,7 @@ class AccountingReportController extends Controller
         // of 5200 such as 6061, a new account...), so nothing is dropped from net profit.
         $otherOperatingExpenses = $bal('5010');
         foreach (ChartOfAccount::where('account_type', 'Expense')->whereNotIn('code', self::WATERFALL_EXPENSE_CODES)->pluck('id') as $id) {
-            $otherOperatingExpenses = bcadd($otherOperatingExpenses, $balances->get($id)->balance ?? '0.00', 2);
+            $otherOperatingExpenses = bcadd($otherOperatingExpenses, $basis === 'accrual' ? '0.00' : ($balances->get($id)->balance ?? '0.00'), 2);
         }
         $profitBeforeHoAbsorption = bcsub(bcsub($netIncome, $staffCost, 2), $otherOperatingExpenses, 2);
 
@@ -596,14 +600,13 @@ class AccountingReportController extends Controller
                     ['key' => 'label', 'label' => 'Line'],
                     ['key' => 'cash', 'label' => 'Cash Basis', 'align' => 'right', 'format' => 'money'],
                     ['key' => 'accrual', 'label' => 'Accrual Basis', 'align' => 'right', 'format' => 'money'],
-                    ['key' => 'difference', 'label' => 'Accrued, Not Yet Settled (Accrual - Cash)', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'total', 'label' => 'Total (Cash + Accrual)', 'align' => 'right', 'format' => 'money'],
                 ],
                 'rows' => collect(self::WATERFALL_ROWS)->map(fn (array $r) => [
                     'label' => str_repeat('    ', $r[2]) . $r[1],
                     'cash' => data_get($waterfallCash, $r[0]),
                     'accrual' => data_get($waterfallAccrual, $r[0]),
-                    // The two bases are alternative views of the same period, so they are compared, never added.
-                    'difference' => bcsub((string) data_get($waterfallAccrual, $r[0]), (string) data_get($waterfallCash, $r[0]), 2),
+                    'total' => bcadd((string) data_get($waterfallCash, $r[0]), (string) data_get($waterfallAccrual, $r[0]), 2),
                 ])->all(),
             ],
             [

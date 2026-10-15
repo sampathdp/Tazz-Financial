@@ -620,11 +620,11 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
           }] : []),
           {
             title: 'P&L Waterfall',
-            columns: [{ label: 'Line', key: 'label' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }, { label: 'Accrued, Not Yet Settled (Accrual − Cash)', key: 'difference', align: 'right', format: 'money' }],
+            columns: [{ label: 'Line', key: 'label' }, { label: 'Cash Basis', key: 'cash', align: 'right', format: 'money' }, { label: 'Accrual Basis', key: 'accrual', align: 'right', format: 'money' }, { label: 'Total (Cash + Accrual)', key: 'total', align: 'right', format: 'money' }],
             rows: WATERFALL_ROWS.map((r) => {
               const cash = Number(getPath(report.waterfallCash, r.key))
               const accrual = Number(getPath(report.waterfallAccrual, r.key))
-              return { label: (r.indent ? '    ' : '') + r.label, cash, accrual, difference: accrual - cash }
+              return { label: (r.indent ? '    ' : '') + r.label, cash, accrual, total: cash + accrual }
             }),
           },
           {
@@ -699,12 +699,12 @@ export function ProfitLossScreen({ user: _me }: { go: Go; user?: AuthUser | null
         <div className="col gap-4">
           <Card pad={0}>
             <div className="eyebrow" style={{ padding: '14px 20px 0' }}>P&L Waterfall</div>
-            <Table cols={[{ label: 'Line' }, { label: 'Cash Basis', align: 'right' }, { label: 'Accrual Basis', align: 'right' }, { label: 'Accrued, Not Yet Settled (Accrual − Cash)', align: 'right' }]} rows={WATERFALL_ROWS} empty=""
+            <Table cols={[{ label: 'Line' }, { label: 'Cash Basis', align: 'right' }, { label: 'Accrual Basis', align: 'right' }, { label: 'Total (Cash + Accrual)', align: 'right' }]} rows={WATERFALL_ROWS} empty=""
               render={(r) => <>
                 <Td style={{ paddingLeft: r.indent ? 36 : 20, fontWeight: r.bold ? 700 : 400 }}>{r.label}</Td>
                 <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(getPath(report.waterfallCash, r.key))}</Td>
                 <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(getPath(report.waterfallAccrual, r.key))}</Td>
-                <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(Number(getPath(report.waterfallAccrual, r.key)) - Number(getPath(report.waterfallCash, r.key)))}</Td>
+                <Td align="right" mono style={{ fontWeight: r.bold ? 700 : 400 }}>{money(Number(getPath(report.waterfallCash, r.key)) + Number(getPath(report.waterfallAccrual, r.key)))}</Td>
               </>} />
           </Card>
           <Card pad={0}>
