@@ -15,6 +15,9 @@ import type { Go } from './types'
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/** Dropdown label: account name, bank (e.g. People's / HNB), account number. */
+const accountLabel = (a: BankAccount) => [a.name, a.bank?.name, a.accountNumber].filter(Boolean).join(' — ')
+
 /* ============================ Bank Accounts ============================ */
 
 interface AccountForm extends Partial<BankAccount> {}
@@ -182,7 +185,7 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
       <Card style={{ marginBottom: 16 }}>
         <Field label="Bank Account"><Select value={accountId} onChange={(e) => setAccountId(Number(e.target.value) || '')}>
           <option value="">All accounts</option>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+          {accounts.map((a) => <option key={a.id} value={a.id}>{accountLabel(a)}</option>)}
         </Select></Field>
       </Card>
 
@@ -212,7 +215,7 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Bank Account" full><Select value={form.bankAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, bankAccountId: Number(e.target.value) || undefined }))}>
             <option value="">—</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+            {accounts.map((a) => <option key={a.id} value={a.id}>{accountLabel(a)}</option>)}
           </Select></Field>
           <Field label="Date"><DateInput value={form.txnDate} onChange={(iso) => setForm((s) => ({ ...s, txnDate: iso }))} /></Field>
           <Field label="Type"><Select value={form.transactionType || 'Deposit'} onChange={(e) => setForm((s) => ({ ...s, transactionType: e.target.value as any }))}>
@@ -237,7 +240,7 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
           {form.contraKind === 'Bank' && (
             <Field label="Bank Account" full><Select value={form.contraBankAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, contraBankAccountId: Number(e.target.value) || undefined }))}>
               <option value="">Select account...</option>
-              {accounts.filter((a) => a.id !== form.bankAccountId).map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+              {accounts.filter((a) => a.id !== form.bankAccountId).map((a) => <option key={a.id} value={a.id}>{accountLabel(a)}</option>)}
             </Select></Field>
           )}
           {form.contraKind === 'Ledger' && (
@@ -314,7 +317,7 @@ export function BankReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
       <Card style={{ marginBottom: 16 }}>
         <Field label="Bank Account"><Select value={accountId} onChange={(e) => setAccountId(Number(e.target.value) || '')}>
           <option value="">All accounts</option>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+          {accounts.map((a) => <option key={a.id} value={a.id}>{accountLabel(a)}</option>)}
         </Select></Field>
       </Card>
 
@@ -345,7 +348,7 @@ export function BankReconciliationScreen({ go: _go, user: me }: { go: Go; user?:
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Bank Account" full><Select value={form.bankAccountId ?? ''} disabled={!!editing} onChange={(e) => setForm((s) => ({ ...s, bankAccountId: Number(e.target.value) || undefined }))}>
             <option value="">—</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
+            {accounts.map((a) => <option key={a.id} value={a.id}>{accountLabel(a)}</option>)}
           </Select></Field>
           <Field label="Statement Date"><DateInput value={form.statementDate} onChange={(iso) => setForm((s) => ({ ...s, statementDate: iso }))} /></Field>
           <Field label="Statement Balance"><Input type="number" step="0.01" value={form.statementBalance ?? ''} onChange={(e) => setForm((s) => ({ ...s, statementBalance: e.target.value }))} /></Field>

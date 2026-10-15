@@ -105,8 +105,6 @@ export const NAV: NavNode[] = [
     { id: 'exp/petty-cash', label: 'Petty Cash', icon: 'coins' },
   ] },
 
-  { id: 'subs/list', label: 'Subscriptions & Renewals', icon: 'calendar' },
-
   { section: 'Accounting', icon: 'list', items: [
     { id: 'acc/coa', label: 'Chart of Accounts', icon: 'list' },
     { id: 'acc/journal', label: 'Journal Entries', icon: 'doc' },
@@ -181,6 +179,7 @@ export const NAV: NavNode[] = [
     { id: 'ad/audit', label: 'Audit Logs', icon: 'list', soon: true },
     { id: 'ad/login-activity', label: 'Login Activity', icon: 'clock', soon: true },
     { id: 'ad/company', label: 'Company Profile', icon: 'building' },
+    { id: 'subs/list', label: 'Subscriptions & Renewals', icon: 'calendar' },
     { id: 'ad/maintenance', label: 'Data Maintenance', icon: 'trash' },
   ] },
 ]
