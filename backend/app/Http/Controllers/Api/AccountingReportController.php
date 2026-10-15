@@ -327,8 +327,14 @@ class AccountingReportController extends Controller
         // accrual column shows none of it and "Total (Cash + Accrual)" counts each such line once.
         $bal = fn (string $code) => $basis === 'accrual' ? '0.00' : $ledgerBal($code);
 
+        // Accrual column = interest earned in the period minus what was already collected (the cash column), i.e.
+        // the accrued-but-not-collected part, so "Total (Cash + Accrual)" equals the interest actually earned.
         $interestIncome = $basis === 'accrual'
-            ? bcadd(AccrualInterestCalculator::incomeForPeriod('Loan', $from, $to), AccrualInterestCalculator::incomeForPeriod('SpeedDraft', $from, $to), 2)
+            ? bcsub(
+                bcadd(AccrualInterestCalculator::incomeForPeriod('Loan', $from, $to), AccrualInterestCalculator::incomeForPeriod('SpeedDraft', $from, $to), 2),
+                bcadd($ledgerBal('4010'), $ledgerBal('4015'), 2),
+                2
+            )
             : bcadd($bal('4010'), $bal('4015'), 2);
         // Pawning interest (4025) and savings fee income (4045) are lending income too. Neither has an
         // accrual estimate, so both bases use the ledger figure.
@@ -342,8 +348,9 @@ class AccountingReportController extends Controller
         // accrual basis it is recomputed day-count from the FD schedules and the
         // savings balance history — the cost-side mirror of accrual interest
         // income — instead of the cash / run-posted ledger balance.
+        // Accrual column = interest owed for the period minus what was already paid (the cash column).
         $interestCost = $basis === 'accrual'
-            ? AccrualInterestCostCalculator::forPeriod($from, $to)['total']
+            ? bcsub(AccrualInterestCostCalculator::forPeriod($from, $to)['total'], bcadd($ledgerBal('5100'), $ledgerBal('5120'), 2), 2)
             : bcadd($bal('5100'), $bal('5120'), 2);
         // Interest on company borrowings (5110) is a cost of funds as well; no accrual estimate exists for it.
         $interestCost = bcadd($interestCost, $bal('5110'), 2);
