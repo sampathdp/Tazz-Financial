@@ -45,6 +45,30 @@ class AccountingReportController extends Controller
         return ChartOfAccount::balancesAsOf($asOf, $from, $this->branchIds());
     }
 
+    /**
+     * Company-wide statements hide the inter-branch clearing accounts (consolidation elimination): what one
+     * branch is owed, another owes, so they net to zero and are not a real asset or liability of the company.
+     * They are only hidden when they do net to zero, so a one-sided entry stays visible instead of vanishing.
+     * A single-branch view keeps them, because that branch's own books do not balance without them.
+     *
+     * @return array<int, int> account ids to leave out of the statement
+     */
+    private function eliminatedAccountIds($balances, string $asOf): array
+    {
+        if ($this->branchIds() !== null) {
+            return [];
+        }
+        $accounts = ChartOfAccount::whereIn('code', ['1400', '2400', '1410', '2410', '1411', '2411'])->pluck('id', 'code');
+        // Receivable-side (debit) accounts and payable-side (credit) accounts, all in their own natural orientation.
+        $debitSide = collect(['1400', '1410', '1411'])->sum(fn ($c) => (float) ($balances->get($accounts[$c] ?? 0)->balance ?? 0));
+        $creditSide = collect(['2400', '2410', '2411'])->sum(fn ($c) => (float) ($balances->get($accounts[$c] ?? 0)->balance ?? 0));
+        if (abs($debitSide - $creditSide) >= 0.005) {
+            return [];
+        }
+
+        return $accounts->values()->all();
+    }
+
     public function show(Request $request, string $type)
     {
         if (!in_array($type, self::TYPES, true)) {
@@ -121,7 +145,8 @@ class AccountingReportController extends Controller
         $asOf = $request->query('as_of') ?: now()->toDateString();
         $balances = $this->balances($asOf);
 
-        $rows = ChartOfAccount::orderBy('code')->get()->map(function (ChartOfAccount $account) use ($balances) {
+        $eliminated = $this->eliminatedAccountIds($balances, $asOf);
+        $rows = ChartOfAccount::whereNotIn('id', $eliminated)->orderBy('code')->get()->map(function (ChartOfAccount $account) use ($balances) {
             $b = $balances->get($account->id);
             $balance = $b->balance ?? '0.00'; // net, already oriented to the account's normal side
             $onNormalSide = bccomp($balance, '0.00', 2) >= 0;
@@ -291,7 +316,7 @@ class AccountingReportController extends Controller
     private const WATERFALL_INCOME_CODES = ['4010', '4015', '4020', '4025', '4030', '4040', '4045', '4050', '4910', '4920', '4930'];
 
     /** Expense accounts the waterfall reads by name; every other Expense account is summed into other_operating_expenses. */
-    private const WATERFALL_EXPENSE_CODES = ['5010', '5100', '5110', '5120', '5200', '5210', '5220', '5300', '5400', '5500', '5600'];
+    private const WATERFALL_EXPENSE_CODES = ['5010', '5100', '5110', '5120', '5130', '5200', '5210', '5220', '5300', '5400', '5500', '5600'];
 
     private function plWaterfall(?string $from, ?string $to, string $basis): array
     {
@@ -318,6 +343,8 @@ class AccountingReportController extends Controller
             : bcadd($bal('5100'), $bal('5120'), 2);
         // Interest on company borrowings (5110) is a cost of funds as well; no accrual estimate exists for it.
         $interestCost = bcadd($interestCost, $bal('5110'), 2);
+        // Inter-branch funding interest (5130) is the mirror of 4040 above and cancels it company-wide.
+        $interestCost = bcadd($interestCost, $bal('5130'), 2);
         $netIncomeExOther = bcsub($totalIncome, $interestCost, 2);
 
         $documentationIncome = $bal('4910');
@@ -569,13 +596,14 @@ class AccountingReportController extends Controller
                     ['key' => 'label', 'label' => 'Line'],
                     ['key' => 'cash', 'label' => 'Cash Basis', 'align' => 'right', 'format' => 'money'],
                     ['key' => 'accrual', 'label' => 'Accrual Basis', 'align' => 'right', 'format' => 'money'],
-                    ['key' => 'total', 'label' => 'Total (Cash + Accrual)', 'align' => 'right', 'format' => 'money'],
+                    ['key' => 'difference', 'label' => 'Accrued, Not Yet Settled (Accrual - Cash)', 'align' => 'right', 'format' => 'money'],
                 ],
                 'rows' => collect(self::WATERFALL_ROWS)->map(fn (array $r) => [
                     'label' => str_repeat('    ', $r[2]) . $r[1],
                     'cash' => data_get($waterfallCash, $r[0]),
                     'accrual' => data_get($waterfallAccrual, $r[0]),
-                    'total' => bcadd((string) data_get($waterfallCash, $r[0]), (string) data_get($waterfallAccrual, $r[0]), 2),
+                    // The two bases are alternative views of the same period, so they are compared, never added.
+                    'difference' => bcsub((string) data_get($waterfallAccrual, $r[0]), (string) data_get($waterfallCash, $r[0]), 2),
                 ])->all(),
             ],
             [
@@ -687,7 +715,8 @@ class AccountingReportController extends Controller
     {
         $asOf = $request->query('as_of') ?? now()->toDateString();
         $balances = $this->balances($asOf);
-        $accounts = ChartOfAccount::whereIn('account_type', ['Asset', 'Liability', 'Equity'])->orderBy('code')->get();
+        $accounts = ChartOfAccount::whereIn('account_type', ['Asset', 'Liability', 'Equity'])
+            ->whereNotIn('id', $this->eliminatedAccountIds($balances, $asOf))->orderBy('code')->get();
 
         $rows = ['Asset' => [], 'Liability' => [], 'Equity' => []];
         $totals = ['Asset' => '0.00', 'Liability' => '0.00', 'Equity' => '0.00'];
@@ -791,7 +820,7 @@ class AccountingReportController extends Controller
             $mains = DB::table('journal_entries')->whereIn('id', $entryIds)->whereNull('related_entry_id')->pluck('id')
                 ->merge(DB::table('journal_entries')->whereIn('id', $entryIds)->whereNotNull('related_entry_id')->pluck('related_entry_id'))->unique();
             $entryIds = $mains->merge(DB::table('journal_entries')->whereIn('related_entry_id', $mains)->pluck('id'))->unique()->values();
-            $excluded = $cashAccountIds->merge(ChartOfAccount::whereIn('code', ['1400', '2400'])->pluck('id'));
+            $excluded = $cashAccountIds->merge(ChartOfAccount::whereIn('code', ['1400', '2400', '1410', '2410', '1411', '2411'])->pluck('id'));
         }
 
         $lines = DB::table('journal_lines')

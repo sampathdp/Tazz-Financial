@@ -419,10 +419,19 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
               {selectedType && (
                 <div className="t-2" style={{ fontSize: 11.5, marginTop: 4 }}>
                   amount {Number(selectedType.minAmount).toLocaleString()}–{Number(selectedType.maxAmount).toLocaleString()} · term {selectedType.minTermMonths}–{selectedType.maxTermMonths}mo
+                  {Number(selectedType.processingFeePercent) > 0 && <> · doc charge {Number(selectedType.processingFeePercent)}%</>}
                 </div>
               )}
             </Field>
-            <Field label="Loan Amount"><Input type="number" value={form.principalAmount ?? ''} onChange={(e) => setForm((s) => ({ ...s, principalAmount: e.target.value as any }))} /></Field>
+            <Field label="Loan Amount">
+              <Input type="number" value={form.principalAmount ?? ''} onChange={(e) => setForm((s) => ({ ...s, principalAmount: e.target.value as any }))} />
+              {Number(selectedType?.processingFeePercent) > 0 && (
+                <div className="t-2" style={{ fontSize: 11.5, marginTop: 4 }}>
+                  Doc charge {Number(selectedType?.processingFeePercent)}%
+                  {!!form.principalAmount && <> = {(Math.round(Number(form.principalAmount) * Number(selectedType?.processingFeePercent)) / 100).toLocaleString()}</>}
+                </div>
+              )}
+            </Field>
             <Field label="Down Payment">
               <Input type="number" value={form.downPayment ?? ''} onChange={(e) => setForm((s) => ({ ...s, downPayment: e.target.value as any }))} />
               {!!form.principalAmount && (

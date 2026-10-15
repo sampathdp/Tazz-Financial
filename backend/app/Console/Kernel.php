@@ -22,6 +22,8 @@ class Kernel extends ConsoleKernel
         $schedule->command('finance:check-drift')->dailyAt('02:00');
         // Matured pledged FDs are applied to their loans where the FD policy allows it.
         $schedule->command('fd-loans:auto-adjust')->dailyAt('01:30');
+        // Month-end interest on branch-to-branch funding agreements (monthly accrual mode).
+        $schedule->command('funding:accrue')->lastDayOfMonth('23:30');
     }
 
     /**

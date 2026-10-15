@@ -89,7 +89,13 @@ class InterBranchAccountingTest extends TestCase
             $this->assertEquals(0.0, (float) $this->tb($branch)['totals']['difference'], 'each branch trial balance foots');
         }
         $whole = $this->tb(null);
-        $this->assertEquals($this->bal($whole, '1400'), -$this->bal($whole, '2400'), 'company-wide the two clearing accounts net to zero');
+        // Company-wide the two clearing accounts net to zero, so the statement hides them (consolidation).
+        $codes = collect($whole['rows'])->pluck('code')->all();
+        $this->assertNotContains('1400', $codes);
+        $this->assertNotContains('2400', $codes);
+        $this->assertTrue($whole['totals']['balanced']);
+        // A single branch keeps them: its own books do not balance without them.
+        $this->assertNotEquals(0.0, $this->bal($this->tb($this->b), '1400'));
     }
 
     public function test_cash_received_by_branch_b_for_branch_a_creates_the_mirror_entries(): void

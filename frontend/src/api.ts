@@ -2046,6 +2046,37 @@ export const borrowingsApi = {
   remove: (id: number) => http.delete(`/borrowings/${id}`).then((r) => r.data),
 }
 
+/* ===================== Branch Funding (branch-to-branch cash loans, routed through Head Office) ===================== */
+export type BranchFundingStatus = 'Requested' | 'Active' | 'Closed' | 'Rejected'
+export type BranchFundingAccrual = 'monthly' | 'on_repayment'
+export interface BranchFundingTxn { id: number; kind: 'Disbursement' | 'Interest' | 'Repayment'; txnDate: string; principalAmount: string; interestAmount: string }
+export interface BranchFunding {
+  id: number; code: string; lenderBranchId: number; borrowerBranchId: number
+  lenderBranch?: { id: number; name: string; code: string }; borrowerBranch?: { id: number; name: string; code: string }
+  principalAmount: string; outstandingPrincipal: string; interestRatePercent: string; accrualMode: BranchFundingAccrual
+  accruedInterestUnpaid: string; interestAccruedThrough?: string | null; requestDate: string; disbursedOn?: string | null
+  purpose?: string | null; notes?: string | null; status: BranchFundingStatus; transactions?: BranchFundingTxn[]
+}
+export interface BranchFundingLookups {
+  branches: { id: number; name: string; code: string; fundingBorrowLimit: string | null; owed: string; accounts: { chartAccountId: number; name: string }[] }[]
+  accrualModes: BranchFundingAccrual[]
+}
+export interface BranchFundingCreateInput {
+  lenderBranchId: number; borrowerBranchId: number; lenderAccountId: number; borrowerAccountId: number
+  principalAmount: number | string; interestRatePercent: number | string; accrualMode: BranchFundingAccrual
+  requestDate: string; purpose?: string; notes?: string
+}
+export const branchFundingApi = {
+  list: (params?: { status?: BranchFundingStatus }) => http.get('/branch-funding', { params }).then((r) => camelize(r.data) as BranchFunding[]),
+  get: (id: number) => http.get(`/branch-funding/${id}`).then((r) => camelize(r.data) as BranchFunding),
+  lookups: () => http.get('/branch-funding/lookups').then((r) => camelize(r.data) as BranchFundingLookups),
+  create: (body: BranchFundingCreateInput) => http.post('/branch-funding', snakeize(body)).then((r) => camelize(r.data) as BranchFunding),
+  approve: (id: number, disbursedOn?: string) => http.post(`/branch-funding/${id}/approve`, snakeize({ disbursedOn })).then((r) => camelize(r.data) as BranchFunding),
+  reject: (id: number, reason?: string) => http.post(`/branch-funding/${id}/reject`, { reason }).then((r) => camelize(r.data) as BranchFunding),
+  accrue: (id: number, through?: string) => http.post(`/branch-funding/${id}/accrue`, { through }).then((r) => camelize(r.data) as BranchFunding),
+  repay: (id: number, amount: number | string, paymentDate?: string) => http.post(`/branch-funding/${id}/repay`, snakeize({ amount, paymentDate })).then((r) => camelize(r.data) as BranchFunding),
+}
+
 export interface FinanceCalcCharge { label?: string; amount: number | string; financed?: boolean }
 export interface FinanceCalcInput {
   loanTypeId?: number; loanAmount: number | string; downPayment?: number | string; termMonths: number;

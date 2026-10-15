@@ -570,6 +570,16 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('borrowing-transactions/{borrowingTransaction}/void', [BorrowingController::class, 'voidTransaction'])->middleware('perm:Borrowings,Delete');
     Route::delete('borrowings/{borrowing}', [BorrowingController::class, 'destroy'])->middleware('perm:Borrowings,Delete');
 
+    // Branch-to-branch funding through Head Office
+    Route::get('branch-funding', [\App\Http\Controllers\Api\BranchFundingController::class, 'index'])->middleware('perm:Branch Funding,View');
+    Route::get('branch-funding/lookups', [\App\Http\Controllers\Api\BranchFundingController::class, 'lookups'])->middleware('perm:Branch Funding,View');
+    Route::get('branch-funding/{id}', [\App\Http\Controllers\Api\BranchFundingController::class, 'show'])->middleware('perm:Branch Funding,View');
+    Route::post('branch-funding', [\App\Http\Controllers\Api\BranchFundingController::class, 'store'])->middleware('perm:Branch Funding,Create');
+    Route::post('branch-funding/{id}/approve', [\App\Http\Controllers\Api\BranchFundingController::class, 'approve'])->middleware('perm:Branch Funding,Approve');
+    Route::post('branch-funding/{id}/reject', [\App\Http\Controllers\Api\BranchFundingController::class, 'reject'])->middleware('perm:Branch Funding,Approve');
+    Route::post('branch-funding/{id}/accrue', [\App\Http\Controllers\Api\BranchFundingController::class, 'accrue'])->middleware('perm:Branch Funding,Edit');
+    Route::post('branch-funding/{id}/repay', [\App\Http\Controllers\Api\BranchFundingController::class, 'repay'])->middleware('perm:Branch Funding,Edit');
+
     // --- Daily Savings: Products ---
     Route::get('savings-products', [SavingsProductController::class, 'index'])->middleware('perm:Savings Products,View');
     Route::post('savings-products', [SavingsProductController::class, 'store'])->middleware('perm:Savings Products,Create');

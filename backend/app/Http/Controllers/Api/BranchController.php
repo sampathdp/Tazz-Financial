@@ -99,6 +99,7 @@ class BranchController extends Controller
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:190',
             'is_head_office' => 'boolean',
+            'funding_borrow_limit' => 'nullable|numeric|min:0',
             'status' => [Rule::in(['Active', 'Inactive'])],
         ]);
 

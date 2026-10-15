@@ -63,6 +63,7 @@ class Permissions
         'Deposits',
         'Fixed Deposits',
         'Borrowings',
+        'Branch Funding',
         'Funding Reports',
         // --- Daily Savings module ---
         'Savings Products',

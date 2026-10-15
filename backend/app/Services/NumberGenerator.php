@@ -49,6 +49,8 @@ class NumberGenerator
         // One company-wide series, no {BRANCH} — a journal entry isn't tied to a
         // single branch the way a receipt is (see LedgerPoster).
         'journal' => 'JV-{YEAR:2}-{SEQ:6}',
+        // Branch-to-branch funding agreement; company-wide series, it spans two branches.
+        'branch_funding' => 'BFA-{YEAR:2}-{SEQ:5}',
         // Finance module money-movement ledger (see FinancePostingService) —
         // one company-wide series per year, like 'journal': a finance
         // transaction spans branches (a branch-to-branch transfer) and is not
@@ -106,6 +108,7 @@ class NumberGenerator
         'journal' => ['journal_entries', 'code'],
         'finance_transaction' => ['finance_transactions', 'code'],
         'finance_request' => ['finance_requests', 'code'],
+        'branch_funding' => ['branch_funding_agreements', 'code'],
     ];
 
     public static function next(string $module, array $context = [], ?string $format = null): string
