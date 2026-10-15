@@ -469,10 +469,13 @@ export function FinanceTransfersScreen({ user: me }: { go: Go; user?: AuthUser |
     try { await financeRequestsApi.recall(r.id, reason || 'recalled'); refresh(); notify.success('Recalled') } catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
   }
 
-  const twoStepMeta = (r: FinanceRequest) => !!(r.meta as Record<string, unknown> | null | undefined)?.two_step
+  const twoStepMeta = (r: FinanceRequest) => !!(r.meta as Record<string, unknown> | null | undefined)?.twoStep
   const acctName = (r: FinanceRequest, side: 'source' | 'dest') => {
+    // API responses are camelized, so meta keys arrive as sourceCashAccountId etc.
     const m = (r.meta || {}) as Record<string, number | undefined>
-    const cid = m[`${side}_cash_account_id`], bid = m[`${side}_bank_account_id`]
+    const top = r as unknown as Record<string, number | null | undefined>
+    const cid = m[`${side}CashAccountId`] ?? (side === 'source' ? top.sourceCashAccountId : undefined)
+    const bid = m[`${side}BankAccountId`] ?? (side === 'source' ? top.sourceBankAccountId : undefined)
     if (cid) return cash.find((a) => a.id === cid)?.name || `Cash #${cid}`
     if (bid) return bank.find((a) => a.id === bid)?.name || `Bank #${bid}`
     return '—'

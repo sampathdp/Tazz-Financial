@@ -23,21 +23,6 @@ export const NAV: NavNode[] = [
   { id: 'dash', label: 'Dashboard', icon: 'dash' },
   { id: 'customers', label: 'Customer Management', icon: 'users' },
 
-  { section: 'Finance', icon: 'wallet', items: [
-    { id: 'finance/dashboard', label: 'Finance Dashboard', icon: 'wallet' },
-    { id: 'finance/requests', label: 'Finance Requests', icon: 'receipt' },
-    { id: 'cash/book', label: 'Cashbook', icon: 'wallet' },
-    { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust' },
-    { id: 'finance/transactions', label: 'Cash Transactions', icon: 'receipt' },
-    { id: 'finance/transfers', label: 'Transfers', icon: 'swap' },
-    { id: 'finance/floats', label: 'Cash Floats', icon: 'coins' },
-    { id: 'finance/sessions', label: 'Daily Cash Sessions', icon: 'clock' },
-    { id: 'finance/audit', label: 'Audit Log', icon: 'list' },
-    { id: 'finance/reports', label: 'Finance Reports', icon: 'receipt' },
-    { id: 'finance/settings', label: 'Finance Settings', icon: 'shield' },
-    { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
-  ] },
-
   { section: 'Loan Management', icon: 'coins', items: [
     { id: 'loan/types', label: 'Loan Types', icon: 'layers' },
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
@@ -56,12 +41,27 @@ export const NAV: NavNode[] = [
      *  lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back
      *  to its unmapped-route rule (admin role only), not the permission system. */
     { id: 'loan/adjustments', label: 'Loan Adjustments', icon: 'shield' },
+    { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
   ] },
 
   { section: 'Speed Drafts', icon: 'coins', items: [
     { id: 'sd/types', label: 'Speed Draft Types', icon: 'layers' },
     { id: 'sd/drafts', label: 'Speed Drafts', icon: 'coins' },
     { id: 'sd/payments', label: 'Speed Draft Payments', icon: 'receipt' },
+  ] },
+
+  { section: 'Pawning Management', icon: 'tag', items: [
+    { id: 'pawn/types', label: 'Pawning Types', icon: 'layers' },
+    { id: 'pawn/tickets', label: 'Pawn Tickets', icon: 'tag' },
+    { id: 'pawn/auctions', label: 'Auctions', icon: 'store' },
+  ] },
+
+  { section: 'Daily Savings', icon: 'wallet', items: [
+    { id: 'fund/savings-products', label: 'Savings Products', icon: 'layers' },
+    { id: 'fund/savings', label: 'Savings Accounts', icon: 'wallet' },
+    { id: 'fund/savings-collection', label: 'Savings Collection', icon: 'receipt' },
+    { id: 'fund/savings-interest', label: 'Savings Interest', icon: 'coins' },
+    { id: 'rep/savings', label: 'Savings Reports', icon: 'chart' },
   ] },
 
   { section: 'Funding / Investment', icon: 'pie', items: [
@@ -76,37 +76,24 @@ export const NAV: NavNode[] = [
     { id: 'fund/reports', label: 'Funding Reports', icon: 'chart' },
   ] },
 
-  { section: 'Daily Savings', icon: 'wallet', items: [
-    { id: 'fund/savings-products', label: 'Savings Products', icon: 'layers' },
-    { id: 'fund/savings', label: 'Savings Accounts', icon: 'wallet' },
-    { id: 'fund/savings-collection', label: 'Savings Collection', icon: 'receipt' },
-    { id: 'fund/savings-interest', label: 'Savings Interest', icon: 'coins' },
-    { id: 'rep/savings', label: 'Savings Reports', icon: 'chart' },
-  ] },
-
-  { section: 'Pawning Management', icon: 'tag', items: [
-    { id: 'pawn/types', label: 'Pawning Types', icon: 'layers' },
-    { id: 'pawn/tickets', label: 'Pawn Tickets', icon: 'tag' },
-    { id: 'pawn/auctions', label: 'Auctions', icon: 'store' },
+  { section: 'Finance', icon: 'wallet', items: [
+    { id: 'finance/dashboard', label: 'Finance Dashboard', icon: 'wallet' },
+    { id: 'finance/requests', label: 'Finance Requests', icon: 'receipt' },
+    { id: 'cash/book', label: 'Cashbook', icon: 'wallet' },
+    { id: 'finance/transactions', label: 'Cash Transactions', icon: 'receipt' },
+    { id: 'finance/transfers', label: 'Transfers', icon: 'swap' },
+    { id: 'finance/floats', label: 'Cash Floats', icon: 'coins' },
+    { id: 'finance/sessions', label: 'Daily Cash Sessions', icon: 'clock' },
+    { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust' },
+    { id: 'finance/reports', label: 'Finance Reports', icon: 'receipt' },
+    { id: 'finance/audit', label: 'Audit Log', icon: 'list' },
+    { id: 'finance/settings', label: 'Finance Settings', icon: 'shield' },
   ] },
 
   { section: 'Bank Management', icon: 'building', items: [
     { id: 'bank/accounts', label: 'Bank Accounts', icon: 'building' },
     { id: 'bank/txns', label: 'Bank Transactions', icon: 'receipt' },
     { id: 'bank/recon', label: 'Bank Reconciliation', icon: 'adjust' },
-  ] },
-
-  { section: 'Accounting', icon: 'list', items: [
-    { id: 'acc/coa', label: 'Chart of Accounts', icon: 'list' },
-    { id: 'acc/journal', label: 'Journal Entries', icon: 'doc' },
-    { id: 'acc/mje', label: 'Manual Journal Entries', icon: 'edit' },
-    { id: 'acc/gl', label: 'General Ledger', icon: 'layers' },
-    { id: 'acc/tb', label: 'Trial Balance', icon: 'chart' },
-    { id: 'acc/pl', label: 'Profit & Loss', icon: 'pie' },
-    { id: 'acc/bs', label: 'Balance Sheet', icon: 'grid' },
-    { id: 'acc/cf', label: 'Cash Flow', icon: 'swap' },
-    { id: 'acc/ib', label: 'Inter-Branch Balances', icon: 'swap' },
-    { id: 'acc/drift', label: 'Ledger Drift', icon: 'adjust' },
   ] },
 
   { section: 'Expense Management', icon: 'wallet', items: [
@@ -118,14 +105,20 @@ export const NAV: NavNode[] = [
     { id: 'exp/petty-cash', label: 'Petty Cash', icon: 'coins' },
   ] },
 
-  { section: 'Masters', icon: 'layers', items: [
-    { id: 'masters/expense-categories', label: 'Expense Categories', icon: 'tag' },
-    { id: 'masters/banks', label: 'Banks', icon: 'building' },
-    { id: 'masters/document-categories', label: 'Document Categories', icon: 'file-text' },
-    { id: 'masters/charge-categories', label: 'Charge Categories', icon: 'tag' },
-  ] },
-
   { id: 'subs/list', label: 'Subscriptions & Renewals', icon: 'calendar' },
+
+  { section: 'Accounting', icon: 'list', items: [
+    { id: 'acc/coa', label: 'Chart of Accounts', icon: 'list' },
+    { id: 'acc/journal', label: 'Journal Entries', icon: 'doc' },
+    { id: 'acc/mje', label: 'Manual Journal Entries', icon: 'edit' },
+    { id: 'acc/gl', label: 'General Ledger', icon: 'layers' },
+    { id: 'acc/tb', label: 'Trial Balance', icon: 'chart' },
+    { id: 'acc/ib', label: 'Inter-Branch Balances', icon: 'swap' },
+    { id: 'acc/drift', label: 'Ledger Drift', icon: 'adjust' },
+    { id: 'acc/pl', label: 'Profit & Loss', icon: 'pie' },
+    { id: 'acc/bs', label: 'Balance Sheet', icon: 'grid' },
+    { id: 'acc/cf', label: 'Cash Flow', icon: 'swap' },
+  ] },
 
   { section: 'Reports', icon: 'chart', items: [
     { group: 'Loan Reports', icon: 'coins', items: [
@@ -164,6 +157,13 @@ export const NAV: NavNode[] = [
       { id: 'rep/exp-list', label: 'Expense List', icon: 'list' },
       { id: 'rep/exp-vendor', label: 'Expense by Vendor', icon: 'store' },
     ] },
+  ] },
+
+  { section: 'Masters', icon: 'layers', items: [
+    { id: 'masters/expense-categories', label: 'Expense Categories', icon: 'tag' },
+    { id: 'masters/banks', label: 'Banks', icon: 'building' },
+    { id: 'masters/document-categories', label: 'Document Categories', icon: 'file-text' },
+    { id: 'masters/charge-categories', label: 'Charge Categories', icon: 'tag' },
   ] },
 
   { section: 'Notifications', icon: 'bell', items: [

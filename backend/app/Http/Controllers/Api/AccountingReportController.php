@@ -563,7 +563,7 @@ class AccountingReportController extends Controller
      * drift out of step with plWaterfall()'s own keys.
      */
     private const WATERFALL_ROWS = [
-        ['lending_income', 'Income', 0],
+        ['lending_income', 'Interest Income', 0],
         ['inter_zonal_interest', 'Inter Zonal Interest Income/(Exp)', 0],
         ['total_income', 'Total Income', 0],
         ['interest_cost', 'Interest Cost', 0],

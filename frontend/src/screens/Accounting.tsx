@@ -543,7 +543,7 @@ export function TrialBalanceScreen({ user: _me }: { go: Go; user?: AuthUser | nu
 const getPath = (o: any, path: string) => path.split('.').reduce((v, k) => (v == null ? v : v[k]), o)
 
 const WATERFALL_ROWS: { key: string; label: string; indent?: boolean; bold?: boolean }[] = [
-  { key: 'lendingIncome', label: 'Income' },
+  { key: 'lendingIncome', label: 'Interest Income' },
   { key: 'interZonalInterest', label: 'Inter Zonal Interest Income/(Exp)' },
   { key: 'totalIncome', label: 'Total Income', bold: true },
   { key: 'interestCost', label: 'Interest Cost' },

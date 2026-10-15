@@ -496,20 +496,13 @@ class LoanLedgerPoster
             $lines[] = ['account_id' => ChartOfAccount::system('4030')->id, 'credit' => $penalty];
         }
 
-        // Split by the charge's category account rather than one blanket
-        // bucket — a category with no chart_of_account_id set yet (or a
-        // charge with no category) still falls back to 4020, same as before
-        // this split existed, instead of silently going nowhere.
-        $chargesByAccount = $payment->chargeAllocations()
-            ->with('charge.category:id,chart_of_account_id')
-            ->get()
-            ->groupBy(fn ($allocation) => $allocation->charge?->category?->chart_of_account_id ?? ChartOfAccount::system('4020')->id)
-            ->map(fn ($group) => (float) $group->sum('amount_applied'));
-
-        foreach ($chargesByAccount as $accountId => $amount) {
-            if ($amount > 0) {
-                $lines[] = ['account_id' => (int) $accountId, 'credit' => $amount];
-            }
+        // All "Other Charges" collected on a loan are Documentation Income
+        // (4910), whatever the charge category is mapped to. 4020 is only the
+        // fallback on a chart that has no 4910 account.
+        $charges = (float) $payment->chargeAllocations()->sum('amount_applied');
+        if ($charges > 0) {
+            $chargeAccount = ChartOfAccount::where('code', '4910')->value('id') ?? ChartOfAccount::system('4020')->id;
+            $lines[] = ['account_id' => (int) $chargeAccount, 'credit' => $charges];
         }
 
         return $lines;
