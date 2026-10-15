@@ -617,12 +617,13 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           {q && <span className="t-2" style={{ fontSize: 12 }}>{filtered.length} of {rows.length}</span>}
         </div>
         {loading ? <LoadingBlock /> :
-        <Table cols={[{ label: 'Application' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Amount' }, { label: 'Term' }, { label: 'Status', align: 'center' }]}
+        <Table cols={[{ label: 'Application' }, { label: 'Date' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Amount' }, { label: 'Term' }, { label: 'Status', align: 'center' }]}
           rows={filtered}
           empty="No loan applications"
           onRow={openRow}
           render={(l) => <>
             <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
+            <Td>{(l.loanDetail?.applicationDate || l.createdAt || '').slice(0, 10) || '—'}</Td>
             <Td>
               <div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div>
               <div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div>
