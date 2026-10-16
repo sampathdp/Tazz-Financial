@@ -329,7 +329,9 @@ export function ThemeToggle() {
   )
 }
 
-export function Topbar({ setOpen, go }: { setOpen: (fn: (o: boolean) => boolean) => void; go: (r: string) => void }) {
+export function Topbar({ setOpen, go, user }: { setOpen: (fn: (o: boolean) => boolean) => void; go: (r: string) => void; user?: AuthUser | null }) {
+  const displayName = user?.name || 'User'
+  const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || 'U'
   const notify = useNotify()
   // Let notification-center clicks navigate via the app router.
   useEffect(() => { notify.setRouter(go) }, [notify, go])
@@ -343,10 +345,9 @@ export function Topbar({ setOpen, go }: { setOpen: (fn: (o: boolean) => boolean)
         <ThemeToggle />
         <NotificationBell />
         <div className="row gap-2" style={{ paddingLeft: 6, borderLeft: '1px solid var(--line)' }}>
-          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--bg-3)', border: '1px solid var(--line)', display: 'grid', placeItems: 'center', fontFamily: 'Saira', fontWeight: 700, fontSize: 13, color: 'var(--ac-bright)' }}>AD</div>
+          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--bg-3)', border: '1px solid var(--line)', display: 'grid', placeItems: 'center', fontFamily: 'Saira', fontWeight: 700, fontSize: 13, color: 'var(--ac-bright)' }}>{initials}</div>
           <div className="hide-sm" style={{ lineHeight: 1.2 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>Admin User</div>
-            <div className="t-2" style={{ fontSize: 11 }}>Administrator</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{displayName}</div>
           </div>
           <button
             className="mms-icobtn"

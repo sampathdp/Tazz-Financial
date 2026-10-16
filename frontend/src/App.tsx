@@ -315,7 +315,7 @@ function AppShell() {
               <WhatsNewModal user={user} />
               <Sidebar go={go} open={open} setOpen={setOpen} company={brand} user={user} />
               <div className="mms-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                <Topbar setOpen={setOpen} go={go} />
+                <Topbar setOpen={setOpen} go={go} user={user} />
                 <main className="fade-in" style={{ padding: '24px clamp(16px,3vw,32px) 60px', flex: 1 }}>
                   <Outlet />
                 </main>
