@@ -391,19 +391,44 @@ export function SearchSelect({ value, onChange, options, getLabel, getSub, place
 
 /* ---------- Modal ---------- */
 export function Modal({ open, onClose, title, sub, children, width = 560, footer }: { open?: boolean; onClose?: () => void; title?: ReactNode; sub?: ReactNode; children?: ReactNode; width?: number; footer?: ReactNode }) {
+  const [mode, setMode] = useState<'normal' | 'max' | 'min'>('normal')
+  const [desktop, setDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 901px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 901px)')
+    const fn = () => setDesktop(mq.matches)
+    mq.addEventListener('change', fn)
+    return () => mq.removeEventListener('change', fn)
+  }, [])
+  useEffect(() => { if (!open) setMode('normal') }, [open])
   if (!open) return null
+  const m = desktop ? mode : 'normal'
+  const minimized = m === 'min'
+  const maximized = m === 'max'
+  const overlayStyle: CSSProperties = minimized
+    ? { position: 'fixed', right: 20, bottom: 20, zIndex: 200, animation: 'fade .2s ease both' }
+    : { position: 'fixed', inset: 0, zIndex: 200, background: 'oklch(0 0 0 / 0.6)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: maximized ? 0 : 20, paddingLeft: maximized ? 'var(--sb-w)' : 'calc(var(--sb-w) + 20px)', animation: 'fade .2s ease both' }
+  const boxStyle: CSSProperties = minimized
+    ? { width: 320, background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 'var(--r-l)', boxShadow: 'var(--sh-3)', overflow: 'hidden' }
+    : { width: maximized ? '100%' : 'min(' + width + 'px,100%)', height: maximized ? '100%' : undefined, maxHeight: maximized ? '100%' : '90vh', overflow: 'auto', background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: maximized ? 0 : 'var(--r-l)', boxShadow: 'var(--sh-3)', animation: 'slideIn .25s var(--ease) both' }
   return createPortal(
-    <div onClick={onClose} className="mms-modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'oklch(0 0 0 / 0.6)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20, paddingLeft: 'calc(var(--sb-w) + 20px)', animation: 'fade .2s ease both' }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(' + width + 'px,100%)', maxHeight: '90vh', overflow: 'auto', background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 'var(--r-l)', boxShadow: 'var(--sh-3)', animation: 'slideIn .25s var(--ease) both' }}>
-        <div className="row between" style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)', position: 'sticky', top: 0, background: 'var(--bg-1)', zIndex: 1 }}>
-          <div>
-            <h3 style={{ fontSize: 18 }}>{title}</h3>
-            {sub && <div className="t-2" style={{ fontSize: 12.5, marginTop: 2 }}>{sub}</div>}
+    <div onClick={minimized ? undefined : onClose} className="mms-modal-overlay" style={overlayStyle}>
+      <div onClick={(e) => e.stopPropagation()} style={boxStyle}>
+        <div className="row between" style={{ padding: minimized ? '10px 14px' : '18px 22px', borderBottom: minimized ? 'none' : '1px solid var(--line)', position: 'sticky', top: 0, background: 'var(--bg-1)', zIndex: 1 }}>
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ fontSize: minimized ? 14 : 18, whiteSpace: minimized ? 'nowrap' : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</h3>
+            {sub && !minimized && <div className="t-2" style={{ fontSize: 12.5, marginTop: 2 }}>{sub}</div>}
           </div>
-          <Btn variant="plain" size="sm" icon="x" onClick={onClose} style={{ padding: 6 }} />
+          <div className="row" style={{ gap: 2, flexShrink: 0 }}>
+            {desktop && !minimized && <Btn variant="plain" size="sm" icon="minimize" onClick={() => setMode('min')} style={{ padding: 6 }} />}
+            {desktop && <Btn variant="plain" size="sm" icon={m === 'normal' ? 'maximize' : 'restore'} onClick={() => setMode(m === 'normal' ? 'max' : 'normal')} style={{ padding: 6 }} />}
+            <Btn variant="plain" size="sm" icon="x" onClick={onClose} style={{ padding: 6 }} />
+          </div>
         </div>
-        <div style={{ padding: 22 }}>{children}</div>
-        {footer && <div className="row between gap-2" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', position: 'sticky', bottom: 0, background: 'var(--bg-1)' }}>{footer}</div>}
+        {/* body stays mounted while minimized so form state is kept */}
+        <div style={{ display: minimized ? 'none' : undefined }}>
+          <div style={{ padding: 22 }}>{children}</div>
+          {footer && <div className="row between gap-2" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', position: 'sticky', bottom: 0, background: 'var(--bg-1)' }}>{footer}</div>}
+        </div>
       </div>
     </div>,
     document.body,

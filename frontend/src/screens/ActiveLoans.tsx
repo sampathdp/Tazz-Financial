@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Input, Table, Td, Pager, LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { loansApi, type Loan, type LoanStatus, type AuthUser } from '../api'
+import { fmtDate } from '../data'
 import { LoanDetail } from './loan/LoanDetail'
 import { useNotify } from '../components/Notify'
 import type { Go } from './types'
@@ -110,12 +111,13 @@ export function ActiveLoansScreen({ go, user: me }: { go: Go; user?: AuthUser | 
           {search.trim() && <span className="t-2" style={{ fontSize: 12 }}>{total} match{total === 1 ? '' : 'es'}</span>}
         </div>
         {loading ? <LoadingBlock /> : <>
-        <Table cols={[{ label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Principal' }, { label: 'Outstanding' }, { label: 'Status', align: 'center' }]}
+        <Table cols={[{ label: 'Loan' }, { label: 'Date' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Principal' }, { label: 'Outstanding' }, { label: 'Status', align: 'center' }]}
           rows={rows}
           empty={LIVE_STATUSES.includes(statusFilter as LoanStatus) || statusFilter === 'All' ? 'No approved or active loans yet — approve one in Loan Applications first.' : 'No loans in this status'}
           onRow={openRow}
           render={(l) => <>
             <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
+            <Td mono>{fmtDate(l.loanDetail?.applicationDate ?? l.createdAt)}</Td>
             <Td>
               <div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div>
               <div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div>
