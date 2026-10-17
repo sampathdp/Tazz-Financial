@@ -50,6 +50,7 @@ interface FormState {
   branchId?: number
   principalAmount?: number | string
   downPayment?: number | string
+  documentChargeAmount?: number | string
   interestRatePercent?: number | string
   termMonths?: number
   installmentFrequency?: LoanFrequency
@@ -163,6 +164,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
         setForm({
           customerId: loan.customerId, loanTypeId: loan.loanDetail?.loanTypeId, branchId: loan.branchId,
           principalAmount: loan.principalAmount, downPayment: loan.loanDetail?.downPayment ?? undefined,
+          documentChargeAmount: loan.loanDetail?.documentChargeAmount ?? undefined,
           interestRatePercent: loan.interestRatePercent, termMonths: loan.termMonths,
           installmentFrequency: loan.loanDetail?.installmentFrequency, purpose: loan.loanDetail?.purpose || '',
           applicationDate,
@@ -228,6 +230,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
       branchId: customer?.branchId,
       principalAmount: form.principalAmount,
       downPayment: form.downPayment || 0,
+      documentChargeAmount: Number(selectedType?.processingFeePercent) > 0 && form.documentChargeAmount !== undefined && form.documentChargeAmount !== '' ? form.documentChargeAmount : null,
       interestRatePercent: form.interestRatePercent,
       termMonths: form.termMonths,
       installmentFrequency: form.installmentFrequency,
@@ -425,13 +428,22 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             </Field>
             <Field label="Loan Amount">
               <Input type="number" value={form.principalAmount ?? ''} onChange={(e) => setForm((s) => ({ ...s, principalAmount: e.target.value as any }))} />
-              {Number(selectedType?.processingFeePercent) > 0 && (
-                <div className="t-2" style={{ fontSize: 11.5, marginTop: 4 }}>
-                  Doc charge {Number(selectedType?.processingFeePercent)}%
-                  {!!form.principalAmount && <> = {(Math.round(Number(form.principalAmount) * Number(selectedType?.processingFeePercent)) / 100).toLocaleString()}</>}
-                </div>
-              )}
             </Field>
+            {Number(selectedType?.processingFeePercent) > 0 && (() => {
+              const suggested = Math.round(Number(form.principalAmount || 0) * Number(selectedType?.processingFeePercent)) / 100
+              return (
+                <Field label="Doc Charge">
+                  <Input type="number" min={0} value={form.documentChargeAmount ?? ''} placeholder={suggested ? String(suggested) : '0.00'}
+                    onChange={(e) => setForm((s) => ({ ...s, documentChargeAmount: e.target.value as any }))} />
+                  <div className="t-2" style={{ fontSize: 11.5, marginTop: 4 }}>
+                    {Number(selectedType?.processingFeePercent)}% of loan amount = {suggested.toLocaleString()} · leave blank to use this
+                    {form.documentChargeAmount !== undefined && form.documentChargeAmount !== '' && (
+                      <> · <a href="#" onClick={(e) => { e.preventDefault(); setForm((s) => ({ ...s, documentChargeAmount: undefined })) }}>reset</a></>
+                    )}
+                  </div>
+                </Field>
+              )
+            })()}
             <Field label="Down Payment">
               <Input type="number" value={form.downPayment ?? ''} onChange={(e) => setForm((s) => ({ ...s, downPayment: e.target.value as any }))} />
               {!!form.principalAmount && (

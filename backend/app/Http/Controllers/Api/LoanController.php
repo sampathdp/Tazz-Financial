@@ -840,7 +840,10 @@ class LoanController extends Controller
         // 1.00 (or a charge raised before the disbursed amount was changed) must not unlock the loan.
         if ($loanType && (float) $loanType->processing_fee_percent > 0) {
             $financed ??= (float) $loan->principal_amount - (float) $loan->loanDetail->down_payment;
-            $expected = round($financed * (float) $loanType->processing_fee_percent / 100, 2);
+            // An amount keyed in on the application overrides the computed fee.
+            $expected = $detail->document_charge_amount !== null
+                ? round((float) $detail->document_charge_amount, 2)
+                : round($financed * (float) $loanType->processing_fee_percent / 100, 2);
             $paid = (float) $documentCharges->sum('due_amount');
             if ($paid + 0.005 < $expected) {
                 return 'The document charge (' . number_format($paid, 2) . ') is less than the ' . rtrim(rtrim(number_format((float) $loanType->processing_fee_percent, 3), '0'), '.') . '% processing fee on the disbursed amount (' . number_format($expected, 2) . '). Correct the charge before disbursing.';
@@ -1544,6 +1547,7 @@ class LoanController extends Controller
             'loan_type_id' => 'required|exists:loan_types,id',
             'principal_amount' => ['required', 'numeric', 'min:0', new \App\Rules\Money],
             'down_payment' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
+            'document_charge_amount' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
             'interest_rate_percent' => 'nullable|numeric|min:0|max:999',
             'term_months' => 'required|integer|min:1',
             'installment_frequency' => ['required', Rule::in(self::FREQUENCIES)],
@@ -1641,6 +1645,8 @@ class LoanController extends Controller
             'loan_type_id' => $validated['loan_type_id'],
             'vehicle_no' => $loanType->category === 'Leasing' ? $validated['vehicle_no'] : null,
             'down_payment' => $downPayment,
+            'document_charge_amount' => (float) $loanType->processing_fee_percent > 0 && isset($validated['document_charge_amount']) && $validated['document_charge_amount'] !== ''
+                ? $validated['document_charge_amount'] : null,
             'interest_method' => $loanType->interest_method,
             'installment_frequency' => $validated['installment_frequency'],
             'purpose' => $validated['purpose'] ?? null,

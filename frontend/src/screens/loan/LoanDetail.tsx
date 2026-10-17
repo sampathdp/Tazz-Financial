@@ -1086,7 +1086,8 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
   }, [])
 
   const feePercent = num(loan.loanDetail?.loanType?.processingFeePercent)
-  const computedDocCharge = Math.round(num(amount) * feePercent) / 100
+  const appDocCharge = loan.loanDetail?.documentChargeAmount
+  const computedDocCharge = appDocCharge != null && appDocCharge !== '' ? num(appDocCharge) : Math.round(num(amount) * feePercent) / 100
   const docCharge = loan.charges?.find((c) => c.category?.name === 'Document')
   const docBalance = docCharge ? Math.max(0, num(docCharge.dueAmount) - num(docCharge.paidAmount)) : 0
   const chargeRequired = feePercent > 0

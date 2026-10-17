@@ -340,6 +340,8 @@ export interface LoanFacilityDetail {
   vehicleNo?: string | null;
   /** Paid upfront; the schedule amortizes principalAmount - downPayment. */
   downPayment?: number | string | null;
+  /** Doc charge keyed in on the application; null = computed from the product's processing fee %. */
+  documentChargeAmount?: number | string | null;
   /** Set once disbursed — see loansApi.disburse(). */
   disbursementMethod?: 'Cash' | 'Bank' | 'Cheque' | null;
   interestMethod?: InterestMethod | null;
