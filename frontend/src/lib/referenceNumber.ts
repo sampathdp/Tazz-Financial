@@ -1,5 +1,5 @@
 /** Template used when a loan type has no reference_format of its own. */
-export const DEFAULT_REFERENCE_FORMAT = '{BRANCH}-{CODE}-{YEAR:2}-{SEQ:6}'
+export const DEFAULT_REFERENCE_FORMAT = '{BRANCH}-{CODE}-{YEAR:2}-{SEQ:1}'
 
 /**
  * Mirrors the backend's App\Services\NumberGenerator placeholder substitution,

@@ -1280,6 +1280,23 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
     } finally { setAddBusy(false) }
   }
 
+  const [dueEdit, setDueEdit] = useState('')
+  const [updBusy, setUpdBusy] = useState(false)
+  useEffect(() => { setDueEdit(docCharge ? String(num(docCharge.dueAmount)) : '') }, [docCharge?.id, docCharge?.dueAmount])
+
+  const updateCharge = async () => {
+    if (!docCharge) return
+    if (!(num(dueEdit) > 0)) { setPayErr('Enter a charge amount greater than zero.'); return }
+    setUpdBusy(true); setPayErr('')
+    try {
+      await loanChargesApi.update(docCharge.id, { dueAmount: dueEdit } as any)
+      notify.success('Document charge updated')
+      onChanged()
+    } catch (ex: any) {
+      setPayErr(getErrorText(ex, 'Could not update the document charge.'))
+    } finally { setUpdBusy(false) }
+  }
+
   const payCharge = async () => {
     if (method === 'Cheque' && (!bankId || !chequeDate)) { setPayErr('Bank and Cheque Date are required for a cheque payment.'); return }
     setPayBusy(true); setPayErr('')
@@ -1338,6 +1355,13 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
           <b>How to fix:</b> go to <b>Finance → Daily Cash Sessions</b>, click <b>Open Session</b>, choose the cash account and enter the opening amount, then come back and record this payment.
         </div>
       )}
+      <Can user={me} module="Active Loans" action="Edit">
+        <div className="row gap-2 wrap" style={{ alignItems: 'flex-end', marginBottom: 12 }}>
+          <Field label="Charge Amount"><Input type="number" value={dueEdit} onChange={(e) => setDueEdit(e.target.value)} style={{ maxWidth: 160 }} /></Field>
+          <Btn variant="solid" icon="check" onClick={updateCharge} disabled={updBusy || num(dueEdit) === num(docCharge.dueAmount)}>{updBusy ? 'Updating…' : 'Update Charge'}</Btn>
+          <span className="t-2" style={{ fontSize: 11.5 }}>Suggested: {money(computedAmount)} ({feePercent}% of disbursed amount)</span>
+        </div>
+      </Can>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
         <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
           {DOC_CHARGE_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}

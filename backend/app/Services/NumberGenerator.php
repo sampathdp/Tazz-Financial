@@ -33,7 +33,8 @@ use Illuminate\Support\Facades\DB;
 class NumberGenerator
 {
     private const DEFAULT_FORMATS = [
-        'loan' => '{BRANCH}-{CODE}-{YEAR:2}-{SEQ:6}',
+        // {SEQ:1} = no zero-padding (HB-SMEW-26-5); counter is shared across loan types (see resolveKey).
+        'loan' => '{BRANCH}-{CODE}-{YEAR:2}-{SEQ:1}',
         'customer' => 'CUS-{SEQ:6}',
         // {TYPE} is the payment method's short code (CA/BT/CQ) — see
         // LoanPaymentController::TYPE_CODES. One shared sequence per
@@ -119,7 +120,11 @@ class NumberGenerator
         // Atomically create the counter row if this is the first number ever
         // issued for this key, then lock it so concurrent requests serialize
         // on the increment below instead of computing the same "next" value.
-        DB::table('number_sequences')->insertOrIgnore([$key + ['last_sequence' => 0, 'created_at' => now(), 'updated_at' => now()]]);
+        // The shared loan row is seeded from the highest per-type counter so numbers carry on, not restart at 1.
+        $seed = $module === 'loan'
+            ? (int) NumberSequence::where('module', 'loan')->where('year', $key['year'])->max('last_sequence')
+            : 0;
+        DB::table('number_sequences')->insertOrIgnore([$key + ['last_sequence' => $seed, 'created_at' => now(), 'updated_at' => now()]]);
         $seqRow = NumberSequence::where($key)->lockForUpdate()->first();
         $sequence = $seqRow->last_sequence + 1;
         $number = self::format($format, $context, $sequence);
@@ -190,7 +195,8 @@ class NumberGenerator
     {
         $usesCode = str_contains($format, '{CODE}');
         $isProductScoped = in_array($module, self::PRODUCT_SCOPED_MODULES, true);
-        $usesLoanType = $usesCode && !$isProductScoped;
+        // Loan numbers run on one continuous series across every loan type.
+        $usesLoanType = $usesCode && !$isProductScoped && $module !== 'loan';
         $usesProduct = $usesCode && $isProductScoped;
         $usesYear = (bool) preg_match('/\{YEAR(?::\d+)?\}/', $format);
 
