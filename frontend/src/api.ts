@@ -2881,6 +2881,7 @@ export interface Pawning {
   disbursedAt?: string | null;
   status: PawningStatus;
   closedAt?: string | null;
+  createdAt?: string;
   applier?: { id: number; name: string } | null;
   creator?: { id: number; name: string } | null;
 

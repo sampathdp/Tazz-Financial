@@ -40,11 +40,11 @@ class NumberGenerator
         // LoanPaymentController::TYPE_CODES. One shared sequence per
         // branch+year across all methods, same as a physical receipt book.
         'payment' => '{BRANCH}-{TYPE}-{YEAR:2}-{MONTH:2}-{SEQ:5}',
-        'fd_deposit' => '{BRANCH}-DEP-{YEAR:2}-{MONTH:2}-{SEQ:6}',
+        'fd_deposit' => '{BRANCH}-DEP-{YEAR:2}-{MONTH:2}-{SEQ:1}',
         // {CODE} (the funding product's own code, e.g. "TT") already
         // distinguishes this as a fixed deposit — a literal "FD" segment was
         // redundant, so it's dropped in favor of the calendar month.
-        'fixed_deposit' => '{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:6}',
+        'fixed_deposit' => '{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:1}',
         'fd_withdrawal' => '{BRANCH}-FDV-{YEAR:2}-{SEQ:5}',
         'fd_part_payment' => '{BRANCH}-FDP-{YEAR:2}-{SEQ:5}',
         // One company-wide series, no {BRANCH} — a journal entry isn't tied to a
@@ -121,8 +121,8 @@ class NumberGenerator
         // issued for this key, then lock it so concurrent requests serialize
         // on the increment below instead of computing the same "next" value.
         // The shared loan row is seeded from the highest per-type counter so numbers carry on, not restart at 1.
-        $seed = $module === 'loan'
-            ? (int) NumberSequence::where('module', 'loan')->where('year', $key['year'])->max('last_sequence')
+        $seed = in_array($module, ['loan', 'fixed_deposit'], true)
+            ? (int) NumberSequence::where('module', $module)->where('year', $key['year'])->max('last_sequence')
             : 0;
         DB::table('number_sequences')->insertOrIgnore([$key + ['last_sequence' => $seed, 'created_at' => now(), 'updated_at' => now()]]);
         $seqRow = NumberSequence::where($key)->lockForUpdate()->first();
@@ -197,7 +197,8 @@ class NumberGenerator
         $isProductScoped = in_array($module, self::PRODUCT_SCOPED_MODULES, true);
         // Loan numbers run on one continuous series across every loan type.
         $usesLoanType = $usesCode && !$isProductScoped && $module !== 'loan';
-        $usesProduct = $usesCode && $isProductScoped;
+        // Fixed deposit numbers run on one continuous series across every funding product.
+        $usesProduct = $usesCode && $isProductScoped && $module !== 'fixed_deposit';
         $usesYear = (bool) preg_match('/\{YEAR(?::\d+)?\}/', $format);
 
         return [

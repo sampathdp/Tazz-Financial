@@ -413,8 +413,12 @@ function ContractSummary({ loan }: { loan: Loan }) {
           { label: 'Equivalent Annual Effective Rate (AER)', value: `${pct(aer)}%`, icon: 'chart', tone: 'amber' as const },
           { label: 'Equivalent Monthly Effective Rate', value: `${pct(emr)}%`, icon: 'chart', tone: 'amber' as const },
         ] : []),
-        { label: 'Activated', value: dateOnly(loan.disbursedAt), icon: 'calendar', tone: 'green' },
+        { label: 'Application Date', value: dateOnly(loan.applicationDate || loan.loanDetail?.applicationDate || loan.createdAt), icon: 'calendar', tone: 'blue' },
+        { label: 'Created On', value: dateOnly(loan.createdAt), icon: 'calendar', tone: 'neutral' },
+        { label: 'Approved On', value: loan.approvedAt ? dateOnly(loan.approvedAt) : '—', icon: 'calendar', tone: 'blue' },
+        { label: 'Disbursed / Activated', value: loan.disbursedAt ? dateOnly(loan.disbursedAt) : '—', icon: 'calendar', tone: 'green' },
         { label: 'Expiry', value: expiry ? dateOnly(expiry) : '—', icon: 'clock', tone: 'red' },
+        { label: 'Closed On', value: loan.closedAt ? dateOnly(loan.closedAt) : '—', icon: 'clock', tone: loan.closedAt ? 'red' : 'neutral' },
       ]} />
     </>
   )
@@ -1194,6 +1198,10 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
 
       <DocumentChargeSection loan={loan} me={me} docCharge={docCharge} docBalance={docBalance} computedAmount={computedDocCharge} feePercent={feePercent} onChanged={onChanged} notify={notify} />
 
+      <div className="row wrap gap-4" style={{ marginBottom: 14, fontSize: 12.5 }}>
+        <div><span className="t-2">Application Date: </span><b>{dateOnly(loan.applicationDate || loan.loanDetail?.applicationDate || loan.createdAt)}</b></div>
+        <div><span className="t-2">Approved On: </span><b>{loan.approvedAt ? dateOnly(loan.approvedAt) : '—'}</b></div>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 16 }}>
         <Field label="Disbursed Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <Field label="Disbursed Date"><Input type="date" value={disbursedAt} onChange={(e) => setDisbursedAt(e.target.value)} /></Field>

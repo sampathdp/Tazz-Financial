@@ -74,8 +74,10 @@ function OverviewPanel({ pawning: d }: { pawning: Pawning }) {
         <div><span className="t-2">Customer: </span><b>{d.customer?.fullName}</b></div>
         <div><span className="t-2">Scheme: </span><b>{detail?.pawningType?.name}</b></div>
         <div><span className="t-2">Applied Rate: </span><b>{Number(detail?.appliedRatePercent).toFixed(3)}% {detail?.isSpecialRate ? '(special)' : '(normal)'}</b></div>
-        <div><span className="t-2">Issued: </span><b>{dateOnly(d.startDate)}</b></div>
+        <div><span className="t-2">Created On: </span><b>{d.createdAt ? dateOnly(d.createdAt) : '—'}</b></div>
+        <div><span className="t-2">Issued / Disbursed: </span><b>{dateOnly(d.disbursedAt || d.startDate)}</b></div>
         <div><span className="t-2">Repay Due: </span><b>{dateOnly(detail?.repayDueDate)}</b></div>
+        <div><span className="t-2">Closed On: </span><b>{d.closedAt ? dateOnly(d.closedAt) : '—'}</b></div>
         <div><span className="t-2">Renewals: </span><b>{detail?.renewalCount ?? 0}</b></div>
         {detail?.previousFacility && <div><span className="t-2">Renewed From: </span><b>{detail.previousFacility.code}</b></div>}
         {detail?.purpose && <div><span className="t-2">Purpose: </span><b>{detail.purpose}</b></div>}

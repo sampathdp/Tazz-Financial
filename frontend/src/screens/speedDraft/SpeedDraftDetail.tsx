@@ -129,8 +129,12 @@ function OverviewPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
         <div><span className="t-2">Type: </span><b>{d.speedDraftDetail?.speedDraftType?.name} ({CATEGORY_LABEL[d.speedDraftDetail?.speedDraftType?.category || ''] || d.speedDraftDetail?.speedDraftType?.category})</b></div>
         <div><span className="t-2">Rate: </span><b>{Number(d.interestRatePercent).toFixed(3)}% {d.ratePeriod === 'annual' ? 'p.a.' : d.ratePeriod === 'daily' ? 'p.d.' : 'p.m.'}</b></div>
         <div><span className="t-2">Period: </span><b>{d.termMonths} months</b></div>
+        <div><span className="t-2">Application Date: </span><b>{d.createdAt ? dateOnly(d.createdAt) : '—'}</b></div>
+        <div><span className="t-2">Approved On: </span><b>{d.approvedAt ? dateOnly(d.approvedAt) : '—'}</b></div>
+        <div><span className="t-2">Disbursed On: </span><b>{d.disbursedAt ? dateOnly(d.disbursedAt) : '—'}</b></div>
         <div><span className="t-2">Start: </span><b>{dateOnly(d.startDate)}</b></div>
         <div><span className="t-2">Maturity: </span><b>{dateOnly(d.maturityDate)}</b></div>
+        <div><span className="t-2">Closed On: </span><b>{d.closedAt ? dateOnly(d.closedAt) : '—'}</b></div>
         {!!d.speedDraftDetail?.vehicleNo && <div><span className="t-2">Vehicle No: </span><b>{d.speedDraftDetail.vehicleNo}</b></div>}
       </div>
 
