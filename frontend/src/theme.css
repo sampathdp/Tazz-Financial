@@ -226,3 +226,10 @@ select option{ background:var(--bg-1); color:var(--tx-0); }
    that spills an extra near-blank page. Also suppresses Chrome's default print
    header/footer (URL/date), since there's no margin left to draw them in. */
 @page{ size:A4; margin:0; }
+
+/* page window controls (desktop only) */
+@media (max-width: 900px){ .mms-winctl,.mms-dock{ display:none!important; } }
+@media (min-width: 901px){
+  html[data-win="max"] .mms-sb, html[data-win="max"] .mms-top{ display:none!important; }
+  html[data-win="max"] .mms-dock{ left:16px!important; }
+}

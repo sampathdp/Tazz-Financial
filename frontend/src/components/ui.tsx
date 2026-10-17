@@ -1,8 +1,10 @@
 /* NMS-Auto — shared UI kit, ported from ui.jsx */
-import { Children, useEffect, useRef, useState } from 'react'
+import { Children, Fragment, isValidElement, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
+import { useLocation } from 'react-router-dom'
+import { useWinDock } from './WinDock'
 import { banksApi, bankAccountsApi, type Bank, type BankAccount } from '../api'
 
 /* ---------- primitives ---------- */
@@ -109,8 +111,11 @@ export function Card({ children, style, pad = 20, className = '' }: { children?:
 }
 
 export function PageHead({ title, sub, crumbs, actions, icon }: { title: string; sub?: ReactNode; crumbs?: ReactNode; actions?: ReactNode; icon?: string }) {
+  const dock = useWinDock()
+  const { pathname, search } = useLocation()
+  const win = dock.isMin(pathname) ? 'min' : dock.maximized ? 'max' : 'normal'
   return (
-    <div className="row between wrap gap-4" style={{ marginBottom: 20 }}>
+    <div className="row between wrap gap-4 mms-pagehead" style={{ marginBottom: 20 }}>
       <div className="row gap-3" style={{ alignItems: 'flex-start' }}>
         {icon && (
           <div style={{ width: 42, height: 42, borderRadius: 'var(--r-m)', background: 'var(--ac-dim)', border: '1px solid var(--ac-line)', display: 'grid', placeItems: 'center', color: 'var(--ac-bright)', flexShrink: 0 }}>
@@ -123,7 +128,13 @@ export function PageHead({ title, sub, crumbs, actions, icon }: { title: string;
           {sub && <div className="t-2" style={{ fontSize: 13, marginTop: 3 }}>{sub}</div>}
         </div>
       </div>
-      {actions && <div className="row gap-2 wrap">{actions}</div>}
+      <div className="row gap-2 wrap">
+        {actions}
+        <div className="mms-winctl row" style={{ gap: 6 }}>
+          <Btn variant="solid" size="md" icon="minimize" title="Minimize" onClick={() => dock.minimize({ key: pathname, to: pathname + search, title, crumbs })} style={{ padding: 9 }} />
+          <Btn variant="solid" size="md" icon={win === 'normal' ? 'maximize' : 'restore'} title={win === 'normal' ? 'Maximize' : 'Restore'} onClick={() => dock.setMaximized(win === 'normal')} style={{ padding: 9 }} />
+        </div>
+      </div>
     </div>
   )
 }
@@ -418,10 +429,10 @@ export function Modal({ open, onClose, title, sub, children, width = 560, footer
             <h3 style={{ fontSize: minimized ? 14 : 18, whiteSpace: minimized ? 'nowrap' : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</h3>
             {sub && !minimized && <div className="t-2" style={{ fontSize: 12.5, marginTop: 2 }}>{sub}</div>}
           </div>
-          <div className="row" style={{ gap: 2, flexShrink: 0 }}>
-            {desktop && !minimized && <Btn variant="plain" size="sm" icon="minimize" onClick={() => setMode('min')} style={{ padding: 6 }} />}
-            {desktop && <Btn variant="plain" size="sm" icon={m === 'normal' ? 'maximize' : 'restore'} onClick={() => setMode(m === 'normal' ? 'max' : 'normal')} style={{ padding: 6 }} />}
-            <Btn variant="plain" size="sm" icon="x" onClick={onClose} style={{ padding: 6 }} />
+          <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+            {desktop && !minimized && <Btn variant="solid" size="sm" icon="minimize" title="Minimize" onClick={() => setMode('min')} style={{ padding: 7 }} />}
+            {desktop && <Btn variant="solid" size="sm" icon={m === 'normal' ? 'maximize' : 'restore'} title={m === 'normal' ? 'Maximize' : 'Restore'} onClick={() => setMode(m === 'normal' ? 'max' : 'normal')} style={{ padding: 7 }} />}
+            <Btn variant="solid" size="sm" icon="x" onClick={onClose} style={{ padding: 7 }} />
           </div>
         </div>
         {/* body stays mounted while minimized so form state is kept */}
@@ -436,23 +447,76 @@ export function Modal({ open, onClose, title, sub, children, width = 560, footer
 }
 
 /* ---------- Table ---------- */
-export interface Col { label: ReactNode; align?: 'left' | 'right' | 'center'; w?: number | string }
+export interface Col { label: ReactNode; align?: 'left' | 'right' | 'center'; w?: number | string; sortable?: boolean }
+
+/* Pull plain text out of a rendered cell so columns can be sorted without per-screen accessors. */
+function nodeText(n: ReactNode): string {
+  if (n == null || typeof n === 'boolean') return ''
+  if (typeof n === 'string' || typeof n === 'number') return String(n)
+  if (Array.isArray(n)) return n.map(nodeText).join(' ')
+  if (isValidElement(n)) return nodeText((n.props as { children?: ReactNode }).children)
+  return ''
+}
+function cellsOf(row: ReactNode): ReactNode[] {
+  const out: ReactNode[] = []
+  const walk = (n: ReactNode) => {
+    Children.toArray(n).forEach((c) => {
+      if (isValidElement(c) && c.type === Fragment) walk((c.props as { children?: ReactNode }).children)
+      else out.push(c)
+    })
+  }
+  walk(row)
+  return out
+}
+function sortKey(text: string): { n?: number; s: string } {
+  const t = text.trim()
+  if (/^\d{4}-\d{2}-\d{2}/.test(t) || /^\d{1,2}[ \/-][A-Za-z]{3,9}[ \/-]\d{2,4}/.test(t)) {
+    const d = Date.parse(t)
+    if (Number.isFinite(d)) return { n: d, s: t }
+  }
+  // plain amounts: optional currency prefix, thousands separators, decimals, trailing %
+  const m = /^(?:LKR|Rs\.?)?\s*(-?[\d,]+(?:\.\d+)?)\s*%?$/i.exec(t)
+  if (m) return { n: Number(m[1].replace(/,/g, '')), s: t }
+  return { s: t.toLowerCase() }
+}
+
 export function Table<T = any>({ cols, rows, render, empty = 'No records', onRow, footer }: { cols: Col[]; rows: T[]; render: (r: T, i: number) => ReactNode; empty?: string; onRow?: (r: T) => void; footer?: ReactNode }) {
+  const [sort, setSort] = useState<{ col: number; dir: 1 | -1 } | null>(null)
+  const ordered = useMemo(() => {
+    if (!sort) return rows
+    const keyed = rows.map((r, i) => ({ r, i, k: sortKey(nodeText(cellsOf(render(r, i))[sort.col] as ReactNode)) }))
+    keyed.sort((x, y) => {
+      let c: number
+      if (x.k.n !== undefined && y.k.n !== undefined) c = x.k.n - y.k.n
+      else if (x.k.s === '' || y.k.s === '') c = x.k.s === y.k.s ? 0 : x.k.s === '' ? 1 : -1 // blanks last
+      else c = x.k.s.localeCompare(y.k.s, undefined, { numeric: true })
+      return c * sort.dir || x.i - y.i
+    })
+    return keyed.map((k) => k.r)
+  }, [rows, sort, render])
+  const toggle = (i: number) => setSort((s) => (s?.col !== i ? { col: i, dir: 1 } : s.dir === 1 ? { col: i, dir: -1 } : null))
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr>
-            {cols.map((c, i) => (
-              <th key={i} style={{ textAlign: c.align || 'left', padding: '10px 14px', fontSize: 11, fontWeight: 600, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--bg-1)', width: c.w }}>{c.label}</th>
-            ))}
+            {cols.map((c, i) => {
+              const can = c.sortable !== false && c.label !== '' && c.label != null
+              const active = sort?.col === i
+              return (
+                <th key={i} onClick={can ? () => toggle(i) : undefined} aria-sort={active ? (sort!.dir === 1 ? 'ascending' : 'descending') : undefined} style={{ textAlign: c.align || 'left', padding: '10px 14px', fontSize: 11, fontWeight: 600, color: active ? 'var(--tx-1)' : 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '.06em', borderBottom: '1px solid var(--line)', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--bg-1)', width: c.w, cursor: can ? 'pointer' : 'default', userSelect: 'none' }}>
+                  {c.label}
+                  {can && <span style={{ marginLeft: 5, opacity: active ? 1 : 0.3, fontSize: 9 }}>{active ? (sort!.dir === 1 ? '▲' : '▼') : '↕'}</span>}
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr><td colSpan={cols.length} style={{ padding: '40px', textAlign: 'center', color: 'var(--tx-3)' }}>{empty}</td></tr>
           )}
-          {rows.map((r, ri) => (
+          {ordered.map((r, ri) => (
             <tr key={ri} className="mms-tr" onClick={onRow ? () => onRow(r) : undefined} style={{ cursor: onRow ? 'pointer' : 'default', transition: 'background .12s' }}>
               {render(r, ri)}
             </tr>

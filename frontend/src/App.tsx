@@ -1,7 +1,8 @@
 /* NMS-Auto — app router + screen registry (replaces window.SCREENS) */
 import { lazy, Suspense, useEffect, useState } from 'react'
-import type { ComponentType } from 'react'
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import type { ComponentType, ReactNode } from 'react'
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { WinDockProvider, WinDockBar, useWinDock } from './components/WinDock'
 import { Sidebar, Topbar, flatNav } from './components/Shell'
 import { Icon } from './components/Icon'
 import DB from './data'
@@ -278,6 +279,62 @@ const EXTRA_ROUTES: { path: string; forId: string }[] = [
   { path: 'loan/apps/:id/edit', forId: 'loan/apps' },
 ]
 
+// Renders the current page plus every minimized page (kept mounted but hidden,
+// so their in-progress form state survives navigation). Each instance gets its
+// own <Routes location> so useLocation/useParams inside it stay on its own URL.
+function PageHost({ renderRoutes }: { renderRoutes: () => ReactNode }) {
+  const location = useLocation()
+  const dock = useWinDock()
+  const cur = location.pathname
+  const keys = Array.from(new Set([...dock.items.map((i) => i.key), cur]))
+  return (
+    <>
+      {keys.map((k) => {
+        const visible = k === cur && !dock.isMin(k)
+        const loc = k === cur ? location : (dock.items.find((i) => i.key === k)?.to ?? k)
+        return (
+          <div key={k} style={{ display: visible ? undefined : 'none' }}>
+            <Routes location={loc}>
+              {renderRoutes()}
+              <Route index element={<Navigate to="/dash" replace />} />
+              <Route path="*" element={<Navigate to="/dash" replace />} />
+            </Routes>
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+function renderAppRoutes(user: AuthUser, go: Go, setBrand: (b: { name: string; tagline: string }) => void): ReactNode {
+  return (
+    <>
+        {user && ROUTE_IDS.map((id) => {
+          const Screen = SCREENS[id]
+          const allowed = canAccessRoute(user, id)
+          const element = !allowed ? (
+            <Navigate to="/dash" replace />
+          ) : Screen ? (
+            <Suspense fallback={<ScreenLoader />}><Screen go={go} setBrand={setBrand} user={user} /></Suspense>
+          ) : (
+            <ComingSoon route={id} />
+          )
+          if (!FORM_ROUTE_IDS.has(id)) return <Route key={id} path={id} element={element} />
+          return [
+            <Route key={id} path={id} element={element} />,
+            <Route key={id + '/new'} path={id + '/new'} element={element} />,
+            <Route key={id + '/:id'} path={id + '/:id'} element={element} />,
+          ]
+        })}
+        {user && EXTRA_ROUTES.map(({ path, forId }) => {
+          const Screen = SCREENS[forId]
+          if (!Screen || !canAccessRoute(user, forId)) return null
+          return <Route key={path} path={path} element={<Suspense fallback={<ScreenLoader />}><Screen go={go} setBrand={setBrand} user={user} /></Suspense>} />
+        })}
+    </>
+  )
+}
+
 function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -311,45 +368,23 @@ function AppShell() {
       <Route
         element={
           user ? (
-            <div style={{ display: 'flex', minHeight: '100vh' }}>
+            <WinDockProvider><div style={{ display: 'flex', minHeight: '100vh' }}>
+              <WinDockBar />
               <WhatsNewModal user={user} />
               <Sidebar go={go} open={open} setOpen={setOpen} company={brand} user={user} />
               <div className="mms-main" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                 <Topbar setOpen={setOpen} go={go} user={user} />
                 <main className="fade-in" style={{ padding: '24px clamp(16px,3vw,32px) 60px', flex: 1 }}>
-                  <Outlet />
+                  <PageHost renderRoutes={() => renderAppRoutes(user, go, setBrand)} />
                 </main>
               </div>
-            </div>
+            </div></WinDockProvider>
           ) : (
             <Navigate to="/login" state={{ from: location }} replace />
           )
         }
       >
-        {user && ROUTE_IDS.map((id) => {
-          const Screen = SCREENS[id]
-          const allowed = canAccessRoute(user, id)
-          const element = !allowed ? (
-            <Navigate to="/dash" replace />
-          ) : Screen ? (
-            <Suspense fallback={<ScreenLoader />}><Screen go={go} setBrand={setBrand} user={user} /></Suspense>
-          ) : (
-            <ComingSoon route={id} />
-          )
-          if (!FORM_ROUTE_IDS.has(id)) return <Route key={id} path={id} element={element} />
-          return [
-            <Route key={id} path={id} element={element} />,
-            <Route key={id + '/new'} path={id + '/new'} element={element} />,
-            <Route key={id + '/:id'} path={id + '/:id'} element={element} />,
-          ]
-        })}
-        {user && EXTRA_ROUTES.map(({ path, forId }) => {
-          const Screen = SCREENS[forId]
-          if (!Screen || !canAccessRoute(user, forId)) return null
-          return <Route key={path} path={path} element={<Suspense fallback={<ScreenLoader />}><Screen go={go} setBrand={setBrand} user={user} /></Suspense>} />
-        })}
-        <Route index element={<Navigate to="/dash" replace />} />
-        <Route path="*" element={<Navigate to="/dash" replace />} />
+        <Route path="*" element={null} />
       </Route>
     </Routes>
   )
