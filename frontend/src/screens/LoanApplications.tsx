@@ -14,6 +14,7 @@ import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import { DEFAULT_REFERENCE_FORMAT, previewReferenceNumber } from '../lib/referenceNumber'
 import { LoanDetail } from './loan/LoanDetail'
+import { CustomerDetailCard } from '../components/CustomerDetailCard'
 import type { Go } from './types'
 
 const FREQ_OPTIONS: { value: LoanFrequency; label: string }[] = [
@@ -28,7 +29,6 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
   Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
-const custStatusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'red', Blacklisted: 'amber' }
 const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.']
 const blankQuickAdd = () => ({ title: '' as CustomerTitle | '', surname: '', initials: '', nameDenotedByInitials: '', branchId: undefined as number | undefined, nicNo: '', phone: '' })
 
@@ -662,91 +662,6 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           </>} />}
       </Card>
       {preview.node}
-    </div>
-  )
-}
-
-function CustomerDetailCard({ c }: { c: Customer }) {
-  const idNo = c.nicNo || c.passportNo || c.drivingLicenseNo || '—'
-  const occupation = c.occupationType === 'Employed' ? [c.employmentDetail?.jobTitle, c.employmentDetail?.employerName].filter(Boolean).join(' at ')
-    : (c.occupationType === 'SelfEmployed' || c.occupationType === 'BusinessOwner') ? c.businessDetail?.businessName
-    : c.occupationType
-
-  const [activeOwn, setActiveOwn] = useState<Loan[]>([])
-  const [activeGuaranteed, setActiveGuaranteed] = useState<Loan[]>([])
-  const [loansLoading, setLoansLoading] = useState(true)
-  const [loansModal, setLoansModal] = useState(false)
-  useEffect(() => {
-    setLoansLoading(true)
-    customerLoansApi.list(c.id)
-      .then((d) => { setActiveOwn(d.borrower.filter((l) => l.status === 'Active')); setActiveGuaranteed(d.guarantor.filter((l) => l.status === 'Active')) })
-      .catch(() => { setActiveOwn([]); setActiveGuaranteed([]) })
-      .finally(() => setLoansLoading(false))
-  }, [c.id])
-
-  const outstandingOf = (l: Loan) => Number(l.totalDueSum ?? 0) - Number(l.paidSum ?? 0)
-
-  return (
-    <div style={{ marginTop: 10, padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
-      <div className="row between" style={{ marginBottom: 10 }}>
-        <div className="row gap-2" style={{ alignItems: 'center' }}>
-          <span style={{ fontWeight: 700, fontSize: 14 }}>{c.fullName}</span>
-          <span className="t-2" style={{ fontSize: 12 }}>{c.code}</span>
-          {c.isGuarantor && <Badge tone="blue">Guarantor</Badge>}
-        </div>
-        <Badge tone={custStatusTone[c.status || 'Active']} dot>{c.status || 'Active'}</Badge>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px 20px', fontSize: 12.5 }}>
-        <div><span className="t-2">NIC / ID: </span>{idNo}</div>
-        <div><span className="t-2">Phone: </span>{c.phone || '—'}</div>
-        <div><span className="t-2">Branch: </span>{c.branch?.name || '—'}</div>
-        <div><span className="t-2">Occupation: </span>{occupation || '—'}</div>
-        <div><span className="t-2">Monthly Income: </span>{c.monthlyIncome ? Number(c.monthlyIncome).toLocaleString() : '—'}</div>
-        <div><span className="t-2">Email: </span>{c.email || '—'}</div>
-        {c.address && <div style={{ gridColumn: '1/-1' }}><span className="t-2">Address: </span>{c.address}</div>}
-      </div>
-
-      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
-        <div className="row between" style={{ marginBottom: 6 }}>
-          <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em' }}>Active Loans</div>
-          {(activeOwn.length + activeGuaranteed.length) > 0 && (
-            <button onClick={() => setLoansModal(true)} style={{ background: 'none', border: 'none', color: 'var(--ac-bright)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', padding: 0 }}>View All</button>
-          )}
-        </div>
-        {loansLoading ? <div className="t-2" style={{ fontSize: 12 }}>Loading…</div> : (activeOwn.length === 0 && activeGuaranteed.length === 0) ? (
-          <div className="t-2" style={{ fontSize: 12 }}>No active loans.</div>
-        ) : (
-          <div className="col gap-1">
-            {activeOwn.map((l) => (
-              <div key={`own-${l.id}`} className="row between" style={{ fontSize: 12 }}>
-                <span><b>{l.code}</b> · {l.loanDetail?.loanType?.name || '—'} · <span className="t-2">Borrower</span></span>
-                <span style={{ fontFamily: 'JetBrains Mono' }}>{outstandingOf(l).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-            ))}
-            {activeGuaranteed.map((l) => (
-              <div key={`grt-${l.id}`} className="row between" style={{ fontSize: 12 }}>
-                <span><b>{l.code}</b> · {l.loanDetail?.loanType?.name || '—'} · <span className="t-2">Guarantor for {l.customer?.fullName}</span></span>
-                <span style={{ fontFamily: 'JetBrains Mono' }}>{outstandingOf(l).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <Modal open={loansModal} onClose={() => setLoansModal(false)} width={720} title="Active Loans" sub={`${c.fullName} — ${activeOwn.length + activeGuaranteed.length} active loan(s)`}>
-        <Table cols={[{ label: 'Loan Code' }, { label: 'Product' }, { label: 'Role' }, { label: 'Principal', align: 'right' }, { label: 'Term' }, { label: 'Outstanding', align: 'right' }, { label: 'Status', align: 'center' }]}
-          rows={[...activeOwn.map((l) => ({ l, role: 'Borrower' })), ...activeGuaranteed.map((l) => ({ l, role: `Guarantor for ${l.customer?.fullName || '—'}` }))]}
-          empty="No active loans"
-          render={({ l, role }) => <>
-            <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{l.code}</Td>
-            <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
-            <Td>{role}</Td>
-            <Td align="right" mono>{Number(l.principalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Td>
-            <Td>{l.termMonths ? `${l.termMonths}mo` : '—'}{l.loanDetail?.installmentFrequency ? ` · ${l.loanDetail.installmentFrequency}` : ''}</Td>
-            <Td align="right" mono>{outstandingOf(l).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Td>
-            <Td align="center"><Badge tone="green" dot>{l.status}</Badge></Td>
-          </>} />
-      </Modal>
     </div>
   )
 }

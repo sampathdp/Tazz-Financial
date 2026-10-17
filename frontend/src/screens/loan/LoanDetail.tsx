@@ -8,8 +8,8 @@ import { Icon } from '../../components/Icon'
 import { useFilePreview } from '../../components/FilePreview'
 import { PrintDocumentsPanel } from './PrintDocuments'
 import {
-  loansApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, branchesApi, api,
-  type Loan, type LoanStatus, type LoanSchedule, type BankAccount,
+  loansApi, customersApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, branchesApi, api,
+  type Customer, type Loan, type LoanStatus, type LoanSchedule, type BankAccount,
   type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type DocumentCategory, type LoanDiaryNote,
   type LoanCharge, type PaymentMethod, type LoanCollateralDocument,
@@ -17,6 +17,7 @@ import {
 } from '../../api'
 import { Can, canApprove } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
+import { CustomerDetailCard } from '../../components/CustomerDetailCard'
 import { getErrorText } from '../../lib/apiError'
 import type { Go } from '../types'
 
@@ -41,6 +42,7 @@ const ACTIVE_STAGE_STATUSES: LoanStatus[] = ['Active', 'Closed', 'WrittenOff', '
 
 const SECTIONS = [
   { id: 'summary', label: 'Summary', icon: 'chart' },
+  { id: 'customer', label: 'Customer Details', icon: 'users' },
   { id: 'due-types', label: 'Due Types', icon: 'coins' },
   { id: 'contract-status', label: 'Contract Status', icon: 'target' },
   { id: 'recovery', label: 'Recovery', icon: 'users' },
@@ -337,6 +339,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
       </div>
 
       {tab === 'summary' && <ContractSummary loan={loan} />}
+      {tab === 'customer' && <CustomerTab loan={loan} />}
       {tab === 'due-types' && <DueTypeBreakdown loan={loan} />}
       {tab === 'contract-status' && <ArrearsPanel loan={loan} />}
       {tab === 'recovery' && <RecoveryDetails loan={loan} me={me} onChanged={onChanged} notify={notify} />}
@@ -382,6 +385,19 @@ function KpiGrid({ items }: { items: KpiItem[] }) {
       {items.map((it) => <Kpi key={it.label} {...it} />)}
     </div>
   )
+}
+
+/** Full customer profile, active loans and credit report for the applicant — so an approver can review them without leaving the loan. */
+function CustomerTab({ loan }: { loan: Loan }) {
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    setLoading(true)
+    customersApi.get(loan.customerId).then(setCustomer).catch(() => setCustomer(null)).finally(() => setLoading(false))
+  }, [loan.customerId])
+  if (loading) return <div className="t-2" style={{ fontSize: 12.5 }}>Loading customer…</div>
+  if (!customer) return <div className="t-2" style={{ fontSize: 12.5 }}>Customer details unavailable.</div>
+  return <CustomerDetailCard c={customer} />
 }
 
 function ContractSummary({ loan }: { loan: Loan }) {

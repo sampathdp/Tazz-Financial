@@ -364,7 +364,7 @@ const LEGEND: [string, string, string][] = [
 
 /** Read-only internal credit report for one customer — CRIB-report layout, this
  *  company's own facilities only. Fetched lazily; PDF export mirrors the screen. */
-function CreditReportPanel({ customerId, me }: { customerId: number; me?: AuthUser | null }) {
+export function CreditReportPanel({ customerId, me }: { customerId: number; me?: AuthUser | null }) {
   const notify = useNotify()
   const [data, setData] = useState<CribReport | null>(null)
   const [loading, setLoading] = useState(true)
