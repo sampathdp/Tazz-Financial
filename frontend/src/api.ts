@@ -1848,6 +1848,10 @@ export type FdInterestMethod = 'monthly' | 'maturity'
 export type FdPaymentMethod = 'Cash' | 'Bank' | 'Cheque'
 export type FdDepositStatus = 'Available' | 'Allocated'
 export type FixedDepositStatus = 'Active' | 'Closed' | 'Renewed'
+/** What an auto-renewing FD does with its interest: pay it out, or roll it into the new principal. */
+export type FdAutoRenewMode = 'principal_only' | 'principal_and_interest'
+/** Interest-at-maturity FDs only: pay the earned interest out, or add it to the renewed principal. */
+export type FdInterestTreatment = 'payout' | 'capitalise'
 
 export interface FundingProduct {
   id: number;
@@ -1861,6 +1865,8 @@ export interface FundingProduct {
   rateIsManual?: boolean;
   /** Reduced rate applied to a premature part-payment (see fixedDepositsApi.partPayment). Null = part-payment blocked for this product until set. */
   prematureWithdrawalRatePercent?: number | string | null;
+  /** Default annual rate paid for days an FD is held past maturity before withdrawal. Null/0 = none (the Withdraw screen can still override). */
+  postMaturityRatePercent?: number | string | null;
   allowedTermsMonths: number[];
   allowCustomTerm?: boolean;
   minDepositAmount: number | string;
@@ -1899,6 +1905,8 @@ export interface FdWithdrawal {
   principalAmount: number | string; interestAmount: number | string; totalAmount: number | string;
   /** Part of totalAmount applied to a loan (FD closed against its loan); the rest was paid to the customer. */
   adjustedAmount?: number | string;
+  /** Part of interestAmount earned for days held past maturity. */
+  postMaturityDays?: number; postMaturityRatePercent?: number | string | null; postMaturityInterest?: number | string;
   settledCreditFacilityId?: number | null;
   paymentMethod: FdPaymentMethod; referenceNo?: string | null; notes?: string | null;
   closedAt: string;
@@ -1943,6 +1951,7 @@ export interface FixedDeposit {
   totalInterestAmount: number | string;
   maturityAmount: number | string;
   /** Amount frozen as loan security; 0 = free. While > 0 renew / withdraw / part-payment are refused. */
+  autoRenew?: boolean; autoRenewMode?: FdAutoRenewMode | null; autoRenewTermMonths?: number | null;
   lienAmount?: number | string;
   isPledged?: boolean;
   nextInterestDate?: string | null;
@@ -1975,6 +1984,10 @@ export const fdDepositsApi = {
   remove: (id: number) => http.delete(`/fd-deposits/${id}`).then((r) => r.data),
 }
 
+export interface FdAutoRenewInput { autoRenew: boolean; autoRenewMode?: FdAutoRenewMode; autoRenewTermMonths?: number }
+
+export interface FdWithdrawalPreview { postMaturityDays: number; postMaturityRatePercent: number | null; postMaturityInterest: number; maturityInterest: number }
+
 export interface FdEnhancementInput {
   amount: number | string; paymentMethod: FdPaymentMethod;
   depositDate?: string; referenceNo?: string; bankId?: number; bankAccountId?: number; notes?: string;
@@ -1984,12 +1997,18 @@ export const fixedDepositsApi = {
   list: (params?: { status?: FixedDepositStatus; customerId?: number; matured?: boolean; maturingWithinDays?: number }) =>
     http.get('/fixed-deposits', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as FixedDeposit[]),
   get: (id: number) => http.get(`/fixed-deposits/${id}`).then((r) => camelize(r.data) as FixedDeposit),
-  create: (body: { depositId: number; fundingProductId: number; termMonths: number; startDate: string; interestPaymentMethod?: FdInterestMethod }) =>
+  create: (body: { depositId: number; fundingProductId: number; termMonths: number; startDate: string; interestPaymentMethod?: FdInterestMethod } & Partial<FdAutoRenewInput>) =>
     http.post('/fixed-deposits', snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
-  renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput }) =>
+  renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput; interestTreatment?: FdInterestTreatment } & Partial<FdAutoRenewInput>) =>
     http.post(`/fixed-deposits/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { fixedDeposit: FixedDeposit; enhancementDeposit: FdDeposit | null }),
-  withdraw: (id: number, body: { paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; closedAt?: string }) =>
+  withdraw: (id: number, body: { paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; closedAt?: string; postMaturityRatePercent?: number | string; postMaturityInterest?: number | string }) =>
     http.post(`/fixed-deposits/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
+  /** Late days + default post-maturity interest for a closing date / rate, so the Withdraw form can pre-fill an editable amount. */
+  withdrawalPreview: (id: number, params: { closedAt?: string; postMaturityRatePercent?: number | string }) =>
+    http.get(`/fixed-deposits/${id}/withdrawal-preview`, { params: snakeize(params) }).then((r) => camelize(r.data) as FdWithdrawalPreview),
+  /** Sets or clears the customer's auto-renew instruction on an active FD. */
+  setAutoRenew: (id: number, body: FdAutoRenewInput) =>
+    http.put(`/fixed-deposits/${id}/auto-renew`, snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
   /** Undoes a mistaken closure — reverses GL/Cashbook and reopens the FD (see backend FixedDepositController::voidWithdrawal). */
   voidWithdrawal: (id: number) => http.post(`/fixed-deposits/${id}/void-withdrawal`).then((r) => camelize(r.data) as FixedDeposit),
   /** Premature partial withdrawal — FD stays open on the reduced principal (see backend FixedDepositController::partPayment). */
@@ -2046,6 +2065,11 @@ export interface Borrowing {
   outstandingAmount: number | string;
   /** Overdraft only — same value as outstandingAmount, made explicit. */
   overdraftDrawn?: number | string;
+  /** Interest earned by the lender and booked (Cr 2220) but not yet paid. Not accrued for an Overdraft. */
+  accruedInterestUnpaid?: number | string;
+  /** Active, term-bound and past its maturity date - needs renewing or settling. */
+  isMatured?: boolean;
+  interestAccruedThrough?: string | null;
   interestRatePercent?: number | string | null;
   termMonths?: number | null;
   borrowingDate: string;
@@ -2089,6 +2113,8 @@ export interface BorrowingRenewInput {
   renewedOn: string; newMaturityDate: string;
   newTermMonths?: number | string; newInterestRatePercent?: number | string;
   interestPaidAmount?: number | string; notes?: string;
+  /** Required when interestPaidAmount > 0 - the interest is recorded as a real InterestPayment. */
+  paymentMethod?: FdPaymentMethod; cashAccountId?: number; bankAccountId?: number;
 }
 
 export const borrowingsApi = {

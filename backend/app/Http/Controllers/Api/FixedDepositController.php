@@ -25,6 +25,8 @@ class FixedDepositController extends Controller
 
     private const INTEREST_METHODS = ['monthly', 'maturity'];
 
+    private const AUTO_RENEW_MODES = ['principal_only', 'principal_and_interest'];
+
     private const SUMMARY_RELATIONS = ['customer:id,full_name,code,nic_no,phone', 'branch:id,name,code', 'fundingProduct:id,name,code,interest_method'];
 
     private const DETAIL_RELATIONS = [
@@ -74,6 +76,9 @@ class FixedDepositController extends Controller
             'term_months' => 'required|integer|min:1',
             'start_date' => 'required|date',
             'interest_payment_method' => ['nullable', Rule::in(self::INTEREST_METHODS)],
+            'auto_renew' => 'nullable|boolean',
+            'auto_renew_mode' => ['nullable', Rule::in(self::AUTO_RENEW_MODES)],
+            'auto_renew_term_months' => 'nullable|integer|min:1',
         ]);
 
         $deposit = FdDeposit::findOrFail($data['deposit_id']);
@@ -100,6 +105,7 @@ class FixedDepositController extends Controller
                 startDate: $startDate,
                 userId: $request->user()->id,
                 interestMethod: $interestMethod,
+                autoRenew: $this->autoRenewColumns($data, $product),
             );
 
             // The deposit's cash was already posted to the cashbook/ledger when it
@@ -126,6 +132,11 @@ class FixedDepositController extends Controller
         $data = $request->validate([
             'term_months' => 'required|integer|min:1',
             'notes' => 'nullable|string|max:255',
+            // Interest-at-maturity FDs only: what happens to the interest earned over the old term.
+            'interest_treatment' => ['nullable', Rule::in(['payout', 'capitalise'])],
+            'auto_renew' => 'nullable|boolean',
+            'auto_renew_mode' => ['nullable', Rule::in(self::AUTO_RENEW_MODES)],
+            'auto_renew_term_months' => 'nullable|integer|min:1',
             'enhancement' => 'nullable|array',
             'enhancement.amount' => 'required_with:enhancement|numeric|min:0.01',
             'enhancement.deposit_date' => 'nullable|date',
@@ -140,84 +151,164 @@ class FixedDepositController extends Controller
         $product = $fixedDeposit->fundingProduct;
         $this->assertTermAllowed((int) $data['term_months'], $product);
 
-        [$newFd, $enhancementDeposit] = DB::transaction(function () use ($fixedDeposit, $data, $product, $request) {
-            $enhancementAmount = (float) ($data['enhancement']['amount'] ?? 0);
-            $newPrincipal = (float) $fixedDeposit->principal_amount + $enhancementAmount;
-            $newStart = Carbon::parse($fixedDeposit->maturity_date);
+        // Not sent = keep the instruction the old FD carried; sent = whatever the operator just chose.
+        $autoRenew = array_key_exists('auto_renew', $data) && $data['auto_renew'] !== null
+            ? $this->autoRenewColumns($data, $product)
+            : $this->carriedAutoRenew($fixedDeposit);
 
-            $newFd = $this->createFixedDeposit(
-                branchId: $fixedDeposit->branch_id,
-                customerId: $fixedDeposit->customer_id,
-                product: $product,
-                principal: $newPrincipal,
-                termMonths: (int) $data['term_months'],
-                startDate: $newStart,
-                userId: $request->user()->id,
-                // Carries the method the customer originally chose forward, even
-                // if the product's own default has since been changed.
-                interestMethod: $fixedDeposit->interest_payment_method,
-                renewedFromId: $fixedDeposit->id,
-            );
-
-            // Only the enhancement portion is a real cash event — the old FD's
-            // principal simply rolls forward into the new FD's principal_amount
-            // above, with no cash changing hands (see FdLedgerPoster's docblock).
-            $enhancementDeposit = null;
-            if ($enhancementAmount > 0) {
-                $depositNumber = NumberGenerator::next('fd_deposit', [
-                    'branch_id' => $fixedDeposit->branch_id,
-                    'branch_code' => $fixedDeposit->branch->code,
-                    'user_id' => $request->user()->id,
-                ]);
-                $enhancementDeposit = FdDeposit::create([
-                    'deposit_number' => $depositNumber,
-                    'branch_id' => $fixedDeposit->branch_id,
-                    'customer_id' => $fixedDeposit->customer_id,
-                    'deposit_date' => $data['enhancement']['deposit_date'] ?? now()->format('Y-m-d'),
-                    'amount' => $enhancementAmount,
-                    'payment_method' => $data['enhancement']['payment_method'],
-                    'reference_no' => $data['enhancement']['reference_no'] ?? null,
-                    'bank_id' => $data['enhancement']['bank_id'] ?? null,
-                    'bank_account_id' => $data['enhancement']['bank_account_id'] ?? null,
-                    'notes' => $data['enhancement']['notes'] ?? null,
-                    // Created already-allocated (unlike FdDepositController::store()'s
-                    // normal Available-first flow) since it's funding this new FD
-                    // in the same breath it's recorded.
-                    'status' => 'Allocated',
-                    'fixed_deposit_id' => $newFd->id,
-                    'created_by' => $request->user()->id,
-                ]);
-                NumberGenerator::attach($depositNumber, $enhancementDeposit);
-
-                FdLedgerPoster::postDepositReceived($enhancementDeposit);
-            }
-
-            $fixedDeposit->update([
-                'status' => 'Renewed',
-                'renewed_to_id' => $newFd->id,
-                'closed_at' => now()->format('Y-m-d'),
-            ]);
-
-            FdRenewal::create([
-                'old_fixed_deposit_id' => $fixedDeposit->id,
-                'new_fixed_deposit_id' => $newFd->id,
-                'old_principal' => $fixedDeposit->principal_amount,
-                'additional_deposit_amount' => $enhancementAmount,
-                'new_principal' => $newPrincipal,
-                'additional_deposit_id' => $enhancementDeposit?->id,
-                'new_term_months' => $data['term_months'],
-                'renewed_at' => now()->format('Y-m-d'),
-                'notes' => $data['notes'] ?? null,
-                'created_by' => $request->user()->id,
-            ]);
-
-            return [$newFd, $enhancementDeposit];
-        });
+        [$newFd, $enhancementDeposit] = DB::transaction(fn () => $this->performRenewal(
+            $fixedDeposit,
+            (int) $data['term_months'],
+            $data['enhancement'] ?? null,
+            $data['notes'] ?? null,
+            $fixedDeposit->interest_payment_method === 'maturity' ? ($data['interest_treatment'] ?? 'none') : 'none',
+            (int) $request->user()->id,
+            false,
+            $autoRenew,
+        ));
 
         return response()->json([
             'fixed_deposit' => $newFd->load(self::DETAIL_RELATIONS),
             'enhancement_deposit' => $enhancementDeposit,
         ], 201);
+    }
+
+    /**
+     * Rolls a matured FD into a new one. Called inside a transaction by renew() (operator) and by
+     * fd:auto-renew (customer's standing instruction). $interestTreatment only matters for an
+     * interest-at-maturity FD: 'capitalise' adds the earned interest to the new principal,
+     * 'payout' pays it to the customer in cash, 'none' (legacy) leaves it unsettled.
+     *
+     * @return array{0: FixedDeposit, 1: ?FdDeposit}
+     */
+    public function performRenewal(FixedDeposit $fixedDeposit, int $termMonths, ?array $enhancement, ?string $notes, string $interestTreatment, int $userId, bool $auto, array $autoRenew): array
+    {
+        $fixedDeposit->loadMissing(['fundingProduct', 'branch']);
+        $product = $fixedDeposit->fundingProduct;
+
+        $enhancementAmount = (float) ($enhancement['amount'] ?? 0);
+        $interest = $interestTreatment === 'none' ? 0.0 : (float) $fixedDeposit->total_interest_amount;
+        $capitalised = $interestTreatment === 'capitalise' ? $interest : 0.0;
+        $newPrincipal = round((float) $fixedDeposit->principal_amount + $capitalised + $enhancementAmount, 2);
+        $newStart = Carbon::parse($fixedDeposit->maturity_date);
+
+        $newFd = $this->createFixedDeposit(
+            branchId: $fixedDeposit->branch_id,
+            customerId: $fixedDeposit->customer_id,
+            product: $product,
+            principal: $newPrincipal,
+            termMonths: $termMonths,
+            startDate: $newStart,
+            userId: $userId,
+            // Carries the method the customer originally chose forward, even
+            // if the product's own default has since been changed.
+            interestMethod: $fixedDeposit->interest_payment_method,
+            renewedFromId: $fixedDeposit->id,
+            autoRenew: $autoRenew,
+        );
+
+        // Only the enhancement portion is a real cash event — the old FD's
+        // principal simply rolls forward into the new FD's principal_amount
+        // above, with no cash changing hands (see FdLedgerPoster's docblock).
+        $enhancementDeposit = null;
+        if ($enhancementAmount > 0) {
+            $depositNumber = NumberGenerator::next('fd_deposit', [
+                'branch_id' => $fixedDeposit->branch_id,
+                'branch_code' => $fixedDeposit->branch->code,
+                'user_id' => $userId,
+            ]);
+            $enhancementDeposit = FdDeposit::create([
+                'deposit_number' => $depositNumber,
+                'branch_id' => $fixedDeposit->branch_id,
+                'customer_id' => $fixedDeposit->customer_id,
+                'deposit_date' => $enhancement['deposit_date'] ?? now()->format('Y-m-d'),
+                'amount' => $enhancementAmount,
+                'payment_method' => $enhancement['payment_method'],
+                'reference_no' => $enhancement['reference_no'] ?? null,
+                'bank_id' => $enhancement['bank_id'] ?? null,
+                'bank_account_id' => $enhancement['bank_account_id'] ?? null,
+                'notes' => $enhancement['notes'] ?? null,
+                // Created already-allocated (unlike FdDepositController::store()'s
+                // normal Available-first flow) since it's funding this new FD
+                // in the same breath it's recorded.
+                'status' => 'Allocated',
+                'fixed_deposit_id' => $newFd->id,
+                'created_by' => $userId,
+            ]);
+            NumberGenerator::attach($depositNumber, $enhancementDeposit);
+
+            FdLedgerPoster::postDepositReceived($enhancementDeposit);
+        }
+
+        $fixedDeposit->update([
+            'status' => 'Renewed',
+            'renewed_to_id' => $newFd->id,
+            'closed_at' => now()->format('Y-m-d'),
+        ]);
+
+        $renewal = FdRenewal::create([
+            'old_fixed_deposit_id' => $fixedDeposit->id,
+            'new_fixed_deposit_id' => $newFd->id,
+            'old_principal' => $fixedDeposit->principal_amount,
+            'additional_deposit_amount' => $enhancementAmount,
+            'new_principal' => $newPrincipal,
+            'interest_amount' => $interest,
+            'capitalised_interest' => $capitalised,
+            'interest_payment_method' => $interestTreatment === 'payout' ? 'Cash' : null,
+            'is_auto' => $auto,
+            'additional_deposit_id' => $enhancementDeposit?->id,
+            'new_term_months' => $termMonths,
+            'renewed_at' => now()->format('Y-m-d'),
+            'notes' => $notes,
+            'created_by' => $userId,
+        ]);
+        FdLedgerPoster::postRenewalInterest($renewal, $fixedDeposit);
+
+        return [$newFd, $enhancementDeposit];
+    }
+
+    /** Sets or clears the customer's auto-renew instruction on a live FD. */
+    public function setAutoRenew(Request $request, FixedDeposit $fixedDeposit)
+    {
+        if ($fixedDeposit->status !== 'Active') {
+            return response()->json(['message' => 'Auto-renew can only be changed on an active FD.'], 422);
+        }
+        $data = $request->validate([
+            'auto_renew' => 'required|boolean',
+            'auto_renew_mode' => ['nullable', Rule::in(self::AUTO_RENEW_MODES)],
+            'auto_renew_term_months' => 'nullable|integer|min:1',
+        ]);
+        $fixedDeposit->loadMissing('fundingProduct');
+        $fixedDeposit->update($this->autoRenewColumns($data, $fixedDeposit->fundingProduct));
+
+        return $fixedDeposit->fresh()->load(self::DETAIL_RELATIONS);
+    }
+
+    /** Validated request fields -> fixed_deposits auto-renew columns (all cleared when switched off). */
+    private function autoRenewColumns(array $data, FundingProduct $product): array
+    {
+        if (empty($data['auto_renew'])) {
+            return ['auto_renew' => false, 'auto_renew_mode' => null, 'auto_renew_term_months' => null];
+        }
+        $term = isset($data['auto_renew_term_months']) ? (int) $data['auto_renew_term_months'] : null;
+        if ($term !== null) {
+            $this->assertTermAllowed($term, $product);
+        }
+
+        return [
+            'auto_renew' => true,
+            'auto_renew_mode' => $data['auto_renew_mode'] ?? 'principal_only',
+            'auto_renew_term_months' => $term,
+        ];
+    }
+
+    private function carriedAutoRenew(FixedDeposit $fd): array
+    {
+        return [
+            'auto_renew' => (bool) $fd->auto_renew,
+            'auto_renew_mode' => $fd->auto_renew ? $fd->auto_renew_mode : null,
+            'auto_renew_term_months' => $fd->auto_renew ? $fd->auto_renew_term_months : null,
+        ];
     }
 
     /** Pays out principal (+ maturity-method interest) and closes the FD. */
@@ -241,12 +332,27 @@ class FixedDepositController extends Controller
             'reference_no' => 'nullable|string|max:64',
             'notes' => 'nullable|string',
             'closed_at' => 'nullable|date',
+            // Interest for days held past maturity. Rate defaults to the product's post-maturity rate;
+            // the amount defaults to the computed figure but the operator may override it (e.g. to match what was agreed).
+            'post_maturity_rate_percent' => 'nullable|numeric|min:0|max:999',
+            'post_maturity_interest' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
         ]);
 
         $withdrawal = DB::transaction(function () use ($fixedDeposit, $data, $request) {
             $closedAt = $data['closed_at'] ?? now()->format('Y-m-d');
-            $interestAmount = $fixedDeposit->interest_payment_method === 'maturity' ? (float) $fixedDeposit->total_interest_amount : 0.0;
             $principalAmount = (float) $fixedDeposit->principal_amount;
+
+            $postMaturity = $this->postMaturityInterest(
+                $fixedDeposit,
+                $closedAt,
+                isset($data['post_maturity_rate_percent']) ? (float) $data['post_maturity_rate_percent'] : null,
+            );
+            $postMaturityInterest = isset($data['post_maturity_interest']) ? round((float) $data['post_maturity_interest'], 2) : $postMaturity['interest'];
+
+            $interestAmount = round(
+                ($fixedDeposit->interest_payment_method === 'maturity' ? (float) $fixedDeposit->total_interest_amount : 0.0) + $postMaturityInterest,
+                2,
+            );
 
             $voucherNo = NumberGenerator::next('fd_withdrawal', [
                 'branch_id' => $fixedDeposit->branch_id,
@@ -260,6 +366,9 @@ class FixedDepositController extends Controller
                 'principal_amount' => $principalAmount,
                 'interest_amount' => $interestAmount,
                 'total_amount' => $principalAmount + $interestAmount,
+                'post_maturity_days' => $postMaturity['days'],
+                'post_maturity_rate_percent' => $postMaturity['rate'],
+                'post_maturity_interest' => $postMaturityInterest,
                 'payment_method' => $data['payment_method'],
                 'bank_account_id' => $data['bank_account_id'] ?? null,
                 'reference_no' => $data['reference_no'] ?? null,
@@ -278,6 +387,47 @@ class FixedDepositController extends Controller
         });
 
         return response()->json($withdrawal->load(['fixedDeposit' => fn ($q) => $q->with(self::DETAIL_RELATIONS)]), 201);
+    }
+
+    /**
+     * Interest for the days an FD was held past its maturity date before being withdrawn:
+     * principal x rate x days / 365 (same simple-interest basis as partPayment()). The rate
+     * is the operator's override, else the product's post_maturity_rate_percent, else 0.
+     *
+     * @return array{days: int, rate: ?float, interest: float}
+     */
+    private function postMaturityInterest(FixedDeposit $fd, string $closedAt, ?float $rateOverride): array
+    {
+        $fd->loadMissing('fundingProduct');
+        $days = (int) max(0, Carbon::parse($fd->maturity_date)->startOfDay()->diffInDays(Carbon::parse($closedAt)->startOfDay(), false));
+        $rate = $rateOverride ?? ($fd->fundingProduct->post_maturity_rate_percent !== null ? (float) $fd->fundingProduct->post_maturity_rate_percent : null);
+
+        return [
+            'days' => $days,
+            'rate' => $rate,
+            'interest' => $rate ? round((float) $fd->principal_amount * ($rate / 100) * ($days / 365), 2) : 0.0,
+        ];
+    }
+
+    /** Read-only preview for the Withdraw screen: late days and the default post-maturity interest for a given closing date / rate. */
+    public function withdrawalPreview(Request $request, FixedDeposit $fixedDeposit)
+    {
+        $data = $request->validate([
+            'closed_at' => 'nullable|date',
+            'post_maturity_rate_percent' => 'nullable|numeric|min:0|max:999',
+        ]);
+        $p = $this->postMaturityInterest(
+            $fixedDeposit,
+            $data['closed_at'] ?? now()->format('Y-m-d'),
+            isset($data['post_maturity_rate_percent']) ? (float) $data['post_maturity_rate_percent'] : null,
+        );
+
+        return response()->json([
+            'post_maturity_days' => $p['days'],
+            'post_maturity_rate_percent' => $p['rate'],
+            'post_maturity_interest' => $p['interest'],
+            'maturity_interest' => $fixedDeposit->interest_payment_method === 'maturity' ? (float) $fixedDeposit->total_interest_amount : 0.0,
+        ]);
     }
 
     /**
@@ -507,7 +657,7 @@ class FixedDepositController extends Controller
     }
 
     /** Shared FD-row creation for both a fresh issue (store) and a renewal (renew). */
-    private function createFixedDeposit(int $branchId, int $customerId, FundingProduct $product, float $principal, int $termMonths, Carbon $startDate, int $userId, string $interestMethod, ?int $renewedFromId = null): FixedDeposit
+    private function createFixedDeposit(int $branchId, int $customerId, FundingProduct $product, float $principal, int $termMonths, Carbon $startDate, int $userId, string $interestMethod, ?int $renewedFromId = null, array $autoRenew = []): FixedDeposit
     {
         $maturityDate = $startDate->copy()->addMonthsNoOverflow($termMonths);
         $calc = FdInterestCalculator::calculate($principal, (float) $product->annual_rate_percent, $termMonths, $interestMethod);
@@ -521,7 +671,7 @@ class FixedDepositController extends Controller
             'user_id' => $userId,
         ], $product->reference_format);
 
-        $fd = FixedDeposit::create([
+        $fd = FixedDeposit::create($autoRenew + [
             'fd_number' => $fdNumber,
             'branch_id' => $branchId,
             'customer_id' => $customerId,

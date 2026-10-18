@@ -10,6 +10,7 @@ use App\Models\Branch;
 use App\Models\CashAccount;
 use App\Models\Pawning;
 use App\Services\NumberGenerator;
+use App\Support\BorrowingInterestAccrual;
 use App\Support\BorrowingLedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -146,6 +147,8 @@ class BorrowingController extends Controller
                 'maturity_date' => $data['maturity_date']
                     ?? (isset($data['term_months']) ? \Carbon\Carbon::parse($data['borrowing_date'])->addMonthsNoOverflow((int) $data['term_months'])->toDateString() : null),
                 'on_maturity' => $data['on_maturity'] ?? null,
+                // Interest accrues monthly from the day the money is received (not for an overdraft: the bank charges that).
+                'interest_accrued_through' => $isOverdraft ? null : $data['borrowing_date'],
                 'contract_no' => $data['contract_no'] ?? null,
                 'receipt_method' => $isOverdraft ? null : $data['receipt_method'],
                 'receipt_cash_account_id' => $isOverdraft ? null : ($data['receipt_cash_account_id'] ?? null),
@@ -184,9 +187,11 @@ class BorrowingController extends Controller
     /**
      * Rolls a matured borrowing over for another term — updates its
      * maturity_date / term / rate in place and logs the prior values to
-     * borrowing_renewals. No cash moves here; if interest is cleared at
-     * roll-over, record it separately as an InterestPayment transaction
-     * (interest_paid_amount below is informational only).
+     * borrowing_renewals. Interest is booked up to the roll-over date first
+     * (at the old rate). If interest is paid at roll-over, say how
+     * (payment_method + account) and it is recorded as a real InterestPayment
+     * — clearing accrued interest (2220) before any new expense; with none
+     * given nothing is paid and the accrued interest simply stays payable.
      */
     public function renew(Request $request, Borrowing $borrowing)
     {
@@ -197,37 +202,58 @@ class BorrowingController extends Controller
             return response()->json(['message' => 'An overdraft facility is managed on the linked bank account, not renewed here.'], 422);
         }
 
+        $paying = (float) $request->input('interest_paid_amount', 0) > 0;
         $data = $request->validate([
             'renewed_on' => 'required|date',
             'new_maturity_date' => 'required|date|after:renewed_on',
             'new_term_months' => 'nullable|integer|min:1|max:600',
             'new_interest_rate_percent' => 'nullable|numeric|min:0|max:999',
-            'interest_paid_amount' => 'nullable|numeric|min:0',
+            'interest_paid_amount' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
+            'payment_method' => [Rule::requiredIf($paying), 'nullable', Rule::in(self::METHODS)],
+            'cash_account_id' => ['nullable', 'exists:cash_accounts,id', Rule::requiredIf($paying && $request->input('payment_method') === 'Cash')],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id', Rule::requiredIf($paying && in_array($request->input('payment_method'), ['Bank', 'Cheque'], true))],
             'notes' => 'nullable|string',
         ]);
 
-        DB::transaction(function () use ($data, $request, $borrowing) {
-            $borrowing->renewals()->create([
-                'renewed_on' => $data['renewed_on'],
-                'previous_maturity_date' => $borrowing->maturity_date,
-                'new_maturity_date' => $data['new_maturity_date'],
-                'previous_term_months' => $borrowing->term_months,
-                'new_term_months' => $data['new_term_months'] ?? $borrowing->term_months,
-                'previous_interest_rate_percent' => $borrowing->interest_rate_percent,
-                'new_interest_rate_percent' => $data['new_interest_rate_percent'] ?? $borrowing->interest_rate_percent,
-                'interest_paid_amount' => $data['interest_paid_amount'] ?? 0,
-                'notes' => $data['notes'] ?? null,
-                'created_by' => $request->user()->id,
-            ]);
-
-            $borrowing->update([
-                'maturity_date' => $data['new_maturity_date'],
-                'term_months' => $data['new_term_months'] ?? $borrowing->term_months,
-                'interest_rate_percent' => $data['new_interest_rate_percent'] ?? $borrowing->interest_rate_percent,
-            ]);
-        });
+        DB::transaction(fn () => $this->performRenewal($borrowing, $data, (int) $request->user()->id));
 
         return response()->json($this->fresh($borrowing->refresh()));
+    }
+
+    /** The roll-over itself — shared with the borrowings:auto-renew command. Call inside a DB transaction. */
+    public function performRenewal(Borrowing $borrowing, array $data, int $userId): void
+    {
+        $borrowing->setRawAttributes(Borrowing::lockForUpdate()->findOrFail($borrowing->id)->getAttributes(), true);
+        // Book interest at the old rate up to the roll-over date before the rate can change.
+        BorrowingInterestAccrual::accrue($borrowing, $data['renewed_on'], $userId);
+
+        $paid = (string) ($data['interest_paid_amount'] ?? 0);
+        if (bccomp($paid, '0', 2) > 0) {
+            $this->recordTransaction($borrowing, [
+                'kind' => 'InterestPayment', 'amount' => $paid, 'txn_date' => $data['renewed_on'],
+                'payment_method' => $data['payment_method'], 'cash_account_id' => $data['cash_account_id'] ?? null,
+                'bank_account_id' => $data['bank_account_id'] ?? null, 'notes' => 'Interest paid at renewal',
+            ], $userId);
+        }
+
+        $borrowing->renewals()->create([
+            'renewed_on' => $data['renewed_on'],
+            'previous_maturity_date' => $borrowing->maturity_date,
+            'new_maturity_date' => $data['new_maturity_date'],
+            'previous_term_months' => $borrowing->term_months,
+            'new_term_months' => $data['new_term_months'] ?? $borrowing->term_months,
+            'previous_interest_rate_percent' => $borrowing->interest_rate_percent,
+            'new_interest_rate_percent' => $data['new_interest_rate_percent'] ?? $borrowing->interest_rate_percent,
+            'interest_paid_amount' => $paid,
+            'notes' => $data['notes'] ?? null,
+            'created_by' => $userId,
+        ]);
+
+        $borrowing->update([
+            'maturity_date' => $data['new_maturity_date'],
+            'term_months' => $data['new_term_months'] ?? $borrowing->term_months,
+            'interest_rate_percent' => $data['new_interest_rate_percent'] ?? $borrowing->interest_rate_percent,
+        ]);
     }
 
     public function addTransaction(Request $request, Borrowing $borrowing)
@@ -242,7 +268,13 @@ class BorrowingController extends Controller
             'txn_date' => 'required|date',
             'payment_method' => ['required', Rule::in(self::METHODS)],
             'cash_account_id' => 'nullable|exists:cash_accounts,id|required_if:payment_method,Cash',
-            'bank_account_id' => 'nullable|exists:bank_accounts,id|required_if:payment_method,Bank',
+            // Bank always names the account; a Cheque paid out must say which account it is drawn on
+            // (a Cheque received may stay unbanked and park in 1030 Undeposited Funds).
+            'bank_account_id' => [
+                'nullable', 'exists:bank_accounts,id',
+                Rule::requiredIf(fn () => $request->input('payment_method') === 'Bank'
+                    || ($request->input('payment_method') === 'Cheque' && $request->input('kind') !== 'Drawdown')),
+            ],
             'reference_no' => 'nullable|string|max:64',
             'notes' => 'nullable|string',
         ]);
@@ -254,40 +286,58 @@ class BorrowingController extends Controller
             throw ValidationException::withMessages(['kind' => 'For an overdraft, only interest payments are recorded here — draw-downs and repayments are bank withdrawals/deposits on the linked account.']);
         }
 
-        $txn = DB::transaction(function () use ($data, $request, $borrowing) {
-            $outstandingBefore = (string) $borrowing->outstanding_amount;
-
-            $number = NumberGenerator::next('borrowing_txn', [
-                'branch_id' => $borrowing->branch_id,
-                'branch_code' => $borrowing->branch?->code,
-                'user_id' => $request->user()->id,
-            ]);
-
-            $txn = $borrowing->transactions()->create([
-                'voucher_no' => $number,
-                'kind' => $data['kind'],
-                'amount' => $data['amount'],
-                'txn_date' => $data['txn_date'],
-                'payment_method' => $data['payment_method'],
-                'cash_account_id' => $data['cash_account_id'] ?? null,
-                'bank_account_id' => $data['bank_account_id'] ?? null,
-                'reference_no' => $data['reference_no'] ?? null,
-                'notes' => $data['notes'] ?? null,
-                'outstanding_before' => $outstandingBefore,
-                'created_by' => $request->user()->id,
-            ]);
-            NumberGenerator::attach($number, $txn);
-
-            $this->applyTransactionToBalance($borrowing, $data['kind'], (string) $data['amount']);
-
-            BorrowingLedgerPoster::postTransaction($txn);
-
-            return $txn;
-        });
+        DB::transaction(fn () => $this->recordTransaction($borrowing, $data, (int) $request->user()->id));
 
         return response()->json($this->fresh($borrowing->refresh()), 201);
     }
 
+    /** Books one transaction against a borrowing: accrue first, clear 2220, move the balance, post the ledger. Call inside a DB transaction. */
+    private function recordTransaction(Borrowing $borrowing, array $data, int $userId): BorrowingTransaction
+    {
+        // Serialise with the month-end accrual run, then book interest up to this date at the balance
+        // that was really owed, before the balance changes.
+        $borrowing->setRawAttributes(Borrowing::lockForUpdate()->findOrFail($borrowing->id)->getAttributes(), true);
+        BorrowingInterestAccrual::accrue($borrowing, $data['txn_date'], $userId);
+
+        // An interest payment clears accrued interest (2220) first; only the excess is new expense.
+        $cleared = '0.00';
+        if ($data['kind'] === 'InterestPayment') {
+            $unpaid = (string) $borrowing->accrued_interest_unpaid;
+            $cleared = bccomp((string) $data['amount'], $unpaid, 2) < 0 ? number_format((float) $data['amount'], 2, '.', '') : $unpaid;
+        }
+        $outstandingBefore = (string) $borrowing->outstanding_amount;
+
+        $number = NumberGenerator::next('borrowing_txn', [
+            'branch_id' => $borrowing->branch_id,
+            'branch_code' => $borrowing->branch?->code,
+            'user_id' => $userId,
+        ]);
+
+        $txn = $borrowing->transactions()->create([
+            'voucher_no' => $number,
+            'kind' => $data['kind'],
+            'amount' => $data['amount'],
+            'txn_date' => $data['txn_date'],
+            'payment_method' => $data['payment_method'],
+            'cash_account_id' => $data['cash_account_id'] ?? null,
+            'bank_account_id' => $data['bank_account_id'] ?? null,
+            'reference_no' => $data['reference_no'] ?? null,
+            'notes' => $data['notes'] ?? null,
+            'outstanding_before' => $outstandingBefore,
+            'accrued_interest_cleared' => $cleared,
+            'created_by' => $userId,
+        ]);
+        NumberGenerator::attach($number, $txn);
+
+        if (bccomp($cleared, '0', 2) > 0) {
+            $borrowing->update(['accrued_interest_unpaid' => bcsub((string) $borrowing->accrued_interest_unpaid, $cleared, 2)]);
+        }
+        $this->applyTransactionToBalance($borrowing, $data['kind'], (string) $data['amount']);
+
+        BorrowingLedgerPoster::postTransaction($txn);
+
+        return $txn;
+    }
     public function voidTransaction(BorrowingTransaction $borrowingTransaction)
     {
         $borrowing = $borrowingTransaction->borrowing;
@@ -302,6 +352,8 @@ class BorrowingController extends Controller
 
             $borrowing->update([
                 'outstanding_amount' => $borrowingTransaction->outstanding_before,
+                // Give back the accrued interest this payment had cleared (its 2220 debit was just reversed).
+                'accrued_interest_unpaid' => bcadd((string) $borrowing->accrued_interest_unpaid, (string) $borrowingTransaction->accrued_interest_cleared, 2),
                 'status' => $borrowing->status === 'Settled' ? 'Active' : $borrowing->status,
             ]);
             $borrowingTransaction->delete();
@@ -318,6 +370,7 @@ class BorrowingController extends Controller
 
         DB::transaction(function () use ($borrowing) {
             BorrowingLedgerPoster::reverseDrawdown($borrowing);
+            BorrowingLedgerPoster::reverseAccruals($borrowing);
             $borrowing->delete();
         });
 

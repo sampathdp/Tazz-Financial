@@ -7,6 +7,8 @@ use App\Models\ChartOfAccount;
 use App\Models\FdDeposit;
 use App\Models\FdInterestPayment;
 use App\Models\FdPartPayment;
+use App\Models\FdRenewal;
+use App\Models\FixedDeposit;
 use App\Models\FinanceTransaction;
 use App\Models\FdWithdrawal;
 use App\Models\JournalEntry;
@@ -200,6 +202,55 @@ class FdLedgerPoster
             'description' => $description,
             'branch_id' => $fd->branch_id,
             'posted_by' => $withdrawal->created_by,
+        ]);
+    }
+
+    /**
+     * Maturity-method interest settled when an FD is renewed. Capitalised: no cash moves, the
+     * interest simply becomes more principal owed back - Dr 5100, Cr 2010. Paid out: Dr 5100,
+     * Cr the branch till (Cash-method only, like every other FD leg here).
+     */
+    public static function postRenewalInterest(FdRenewal $renewal, FixedDeposit $oldFd): void
+    {
+        $amount = (float) $renewal->interest_amount;
+        if ($amount <= 0) {
+            return;
+        }
+        $expense = ChartOfAccount::system('5100');
+        $description = "FD renewal interest - {$oldFd->fd_number}";
+
+        if ((float) $renewal->capitalised_interest > 0) {
+            LedgerPoster::post([
+                ['account_id' => $expense->id, 'debit' => $amount, 'credit' => 0],
+                ['account_id' => ChartOfAccount::system('2010')->id, 'debit' => 0, 'credit' => $amount],
+            ], \Illuminate\Support\Carbon::parse($renewal->renewed_at)->toDateString(), [
+                'source_type' => 'FdRenewal',
+                'source_id' => $renewal->id,
+                'description' => $description . ' (capitalised)',
+                'branch_id' => $oldFd->branch_id,
+                'posted_by' => $renewal->created_by,
+            ]);
+
+            return;
+        }
+
+        $leg = MoneyLeg::resolve($renewal->interest_payment_method ?: 'Cash', (int) $oldFd->branch_id, CashAccount::PURPOSE_FD, null);
+        if (!$leg) {
+            return;
+        }
+        self::postCashLeg($leg, '-' . $amount, [
+            ['account_id' => $expense->id, 'debit' => $amount, 'credit' => 0],
+            ['account_id' => $leg['leaf']->id, 'debit' => 0, 'credit' => $amount],
+        ], [
+            'txn_type' => 'CASH_OUT',
+            'amount' => $amount,
+            'entry_date' => $renewal->renewed_at,
+            'branch_id' => $oldFd->branch_id,
+            'source_type' => 'FdRenewal',
+            'source_id' => $renewal->id,
+            'idempotency_key' => "fd-renewal-interest-{$renewal->id}",
+            'description' => $description . ' (paid out)',
+            'posted_by' => $renewal->created_by,
         ]);
     }
 

@@ -201,7 +201,7 @@ export function BorrowingsScreen({ go: _go, user: me }: { go: Go; user?: AuthUse
             <Td>{dateOnly(b.borrowingDate)}</Td>
             <Td align="right" mono>{money(b.principalAmount)}</Td>
             <Td align="right" mono>{money(b.outstandingAmount)}</Td>
-            <Td align="center"><Badge tone={STATUS_TONE[b.status]} dot>{b.status}</Badge></Td>
+            <Td align="center"><Badge tone={STATUS_TONE[b.status]} dot>{b.status}</Badge>{b.isMatured && <Badge tone="amber" dot>Matured</Badge>}</Td>
             <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
               {b.status !== 'Void' && (b.transactions?.length ?? 0) === 0 && (
                 <Can user={me} module="Borrowings" action="Delete">
@@ -295,7 +295,7 @@ export function BorrowingsScreen({ go: _go, user: me }: { go: Go; user?: AuthUse
               </Select></Field>
             )}
             {form.receiptMethod === 'Cheque' && (
-              <Field label="" full><div className="t-2" style={{ fontSize: 12 }}>Cheque receipts are recorded only — they don’t post to the ledger/cashbook until banked (same as FD deposits).</div></Field>
+              <Field label="" full><div className="t-2" style={{ fontSize: 12 }}>A cheque received is held in Undeposited Funds (1030) until banked, same as FD deposits. Cheques paid out are drawn on a company bank account and post to it.</div></Field>
             )}
           </>}
 
@@ -345,7 +345,7 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
   const [err, setErr] = useState('')
   const [renewOpen, setRenewOpen] = useState(false)
   const [rnErr, setRnErr] = useState('')
-  const blankRenew = () => ({ renewedOn: todayIso(), newMaturityDate: '', newTermMonths: '', newRate: '', interestPaid: '', notes: '' })
+  const blankRenew = () => ({ renewedOn: todayIso(), newMaturityDate: '', newTermMonths: '', newRate: '', interestPaid: '', payMethod: 'Cash' as FdPaymentMethod, payCashId: undefined as number | undefined, payBankId: undefined as number | undefined, notes: '' })
   const [rn, setRn] = useState(blankRenew())
 
   useEffect(() => {
@@ -367,12 +367,13 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
     if (!amount || Number(amount) <= 0) return setErr('Amount must be greater than zero.')
     if (method === 'Cash' && !cashId) return setErr('Select a cash account.')
     if (method === 'Bank' && !bankId) return setErr('Select a bank account.')
+    if (method === 'Cheque' && kind !== 'Drawdown' && !bankId) return setErr('Select the bank account the cheque is drawn on.')
     setBusy(true); setErr('')
     try {
       const updated = await borrowingsApi.addTransaction(b.id, {
         kind, amount, txnDate, paymentMethod: method,
         cashAccountId: method === 'Cash' ? cashId : undefined,
-        bankAccountId: method === 'Bank' ? bankId : undefined,
+        bankAccountId: method === 'Bank' || method === 'Cheque' ? bankId : undefined,
         referenceNo: ref.trim() || undefined,
       })
       onChanged(updated); setAmount(''); setRef('')
@@ -384,12 +385,16 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
 
   const doRenew = async () => {
     if (!rn.newMaturityDate) { setRnErr('New maturity date is required.'); return }
+    const paying = Number(rn.interestPaid) > 0
+    if (paying && rn.payMethod === 'Cash' && !rn.payCashId) { setRnErr('Select the cash account the interest is paid from.'); return }
+    if (paying && rn.payMethod !== 'Cash' && !rn.payBankId) { setRnErr('Select the bank account the interest is paid from.'); return }
     setBusy(true); setRnErr('')
     try {
       const updated = await borrowingsApi.renew(b.id, {
         renewedOn: rn.renewedOn, newMaturityDate: rn.newMaturityDate,
         newTermMonths: rn.newTermMonths || undefined, newInterestRatePercent: rn.newRate || undefined,
         interestPaidAmount: rn.interestPaid || undefined, notes: rn.notes.trim() || undefined,
+        ...(paying ? { paymentMethod: rn.payMethod, cashAccountId: rn.payMethod === 'Cash' ? rn.payCashId : undefined, bankAccountId: rn.payMethod !== 'Cash' ? rn.payBankId : undefined } : {}),
       })
       onChanged(updated); setRenewOpen(false); setRn(blankRenew())
       notify.success('Borrowing renewed')
@@ -415,6 +420,9 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
         {b.purpose && <div className="row between"><span className="t-2">Purpose</span><b style={{ maxWidth: 380, textAlign: 'right' }}>{b.purpose}</b></div>}
         <div className="row between"><span className="t-2">{isOd ? 'Sanctioned Limit' : 'Amount Borrowed'}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.principalAmount)}</b></div>
         <div className="row between"><span className="t-2">{isOd ? 'Overdraft Utilised (live)' : 'Outstanding'}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.outstandingAmount)}</b></div>
+        {!isOd && Number(b.accruedInterestUnpaid ?? 0) > 0 && (
+          <div className="row between"><span className="t-2">Accrued Interest Payable{b.interestAccruedThrough ? ` (to ${dateOnly(b.interestAccruedThrough)})` : ''}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.accruedInterestUnpaid ?? 0)}</b></div>
+        )}
         {b.interestRatePercent != null && <div className="row between"><span className="t-2">Interest Rate</span><b>{b.interestRatePercent}% p.a.</b></div>}
         {b.termMonths != null && <div className="row between"><span className="t-2">Tenure</span><b>{b.termMonths} months</b></div>}
         {b.maturityDate && <div className="row between"><span className="t-2">Maturity Date</span><b>{dateOnly(b.maturityDate)}</b></div>}
@@ -423,7 +431,7 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
         {isOd && b.bankAccount && (
           <div className="row between"><span className="t-2">Current Account</span><b>{b.bankAccount.name} · bal {money(b.bankAccount.currentBalance)}{b.bankAccount.overdraftLimit != null ? ` · limit ${money(b.bankAccount.overdraftLimit)}` : ''}</b></div>
         )}
-        <div className="row between"><span className="t-2">Status</span><Badge tone={STATUS_TONE[b.status]} dot>{b.status}</Badge></div>
+        <div className="row between"><span className="t-2">Status</span><span className="row gap-1"><Badge tone={STATUS_TONE[b.status]} dot>{b.status}</Badge>{b.isMatured && <Badge tone="amber" dot>Matured - renew or settle</Badge>}</span></div>
       </div>
 
       {b.repledgedItems && b.repledgedItems.length > 0 && (
@@ -471,10 +479,18 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
                     </Field>
                     <Field label="New Maturity Date"><DateInput value={rn.newMaturityDate} onChange={(iso) => setRn((s) => ({ ...s, newMaturityDate: iso }))} /></Field>
                     <Field label="New Interest Rate %"><Input type="number" step="0.001" value={rn.newRate} onChange={(e) => setRn((s) => ({ ...s, newRate: e.target.value }))} placeholder={b.interestRatePercent != null ? String(b.interestRatePercent) : ''} /></Field>
-                    <Field label="Interest Cleared (info)"><Input type="number" step="0.01" value={rn.interestPaid} onChange={(e) => setRn((s) => ({ ...s, interestPaid: e.target.value }))} /></Field>
+                    <Field label="Interest Paid Now"><Input type="number" step="0.01" value={rn.interestPaid} onChange={(e) => setRn((s) => ({ ...s, interestPaid: e.target.value }))} /></Field>
+                    {Number(rn.interestPaid) > 0 && <>
+                      <Field label="Paid By"><Select value={rn.payMethod} onChange={(e) => setRn((s) => ({ ...s, payMethod: e.target.value as FdPaymentMethod }))}>
+                        {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </Select></Field>
+                      {rn.payMethod === 'Cash'
+                        ? <Field label="Cash Account"><Select value={rn.payCashId ?? ''} onChange={(e) => setRn((s) => ({ ...s, payCashId: Number(e.target.value) || undefined }))}><option value="">—</option>{branchCash.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+                        : <Field label={rn.payMethod === 'Cheque' ? 'Cheque Drawn On' : 'Bank Account'}><Select value={rn.payBankId ?? ''} onChange={(e) => setRn((s) => ({ ...s, payBankId: Number(e.target.value) || undefined }))}><option value="">—</option>{bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>}
+                    </>}
                     <Field label="Notes"><Input value={rn.notes} onChange={(e) => setRn((s) => ({ ...s, notes: e.target.value }))} /></Field>
                   </div>
-                  <div className="t-2" style={{ fontSize: 12, marginTop: 6 }}>Rolls the borrowing over in place — updates maturity / term / rate and logs the prior values. No cash moves; if interest is actually paid at roll-over, also add an <b>InterestPayment</b> transaction below.</div>
+                  <div className="t-2" style={{ fontSize: 12, marginTop: 6 }}>Rolls the borrowing over in place — updates maturity / term / rate and logs the prior values. Interest is booked up to the roll-over date first. Enter an amount under <b>Interest Paid Now</b> to pay interest at roll-over (recorded as an InterestPayment); leave it blank and the accrued interest simply stays payable.</div>
                   <div className="row gap-1" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
                     <Btn variant="plain" onClick={() => { setRenewOpen(false); setRnErr('') }}>Cancel</Btn>
                     <Btn variant="primary" icon="check" onClick={doRenew} disabled={busy}>{busy ? 'Saving…' : 'Renew'}</Btn>
@@ -522,8 +538,8 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
                   {branchCash.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </Select></Field>
               )}
-              {method === 'Bank' && (
-                <Field label="Bank Account"><Select value={bankId ?? ''} onChange={(e) => setBankId(Number(e.target.value) || undefined)}>
+              {(method === 'Bank' || method === 'Cheque') && (
+                <Field label={method === 'Cheque' ? (kind === 'Drawdown' ? 'Banked Into (optional)' : 'Cheque Drawn On') : 'Bank Account'}><Select value={bankId ?? ''} onChange={(e) => setBankId(Number(e.target.value) || undefined)}>
                   <option value="">—</option>
                   {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </Select></Field>

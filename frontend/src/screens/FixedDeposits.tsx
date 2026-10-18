@@ -10,6 +10,7 @@ import {
   fixedDepositsApi, fdDepositsApi, fundingProductsApi, fdInterestPaymentsApi, company,
   type FixedDeposit, type FdDeposit, type FundingProduct, type FdInterestPayment, type FdWithdrawal,
   type FdPaymentMethod, type FixedDepositStatus, type FdInterestMethod, type AuthUser,
+  type FdAutoRenewMode, type FdInterestTreatment, type FdWithdrawalPreview,
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
@@ -146,6 +147,7 @@ function PrintView({ doc, brand, onClose }: { doc: PrintDoc; brand: { name: stri
             <div className="col gap-2" style={{ fontSize: 13, marginBottom: 20 }}>
               <DocRow label="Principal" value={money(withdrawal.principalAmount)} />
               <DocRow label="Interest" value={money(withdrawal.interestAmount)} />
+              {Number(withdrawal.postMaturityInterest) > 0 && <DocRow label={`  of which post-maturity (${withdrawal.postMaturityDays} days @ ${Number(withdrawal.postMaturityRatePercent ?? 0).toFixed(2)}%)`} value={money(withdrawal.postMaturityInterest)} />}
               <div className="row between" style={{ fontSize: 15, fontWeight: 700, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
                 <span>Total Paid</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(withdrawal.totalAmount)}</span>
               </div>
@@ -158,6 +160,43 @@ function PrintView({ doc, brand, onClose }: { doc: PrintDoc; brand: { name: stri
           <div>Signature: ______________</div>
         </div>
       </Card>
+    </div>
+  )
+}
+
+/* ============================ Auto-renew fields ============================ */
+
+type AutoRenewState = { on: boolean; mode: FdAutoRenewMode; term: number | '' }
+const noAutoRenew: AutoRenewState = { on: false, mode: 'principal_only', term: '' }
+const autoRenewFrom = (fd: FixedDeposit): AutoRenewState => ({ on: !!fd.autoRenew, mode: fd.autoRenewMode || 'principal_only', term: fd.autoRenewTermMonths || '' })
+const autoRenewBody = (a: AutoRenewState) => ({ autoRenew: a.on, autoRenewMode: a.on ? a.mode : undefined, autoRenewTermMonths: a.on && a.term ? a.term : undefined })
+const AUTO_RENEW_MODES: { value: FdAutoRenewMode; label: string }[] = [
+  { value: 'principal_only', label: 'Renew principal only — interest is paid out' },
+  { value: 'principal_and_interest', label: 'Renew principal + interest (compound)' },
+]
+
+/** Customer's standing instruction for what happens when the FD matures. */
+function AutoRenewFields({ value, onChange, terms, interestMethod }: { value: AutoRenewState; onChange: (v: AutoRenewState) => void; terms: number[]; interestMethod?: FdInterestMethod }) {
+  return (
+    <div className="col gap-2">
+      <label className="row gap-2" style={{ fontSize: 12.5 }}>
+        <input type="checkbox" checked={value.on} onChange={(e) => onChange({ ...value, on: e.target.checked })} /> Auto-renew at maturity
+      </label>
+      {value.on && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {interestMethod === 'maturity' ? (
+            <Field label="On renewal"><Select value={value.mode} onChange={(e) => onChange({ ...value, mode: e.target.value as FdAutoRenewMode })}>
+              {AUTO_RENEW_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </Select></Field>
+          ) : (
+            <div className="t-2" style={{ fontSize: 11.5, alignSelf: 'end' }}>Monthly interest is already paid out as it falls due — only the principal renews.</div>
+          )}
+          <Field label="Renewal Term"><Select value={value.term} onChange={(e) => onChange({ ...value, term: e.target.value ? Number(e.target.value) : '' })}>
+            <option value="">Same term as this FD</option>
+            {terms.map((t) => <option key={t} value={t}>{t} months</option>)}
+          </Select></Field>
+        </div>
+      )}
     </div>
   )
 }
@@ -175,11 +214,13 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   const [customTerm, setCustomTerm] = useState('')
   const [startDate, setStartDate] = useState(todayIso())
   const [interestMethod, setInterestMethod] = useState<FdInterestMethod | ''>('')
+  const [autoRenew, setAutoRenew] = useState<AutoRenewState>(noAutoRenew)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     if (!open) return
+    setAutoRenew(noAutoRenew)
     fdDepositsApi.list({ status: 'Available' }).then(setDeposits).catch(() => setDeposits([]))
     fundingProductsApi.list().then((d) => setProducts(d.filter((p) => (p.status || 'Active') === 'Active'))).catch(() => setProducts([]))
     setDepositLabel(''); setDepositId(undefined); setProductId(undefined); setTerm(''); setCustomTerm(''); setStartDate(todayIso()); setInterestMethod(''); setErr('')
@@ -202,7 +243,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
     if (!effectiveTerm || effectiveTerm <= 0) { setErr('Select or enter a valid term.'); return }
     setBusy(true); setErr('')
     try {
-      const fd = await fixedDepositsApi.create({ depositId, fundingProductId: productId, termMonths: effectiveTerm, startDate, interestPaymentMethod: interestMethod || undefined })
+      const fd = await fixedDepositsApi.create({ depositId, fundingProductId: productId, termMonths: effectiveTerm, startDate, interestPaymentMethod: interestMethod || undefined, ...autoRenewBody(autoRenew) })
       onCreated(fd)
       notify.success('Fixed Deposit created', fd.fdNumber)
     } catch (ex: any) {
@@ -254,6 +295,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
             </div>
           </Field>
         )}
+        {product && <AutoRenewFields value={autoRenew} onChange={setAutoRenew} terms={product.allowedTermsMonths} interestMethod={effectiveInterestMethod || undefined} />}
         {deposit && product && (
           <div style={{ background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', padding: 14 }}>
             {deposit.amount < product.minDepositAmount || (product.maxDepositAmount && deposit.amount > product.maxDepositAmount) ? (
@@ -288,11 +330,14 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
   const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
   const [refNo, setRefNo] = useState('')
   const [bankId, setBankId] = useState<number | undefined>(undefined)
+  const [treatment, setTreatment] = useState<FdInterestTreatment>('payout')
+  const [autoRenew, setAutoRenew] = useState<AutoRenewState>(noAutoRenew)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     if (!open || !fd) return
+    setTreatment('payout'); setAutoRenew(autoRenewFrom(fd))
     setTerm(fd.termMonths); setCustomTerm(''); setNotes(''); setEnhance(false)
     setAmount(''); setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setBankId(undefined); setErr('')
   }, [open, fd])
@@ -300,7 +345,9 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
   if (!fd) return null
   const product = fd.fundingProduct
   const effectiveTerm = term === 'custom' ? parseInt(customTerm, 10) : (term || undefined)
-  const newPrincipal = Number(fd.principalAmount) + (enhance ? Number(amount || 0) : 0)
+  const maturityInterest = fd.interestPaymentMethod === 'maturity' ? Number(fd.totalInterestAmount) : 0
+  const capitalised = treatment === 'capitalise' ? maturityInterest : 0
+  const newPrincipal = Number(fd.principalAmount) + capitalised + (enhance ? Number(amount || 0) : 0)
   const preview = product && effectiveTerm ? previewInterest(newPrincipal, Number(fd.interestRatePercent), effectiveTerm, fd.interestPaymentMethod) : null
 
   const save = async () => {
@@ -311,6 +358,8 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
     try {
       const result = await fixedDepositsApi.renew(fd.id, {
         termMonths: effectiveTerm, notes: notes || undefined,
+        interestTreatment: maturityInterest > 0 ? treatment : undefined,
+        ...autoRenewBody(autoRenew),
         enhancement: enhance ? { amount, paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, bankId: method !== 'Cash' ? bankId : undefined } : undefined,
       })
       onRenewed(result.fixedDeposit, result.enhancementDeposit)
@@ -338,6 +387,15 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
           {term === 'custom' && <Input type="number" style={{ marginTop: 8 }} value={customTerm} onChange={(e) => setCustomTerm(e.target.value)} placeholder="Months" />}
         </Field>
 
+        {maturityInterest > 0 && (
+          <Field label={`Interest earned over the old term — ${money(maturityInterest)}`}>
+            <Select value={treatment} onChange={(e) => setTreatment(e.target.value as FdInterestTreatment)}>
+              <option value="payout">Pay the interest out to the customer (cash)</option>
+              <option value="capitalise">Add the interest to the new principal</option>
+            </Select>
+          </Field>
+        )}
+
         <label className="row gap-2" style={{ fontSize: 12.5 }}>
           <input type="checkbox" checked={enhance} onChange={(e) => setEnhance(e.target.checked)} /> Add capital (top up the principal with a new deposit)
         </label>
@@ -352,6 +410,7 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
             {method !== 'Cash' && <Field label="Bank Name"><BankSelect value={bankId} onChange={setBankId} /></Field>}
           </div>
         )}
+        <AutoRenewFields value={autoRenew} onChange={setAutoRenew} terms={product?.allowedTermsMonths || []} interestMethod={fd.interestPaymentMethod} />
         <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
 
         {preview && (
@@ -378,20 +437,38 @@ function WithdrawModal({ fd, open, onClose, onWithdrawn }: { fd: FixedDeposit | 
   const [refNo, setRefNo] = useState('')
   const [notes, setNotes] = useState('')
   const [closedAt, setClosedAt] = useState(todayIso())
+  const [rate, setRate] = useState('')
+  const [pmOverride, setPmOverride] = useState<string | null>(null)
+  const [pm, setPm] = useState<FdWithdrawalPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (open) { setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setNotes(''); setClosedAt(todayIso()); setErr('') } }, [open])
+  useEffect(() => { if (open) { setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setNotes(''); setClosedAt(todayIso()); setRate(''); setPmOverride(null); setPm(null); setErr('') } }, [open])
+
+  // Days held past maturity and the default interest for them (server-computed from the product's post-maturity rate).
+  const fdId = fd?.id
+  useEffect(() => {
+    if (!open || !fdId || !closedAt) return
+    let live = true
+    setPmOverride(null)
+    fixedDepositsApi.withdrawalPreview(fdId, { closedAt, postMaturityRatePercent: rate === '' ? undefined : rate })
+      .then((p) => { if (live) setPm(p) }).catch(() => { if (live) setPm(null) })
+    return () => { live = false }
+  }, [open, fdId, closedAt, rate])
+
   if (!fd) return null
 
-  const interestPayable = fd.interestPaymentMethod === 'maturity' ? Number(fd.totalInterestAmount) : 0
+  const lateDays = pm?.postMaturityDays ?? 0
+  const shownRate = rate !== '' ? rate : (pm?.postMaturityRatePercent ?? '')
+  const postMaturityInterest = lateDays > 0 ? Number(pmOverride ?? pm?.postMaturityInterest ?? 0) : 0
+  const interestPayable = (fd.interestPaymentMethod === 'maturity' ? Number(fd.totalInterestAmount) : 0) + postMaturityInterest
   const total = Number(fd.principalAmount) + interestPayable
 
   const save = async () => {
     if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     setBusy(true); setErr('')
     try {
-      const result = await fixedDepositsApi.withdraw(fd.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, notes: notes || undefined, closedAt })
+      const result = await fixedDepositsApi.withdraw(fd.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, notes: notes || undefined, closedAt, postMaturityRatePercent: lateDays > 0 && rate !== '' ? rate : undefined, postMaturityInterest: lateDays > 0 ? postMaturityInterest : undefined })
       onWithdrawn(result, result.fixedDeposit)
       notify.success('Fixed Deposit withdrawn', fd.fdNumber)
     } catch (ex: any) {
@@ -410,6 +487,7 @@ function WithdrawModal({ fd, open, onClose, onWithdrawn }: { fd: FixedDeposit | 
         <div style={{ background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', padding: 14, fontSize: 12.5 }}>
           <div className="row between"><span className="t-2">Principal</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(fd.principalAmount)}</b></div>
           <div className="row between"><span className="t-2">Interest</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(interestPayable)}</b></div>
+          {postMaturityInterest > 0 && <div className="row between"><span className="t-2">&nbsp;&nbsp;incl. post-maturity ({lateDays} days)</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(postMaturityInterest)}</b></div>}
           <div className="row between" style={{ fontWeight: 700, marginTop: 4 }}><span>Total Payable</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(total)}</b></div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -420,8 +498,51 @@ function WithdrawModal({ fd, open, onClose, onWithdrawn }: { fd: FixedDeposit | 
           <Field label="Closed Date"><DateInput value={closedAt} onChange={setClosedAt} /></Field>
           <Field label="Reference No"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
         </div>
+        {lateDays > 0 && (
+          <div style={{ border: '1px solid var(--line)', borderRadius: 'var(--r-s)', padding: 14 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Held {lateDays} day{lateDays === 1 ? '' : 's'} past maturity ({dateOnly(fd.maturityDate)})</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Field label="Annual Rate (%)"><Input type="number" step="0.01" value={shownRate} onChange={(e) => setRate(e.target.value)} placeholder="0 = no extra interest" /></Field>
+              <Field label="Post-maturity Interest"><Input type="number" step="0.01" value={pmOverride ?? (pm?.postMaturityInterest ?? 0)} onChange={(e) => setPmOverride(e.target.value)} /></Field>
+            </div>
+            <div className="t-2" style={{ fontSize: 11, marginTop: 6 }}>Calculated as principal × rate × days ÷ 365 — edit the amount to match what was agreed with the customer.</div>
+          </div>
+        )}
         <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
       </div>
+    </Modal>
+  )
+}
+
+/* ============================ Auto-renew modal ============================ */
+
+function AutoRenewModal({ fd, open, onClose, onSaved }: { fd: FixedDeposit; open: boolean; onClose: () => void; onSaved: () => void }) {
+  const notify = useNotify()
+  const [value, setValue] = useState<AutoRenewState>(noAutoRenew)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { if (open) { setValue(autoRenewFrom(fd)); setErr('') } }, [open, fd])
+
+  const save = async () => {
+    setBusy(true); setErr('')
+    try {
+      await fixedDepositsApi.setAutoRenew(fd.id, autoRenewBody(value) as { autoRenew: boolean })
+      notify.success(value.on ? 'Auto-renew enabled' : 'Auto-renew turned off', fd.fdNumber)
+      onSaved()
+    } catch (ex: any) {
+      setErr(getErrorText(ex, 'Could not update auto-renew.'))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} width={520} title={`Auto-renew — ${fd.fdNumber}`}
+      footer={<>
+        <Btn variant="plain" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : 'Save'}</Btn>
+      </>}>
+      <ErrorBanner error={err} style={{ marginBottom: 14 }} />
+      <AutoRenewFields value={value} onChange={setValue} terms={fd.fundingProduct?.allowedTermsMonths || []} interestMethod={fd.interestPaymentMethod} />
+      <div className="t-2" style={{ fontSize: 11.5, marginTop: 10 }}>The FD is renewed automatically on its maturity date (unless it is pledged to a loan). Matured FDs without this instruction stay open until someone renews or withdraws them.</div>
     </Modal>
   )
 }
@@ -492,6 +613,7 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
   const notify = useNotify()
   const [renewOpen, setRenewOpen] = useState(false)
   const [withdrawOpen, setWithdrawOpen] = useState(false)
+  const [autoRenewOpen, setAutoRenewOpen] = useState(false)
   const [payTarget, setPayTarget] = useState<FdInterestPayment | null>(null)
 
   const canRenewOrWithdraw = fd.status === 'Active' && fd.isMatured && !fd.isPledged
@@ -516,6 +638,7 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
       <div className="row gap-2" style={{ marginBottom: 16 }}>
         <Btn variant="solid" icon="chev" onClick={onBack}>Back to List</Btn>
         <Btn variant="solid" icon="print" onClick={() => onPrint({ kind: 'certificate', fd })}>Print Certificate</Btn>
+        {fd.status === 'Active' && <Can user={me} module="Fixed Deposits" action="Edit"><Btn variant="solid" icon="swap" onClick={() => setAutoRenewOpen(true)}>Auto-renew</Btn></Can>}
         {canRenewOrWithdraw && (
           <Can user={me} module="Fixed Deposits" action="Edit">
             <Btn variant="solid" icon="swap" onClick={() => setRenewOpen(true)}>Renew</Btn>
@@ -530,6 +653,7 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
           <div className="row gap-2">
             <Badge tone={statusTone[fd.status] || 'neutral'} dot>{fd.status}</Badge>
             {fd.isMatured && <Badge tone="amber" dot>Matured</Badge>}
+            {fd.status === 'Active' && fd.autoRenew && <Badge tone="blue" dot>Auto-renew{fd.autoRenewMode === 'principal_and_interest' ? ' (principal + interest)' : ''}</Badge>}
             {fd.isPledged && <Badge tone="red" dot>Pledged — {Number(fd.lienAmount).toLocaleString()} lien</Badge>}
           </div>
         </div>
@@ -610,6 +734,7 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
       )}
 
       <RenewModal fd={fd} open={renewOpen} onClose={() => setRenewOpen(false)} onRenewed={(newFd, enh) => { setRenewOpen(false); onPrint({ kind: 'renewal', fd: newFd, enhancementDeposit: enh }); onChanged() }} />
+      <AutoRenewModal fd={fd} open={autoRenewOpen} onClose={() => setAutoRenewOpen(false)} onSaved={() => { setAutoRenewOpen(false); onChanged() }} />
       <WithdrawModal fd={fd} open={withdrawOpen} onClose={() => setWithdrawOpen(false)} onWithdrawn={(w, newFd) => { setWithdrawOpen(false); onPrint({ kind: 'withdrawal', withdrawal: w, fd: newFd }); onChanged() }} />
       <PayInterestModal payment={payTarget} open={!!payTarget} onClose={() => setPayTarget(null)} onPaid={() => { setPayTarget(null); onChanged() }} />
     </div>

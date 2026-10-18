@@ -79,6 +79,8 @@ class AccrualInterestCalculator
             return [];
         }
 
+        $asOf = $to ? null : Carbon::today();
+
         $totals = [];
         foreach ($facilities->keys()->chunk(200) as $chunk) {
             $rowsByFacility = DB::table('facility_schedules')
@@ -116,8 +118,17 @@ class AccrualInterestCalculator
                     $end = ((float) $row->waived_interest > 0 && $row->paid_at)
                         ? Carbon::parse($row->paid_at)
                         : $dueDate;
-                    if ((float) $row->interest_due > 0 && $end->greaterThan($start)) {
-                        array_push($slices, ...InterestAccrualSchedule::monthlySlices($start, $end, (float) $row->interest_due));
+                    $interest = (float) $row->interest_due;
+                    // Open-ended report ("All Dates", no To): only what has accrued
+                    // through today, never installments still in the future.
+                    if ($asOf && $interest > 0) {
+                        $interest = InterestAccrualSchedule::accruedThrough($start, $end, $interest, $asOf);
+                        if ($asOf->lessThan($end)) {
+                            $end = $asOf->copy();
+                        }
+                    }
+                    if ($interest > 0 && $end->greaterThan($start)) {
+                        array_push($slices, ...InterestAccrualSchedule::monthlySlices($start, $end, $interest));
                     }
                     $periodStart = $dueDate;
                 }

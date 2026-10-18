@@ -146,6 +146,10 @@ export function FundingProductsScreen({ go: _go, user: me }: { go: Go; user?: Au
             <Input type="number" step="0.01" value={form.prematureWithdrawalRatePercent ?? ''} onChange={(e) => set({ prematureWithdrawalRatePercent: e.target.value || null })} placeholder="Reduced rate for an early part payment" />
             <div className="t-2" style={{ fontSize: 11, marginTop: 4 }}>Left blank, part payments are disabled for this product.</div>
           </Field>
+          <Field label="Post-maturity Rate (%, optional)">
+            <Input type="number" step="0.01" value={form.postMaturityRatePercent ?? ''} onChange={(e) => set({ postMaturityRatePercent: e.target.value || null })} placeholder="Rate for days held past maturity" />
+            <div className="t-2" style={{ fontSize: 11, marginTop: 4 }}>Pre-fills the extra interest when an FD is withdrawn after its maturity date. Editable at withdrawal.</div>
+          </Field>
           <Field label="Monthly Rate (%)">
             <Input type="number" step="0.001" value={form.rateIsManual ? (form.monthlyRatePercent ?? '') : (form.annualRatePercent ? (Number(form.annualRatePercent) / 12).toFixed(3) : '')}
               disabled={!form.rateIsManual} onChange={(e) => set({ monthlyRatePercent: e.target.value })} placeholder="Auto = Annual ÷ 12" />

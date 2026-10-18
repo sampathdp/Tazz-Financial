@@ -56,6 +56,8 @@ class FundingProductController extends Controller
             // Reduced rate applied to a premature part-payment (see FixedDepositController::partPayment()).
             // Left unset, part-payment stays blocked for this product until an admin configures one.
             'premature_withdrawal_rate_percent' => 'nullable|numeric|min:0|max:999',
+            // Default annual rate for days an FD is held past maturity before withdrawal (FixedDepositController::withdraw()).
+            'post_maturity_rate_percent' => 'nullable|numeric|min:0|max:999',
             'allowed_terms_months' => 'required|array|min:1',
             'allowed_terms_months.*' => 'integer|min:1',
             'allow_custom_term' => 'boolean',

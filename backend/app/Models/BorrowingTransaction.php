@@ -9,13 +9,14 @@ class BorrowingTransaction extends Model
     protected $fillable = [
         'borrowing_id', 'voucher_no', 'kind', 'amount', 'txn_date', 'payment_method',
         'cash_account_id', 'bank_account_id', 'reference_no', 'notes',
-        'outstanding_before', 'journal_entry_id', 'created_by',
+        'outstanding_before', 'accrued_interest_cleared', 'journal_entry_id', 'created_by',
     ];
 
     protected $casts = [
         'txn_date' => 'date:Y-m-d',
         'amount' => 'decimal:2',
         'outstanding_before' => 'decimal:2',
+        'accrued_interest_cleared' => 'decimal:2',
     ];
 
     public function borrowing()

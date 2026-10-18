@@ -10,7 +10,7 @@ class Borrowing extends Model
     protected $fillable = [
         'borrowing_number', 'branch_id', 'type', 'lender_name', 'source', 'purpose',
         'principal_amount', 'outstanding_amount', 'interest_rate_percent', 'term_months',
-        'borrowing_date', 'maturity_date', 'on_maturity',
+        'borrowing_date', 'maturity_date', 'on_maturity', 'interest_accrued_through', 'accrued_interest_unpaid',
         'receipt_method', 'receipt_cash_account_id', 'receipt_bank_account_id', 'bank_account_id',
         'reference_no', 'contract_no', 'notes', 'status', 'created_by',
     ];
@@ -18,11 +18,22 @@ class Borrowing extends Model
     protected $casts = [
         'borrowing_date' => 'date:Y-m-d',
         'maturity_date' => 'date:Y-m-d',
+        'interest_accrued_through' => 'date:Y-m-d',
+        'accrued_interest_unpaid' => 'decimal:2',
         'principal_amount' => 'decimal:2',
         'outstanding_amount' => 'decimal:2',
         'interest_rate_percent' => 'decimal:3',
         'term_months' => 'integer',
     ];
+
+    protected $appends = ['is_matured'];
+
+    /** Active, term-bound and past its maturity date — needs renewing or settling. */
+    public function getIsMaturedAttribute(): bool
+    {
+        return $this->status === 'Active' && $this->type !== 'Overdraft' && $this->maturity_date !== null
+            && $this->maturity_date->lte(now()->startOfDay());
+    }
 
     public function branch()
     {

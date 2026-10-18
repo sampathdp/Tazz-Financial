@@ -56,6 +56,9 @@ class AccrualInterestCostCalculator
             ->get(['fixed_deposit_id', 'due_date', 'amount'])
             ->groupBy('fixed_deposit_id');
 
+        // Open-ended report ("All Dates", no To): accrue only through today, not to maturity.
+        $asOf = $to ? null : Carbon::today();
+
         $total = '0.00';
         foreach ($fds as $fd) {
             $windowEnd = in_array($fd->status, ['Closed', 'Renewed'], true) && $fd->closed_at
@@ -68,8 +71,15 @@ class AccrualInterestCostCalculator
                 foreach ($scheduleByFd->get($fd->id, collect()) as $row) {
                     $due = Carbon::parse($row->due_date);
                     $end = $windowEnd && $windowEnd->lessThan($due) ? $windowEnd->copy() : $due;
-                    if ($end->greaterThan($cursor) && (float) $row->amount != 0.0) {
-                        array_push($slices, ...InterestAccrualSchedule::monthlySlices($cursor->copy(), $end, (float) $row->amount));
+                    $amount = (float) $row->amount;
+                    if ($asOf && $amount != 0.0 && $end->greaterThan($cursor)) {
+                        $amount = InterestAccrualSchedule::accruedThrough($cursor, $end, $amount, $asOf);
+                        if ($asOf->lessThan($end)) {
+                            $end = $asOf->copy();
+                        }
+                    }
+                    if ($end->greaterThan($cursor) && $amount != 0.0) {
+                        array_push($slices, ...InterestAccrualSchedule::monthlySlices($cursor->copy(), $end, $amount));
                     }
                     $cursor = $due;
                 }
@@ -79,8 +89,15 @@ class AccrualInterestCostCalculator
                 if ($windowEnd && $windowEnd->lessThan($end)) {
                     $end = $windowEnd->copy();
                 }
-                if ($end->greaterThan($start) && (float) $fd->total_interest_amount != 0.0) {
-                    $slices = InterestAccrualSchedule::monthlySlices($start, $end, (float) $fd->total_interest_amount);
+                $amount = (float) $fd->total_interest_amount;
+                if ($asOf && $amount != 0.0 && $end->greaterThan($start)) {
+                    $amount = InterestAccrualSchedule::accruedThrough($start, $end, $amount, $asOf);
+                    if ($asOf->lessThan($end)) {
+                        $end = $asOf->copy();
+                    }
+                }
+                if ($end->greaterThan($start) && $amount != 0.0) {
+                    $slices = InterestAccrualSchedule::monthlySlices($start, $end, $amount);
                 }
             }
 

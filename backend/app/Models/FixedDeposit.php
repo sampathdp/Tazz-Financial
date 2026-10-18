@@ -16,6 +16,7 @@ class FixedDeposit extends Model
         'principal_amount', 'interest_rate_percent', 'interest_payment_method',
         'term_months', 'start_date', 'maturity_date',
         'monthly_interest_amount', 'total_interest_amount', 'maturity_amount', 'lien_amount', 'next_interest_date',
+        'auto_renew', 'auto_renew_mode', 'auto_renew_term_months',
         'status', 'renewed_from_id', 'renewed_to_id', 'closed_at', 'created_by',
     ];
 
@@ -28,6 +29,7 @@ class FixedDeposit extends Model
         'total_interest_amount' => 'decimal:2',
         'maturity_amount' => 'decimal:2',
         'lien_amount' => 'decimal:2',
+        'auto_renew' => 'boolean',
         'next_interest_date' => 'date:Y-m-d',
         'closed_at' => 'date:Y-m-d',
     ];
