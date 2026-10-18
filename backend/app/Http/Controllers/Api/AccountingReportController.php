@@ -955,10 +955,11 @@ class AccountingReportController extends Controller
         $totalExpense = '0.00';
         foreach ($accounts as $account) {
             $balance = $balances->get($account->id)->balance ?? '0.00';
-            if ($basis === 'accrual' && $account->account_type === 'Income') {
-                $balance = isset(self::ACCRUAL_INCOME_ACCOUNTS[$account->code])
-                    ? AccrualInterestCalculator::incomeForPeriod(self::ACCRUAL_INCOME_ACCOUNTS[$account->code], $from, $to)
-                    : '0.00';
+            // Only 4010 / 4015 are schedule-recomputed; every other income account
+            // (penalty, charges, documentation, ...) has no accrual schedule, so it
+            // keeps its ledger balance on both bases — same rule as expenses below.
+            if ($basis === 'accrual' && $account->account_type === 'Income' && isset(self::ACCRUAL_INCOME_ACCOUNTS[$account->code])) {
+                $balance = AccrualInterestCalculator::incomeForPeriod(self::ACCRUAL_INCOME_ACCOUNTS[$account->code], $from, $to);
             }
             if ($basis === 'accrual' && isset(self::ACCRUAL_EXPENSE_ACCOUNTS[$account->code])) {
                 // Only 5100 / 5120 are schedule-recomputed; every other expense

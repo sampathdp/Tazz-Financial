@@ -190,6 +190,18 @@ class AccrualInterestCostTest extends TestCase
         $this->assertArrayHasKey('total_expense_accrual', $after);
     }
 
+    public function test_accrual_basis_keeps_ledger_balance_for_income_without_an_accrual_schedule(): void
+    {
+        $this->actingAs($this->admin, 'sanctum');
+        $res = $this->getJson('http://localhost/api/accounting-reports/profit-loss?from=2020-01-01&to=2030-12-31')->assertOk()->json();
+
+        $nonInterest = array_filter($res['income'], fn ($row) => !in_array($row['code'], ['4010', '4015'], true));
+        $this->assertNotEmpty($nonInterest);
+        foreach ($nonInterest as $row) {
+            $this->assertSame($row['cash_balance'], $row['accrual_balance'], "income {$row['code']} must not be zeroed on the accrual basis");
+        }
+    }
+
     private function ledger(string $code): string
     {
         $row = ChartOfAccount::balancesAsOf('2030-01-01')->get(ChartOfAccount::system($code)->id);
