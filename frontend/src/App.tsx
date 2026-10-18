@@ -5,6 +5,8 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from
 import { WinDockProvider, WinDockBar, useWinDock } from './components/WinDock'
 import { Sidebar, Topbar, flatNav } from './components/Shell'
 import { Icon } from './components/Icon'
+import { Btn } from './components/ui'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import DB from './data'
 import type { Go, ScreenProps } from './screens/types'
 import Login from './screens/Login'
@@ -143,6 +145,21 @@ function ScreenLoader() {
 function BootLoader() {
   return <div style={{ minHeight: '100vh' }} />
 }
+
+// Server unreachable at boot. The session token is kept — only a real 401 may log the user out.
+function BootOffline({ onRetry, retrying }: { onRetry: () => void; retrying: boolean }) {
+  return (
+    <div className="col center" style={{ minHeight: '100vh', padding: 24, textAlign: 'center', color: 'var(--tx-2)' }}>
+      <h2 style={{ fontSize: 18, color: 'var(--tx-0)', marginBottom: 6 }}>Can't reach the server</h2>
+      <p style={{ fontSize: 13, maxWidth: 380, marginBottom: 16 }}>
+        Check your internet connection. You are still signed in — nothing was lost.
+      </p>
+      <Btn variant="primary" onClick={onRetry} disabled={retrying}>{retrying ? 'Retrying…' : 'Try again'}</Btn>
+    </div>
+  )
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // Shown for nav items on the roadmap but not built yet (admin-only preview — see canAccessRoute).
 function ComingSoon({ route }: { route: string }) {
@@ -294,11 +311,13 @@ function PageHost({ renderRoutes }: { renderRoutes: () => ReactNode }) {
         const loc = k === cur ? location : (dock.items.find((i) => i.key === k)?.to ?? k)
         return (
           <div key={k} style={{ display: visible ? undefined : 'none' }}>
-            <Routes location={loc}>
-              {renderRoutes()}
-              <Route index element={<Navigate to="/dash" replace />} />
-              <Route path="*" element={<Navigate to="/dash" replace />} />
-            </Routes>
+            <ErrorBoundary>
+              <Routes location={loc}>
+                {renderRoutes()}
+                <Route index element={<Navigate to="/dash" replace />} />
+                <Route path="*" element={<Navigate to="/dash" replace />} />
+              </Routes>
+            </ErrorBoundary>
           </div>
         )
       })}
@@ -345,19 +364,47 @@ function AppShell() {
   const go: Go = (r) => { navigate('/' + r); window.scrollTo(0, 0) }
   useEffect(() => { document.title = brand.name + ' — Admin Panel' }, [brand.name])
 
+  const [bootOffline, setBootOffline] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+
+  const loadSession = async () => {
+    const token = auth.getToken()
+    if (!token) { setAuthReady(true); return }
+    setRetrying(true)
+    const delays = [0, 1000, 2500]
+    for (let i = 0; i < delays.length; i++) {
+      if (delays[i]) await sleep(delays[i])
+      try {
+        setUser(await auth.me())
+        setBootOffline(false)
+        setRetrying(false)
+        setAuthReady(true)
+        return
+      } catch (err: any) {
+        const status = err?.response?.status
+        // Network failure / timeout / 5xx: transient — retry, never drop the token.
+        if (!status || status >= 500) continue
+        auth.setToken(null) // 401/403/etc: session really is invalid
+        setRetrying(false)
+        setAuthReady(true)
+        return
+      }
+    }
+    setBootOffline(true)
+    setRetrying(false)
+    setAuthReady(true)
+  }
+
   useEffect(() => {
     import('./api').then(({ company }) => {
       company.branding().then(b => setBrand({ name: b.name, tagline: b.tagline })).catch(() => {})
     })
-    const token = auth.getToken()
-    if (!token) { setAuthReady(true); return }
-    auth.me()
-      .then((u) => setUser(u))
-      .catch(() => auth.setToken(null))
-      .finally(() => setAuthReady(true))
+    loadSession()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (!authReady) return <BootLoader />
+  if (bootOffline) return <BootOffline onRetry={loadSession} retrying={retrying} />
 
   return (
     <Routes>

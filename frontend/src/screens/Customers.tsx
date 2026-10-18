@@ -1,4 +1,5 @@
 /* Tazz Investment & Credit — Customer Management (API-backed) */
+import { useFormDraft, DraftBanner } from '../lib/draft'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, Pager, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
@@ -657,6 +658,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const [form, setForm] = useState<Partial<Customer>>(blankForm())
   const set = <K extends keyof Customer>(k: K, v: Customer[K]) => setForm((s) => ({ ...s, [k]: v }))
   const [formErrors, setFormErrors] = useState<{ nic?: string; phone?: string; altPhone?: string; email?: string }>({})
+  const customerDraft = useFormDraft('customer:new', mode === 'form' && !editing, form, blankForm())
 
   const onNicChange = (v: string) => {
     set('nicNo', v as any)
@@ -756,6 +758,7 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     try {
       if (editing) await customersApi.update(editing.id, form)
       else await customersApi.create(form)
+      customerDraft.clear()
       back(); refresh()
       notify.success(editing ? 'Customer updated' : 'Customer created', [form.title, form.initials, form.surname].filter(Boolean).join(' '))
     } catch (ex: any) {
@@ -820,6 +823,12 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
             <Btn variant="solid" onClick={back}>Cancel</Btn>
             <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Create Customer')}</Btn>
           </>} />
+
+        {customerDraft.draft && (
+          <DraftBanner savedAt={customerDraft.draft.ts}
+            onRestore={() => { setForm(customerDraft.draft!.value); customerDraft.accept() }}
+            onDiscard={customerDraft.clear} />
+        )}
 
         <ErrorBanner error={err} />
 

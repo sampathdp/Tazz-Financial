@@ -1,4 +1,5 @@
 /* Tazz Investment & Credit — Loan Applications (intake → approve/reject workflow) */
+import { useFormDraft, DraftBanner } from '../lib/draft'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
@@ -92,6 +93,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
   const [viewing, setViewing] = useState<Loan | null>(null) // read-only detail (non-pending)
   const [form, setForm] = useState<FormState>(blankForm())
   const [backDated, setBackDated] = useState(false)
+  const loanDraft = useFormDraft('loan-application:new', mode === 'form' && !editing, form, blankForm())
   // Newly-picked, not-yet-uploaded attachments per collateral row (index-aligned with form.collateral).
   // Uploaded once the loan/collateral rows are saved and have real ids.
   const [collateralFiles, setCollateralFiles] = useState<File[][]>([])
@@ -263,6 +265,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
           catch { uploadFailures++ }
         }
       }
+      loanDraft.clear()
       backFromForm(); refresh()
       notify.success(editing ? 'Application updated' : 'Application submitted', customer?.fullName)
       if (uploadFailures) notify.error('Some attachments failed to upload', `${uploadFailures} file(s) — re-attach them from the application.`)
@@ -353,6 +356,12 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             <Btn variant="solid" onClick={backFromForm}>Cancel</Btn>
             <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : (editing ? 'Save Changes' : 'Submit Application')}</Btn>
           </>} />
+
+        {loanDraft.draft && (
+          <DraftBanner savedAt={loanDraft.draft.ts}
+            onRestore={() => { setForm(loanDraft.draft!.value); loanDraft.accept() }}
+            onDiscard={loanDraft.clear} />
+        )}
 
         <ErrorBanner error={err} />
 

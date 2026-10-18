@@ -4,6 +4,7 @@ import './theme.css'
 import App from './App'
 import { NotifyProvider } from './components/Notify'
 import { DownloadIndicator } from './components/DownloadIndicator'
+import { OfflineBanner } from './components/OfflineBanner'
 
 // Apply the saved theme + accent before first paint (avoids a flash of the wrong theme).
 // Theme defaults to dark; falls back to the OS preference only when nothing was saved.
@@ -38,6 +39,7 @@ createRoot(document.getElementById('root')!).render(
     <NotifyProvider>
       <App />
       <DownloadIndicator />
+      <OfflineBanner />
     </NotifyProvider>
   </StrictMode>,
 )

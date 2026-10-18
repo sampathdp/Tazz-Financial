@@ -18,10 +18,10 @@ return [
 
     'allowed_headers' => [
         'Accept', 'Authorization', 'Content-Type', 'X-Requested-With',
-        'X-CSRF-TOKEN', 'X-XSRF-TOKEN', 'X-Request-Id',
+        'X-CSRF-TOKEN', 'X-XSRF-TOKEN', 'X-Request-Id', 'Idempotency-Key',
     ],
 
-    'exposed_headers' => ['X-Request-Id'],
+    'exposed_headers' => ['X-Request-Id', 'Idempotency-Replayed'],
 
     'max_age' => 3600,
 

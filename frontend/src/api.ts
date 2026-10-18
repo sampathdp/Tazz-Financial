@@ -2,6 +2,8 @@
 import axios from 'axios'
 import { beginDownload, endDownload } from './lib/downloadProgress'
 import { compressImageToWebp } from './lib/image'
+import { isOnline, setOnline, setLoadFailed } from './lib/network'
+import { clearAllDrafts } from './lib/draft'
 
 export const http = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -17,13 +19,57 @@ const genReqId = () =>
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now().toString(36))
 
+/* ---------- idempotency keys ----------
+   Every JSON write carries an `Idempotency-Key`. The backend only honours it on
+   money-moving routes. If a write dies without a definite answer (timeout, dropped
+   connection, 5xx) the key is remembered against the exact same request, so a
+   re-submit re-uses it and the server replays / dedupes instead of posting twice. */
+const WRITE_METHODS = new Set(['post', 'put', 'patch', 'delete'])
+const PENDING_KEY_TTL = 10 * 60_000
+const pendingKeys = new Map<string, { key: string; ts: number }>()
+
+const writeSignature = (cfg: { method?: string; url?: string; data?: any }): string | null => {
+  const data = cfg.data
+  if (data !== undefined && typeof data !== 'string') {
+    if (typeof FormData !== 'undefined' && data instanceof FormData) return null
+    try { return `${cfg.method}|${cfg.url}|${JSON.stringify(data)}` } catch { return null }
+  }
+  return `${cfg.method}|${cfg.url}|${data ?? ''}`
+}
+
 http.interceptors.request.use((cfg) => {
   const t = localStorage.getItem('mms-token')
   if (t) cfg.headers.Authorization = `Bearer ${t}`
   cfg.headers['X-Request-Id'] = genReqId()
   if (cfg.responseType === 'blob') beginDownload()
+  const m = cfg.method?.toLowerCase()
+  // Offline: refuse writes up front instead of letting them hang to the 30s timeout.
+  if (m && WRITE_METHODS.has(m) && !isOnline()) {
+    return Promise.reject(Object.assign(new Error('You are offline. Reconnect and try again — nothing was saved.'), { code: 'ERR_OFFLINE', config: cfg }))
+  }
+  if (m && WRITE_METHODS.has(m) && !cfg.headers['Idempotency-Key']) {
+    const sig = writeSignature({ method: m, url: cfg.url, data: cfg.data })
+    const prior = sig ? pendingKeys.get(sig) : undefined
+    const key = prior && Date.now() - prior.ts < PENDING_KEY_TTL ? prior.key : genReqId()
+    cfg.headers['Idempotency-Key'] = key
+  }
   return cfg
 })
+
+/** Remember (on indeterminate failure) or forget (on definite answer) a write's key. */
+const settleWriteKey = (cfg: any, indeterminate: boolean) => {
+  const m = cfg?.method?.toLowerCase()
+  const key = cfg?.headers?.['Idempotency-Key']
+  if (!m || !WRITE_METHODS.has(m) || !key) return
+  // cfg.data is already serialised to a string by now; the request side hashed the object,
+  // so re-derive the same signature from the parsed body.
+  let data: any = cfg.data
+  if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* keep string */ } }
+  const sig = writeSignature({ method: m, url: cfg.url, data })
+  if (!sig) return
+  if (indeterminate) pendingKeys.set(sig, { key: String(key), ts: Date.now() })
+  else pendingKeys.delete(sig)
+}
 
 /* ---------- list cache (stale-while-fresh) -----
    GET list endpoints are cached for a short window so re-visiting a screen is
@@ -39,6 +85,9 @@ http.interceptors.response.use(
   (r) => {
     const m = r.config.method?.toLowerCase()
     if (m && m !== 'get') listCache.clear()
+    settleWriteKey(r.config, false)
+    setOnline(true)
+    if (m === 'get') setLoadFailed(false)
     if (r.config.responseType === 'blob') endDownload()
     return r
   },
@@ -60,6 +109,22 @@ http.interceptors.response.use(
       }
     }
     const status = err?.response?.status
+    if (status) setOnline(true)
+    else if (err?.code === 'ERR_NETWORK') setOnline(false)
+    // No answer / server error = outcome unknown: keep the key so a re-submit is deduped.
+    // A definite 4xx means nothing was posted: forget it.
+    settleWriteKey(err?.config, !status || status >= 500 || status === 409)
+    // Reads are safe to repeat: retry transient failures (no answer / 502-504) with backoff.
+    const cfg: any = err?.config
+    if (cfg && cfg.method?.toLowerCase() === 'get' && cfg.responseType !== 'blob' && err?.code !== 'ERR_CANCELED'
+        && (!status || status === 502 || status === 503 || status === 504)) {
+      cfg.__retries = (cfg.__retries ?? 0) + 1
+      if (cfg.__retries <= 2) {
+        await new Promise((res) => setTimeout(res, 600 * 2 ** (cfg.__retries - 1) + Math.random() * 300))
+        return http.request(cfg)
+      }
+      setLoadFailed(true)
+    }
     if (status === 401 && localStorage.getItem('mms-token') && !unauthorizedHandled) {
       unauthorizedHandled = true
       localStorage.removeItem('mms-token')
@@ -2693,7 +2758,7 @@ export const auth = {
   login: (email: string, password: string) =>
     http.post<{ token: string; user: AuthUser }>('/login', { email, password }).then((r) => r.data),
   me: () => http.get<AuthUser>('/me').then((r) => r.data),
-  logout: () => http.post('/logout').then((r) => r.data),
+  logout: () => { clearAllDrafts(); return http.post('/logout').then((r) => r.data) },
   setToken: (t: string | null) => {
     if (t) localStorage.setItem('mms-token', t)
     else localStorage.removeItem('mms-token')

@@ -3,6 +3,16 @@
    These helpers surface every field's messages instead of just the first one found. */
 
 export function getErrorMessages(err: any, fallback = 'Something went wrong. Please try again.'): string[] {
+  if (err?.code === 'ERR_OFFLINE') return [err.message]
+  if (!err?.response && err?.code === 'ERR_NETWORK') {
+    return ['Connection lost — could not reach the server. Check your internet. If you were saving, check the record before trying again.']
+  }
+  if (!err?.response && (err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message ?? ''))) {
+    return ['The server is taking too long to respond. Your action may or may not have gone through — check the record before trying again.']
+  }
+  if (err?.response?.status >= 500 && !err?.response?.data?.message) {
+    return [`Server error (${err.response.status}). Please try again in a moment.`]
+  }
   const errors = err?.response?.data?.errors
   if (errors && typeof errors === 'object') {
     const msgs = Object.values(errors).flat().filter((m): m is string => typeof m === 'string' && m.length > 0)

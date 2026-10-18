@@ -101,6 +101,9 @@ Route::middleware('throttle:' . config('ratelimit.login') . ',1')->group(functio
     Route::post('login', [AuthController::class, 'login']);
 });
 
+// --- Connectivity probe (client offline banner polls this; no auth, no DB) ---
+Route::get('ping', fn () => response()->json(['ok' => true]));
+
 // --- Public branding (pre-auth: Login screen, page <title>, <img> can't carry a bearer token) ---
 Route::get('company-profile/branding', [CompanyProfileController::class, 'branding']);
 Route::get('company-profile/logo', [CompanyProfileController::class, 'logo']);
@@ -216,10 +219,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Loan Management: Active Loans ---
     // Direct disburse (Finance / admin): finishes the loan and releases the money in one call.
-    Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware('perm:Active Loans,Approve');
+    Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware(['perm:Active Loans,Approve', 'idempotency']);
     // Request disburse (loan officer): raises a LoanDisbursement finance request; Finance
     // approves + executes it, then a listener finishes the loan (see the Finance module plan, D2).
-    Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware('perm:Active Loans,Create');
+    Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware(['perm:Active Loans,Create', 'idempotency']);
     // Write-off is maker-checker (shared approval_requests table, code 'loan_write_off'),
     // same pattern as loan_cancel below. Submitting needs the module permission; who may
     // approve/reject is admin-manageable data via ApprovalType::isAuthorized('loan_write_off').
@@ -255,17 +258,17 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('loans/{loan}/payments', [LoanPaymentController::class, 'index'])->middleware('perm:Loan Payments,View');
     Route::get('loans/{loan}/next-receipt-no', [LoanPaymentController::class, 'nextReceiptNo'])->middleware('perm:Loan Payments,Create');
     Route::get('loans/{loan}/outstanding-by-bucket', [LoanPaymentController::class, 'outstandingByBucket'])->middleware('perm:Loan Payments,Create');
-    Route::post('loans/{loan}/payments', [LoanPaymentController::class, 'store'])->middleware('perm:Loan Payments,Create');
-    Route::post('loan-payments/{payment}/void-request', [LoanPaymentController::class, 'voidRequest'])->middleware('perm:Loan Payments,Delete');
+    Route::post('loans/{loan}/payments', [LoanPaymentController::class, 'store'])->middleware(['perm:Loan Payments,Create', 'idempotency']);
+    Route::post('loan-payments/{payment}/void-request', [LoanPaymentController::class, 'voidRequest'])->middleware(['perm:Loan Payments,Delete', 'idempotency']);
     // approve/reject gated inline by ApprovalType::isAuthorized('payment_void', ...) — see LoanPaymentController.
-    Route::post('loan-payment-void-requests/{voidRequest}/approve', [LoanPaymentController::class, 'approveVoidRequest']);
+    Route::post('loan-payment-void-requests/{voidRequest}/approve', [LoanPaymentController::class, 'approveVoidRequest'])->middleware('idempotency');
     Route::post('loan-payment-void-requests/{voidRequest}/reject', [LoanPaymentController::class, 'rejectVoidRequest']);
     // approve/reject gated inline by ApprovalType::isAuthorized('payment_manual_allocation', ...) — see LoanPaymentController.
-    Route::post('loan-payment-allocation-requests/{allocationRequest}/approve', [LoanPaymentController::class, 'approveAllocationRequest']);
+    Route::post('loan-payment-allocation-requests/{allocationRequest}/approve', [LoanPaymentController::class, 'approveAllocationRequest'])->middleware('idempotency');
     Route::post('loan-payment-allocation-requests/{allocationRequest}/reject', [LoanPaymentController::class, 'rejectAllocationRequest']);
     // approve/reject gated inline by ApprovalType::isAuthorized('payment_settlement', ...) — see LoanPaymentController —
     // not the module permission grid, same maker-checker pattern as payment_void above.
-    Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement']);
+    Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement'])->middleware('idempotency');
     Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement']);
     // Admin-only — realizing/bouncing a cheque is a Loan Adjustments action, not a regular Loan Payments one.
     Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('admin');
@@ -315,7 +318,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // Viewing stays permission-based (the loan detail page shows them read-only);
     // recording/removing a waiver is a Loan Adjustments action (admin-only).
     Route::get('loans/{loan}/waivers', [LoanWaiverController::class, 'index'])->middleware('perm:Active Loans,View');
-    Route::post('loans/{loan}/waivers', [LoanWaiverController::class, 'store'])->middleware('admin');
+    Route::post('loans/{loan}/waivers', [LoanWaiverController::class, 'store'])->middleware(['admin', 'idempotency']);
     Route::delete('loan-waivers/{waiver}', [LoanWaiverController::class, 'destroy'])->middleware('admin');
 
     // --- Speed Drafts: Types ---
@@ -337,9 +340,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // not the module permission grid, so who may approve is admin-manageable data, same as loan_application above.
     Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve']);
     Route::post('speed-drafts/{speedDraft}/reject', [SpeedDraftController::class, 'reject']);
-    Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware('perm:Speed Drafts,Approve');
-    Route::post('speed-drafts/{speedDraft}/request-disbursement', [SpeedDraftController::class, 'requestDisbursement'])->middleware('perm:Speed Drafts,Create');
-    Route::post('speed-drafts/{speedDraft}/renew', [SpeedDraftController::class, 'renew'])->middleware('perm:Speed Draft Payments,Create');
+    Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware(['perm:Speed Drafts,Approve', 'idempotency']);
+    Route::post('speed-drafts/{speedDraft}/request-disbursement', [SpeedDraftController::class, 'requestDisbursement'])->middleware(['perm:Speed Drafts,Create', 'idempotency']);
+    Route::post('speed-drafts/{speedDraft}/renew', [SpeedDraftController::class, 'renew'])->middleware(['perm:Speed Draft Payments,Create', 'idempotency']);
 
     // --- Speed Drafts: Collateral (Gold Pawning / Lease asset records) ---
     Route::get('speed-drafts/{speedDraft}/collateral', [SpeedDraftCollateralController::class, 'index'])->middleware('perm:Speed Drafts,View');
@@ -355,7 +358,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Speed Drafts: Payments (interest / capital-reduction / full settlement) ---
     Route::get('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'index'])->middleware('perm:Speed Draft Payments,View');
     Route::get('speed-drafts/{speedDraft}/next-receipt-no', [SpeedDraftPaymentController::class, 'nextReceiptNo'])->middleware('perm:Speed Draft Payments,Create');
-    Route::post('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'store'])->middleware('perm:Speed Draft Payments,Create');
+    Route::post('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'store'])->middleware(['perm:Speed Draft Payments,Create', 'idempotency']);
     Route::delete('speed-draft-payments/{payment}', [SpeedDraftPaymentController::class, 'destroy'])->middleware('perm:Speed Draft Payments,Delete');
 
     // --- Pawning: Types (schemes — rates, LTV, grace/auction-notice days) ---
@@ -382,8 +385,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('pawnings-overdue', [PawningController::class, 'overdue'])->middleware('perm:Pawnings,View');
     Route::get('pawnings/{pawning}', [PawningController::class, 'show'])->middleware('perm:Pawnings,View');
     Route::post('pawnings', [PawningController::class, 'store'])->middleware('perm:Pawnings,Create');
-    Route::post('pawnings/{pawning}/renew', [PawningController::class, 'renew'])->middleware('perm:Pawning Payments,Create');
-    Route::post('pawnings/{pawning}/redeem', [PawningController::class, 'redeem'])->middleware('perm:Pawning Payments,Create');
+    Route::post('pawnings/{pawning}/renew', [PawningController::class, 'renew'])->middleware(['perm:Pawning Payments,Create', 'idempotency']);
+    Route::post('pawnings/{pawning}/redeem', [PawningController::class, 'redeem'])->middleware(['perm:Pawning Payments,Create', 'idempotency']);
     Route::post('pawning-payments/{payment}/void', [PawningController::class, 'voidPayment'])->middleware('perm:Pawning Payments,Delete');
 
     // --- Pawning: Auctions (default handling) ---
@@ -475,7 +478,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('cash-floats/issue', [CashFloatController::class, 'issue'])->middleware('perm:Cash Floats,Create');
     Route::post('cash-floats/{cashAccount}/request-settlement', [CashFloatController::class, 'requestSettlement'])->middleware('perm:Cash Floats,Edit');
     // settle gated inline by ApprovalType::isAuthorized('finance_float_settlement') — same maker-checker pattern.
-    Route::post('cash-float-settlements/{cashFloatSettlement}/settle', [CashFloatController::class, 'settle'])->middleware('perm:Cash Floats,Edit');
+    Route::post('cash-float-settlements/{cashFloatSettlement}/settle', [CashFloatController::class, 'settle'])->middleware(['perm:Cash Floats,Edit', 'idempotency']);
 
     // --- Finance: Requests (the single outbound-payment / transfer queue) ---
     // Create / submit / cancel are requester actions; approve / reject are
@@ -491,8 +494,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('finance-requests/{financeRequest}/reject', [FinanceRequestController::class, 'reject']);
     Route::post('finance-requests/{financeRequest}/execute', [FinanceRequestController::class, 'execute'])->middleware('perm:Finance Requests,Edit');
     // Cross-branch transfer: release (send) -> receive (confirm) -> or recall.
-    Route::post('finance-requests/{financeRequest}/release', [FinanceRequestController::class, 'release'])->middleware('perm:Finance Transfers,Edit');
-    Route::post('finance-requests/{financeRequest}/receive', [FinanceRequestController::class, 'receive'])->middleware('perm:Finance Transfers,Edit');
+    Route::post('finance-requests/{financeRequest}/release', [FinanceRequestController::class, 'release'])->middleware(['perm:Finance Transfers,Edit', 'idempotency']);
+    Route::post('finance-requests/{financeRequest}/receive', [FinanceRequestController::class, 'receive'])->middleware(['perm:Finance Transfers,Edit', 'idempotency']);
     Route::post('finance-requests/{financeRequest}/recall', [FinanceRequestController::class, 'recall'])->middleware('perm:Finance Transfers,Edit');
 
     // --- Masters: Expense Categories — a dedicated table, used by the
@@ -540,7 +543,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('fd-loans/eligible-fds', [FdLoanController::class, 'eligibleFds'])->middleware('perm:Loan Applications,Create');
     Route::get('fd-loans/quote/{fixedDeposit}', [FdLoanController::class, 'quote'])->middleware('perm:Loan Applications,Create');
     Route::post('fd-loans', [FdLoanController::class, 'store'])->middleware('perm:Loan Applications,Create');
-    Route::post('loans/{loan}/settle-from-fd', [FdLoanController::class, 'settle'])->middleware('perm:Active Loans,Approve');
+    Route::post('loans/{loan}/settle-from-fd', [FdLoanController::class, 'settle'])->middleware(['perm:Active Loans,Approve', 'idempotency']);
     Route::get('fd-loan-policies', [FdLoanController::class, 'policies'])->middleware('perm:Funding Products,View');
     Route::put('fd-loan-policies/{fundingProduct}', [FdLoanController::class, 'savePolicy'])->middleware('perm:Funding Products,Edit');
 
@@ -550,13 +553,13 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('fixed-deposits/{fixedDeposit}/renew', [FixedDepositController::class, 'renew'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fixed-deposits/{fixedDeposit}/withdraw', [FixedDepositController::class, 'withdraw'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fixed-deposits/{fixedDeposit}/void-withdrawal', [FixedDepositController::class, 'voidWithdrawal'])->middleware('perm:Fixed Deposits,Delete');
-    Route::post('fixed-deposits/{fixedDeposit}/part-payment', [FixedDepositController::class, 'partPayment'])->middleware('perm:Fixed Deposits,Edit');
+    Route::post('fixed-deposits/{fixedDeposit}/part-payment', [FixedDepositController::class, 'partPayment'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
     Route::post('fd-part-payments/{fdPartPayment}/void', [FixedDepositController::class, 'voidPartPayment'])->middleware('perm:Fixed Deposits,Delete');
 
     // --- Funding Management: Monthly Interest Payments ---
     Route::get('fd-interest-payments/due', [FdInterestPaymentController::class, 'due'])->middleware('perm:Fixed Deposits,View');
     Route::get('fixed-deposits/{fixedDeposit}/interest-payments', [FdInterestPaymentController::class, 'index'])->middleware('perm:Fixed Deposits,View');
-    Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware('perm:Fixed Deposits,Edit');
+    Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
     Route::post('fd-interest-payments/{fdInterestPayment}/void', [FdInterestPaymentController::class, 'void'])->middleware('perm:Fixed Deposits,Delete');
 
     // --- Funding Management: Borrowings (money the company itself borrows) ---
@@ -564,9 +567,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('borrowings/next-number', [BorrowingController::class, 'nextNumber'])->middleware('perm:Borrowings,Create');
     Route::get('borrowings/lookups', [BorrowingController::class, 'lookups'])->middleware('perm:Borrowings,View');
     Route::get('borrowings/{borrowing}', [BorrowingController::class, 'show'])->middleware('perm:Borrowings,View');
-    Route::post('borrowings', [BorrowingController::class, 'store'])->middleware('perm:Borrowings,Create');
+    Route::post('borrowings', [BorrowingController::class, 'store'])->middleware(['perm:Borrowings,Create', 'idempotency']);
     Route::post('borrowings/{borrowing}/renew', [BorrowingController::class, 'renew'])->middleware('perm:Borrowings,Edit');
-    Route::post('borrowings/{borrowing}/transactions', [BorrowingController::class, 'addTransaction'])->middleware('perm:Borrowings,Edit');
+    Route::post('borrowings/{borrowing}/transactions', [BorrowingController::class, 'addTransaction'])->middleware(['perm:Borrowings,Edit', 'idempotency']);
     Route::post('borrowing-transactions/{borrowingTransaction}/void', [BorrowingController::class, 'voidTransaction'])->middleware('perm:Borrowings,Delete');
     Route::delete('borrowings/{borrowing}', [BorrowingController::class, 'destroy'])->middleware('perm:Borrowings,Delete');
 
@@ -578,7 +581,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('branch-funding/{id}/approve', [\App\Http\Controllers\Api\BranchFundingController::class, 'approve'])->middleware('perm:Branch Funding,Approve');
     Route::post('branch-funding/{id}/reject', [\App\Http\Controllers\Api\BranchFundingController::class, 'reject'])->middleware('perm:Branch Funding,Approve');
     Route::post('branch-funding/{id}/accrue', [\App\Http\Controllers\Api\BranchFundingController::class, 'accrue'])->middleware('perm:Branch Funding,Edit');
-    Route::post('branch-funding/{id}/repay', [\App\Http\Controllers\Api\BranchFundingController::class, 'repay'])->middleware('perm:Branch Funding,Edit');
+    Route::post('branch-funding/{id}/repay', [\App\Http\Controllers\Api\BranchFundingController::class, 'repay'])->middleware(['perm:Branch Funding,Edit', 'idempotency']);
 
     // --- Daily Savings: Products ---
     Route::get('savings-products', [SavingsProductController::class, 'index'])->middleware('perm:Savings Products,View');
@@ -661,15 +664,15 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Expense Management: Expenses (request -> approve/reject -> pay) ---
     Route::get('expenses', [ExpenseController::class, 'index'])->middleware('perm:Expenses,View');
-    Route::post('expenses', [ExpenseController::class, 'store'])->middleware('perm:Expenses,Create');
+    Route::post('expenses', [ExpenseController::class, 'store'])->middleware(['perm:Expenses,Create', 'idempotency']);
     // approve/reject gated inline by ApprovalType::isAuthorized('expense_approval', ...) — see ExpenseController —
     // not the module permission grid, same maker-checker pattern as loan_cancel.
     Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve']);
     Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject']);
     // Direct pay (Finance / admin): moves the money + records the voucher.
-    Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware('perm:Expenses,Edit');
+    Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware(['perm:Expenses,Edit', 'idempotency']);
     // Request pay (requester / manager): raises an ExpensePayment finance request; Finance executes it.
-    Route::post('expenses/{expense}/request-payment', [ExpenseController::class, 'requestPayment'])->middleware('perm:Expenses,Create');
+    Route::post('expenses/{expense}/request-payment', [ExpenseController::class, 'requestPayment'])->middleware(['perm:Expenses,Create', 'idempotency']);
 
     // --- Expense Management: Payment Vouchers (auto-created by ExpenseController::pay — view/void only, see PaymentVoucherController) ---
     Route::get('payment-vouchers', [PaymentVoucherController::class, 'index'])->middleware('perm:Payment Vouchers,View');
