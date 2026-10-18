@@ -27,7 +27,7 @@ class DashboardController extends Controller
 {
     public function index(Request $request)
     {
-        return Cache::remember('dashboard:summary:' . now()->format('Y-m-d-H-i'), 60, function () {
+        return Cache::remember('dashboard:summary:' . md5(json_encode(\App\Support\CurrentBranch::reportBranchIds())) . ':' . now()->format('Y-m-d-H-i'), 60, function () {
             $today = now()->startOfDay();
             $monthStart = now()->startOfMonth();
 
@@ -43,9 +43,12 @@ class DashboardController extends Controller
                 ->where('status', 'Active')->where('approval_status', 'Approved')
                 ->whereDate('paid_at', $today)->sum('amount');
 
-            $glBalances = ChartOfAccount::balancesAsOf(now()->toDateString());
-            $totalAssets = $this->sumByType($glBalances, 'Asset');
-            $totalLiabilities = $this->sumByType($glBalances, 'Liability');
+            // Same statement as Accounting > Balance Sheet (contra accounts netted, inter-branch
+            // eliminated, overdrafts reclassed, current-year profit in equity), so the two always agree.
+            $bs = app(AccountingReportController::class)->show(Request::create('/', 'GET', ['as_of' => now()->toDateString()]), 'balance-sheet');
+            $totalAssets = $bs['total_assets'];
+            $totalLiabilities = $bs['total_liabilities'];
+            $totalEquity = $bs['total_equity'];
 
             $periodBalances = ChartOfAccount::balancesAsOf(now()->toDateString(), $monthStart->toDateString());
             $monthIncome = $this->sumByType($periodBalances, 'Income');
@@ -61,6 +64,7 @@ class DashboardController extends Controller
             return array_merge($this->insights($today, $overdue), [
                 'total_assets' => round((float) $totalAssets, 2),
                 'total_liabilities' => round((float) $totalLiabilities, 2),
+                'total_equity' => round((float) $totalEquity, 2),
                 'total_deposits' => round((float) FixedDeposit::where('status', 'Active')->sum('principal_amount'), 2),
                 'total_loan_portfolio' => round((float) $totalLoanPortfolio, 2),
                 'outstanding_loan_balance' => round((float) $outstandingLoanBalance, 2),

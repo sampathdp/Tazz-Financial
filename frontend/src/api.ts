@@ -2971,7 +2971,7 @@ export const pawningAuctionsApi = {
 }
 
 export interface DashboardSummary {
-  totalAssets: number; totalLiabilities: number; totalDeposits: number;
+  totalAssets: number; totalLiabilities: number; totalEquity: number; totalDeposits: number;
   totalLoanPortfolio: number; outstandingLoanBalance: number; todaysCollections: number;
   monthIncome: number; monthExpense: number; netProfit: number;
   arrearsAmount: number; defaultLoans: number; activeCustomers: number; activeLoanOfficers: number;

@@ -220,7 +220,7 @@ export default function DashScreen({ go: _go, user: _user }: { go: Go; user?: Au
   const eff = d.collectionEfficiency
   const effTone = eff === null ? C.grey : eff >= 90 ? C.green : eff >= 75 ? C.amber : C.red
   const liquid = d.bankBalances + d.cashInHand
-  const equity = d.totalAssets - d.totalLiabilities
+  const equity = d.totalEquity
   const lastM = t[t.length - 1], prevM = t[t.length - 2]
   const delta = (cur?: number, prev?: number) => {
     if (cur === undefined || !prev) return null
@@ -262,10 +262,10 @@ export default function DashScreen({ go: _go, user: _user }: { go: Go; user?: Au
           <HBars format={moneyK} rows={[
             { name: 'Total assets', value: d.totalAssets, color: C.blue },
             { name: 'Total liabilities', value: d.totalLiabilities, color: C.amber },
-            { name: 'Deposits (FD)', value: d.totalDeposits, color: C.violet },
+            { name: 'of which Fixed Deposits', value: d.totalDeposits, color: C.violet },
           ]} />
           <div className="row between" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line-soft)', fontSize: 12.5 }}>
-            <span className="t-2">Net worth</span>
+            <span className="t-2">Equity (net worth)</span>
             <span className="mono" style={{ color: equity >= 0 ? C.green : C.red, fontWeight: 600 }}>{moneyK(equity)}</span>
           </div>
         </Panel>
