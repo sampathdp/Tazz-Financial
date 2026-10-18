@@ -50,7 +50,7 @@ class FinanceRequest extends Model
     ];
 
     /** Statuses from which a request can still be cancelled by its requester. */
-    public const CANCELLABLE = ['Draft', 'Submitted', 'PendingApproval'];
+    public const CANCELLABLE = ['Draft', 'Submitted', 'PendingApproval', 'ReadyForPayment'];
 
     protected $fillable = [
         'code', 'request_type', 'source_module', 'source_id', 'branch_id', 'amount', 'currency',

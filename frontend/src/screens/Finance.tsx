@@ -469,6 +469,12 @@ export function FinanceTransfersScreen({ user: me }: { go: Go; user?: AuthUser |
     try { await financeRequestsApi.recall(r.id, reason || 'recalled'); refresh(); notify.success('Recalled') } catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
   }
 
+  const cancelTransfer = async (r: FinanceRequest) => {
+    const ok = await notify.confirm({ title: `Cancel ${r.code}?`, msg: 'This transfer will be cancelled and cannot be executed.', danger: true, okText: 'Cancel Transfer' })
+    if (!ok) return
+    try { await financeRequestsApi.cancel(r.id); refresh(); notify.success('Transfer cancelled') } catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
+  }
+
   const twoStepMeta = (r: FinanceRequest) => !!(r.meta as Record<string, unknown> | null | undefined)?.twoStep
   const acctName = (r: FinanceRequest, side: 'source' | 'dest') => {
     // API responses are camelized, so meta keys arrive as sourceCashAccountId etc.
@@ -500,6 +506,9 @@ export function FinanceTransfersScreen({ user: me }: { go: Go; user?: AuthUser |
                 <Btn variant="ghost" size="sm" onClick={act(() => financeRequestsApi.reject(r.id), 'Rejected')}>Reject</Btn>
                 <Btn variant="primary" size="sm" icon="check" onClick={act(() => financeRequestsApi.approve(r.id), 'Approved')}>Approve</Btn>
               </>}
+              {r.status === 'ReadyForPayment' && <Can user={me} module="Finance Transfers" action="Edit">
+                <Btn variant="ghost" size="sm" onClick={() => cancelTransfer(r)}>Cancel</Btn>
+              </Can>}
               {r.status === 'ReadyForPayment' && !twoStepMeta(r) && <Can user={me} module="Finance Transfers" action="Edit">
                 <Btn variant="primary" size="sm" icon="check" onClick={act(() => financeRequestsApi.execute(r.id, { method: 'Cash' }), 'Transferred')}>Execute</Btn>
               </Can>}

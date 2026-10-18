@@ -2976,6 +2976,17 @@ export interface DashboardSummary {
   monthIncome: number; monthExpense: number; netProfit: number;
   arrearsAmount: number; defaultLoans: number; activeCustomers: number; activeLoanOfficers: number;
   bankBalances: number; cashInHand: number;
+  trend: { month: string; label: string; disbursed: number; collected: number; income: number; expense: number; newLoans: number }[];
+  portfolioByType: { name: string; count: number; outstanding: number }[];
+  portfolioByBranch: { name: string; count: number; outstanding: number }[];
+  loanStatusCounts: { status: string; count: number }[];
+  arrearsAging: { bucket: string; count: number; amount: number }[];
+  topOverdue: { code: string | null; customer: string; branch: string | null; daysOverdue: number; amount: number }[];
+  expenseByCategory: { name: string; amount: number }[];
+  overdueLoanCount: number;
+  collectionEfficiency: number | null;
+  dueThisMonth: number;
+  pending: { loanApplications: number; pawningActive: number; pawningValue: number; fdMaturing30: number };
 }
 
 export const api = {
