@@ -470,6 +470,13 @@ function cellsOf(row: ReactNode): ReactNode[] {
 }
 function sortKey(text: string): { n?: number; s: string } {
   const t = text.trim()
+  // dd-mm-yy / dd-mm-yyyy (app display format), optional time
+  const dmy = /^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2}|\d{4})(?:[ T,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(t)
+  if (dmy) {
+    const yr = dmy[3].length === 2 ? 2000 + Number(dmy[3]) : Number(dmy[3])
+    const d = Date.UTC(yr, Number(dmy[2]) - 1, Number(dmy[1]), Number(dmy[4] || 0), Number(dmy[5] || 0), Number(dmy[6] || 0))
+    if (Number.isFinite(d)) return { n: d, s: t }
+  }
   if (/^\d{4}-\d{2}-\d{2}/.test(t) || /^\d{1,2}[ \/-][A-Za-z]{3,9}[ \/-]\d{2,4}/.test(t)) {
     const d = Date.parse(t)
     if (Number.isFinite(d)) return { n: d, s: t }
