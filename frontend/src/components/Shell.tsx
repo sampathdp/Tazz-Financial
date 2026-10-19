@@ -21,13 +21,16 @@ export type NavNode = NavLeaf | NavSection
 
 export const NAV: NavNode[] = [
   { id: 'dash', label: 'Dashboard', icon: 'dash' },
-  { id: 'customers', label: 'Customer Management', icon: 'users' },
-  { id: 'blacklist', label: 'Sanction / Blacklist', icon: 'shield' },
+
+  { section: 'Customer Management', icon: 'users', items: [
+    { id: 'customers', label: 'Customer Management', icon: 'users' },
+    { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
+    { id: 'blacklist', label: 'Sanction / Blacklist', icon: 'shield' },
+  ] },
 
   { section: 'Loan Management', icon: 'coins', items: [
     { id: 'loan/types', label: 'Loan Types', icon: 'layers' },
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
-    { id: 'loan/fd-loan', label: 'Loan against FD', icon: 'shield' },
     { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
     { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt' },
     /** Admin-only — cheque realize/reject. Intentionally left out of
@@ -42,7 +45,6 @@ export const NAV: NavNode[] = [
      *  lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back
      *  to its unmapped-route rule (admin role only), not the permission system. */
     { id: 'loan/adjustments', label: 'Loan Adjustments', icon: 'shield' },
-    { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
   ] },
 
   { section: 'Speed Drafts', icon: 'coins', items: [
@@ -70,6 +72,7 @@ export const NAV: NavNode[] = [
     { id: 'fund/products', label: 'Funding Products', icon: 'layers' },
     { id: 'fund/deposits', label: 'Deposits', icon: 'wallet' },
     { id: 'fund/fds', label: 'Fixed Deposits', icon: 'coins' },
+    { id: 'loan/fd-loan', label: 'Loan against FD', icon: 'shield' },
     { id: 'fund/borrowings', label: 'Borrowings', icon: 'wallet' },
     { id: 'fund/branch-funding', label: 'Branch Funding', icon: 'coins' },
     { id: 'fund/deposit-payment', label: 'Deposit Payment', icon: 'receipt' },
