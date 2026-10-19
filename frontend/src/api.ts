@@ -1908,6 +1908,8 @@ export interface FdWithdrawal {
   /** Part of interestAmount earned for days held past maturity. */
   postMaturityDays?: number; postMaturityRatePercent?: number | string | null; postMaturityInterest?: number | string;
   settledCreditFacilityId?: number | null;
+  /** Whole FD closed before maturity at the product's premature rate. prematureClawback is netted off the payout. */
+  isPremature?: boolean; prematureRatePercent?: number | string | null; prematureHeldDays?: number | null; prematureClawback?: number | string;
   paymentMethod: FdPaymentMethod; referenceNo?: string | null; notes?: string | null;
   closedAt: string;
   creator?: { id: number; name: string } | null;
@@ -1988,6 +1990,10 @@ export interface FdAutoRenewInput { autoRenew: boolean; autoRenewMode?: FdAutoRe
 
 export interface FdWithdrawalPreview { postMaturityDays: number; postMaturityRatePercent: number | null; postMaturityInterest: number; maturityInterest: number }
 
+export interface FdPrematurePreview {
+  rate: number; heldDays: number; entitlement: number; paidSoFar: number; interestPaid: number; clawback: number; principal: number; total: number;
+}
+
 export interface FdEnhancementInput {
   amount: number | string; paymentMethod: FdPaymentMethod;
   depositDate?: string; referenceNo?: string; bankId?: number; bankAccountId?: number; notes?: string;
@@ -2011,6 +2017,12 @@ export const fixedDepositsApi = {
     http.put(`/fixed-deposits/${id}/auto-renew`, snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
   /** Undoes a mistaken closure — reverses GL/Cashbook and reopens the FD (see backend FixedDepositController::voidWithdrawal). */
   voidWithdrawal: (id: number) => http.post(`/fixed-deposits/${id}/void-withdrawal`).then((r) => camelize(r.data) as FixedDeposit),
+  /** Payout figures for closing the whole FD early on a given date. Rejects (422) if the FD can't be closed early. */
+  prematurePreview: (id: number, params: { closedAt?: string }) =>
+    http.get(`/fixed-deposits/${id}/premature-preview`, { params: snakeize(params) }).then((r) => camelize(r.data) as FdPrematurePreview),
+  /** Closes the whole FD before maturity at the product's premature rate (see backend FixedDepositController::prematureWithdraw). */
+  prematureWithdraw: (id: number, body: { paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; closedAt?: string }) =>
+    http.post(`/fixed-deposits/${id}/premature-withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
   /** Premature partial withdrawal — FD stays open on the reduced principal (see backend FixedDepositController::partPayment). */
   partPayment: (id: number, body: { amount: number | string; paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; paidAt?: string }) =>
     http.post(`/fixed-deposits/${id}/part-payment`, snakeize(body)).then((r) => camelize(r.data) as FdPartPayment & { fixedDeposit: FixedDeposit }),
@@ -2067,6 +2079,10 @@ export interface Borrowing {
   overdraftDrawn?: number | string;
   /** Interest earned by the lender and booked (Cr 2220) but not yet paid. Not accrued for an Overdraft. */
   accruedInterestUnpaid?: number | string;
+  /** Interest earned since the last ledger posting (not yet booked). */
+  interestPending?: number | string;
+  /** Booked-unpaid plus pending: everything owed in interest as of today. */
+  interestOwedToDate?: number | string;
   /** Active, term-bound and past its maturity date - needs renewing or settling. */
   isMatured?: boolean;
   interestAccruedThrough?: string | null;

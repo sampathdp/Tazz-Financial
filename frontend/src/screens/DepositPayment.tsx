@@ -33,7 +33,7 @@ const METHODS: { value: FdPaymentMethod; label: string }[] = [
   { value: 'Bank', label: 'Bank Transfer' },
 ]
 
-type PrintDoc =
+export type PrintDoc =
   | { kind: 'interest'; payment: FdInterestPayment; fd: FixedDeposit }
   | { kind: 'partpayment'; partPayment: FdPartPayment; fd: FixedDeposit }
   | { kind: 'withdrawal'; withdrawal: FdWithdrawal; fd: FixedDeposit }
@@ -51,7 +51,7 @@ function DocRow({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="row between"><span className="t-2">{label}</span><b>{value}</b></div>
 }
 
-function PrintView({ doc, brand, onClose }: { doc: PrintDoc; brand: { name: string; tagline: string }; onClose: () => void }) {
+export function PrintView({ doc, brand, onClose }: { doc: PrintDoc; brand: { name: string; tagline: string }; onClose: () => void }) {
   return (
     <div>
       <div className="row gap-2 no-print" style={{ marginBottom: 16 }}>
@@ -105,17 +105,19 @@ function PrintView({ doc, brand, onClose }: { doc: PrintDoc; brand: { name: stri
         {doc.kind === 'withdrawal' && (() => {
           const { withdrawal, fd } = doc
           return <>
-            <DocHeader brand={brand} title="WITHDRAWAL VOUCHER" />
+            <DocHeader brand={brand} title={withdrawal.isPremature ? 'PRE-MATURITY WITHDRAWAL VOUCHER' : 'WITHDRAWAL VOUCHER'} />
             <div className="col gap-2" style={{ fontSize: 13, marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--line)' }}>
               <DocRow label="Voucher No" value={withdrawal.voucherNo} />
               <DocRow label="FD No" value={fd.fdNumber} />
               <DocRow label="Customer" value={fd.customer?.fullName || '—'} />
               <DocRow label="Closed Date" value={dateOnly(withdrawal.closedAt)} />
               <DocRow label="Payment Method" value={withdrawal.paymentMethod} />
+              {withdrawal.isPremature && <DocRow label="Held" value={`${withdrawal.prematureHeldDays} days @ ${Number(withdrawal.prematureRatePercent).toFixed(2)}% premature rate`} />}
             </div>
             <div className="col gap-2" style={{ fontSize: 13, marginBottom: 20 }}>
               <DocRow label="Principal" value={money(withdrawal.principalAmount)} />
               <DocRow label="Interest" value={money(withdrawal.interestAmount)} />
+              {Number(withdrawal.prematureClawback) > 0 && <DocRow label="Interest Clawback" value={`(${money(withdrawal.prematureClawback)})`} />}
               <div className="row between" style={{ fontSize: 15, fontWeight: 700, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
                 <span>Total Paid</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(withdrawal.totalAmount)}</span>
               </div>
@@ -269,7 +271,7 @@ function previewPartPayment(fd: FixedDeposit, amount: number, paidAt: string) {
   return { heldDays, rate, entitlement, interestPaid, clawback, netAmount, remainingPrincipal: Math.round((principal - amount) * 100) / 100 }
 }
 
-function PartPaymentModal({ fd, open, onClose, onPaid }: { fd: FixedDeposit | null; open: boolean; onClose: () => void; onPaid: (pp: FdPartPayment, fd: FixedDeposit) => void }) {
+export function PartPaymentModal({ fd, open, onClose, onPaid }: { fd: FixedDeposit | null; open: boolean; onClose: () => void; onPaid: (pp: FdPartPayment, fd: FixedDeposit) => void }) {
   const notify = useNotify()
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')

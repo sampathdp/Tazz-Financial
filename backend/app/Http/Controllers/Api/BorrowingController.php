@@ -50,15 +50,27 @@ class BorrowingController extends Controller
             $q->where('status', $status);
         }
 
-        return $q->get()->each(fn (Borrowing $b) => $this->applyLiveOverdraft($b));
+        return $q->get()->each(function (Borrowing $b) {
+            $this->applyLiveOverdraft($b);
+            $this->applyPendingInterest($b);
+        });
     }
 
     public function show(Borrowing $borrowing)
     {
         $borrowing->load(array_merge(self::RELATIONS, self::DETAIL_RELATIONS));
         $this->applyLiveOverdraft($borrowing);
+        $this->applyPendingInterest($borrowing);
 
         return $borrowing;
+    }
+
+    /** Interest earned since the last posting (not yet in the ledger) so the screen shows what is owed today. */
+    private function applyPendingInterest(Borrowing $b): void
+    {
+        $pending = BorrowingInterestAccrual::pending($b, now()->toDateString());
+        $b->setAttribute('interest_pending', $pending);
+        $b->setAttribute('interest_owed_to_date', bcadd((string) $b->accrued_interest_unpaid, $pending, 2));
     }
 
     /**

@@ -555,6 +555,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('fixed-deposits/{fixedDeposit}/withdrawal-preview', [FixedDepositController::class, 'withdrawalPreview'])->middleware('perm:Fixed Deposits,View');
     Route::put('fixed-deposits/{fixedDeposit}/auto-renew', [FixedDepositController::class, 'setAutoRenew'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fixed-deposits/{fixedDeposit}/void-withdrawal', [FixedDepositController::class, 'voidWithdrawal'])->middleware('perm:Fixed Deposits,Delete');
+    Route::get('fixed-deposits/{fixedDeposit}/premature-preview', [FixedDepositController::class, 'prematurePreview'])->middleware('perm:Fixed Deposits,View');
+    Route::post('fixed-deposits/{fixedDeposit}/premature-withdraw', [FixedDepositController::class, 'prematureWithdraw'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
     Route::post('fixed-deposits/{fixedDeposit}/part-payment', [FixedDepositController::class, 'partPayment'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
     Route::post('fd-part-payments/{fdPartPayment}/void', [FixedDepositController::class, 'voidPartPayment'])->middleware('perm:Fixed Deposits,Delete');
 

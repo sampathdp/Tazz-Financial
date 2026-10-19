@@ -117,6 +117,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'fund/borrowings': 'Borrowings',
   'fund/branch-funding': 'Branch Funding',
   'fund/deposit-payment': 'Fixed Deposits',
+  'fund/premature-withdrawal': 'Fixed Deposits',
   'fund/interest-due': 'Fixed Deposits',
   'fund/reports': 'Funding Reports',
   'fund/savings-products': 'Savings Products',

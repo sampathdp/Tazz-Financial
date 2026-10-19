@@ -123,6 +123,12 @@ export function FdLoanApplicationScreen({ go }: { go: Go }) {
               })}
             </div>
           )}
+          {!loadingFds && fds.some((f) => !f.loanQuote.eligible && f.loanQuote.reason?.includes('Funding Products')) && (
+            <div className="row between wrap gap-2" style={{ marginTop: 14, padding: '10px 12px', borderRadius: 'var(--r-s)', border: '1px solid var(--warn)', background: 'var(--warn-dim)', color: 'var(--warn)', fontSize: 12.5 }}>
+              <span>An FD is not eligible because its product has no active loan policy. Open Funding Products and use the shield icon to set the maximum loan %, rate and minimum days to maturity.</span>
+              <Btn size="sm" variant="solid" onClick={() => go('fund/products')}>Open Funding Products</Btn>
+            </div>
+          )}
         </Card>
       )}
 

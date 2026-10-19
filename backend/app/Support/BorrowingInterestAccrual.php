@@ -26,6 +26,20 @@ class BorrowingInterestAccrual
         return $b->type !== 'Overdraft' && $b->status === 'Active' && $b->interest_accrued_through !== null;
     }
 
+    /** Interest earned since the last booking up to $through but not yet posted — read-only, for display. */
+    public static function pending(Borrowing $b, string $through): string
+    {
+        if (!self::applies($b)) {
+            return '0.00';
+        }
+        $days = (int) Carbon::parse($b->interest_accrued_through)->startOfDay()->diffInDays(Carbon::parse($through)->startOfDay(), false);
+        if ($days <= 0) {
+            return '0.00';
+        }
+
+        return number_format((float) $b->outstanding_amount * ((float) $b->interest_rate_percent / 100) * $days / 365, 2, '.', '');
+    }
+
     /** Accrue up to $through. Returns the amount booked ('0.00' when nothing was due). */
     public static function accrue(Borrowing $b, string $through, ?int $userId = null): string
     {

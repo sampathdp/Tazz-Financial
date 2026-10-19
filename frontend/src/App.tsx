@@ -41,6 +41,7 @@ const FixedDepositsScreen = lazy(() => import('./screens/FixedDeposits').then((m
 const DepositPaymentScreen = lazy(() => import('./screens/DepositPayment').then((m) => ({ default: m.DepositPaymentScreen })))
 const BorrowingsScreen = lazy(() => import('./screens/Borrowings').then((m) => ({ default: m.BorrowingsScreen })))
 const BranchFundingScreen = lazy(() => import('./screens/BranchFunding').then((m) => ({ default: m.BranchFundingScreen })))
+const PrematureWithdrawalScreen = lazy(() => import('./screens/PrematureWithdrawal').then((m) => ({ default: m.PrematureWithdrawalScreen })))
 const FdInterestDueScreen = lazy(() => import('./screens/FdInterestDue').then((m) => ({ default: m.FdInterestDueScreen })))
 const FundingReportsScreen = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingReportsScreen })))
 const SavingsProductsScreen = lazy(() => import('./screens/SavingsProducts').then((m) => ({ default: m.SavingsProductsScreen })))
@@ -243,6 +244,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'fund/deposit-payment': DepositPaymentScreen,
   'fund/borrowings': BorrowingsScreen,
   'fund/branch-funding': BranchFundingScreen,
+  'fund/premature-withdrawal': PrematureWithdrawalScreen,
   'fund/interest-due': FdInterestDueScreen,
   'fund/reports': FundingReportsScreen,
   'fund/savings-products': SavingsProductsScreen,

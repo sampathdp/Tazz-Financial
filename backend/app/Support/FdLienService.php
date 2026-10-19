@@ -44,11 +44,12 @@ class FdLienService
         if ($fd->is_pledged) {
             return 'This FD is already pledged to another loan.';
         }
+        $product = $fd->fundingProduct?->name ?? 'this FD product';
         if (!$policy) {
-            return 'Loans against this FD product are not enabled.';
+            return "Loans against \"{$product}\" are not enabled. Set up its loan policy under Funding Products (shield icon) first.";
         }
         if ($policy->status !== 'Active') {
-            return 'Loans against this FD product are currently disabled.';
+            return "The loan policy for \"{$product}\" is Inactive. Set it to Active under Funding Products (shield icon).";
         }
         $daysLeft = (int) Carbon::today()->diffInDays(Carbon::parse($fd->maturity_date), false);
         if ($daysLeft < $policy->min_days_to_maturity) {

@@ -33,6 +33,23 @@ class VerifySchema extends Command
         'fd_withdrawals.adjusted_amount' => "ALTER TABLE `fd_withdrawals` ADD COLUMN `adjusted_amount` decimal(15,2) unsigned NOT NULL DEFAULT 0 AFTER `total_amount`",
         'fd_withdrawals.settled_credit_facility_id' => "ALTER TABLE `fd_withdrawals` ADD COLUMN `settled_credit_facility_id` bigint unsigned NULL AFTER `closed_at`, ADD CONSTRAINT `fd_withdrawals_settled_credit_facility_id_foreign` FOREIGN KEY (`settled_credit_facility_id`) REFERENCES `credit_facilities` (`id`) ON DELETE SET NULL",
         'fixed_deposits.lien_amount' => "ALTER TABLE `fixed_deposits` ADD COLUMN `lien_amount` decimal(15,2) unsigned NOT NULL DEFAULT 0 AFTER `maturity_amount`, ADD INDEX (`lien_amount`)",
+        // Without these, creating/editing ANY loan (including a loan against an FD) fails with a 500.
+        'loan_facility_details.document_charge_amount' => 'ALTER TABLE `loan_facility_details` ADD COLUMN `document_charge_amount` DECIMAL(15,2) NULL AFTER `down_payment`',
+        'fixed_deposits.auto_renew' => 'ALTER TABLE `fixed_deposits` ADD COLUMN `auto_renew` tinyint(1) NOT NULL DEFAULT 0 AFTER `lien_amount`',
+        'fixed_deposits.auto_renew_mode' => "ALTER TABLE `fixed_deposits` ADD COLUMN `auto_renew_mode` enum('principal_only','principal_and_interest') NULL AFTER `auto_renew`",
+        'fixed_deposits.auto_renew_term_months' => 'ALTER TABLE `fixed_deposits` ADD COLUMN `auto_renew_term_months` smallint unsigned NULL AFTER `auto_renew_mode`',
+        'funding_products.post_maturity_rate_percent' => 'ALTER TABLE `funding_products` ADD COLUMN `post_maturity_rate_percent` decimal(6,3) NULL AFTER `premature_withdrawal_rate_percent`',
+        'fd_withdrawals.post_maturity_days' => 'ALTER TABLE `fd_withdrawals` ADD COLUMN `post_maturity_days` smallint unsigned NOT NULL DEFAULT 0 AFTER `adjusted_amount`',
+        'fd_withdrawals.post_maturity_rate_percent' => 'ALTER TABLE `fd_withdrawals` ADD COLUMN `post_maturity_rate_percent` decimal(6,3) NULL AFTER `post_maturity_days`',
+        'fd_withdrawals.post_maturity_interest' => 'ALTER TABLE `fd_withdrawals` ADD COLUMN `post_maturity_interest` decimal(15,2) unsigned NOT NULL DEFAULT 0 AFTER `post_maturity_rate_percent`',
+        'fd_withdrawals.is_premature' => 'ALTER TABLE `fd_withdrawals` ADD COLUMN `is_premature` tinyint(1) NOT NULL DEFAULT 0',
+        'fd_withdrawals.premature_rate_percent' => 'ALTER TABLE `fd_withdrawals` ADD COLUMN `premature_rate_percent` decimal(6,3) NULL',
+        'fd_withdrawals.premature_held_days' => 'ALTER TABLE `fd_withdrawals` ADD COLUMN `premature_held_days` int unsigned NULL',
+        'fd_withdrawals.premature_clawback' => 'ALTER TABLE `fd_withdrawals` ADD COLUMN `premature_clawback` decimal(15,2) NOT NULL DEFAULT 0',
+        // Borrowing interest accrual - without them a new borrowing cannot be saved / no interest is booked.
+        'borrowings.interest_accrued_through' => 'ALTER TABLE `borrowings` ADD COLUMN `interest_accrued_through` date NULL AFTER `maturity_date`',
+        'borrowings.accrued_interest_unpaid' => 'ALTER TABLE `borrowings` ADD COLUMN `accrued_interest_unpaid` decimal(15,2) NOT NULL DEFAULT 0 AFTER `interest_accrued_through`',
+        'borrowing_transactions.accrued_interest_cleared' => 'ALTER TABLE `borrowing_transactions` ADD COLUMN `accrued_interest_cleared` decimal(15,2) NOT NULL DEFAULT 0 AFTER `outstanding_before`',
     ];
 
     /** table.column that must carry a unique index */

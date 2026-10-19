@@ -458,6 +458,131 @@ class FixedDepositController extends Controller
     }
 
     /**
+     * Payout maths for closing a whole FD before maturity: the full principal earns the
+     * product's premature rate for the days held (same simple-interest basis as partPayment()).
+     * Interest already paid out monthly is netted off — a shortfall is paid now, a surplus is
+     * clawed back from the principal returned.
+     *
+     * @return array{rate: float, held_days: int, entitlement: float, paid_so_far: float, interest_paid: float, clawback: float, principal: float, total: float}
+     */
+    private function prematureFigures(FixedDeposit $fd, string $closedAt): array
+    {
+        $fd->loadMissing('fundingProduct');
+        $rate = (float) $fd->fundingProduct->premature_withdrawal_rate_percent;
+        $principal = (float) $fd->principal_amount;
+        $heldDays = max(1, (int) Carbon::parse($fd->start_date)->startOfDay()->diffInDays(Carbon::parse($closedAt)->startOfDay(), false));
+        $entitlement = round($principal * ($rate / 100) * ($heldDays / 365), 2);
+        $paidSoFar = $fd->interest_payment_method === 'monthly'
+            ? round((float) $fd->interestPayments()->where('status', 'Paid')->sum('paid_amount'), 2)
+            : 0.0;
+        $delta = round($entitlement - $paidSoFar, 2);
+        $interestPaid = max(0.0, $delta);
+        $clawback = max(0.0, -$delta);
+
+        return [
+            'rate' => $rate,
+            'held_days' => $heldDays,
+            'entitlement' => $entitlement,
+            'paid_so_far' => $paidSoFar,
+            'interest_paid' => $interestPaid,
+            'clawback' => $clawback,
+            'principal' => $principal,
+            'total' => round($principal + $interestPaid - $clawback, 2),
+        ];
+    }
+
+    /** Why this FD can't be closed early, or null if it can. */
+    private function prematureBlockReason(FixedDeposit $fd): ?string
+    {
+        if ($fd->status !== 'Active') {
+            return 'Only an active FD can be withdrawn.';
+        }
+        if ($fd->is_matured) {
+            return 'This FD has matured - use the normal Withdraw instead.';
+        }
+        $fd->loadMissing('fundingProduct');
+        if ($fd->fundingProduct->premature_withdrawal_rate_percent === null) {
+            return 'This funding product has no premature withdrawal rate configured - set one on Funding Products first.';
+        }
+
+        return null;
+    }
+
+    /** Read-only preview of an early full closure for a closing date. */
+    public function prematurePreview(Request $request, FixedDeposit $fixedDeposit)
+    {
+        $data = $request->validate(['closed_at' => 'nullable|date']);
+        $reason = $this->prematureBlockReason($fixedDeposit);
+        if ($reason) {
+            return response()->json(['message' => $reason], 422);
+        }
+
+        return response()->json($this->prematureFigures($fixedDeposit, $data['closed_at'] ?? now()->format('Y-m-d')));
+    }
+
+    /** Closes the whole FD before maturity at the product's premature rate and pays out principal + entitled interest. */
+    public function prematureWithdraw(Request $request, FixedDeposit $fixedDeposit)
+    {
+        if ($blocked = FdLienService::guard($fixedDeposit)) {
+            return $blocked;
+        }
+        $reason = $this->prematureBlockReason($fixedDeposit);
+        if ($reason) {
+            return response()->json(['message' => $reason], 422);
+        }
+        $fixedDeposit->loadMissing('branch');
+
+        $data = $request->validate([
+            'payment_method' => ['required', Rule::in(self::PAYMENT_METHODS)],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,id', 'required_if:payment_method,Bank,Cheque'],
+            'reference_no' => 'nullable|string|max:64',
+            'notes' => 'nullable|string',
+            'closed_at' => 'nullable|date|before_or_equal:today',
+        ]);
+
+        $withdrawal = DB::transaction(function () use ($fixedDeposit, $data, $request) {
+            $closedAt = $data['closed_at'] ?? now()->format('Y-m-d');
+            $f = $this->prematureFigures($fixedDeposit, $closedAt);
+            if ($f['total'] <= 0) {
+                throw ValidationException::withMessages(['closed_at' => 'Interest already paid exceeds the principal - nothing is payable. Review the FD before closing.']);
+            }
+
+            $voucherNo = NumberGenerator::next('fd_withdrawal', [
+                'branch_id' => $fixedDeposit->branch_id,
+                'branch_code' => $fixedDeposit->branch->code,
+                'user_id' => $request->user()->id,
+            ]);
+            $withdrawal = FdWithdrawal::create([
+                'fixed_deposit_id' => $fixedDeposit->id,
+                'voucher_no' => $voucherNo,
+                'principal_amount' => $f['principal'],
+                'interest_amount' => $f['interest_paid'],
+                'total_amount' => $f['total'],
+                'payment_method' => $data['payment_method'],
+                'bank_account_id' => $data['bank_account_id'] ?? null,
+                'reference_no' => $data['reference_no'] ?? null,
+                'notes' => $data['notes'] ?? null,
+                'closed_at' => $closedAt,
+                'created_by' => $request->user()->id,
+                'is_premature' => true,
+                'premature_rate_percent' => $f['rate'],
+                'premature_held_days' => $f['held_days'],
+                'premature_clawback' => $f['clawback'],
+            ]);
+            NumberGenerator::attach($voucherNo, $withdrawal);
+
+            $fixedDeposit->update(['status' => 'Closed', 'closed_at' => $closedAt]);
+
+            $withdrawal->setRelation('fixedDeposit', $fixedDeposit);
+            FdLedgerPoster::postWithdrawal($withdrawal);
+
+            return $withdrawal;
+        });
+
+        return response()->json($withdrawal->load(['fixedDeposit' => fn ($q) => $q->with(self::DETAIL_RELATIONS)]), 201);
+    }
+
+    /**
      * Premature partial withdrawal — pays out part of the principal before
      * maturity while keeping the FD open on the reduced balance, following
      * the standard Sri Lankan LFC/bank convention: the withdrawn portion

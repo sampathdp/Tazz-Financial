@@ -175,7 +175,7 @@ class FdLoanTest extends TestCase
         $this->assertFalse(FdLienService::quote($closed)['eligible']);
 
         DB::table('fd_loan_policies')->where('funding_product_id', $this->productId)->update(['status' => 'Inactive']);
-        $this->assertStringContainsString('disabled', FdLienService::quote($this->fd())['reason']);
+        $this->assertStringContainsString('Inactive', FdLienService::quote($this->fd())['reason']);
 
         DB::table('fd_loan_policies')->where('funding_product_id', $this->productId)->delete();
         $this->assertStringContainsString('not enabled', FdLienService::quote($this->fd())['reason']);

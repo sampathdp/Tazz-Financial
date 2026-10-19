@@ -30,8 +30,9 @@ class Kernel extends ConsoleKernel
         $schedule->command('funding:accrue')->lastDayOfMonth('23:30');
         // Matured company borrowings set to renew roll over into a new term.
         $schedule->command('borrowings:auto-renew')->dailyAt('01:20');
-        // Month-end interest payable on company borrowings (Dr 5110 / Cr 2220).
-        $schedule->command('borrowings:accrue-interest')->lastDayOfMonth('23:45');
+        // Interest payable on company borrowings (Dr 5110 / Cr 2220), booked daily so the expense shows
+        // as it is earned, not only at month-end. Re-runs are safe (each borrowing remembers its accrued-to date).
+        $schedule->command('borrowings:accrue-interest')->dailyAt('00:30');
     }
 
     /**

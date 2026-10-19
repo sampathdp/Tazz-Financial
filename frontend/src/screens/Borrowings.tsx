@@ -420,8 +420,16 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
         {b.purpose && <div className="row between"><span className="t-2">Purpose</span><b style={{ maxWidth: 380, textAlign: 'right' }}>{b.purpose}</b></div>}
         <div className="row between"><span className="t-2">{isOd ? 'Sanctioned Limit' : 'Amount Borrowed'}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.principalAmount)}</b></div>
         <div className="row between"><span className="t-2">{isOd ? 'Overdraft Utilised (live)' : 'Outstanding'}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.outstandingAmount)}</b></div>
-        {!isOd && Number(b.accruedInterestUnpaid ?? 0) > 0 && (
-          <div className="row between"><span className="t-2">Accrued Interest Payable{b.interestAccruedThrough ? ` (to ${dateOnly(b.interestAccruedThrough)})` : ''}</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.accruedInterestUnpaid ?? 0)}</b></div>
+        {!isOd && (
+          <>
+            <div className="row between"><span className="t-2">Accrued Interest Payable (booked{b.interestAccruedThrough ? ` to ${dateOnly(b.interestAccruedThrough)}` : ''})</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.accruedInterestUnpaid ?? 0)}</b></div>
+            <div className="row between"><span className="t-2">Interest Owed Today (incl. not yet booked)</span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(b.interestOwedToDate ?? b.accruedInterestUnpaid ?? 0)}</b></div>
+            {b.interestRatePercent == null || Number(b.interestRatePercent) <= 0 ? <div className="t-2" style={{ fontSize: 12 }}>No interest rate set, so no interest is accrued.</div> : null}
+            {b.interestAccruedThrough == null && b.status === 'Active' && <div className="t-2" style={{ fontSize: 12 }}>Interest accrual has not started on this older borrowing.</div>}
+          </>
+        )}
+        {!isOd && b.receiptMethod && (
+          <div className="row between"><span className="t-2">Received Into</span><b>{b.receiptMethod}{b.receiptCashAccount ? ` · ${b.receiptCashAccount.name}` : b.receiptBankAccount ? ` · ${b.receiptBankAccount.name}` : b.receiptMethod === 'Cheque' ? ' · undeposited (1030)' : ''} · {dateOnly(b.borrowingDate)}</b></div>
         )}
         {b.interestRatePercent != null && <div className="row between"><span className="t-2">Interest Rate</span><b>{b.interestRatePercent}% p.a.</b></div>}
         {b.termMonths != null && <div className="row between"><span className="t-2">Tenure</span><b>{b.termMonths} months</b></div>}

@@ -131,6 +131,10 @@ class FdLedgerPoster
             $expense = ChartOfAccount::system('5100');
             $lines[] = ['account_id' => $expense->id, 'debit' => $withdrawal->interest_amount, 'credit' => 0];
         }
+        // Premature closure: monthly interest already paid out above the reduced entitlement is taken back from the principal returned.
+        if ((float) $withdrawal->premature_clawback > 0) {
+            $lines[] = ['account_id' => ChartOfAccount::system('5100')->id, 'debit' => 0, 'credit' => $withdrawal->premature_clawback];
+        }
         $lines[] = ['account_id' => $tillAccount->id, 'debit' => 0, 'credit' => $withdrawal->total_amount];
 
         self::postCashLeg($leg, '-' . $withdrawal->total_amount, $lines, [

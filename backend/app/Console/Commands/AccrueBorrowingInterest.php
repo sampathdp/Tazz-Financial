@@ -21,6 +21,9 @@ class AccrueBorrowingInterest extends Command
     public function handle(): int
     {
         $through = $this->option('through') ?: now()->toDateString();
+        // Older borrowings that never got an accrual start date begin today; earlier interest is not back-booked.
+        Borrowing::withoutGlobalScopes()->where('status', 'Active')->where('type', '!=', 'Overdraft')
+            ->whereNull('interest_accrued_through')->update(['interest_accrued_through' => $through]);
         $count = 0;
         $total = '0.00';
         $ids = Borrowing::withoutGlobalScopes()->where('status', 'Active')->where('type', '!=', 'Overdraft')
