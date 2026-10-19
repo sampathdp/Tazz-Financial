@@ -33,18 +33,18 @@ use Illuminate\Support\Facades\DB;
 class NumberGenerator
 {
     private const DEFAULT_FORMATS = [
-        // {SEQ:1} = no zero-padding (HB-SMEW-26-5); counter is shared across loan types (see resolveKey).
-        'loan' => '{BRANCH}-{CODE}-{YEAR:2}-{SEQ:1}',
+        // {SEQ:6} = zero-padded (HB-SMEW-26-000005); counter is shared across loan types (see resolveKey).
+        'loan' => '{BRANCH}-{CODE}-{YEAR:2}-{SEQ:6}',
         'customer' => 'CUS-{SEQ:6}',
         // {TYPE} is the payment method's short code (CA/BT/CQ) — see
         // LoanPaymentController::TYPE_CODES. One shared sequence per
         // branch+year across all methods, same as a physical receipt book.
         'payment' => '{BRANCH}-{TYPE}-{YEAR:2}-{MONTH:2}-{SEQ:5}',
-        'fd_deposit' => '{BRANCH}-DEP-{YEAR:2}-{MONTH:2}-{SEQ:1}',
+        'fd_deposit' => '{BRANCH}-DEP-{YEAR:2}-{MONTH:2}-{SEQ:6}',
         // {CODE} (the funding product's own code, e.g. "TT") already
         // distinguishes this as a fixed deposit — a literal "FD" segment was
         // redundant, so it's dropped in favor of the calendar month.
-        'fixed_deposit' => '{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:1}',
+        'fixed_deposit' => '{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:6}',
         'fd_withdrawal' => '{BRANCH}-FDV-{YEAR:2}-{SEQ:5}',
         'fd_part_payment' => '{BRANCH}-FDP-{YEAR:2}-{SEQ:5}',
         // One company-wide series, no {BRANCH} — a journal entry isn't tied to a
@@ -82,10 +82,10 @@ class NumberGenerator
         // wired into the loan_type_id/funding_product_id key columns, so
         // numbering is one company-wide series per year across all schemes.
         'pawning' => '{BRANCH}-PW-{YEAR:2}-{SEQ:6}',
-        'pawning_auction' => '{BRANCH}-PWA-{YEAR:2}-{SEQ:4}',
+        'pawning_auction' => '{BRANCH}-PWA-{YEAR:2}-{SEQ:6}',
         // Company borrowings (money the company itself borrows) and their
         // repayment/interest vouchers — one company-wide series per year each.
-        'borrowing' => '{BRANCH}-BRW-{YEAR:2}-{SEQ:5}',
+        'borrowing' => '{BRANCH}-BRW-{YEAR:2}-{SEQ:6}',
         'borrowing_txn' => '{BRANCH}-BRWV-{YEAR:2}-{SEQ:5}',
         // Daily Savings: an account is opened once (no {YEAR}); its
         // transactions and collection sheets reset yearly; interest runs are
