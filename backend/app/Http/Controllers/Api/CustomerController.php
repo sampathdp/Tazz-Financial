@@ -173,7 +173,7 @@ class CustomerController extends Controller
 
     private function validated(Request $request, ?Customer $customer = null): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'branch_id' => 'required|exists:branches,id',
             'title' => ['required', Rule::in(self::TITLES)],
             'surname' => 'required|string|max:100',
@@ -205,10 +205,17 @@ class CustomerController extends Controller
             'business_address' => 'nullable|string|max:255',
             'business_phone' => 'nullable|string|max:20',
             'monthly_income' => 'nullable|numeric|min:0',
-            'status' => ['nullable', Rule::in(['Active', 'Blacklisted', 'Inactive'])],
-            'blacklist_reason' => ['nullable', 'string', 'max:500', Rule::requiredIf(fn () => $request->input('status') === 'Blacklisted')],
+            // Blacklisting is admin-only and lives on its own page (BlacklistController).
+            'status' => ['nullable', Rule::in(['Active', 'Inactive'])],
             'is_guarantor' => 'boolean',
             'notes' => 'nullable|string',
         ]);
+
+        // A blacklisted customer's status can only be changed from the Blacklist page.
+        if ($customer?->status === 'Blacklisted') {
+            unset($data['status']);
+        }
+
+        return $data;
     }
 }

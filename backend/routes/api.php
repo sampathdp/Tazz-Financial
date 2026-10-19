@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\CashReconciliationController;
 use App\Http\Controllers\Api\CompanyProfileController;
 use App\Http\Controllers\Api\ChartOfAccountController;
 use App\Http\Controllers\Api\CollectionReportController;
+use App\Http\Controllers\Api\BlacklistController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerCribReportController;
 use App\Http\Controllers\Api\CustomerDocumentController;
@@ -168,6 +169,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('customers', [CustomerController::class, 'store'])->middleware('perm:Customer Management,Create');
     Route::put('customers/{customer}', [CustomerController::class, 'update'])->middleware('perm:Customer Management,Edit');
     Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->middleware('perm:Customer Management,Delete');
+
+    // --- Sanction / Blacklist (admin only; bars the customer from every new facility in every branch) ---
+    Route::post('customers/{customer}/blacklist', [BlacklistController::class, 'store'])->middleware('admin');
+    Route::delete('customers/{customer}/blacklist', [BlacklistController::class, 'destroy'])->middleware('admin');
 
     // --- Customer Credit Report (internal CRIB-style report, per customer) ---
     Route::get('customers/{customer}/crib-report', [CustomerCribReportController::class, 'show'])->middleware('perm:Customer Management,View');

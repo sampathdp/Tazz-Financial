@@ -42,7 +42,7 @@ export function CustomerDetailCard({ c }: { c: Customer }) {
       </div>
       {c.status === 'Blacklisted' && (
         <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 'var(--r-m)', background: 'var(--bad-dim)', color: 'var(--bad)', fontSize: 12.5, fontWeight: 600 }}>
-          BLACKLISTED — cannot be given any facility in any branch.{c.blacklistReason ? ` Reason: ${c.blacklistReason}` : ''}
+          BLACKLISTED — cannot be given any facility in any branch.{c.blacklistReason ? ` Reason: ${c.blacklistReason}` : ''}{c.blacklistNote ? ` — ${c.blacklistNote}` : ''}
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px 20px', fontSize: 12.5 }}>

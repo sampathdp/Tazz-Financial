@@ -24,6 +24,7 @@ const OverdueLoansScreen = lazy(() => import('./screens/OverdueLoans').then((m) 
 const LoanProvisionsScreen = lazy(() => import('./screens/LoanProvisions').then((m) => ({ default: m.LoanProvisionsScreen })))
 const PaymentReceiptScreen = lazy(() => import('./screens/PaymentReceipt').then((m) => ({ default: m.PaymentReceiptScreen })))
 const DocumentTrackingScreen = lazy(() => import('./screens/DocumentTracking').then((m) => ({ default: m.DocumentTrackingScreen })))
+const BlacklistScreen = lazy(() => import('./screens/Blacklist').then((m) => ({ default: m.BlacklistScreen })))
 const LoanAdjustmentsScreen = lazy(() => import('./screens/LoanAdjustments').then((m) => ({ default: m.LoanAdjustmentsScreen })))
 const ChequeClearanceScreen = lazy(() => import('./screens/ChequeClearance').then((m) => ({ default: m.ChequeClearanceScreen })))
 const SalesExecutiveCommissionsScreen = lazy(() => import('./screens/SalesExecutiveCommissions').then((m) => ({ default: m.SalesExecutiveCommissionsScreen })))
@@ -200,6 +201,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'loan/doc-tracking': DocumentTrackingScreen,
   'loan/cheques': ChequeClearanceScreen,
   'loan/adjustments': LoanAdjustmentsScreen,
+  'blacklist': BlacklistScreen,
   'loan/commissions': SalesExecutiveCommissionsScreen,
   'sd/types': SpeedDraftTypesScreen,
   'sd/drafts': SpeedDraftsScreen,

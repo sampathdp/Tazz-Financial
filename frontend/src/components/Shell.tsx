@@ -22,6 +22,7 @@ export type NavNode = NavLeaf | NavSection
 export const NAV: NavNode[] = [
   { id: 'dash', label: 'Dashboard', icon: 'dash' },
   { id: 'customers', label: 'Customer Management', icon: 'users' },
+  { id: 'blacklist', label: 'Sanction / Blacklist', icon: 'shield' },
 
   { section: 'Loan Management', icon: 'coins', items: [
     { id: 'loan/types', label: 'Loan Types', icon: 'layers' },

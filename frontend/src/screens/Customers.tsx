@@ -537,7 +537,7 @@ function CustomerView({ customer, me, onEdit, onOpenLoan, onOpenCredit }: { cust
     <div>
       {customer.status === 'Blacklisted' && (
         <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 'var(--r-m)', background: 'var(--bad-dim)', color: 'var(--bad)', fontSize: 13, fontWeight: 600 }}>
-          BLACKLISTED — cannot be given any facility in any branch.{customer.blacklistReason ? ` Reason: ${customer.blacklistReason}` : ''}
+          BLACKLISTED — cannot be given any facility in any branch.{customer.blacklistReason ? ` Reason: ${customer.blacklistReason}` : ''}{customer.blacklistNote ? ` — ${customer.blacklistNote}` : ''}
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -849,14 +849,11 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
             <Field label="Branch"><Select value={form.branchId ?? ''} onChange={(e) => set('branchId', Number(e.target.value) || undefined as any)}>
               <option value="">—</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </Select></Field>
-            <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => set('status', e.target.value as any)}>
-              <option>Active</option><option>Blacklisted</option><option>Inactive</option>
-            </Select></Field>
-            {form.status === 'Blacklisted' && (
-              <Field label="Blacklist Reason (barred from all facilities in every branch)">
-                <Input value={form.blacklistReason || ''} onChange={(e) => set('blacklistReason', e.target.value)} placeholder="Required" />
-              </Field>
-            )}
+            <Field label="Status">
+              {form.status === 'Blacklisted'
+                ? <Input value="Blacklisted (change in Sanction / Blacklist)" disabled />
+                : <Select value={form.status || 'Active'} onChange={(e) => set('status', e.target.value as any)}><option>Active</option><option>Inactive</option></Select>}
+            </Field>
             <Field label="NIC Number">
               <Input value={form.nicNo || ''} onChange={(e) => onNicChange(e.target.value)} />
               <FieldError msg={formErrors.nic} />

@@ -15,7 +15,7 @@ class Customer extends Model
         'branch_id', 'code', 'full_name', 'title', 'surname', 'name_denoted_by_initials', 'initials',
         'nic_no', 'passport_no', 'driving_license_no',
         'dob', 'gender', 'phone', 'alt_phone', 'email', 'address',
-        'occupation_type', 'monthly_income', 'photo_path', 'status', 'blacklist_reason', 'blacklisted_at', 'blacklisted_by', 'is_guarantor', 'notes', 'created_by',
+        'occupation_type', 'monthly_income', 'photo_path', 'status', 'blacklist_reason', 'blacklist_note', 'blacklisted_at', 'blacklisted_by', 'is_guarantor', 'notes', 'created_by',
     ];
 
     protected $casts = [
@@ -45,7 +45,7 @@ class Customer extends Model
                     $customer->blacklisted_at = now();
                     $customer->blacklisted_by = \Illuminate\Support\Facades\Auth::id();
                 } else {
-                    $customer->blacklist_reason = $customer->blacklisted_at = $customer->blacklisted_by = null;
+                    $customer->blacklist_reason = $customer->blacklist_note = $customer->blacklisted_at = $customer->blacklisted_by = null;
                 }
             }
 

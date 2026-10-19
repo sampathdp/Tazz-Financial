@@ -15,6 +15,7 @@ return new class extends Migration
     {
         Schema::table('customers', function (Blueprint $table) {
             $table->string('blacklist_reason', 500)->nullable();
+            $table->text('blacklist_note')->nullable();
             $table->timestamp('blacklisted_at')->nullable();
             $table->unsignedBigInteger('blacklisted_by')->nullable();
         });
@@ -22,6 +23,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('customers', fn (Blueprint $t) => $t->dropColumn(['blacklist_reason', 'blacklisted_at', 'blacklisted_by']));
+        Schema::table('customers', fn (Blueprint $t) => $t->dropColumn(['blacklist_reason', 'blacklist_note', 'blacklisted_at', 'blacklisted_by']));
     }
 };

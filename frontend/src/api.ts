@@ -230,7 +230,7 @@ export interface Customer {
   monthlyIncome?: number | string | null;
   status?: 'Active' | 'Blacklisted' | 'Inactive';
   /** Required when status is Blacklisted; a blacklisted customer cannot be given any facility in any branch. */
-  blacklistReason?: string | null; blacklistedAt?: string | null;
+  blacklistReason?: string | null; blacklistNote?: string | null; blacklistedAt?: string | null;
   /** Label, not a restriction — any customer can still be picked as a loan guarantor regardless. */
   isGuarantor?: boolean;
   notes?: string | null;
@@ -2300,6 +2300,11 @@ export const customerReportsApi = {
   get: (type: CustomerReportType, params?: Record<string, any>) =>
     http.get(`/customer-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data)),
   pdf: (type: CustomerReportType, params?: Record<string, any>) => reportPdf('customer', type, params),
+}
+
+export const blacklistApi = {
+  add: (customerId: number, reason: string, note?: string) => http.post(`/customers/${customerId}/blacklist`, { reason, note }).then((r) => camelize(r.data)),
+  remove: (customerId: number) => http.delete(`/customers/${customerId}/blacklist`).then((r) => camelize(r.data)),
 }
 
 export type InvestorReportType = 'summary' | 'directory'

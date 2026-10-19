@@ -53,12 +53,12 @@ class CustomerReportController extends Controller
     {
         $rows = $this->blacklisted()->map(fn ($r) => [
             'code' => $r['code'], 'fullName' => $r['fullName'], 'nicNo' => $r['nicNo'] ?? '—', 'branch' => $r['branch']['name'] ?? '—',
-            'reason' => $r['reason'] ?? '—', 'blacklistedAt' => substr((string) $r['blacklistedAt'], 0, 10) ?: '—', 'blacklistedBy' => $r['blacklistedBy'] ?? '—',
+            'reason' => $r['reason'] ?? '—', 'note' => $r['note'] ?? '—', 'blacklistedAt' => substr((string) $r['blacklistedAt'], 0, 10) ?: '—', 'blacklistedBy' => $r['blacklistedBy'] ?? '—',
             'outstanding' => $r['totalOutstanding'],
         ]);
         $columns = [
             ['key' => 'code', 'label' => 'Code'], ['key' => 'fullName', 'label' => 'Name'], ['key' => 'nicNo', 'label' => 'NIC'], ['key' => 'branch', 'label' => 'Branch'],
-            ['key' => 'reason', 'label' => 'Reason'], ['key' => 'blacklistedAt', 'label' => 'Date'], ['key' => 'blacklistedBy', 'label' => 'By'],
+            ['key' => 'reason', 'label' => 'Reason'], ['key' => 'note', 'label' => 'Note'], ['key' => 'blacklistedAt', 'label' => 'Date'], ['key' => 'blacklistedBy', 'label' => 'By'],
             ['key' => 'outstanding', 'label' => 'Outstanding', 'align' => 'right', 'format' => 'money'],
         ];
         $sections = [['columns' => $columns, 'rows' => $rows->all(), 'totalRow' => ['fullName' => 'Total', 'outstanding' => $rows->sum('outstanding')], 'emptyText' => 'No blacklisted customers']];
@@ -78,7 +78,7 @@ class CustomerReportController extends Controller
         return $customers->map(fn (Customer $c) => [
             'id' => $c->id, 'code' => $c->code, 'fullName' => $c->full_name, 'nicNo' => $c->nic_no, 'phone' => $c->phone,
             'branch' => $c->branch ? ['id' => $c->branch->id, 'name' => $c->branch->name, 'code' => $c->branch->code] : null,
-            'reason' => $c->blacklist_reason, 'blacklistedAt' => $c->blacklisted_at, 'blacklistedBy' => $users[$c->blacklisted_by] ?? null,
+            'reason' => $c->blacklist_reason, 'note' => $c->blacklist_note, 'blacklistedAt' => $c->blacklisted_at, 'blacklistedBy' => $users[$c->blacklisted_by] ?? null,
             'totalOutstanding' => round((float) ($owed[$c->id] ?? 0), 2),
         ])->values();
     }
