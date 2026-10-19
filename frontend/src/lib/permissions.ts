@@ -63,6 +63,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'rep/coll-trend': 'Collection Reports',
   'rep/cust-summary': 'Customer Reports',
   'rep/cust-activity': 'Customer Reports',
+  'rep/cust-blacklisted': 'Customer Reports',
   'rep/cust-credit': 'Customer Reports',
   'rep/inv-summary': 'Investor Reports',
   'rep/inv-directory': 'Investor Reports',

@@ -62,6 +62,7 @@ class Loan extends Model
         });
 
         static::creating(function (Loan $loan) {
+            Customer::assertNotBlacklisted($loan->customer_id);
             $loan->facility_type = 'Loan';
         });
 

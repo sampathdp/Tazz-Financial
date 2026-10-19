@@ -49,6 +49,7 @@ class SpeedDraft extends Model
         });
 
         static::creating(function (SpeedDraft $speedDraft) {
+            Customer::assertNotBlacklisted($speedDraft->customer_id);
             $speedDraft->facility_type = 'SpeedDraft';
         });
     }

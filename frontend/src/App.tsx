@@ -114,6 +114,7 @@ const CollectionTrendScreen = named(() => import('./screens/CollectionReports'),
 
 const CustomerSummaryScreen = named(() => import('./screens/CustomerReports'), 'CustomerSummaryScreen')
 const CustomerActivityScreen = named(() => import('./screens/CustomerReports'), 'CustomerActivityScreen')
+const CustomerBlacklistedScreen = named(() => import('./screens/CustomerReports'), 'CustomerBlacklistedScreen')
 const CustomerCreditReportScreen = named(() => import('./screens/CustomerReports'), 'CustomerCreditReportScreen')
 
 const InvestorSummaryScreen = named(() => import('./screens/InvestorReports'), 'InvestorSummaryScreen')
@@ -264,6 +265,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'rep/coll-trend': CollectionTrendScreen,
   'rep/cust-summary': CustomerSummaryScreen,
   'rep/cust-activity': CustomerActivityScreen,
+  'rep/cust-blacklisted': CustomerBlacklistedScreen,
   'rep/cust-credit': CustomerCreditReportScreen,
   'rep/inv-summary': InvestorSummaryScreen,
   'rep/inv-directory': InvestorDirectoryScreen,

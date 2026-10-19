@@ -206,6 +206,7 @@ class CustomerController extends Controller
             'business_phone' => 'nullable|string|max:20',
             'monthly_income' => 'nullable|numeric|min:0',
             'status' => ['nullable', Rule::in(['Active', 'Blacklisted', 'Inactive'])],
+            'blacklist_reason' => ['nullable', 'string', 'max:500', Rule::requiredIf(fn () => $request->input('status') === 'Blacklisted')],
             'is_guarantor' => 'boolean',
             'notes' => 'nullable|string',
         ]);

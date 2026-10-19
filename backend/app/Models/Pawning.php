@@ -54,6 +54,7 @@ class Pawning extends Model
         });
 
         static::creating(function (Pawning $pawning) {
+            Customer::assertNotBlacklisted($pawning->customer_id);
             $pawning->facility_type = 'Pawning';
         });
     }

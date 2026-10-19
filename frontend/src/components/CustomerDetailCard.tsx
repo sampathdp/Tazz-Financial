@@ -3,7 +3,7 @@ import { Badge, Btn, Modal, Table, Td } from './ui'
 import { customerLoansApi, type Customer, type Loan } from '../api'
 import { CreditReportPanel } from '../screens/Customers'
 
-const custStatusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'red', Blacklisted: 'amber' }
+const custStatusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'amber', Blacklisted: 'red' }
 
 /** Read-only customer summary — profile, active loans and a Credit Report modal. Shared by the loan application form and the loan detail screen. */
 export function CustomerDetailCard({ c }: { c: Customer }) {
@@ -40,6 +40,11 @@ export function CustomerDetailCard({ c }: { c: Customer }) {
           <Badge tone={custStatusTone[c.status || 'Active']} dot>{c.status || 'Active'}</Badge>
         </div>
       </div>
+      {c.status === 'Blacklisted' && (
+        <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 'var(--r-m)', background: 'var(--bad-dim)', color: 'var(--bad)', fontSize: 12.5, fontWeight: 600 }}>
+          BLACKLISTED — cannot be given any facility in any branch.{c.blacklistReason ? ` Reason: ${c.blacklistReason}` : ''}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px 20px', fontSize: 12.5 }}>
         <div><span className="t-2">NIC / ID: </span>{idNo}</div>
         <div><span className="t-2">Phone: </span>{c.phone || '—'}</div>

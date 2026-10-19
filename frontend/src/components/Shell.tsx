@@ -137,6 +137,7 @@ export const NAV: NavNode[] = [
     { group: 'Customer Reports', icon: 'users', items: [
       { id: 'rep/cust-summary', label: 'Customer Summary', icon: 'users' },
       { id: 'rep/cust-activity', label: 'Customer Activity', icon: 'list' },
+      { id: 'rep/cust-blacklisted', label: 'Blacklisted Customers', icon: 'shield' },
       { id: 'rep/cust-credit', label: 'Customer Credit Report', icon: 'shield' },
     ] },
     { group: 'Investor Reports', icon: 'pie', items: [

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\FixedDeposit;
 use App\Models\Loan;
+use App\Models\User;
 use App\Support\CurrentBranch;
 use App\Support\ReportExport;
 use Illuminate\Http\Request;
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\DB;
  */
 class CustomerReportController extends Controller
 {
-    private const TYPES = ['summary', 'activity'];
+    private const TYPES = ['summary', 'activity', 'blacklisted'];
 
     public function show(Request $request, string $type)
     {
@@ -29,6 +30,7 @@ class CustomerReportController extends Controller
         return match ($type) {
             'summary' => $this->summary(),
             'activity' => $this->activity($request),
+            'blacklisted' => $this->blacklisted(),
         };
     }
 
@@ -41,9 +43,44 @@ class CustomerReportController extends Controller
         [$title, $sections, $meta] = match ($type) {
             'summary' => $this->summaryPdf(),
             'activity' => $this->activityPdf($request),
+            'blacklisted' => $this->blacklistedPdf(),
         };
 
         return ReportExport::pdf($title, $sections, null, $meta)->download(ReportExport::filename($type));
+    }
+
+    private function blacklistedPdf(): array
+    {
+        $rows = $this->blacklisted()->map(fn ($r) => [
+            'code' => $r['code'], 'fullName' => $r['fullName'], 'nicNo' => $r['nicNo'] ?? '—', 'branch' => $r['branch']['name'] ?? '—',
+            'reason' => $r['reason'] ?? '—', 'blacklistedAt' => substr((string) $r['blacklistedAt'], 0, 10) ?: '—', 'blacklistedBy' => $r['blacklistedBy'] ?? '—',
+            'outstanding' => $r['totalOutstanding'],
+        ]);
+        $columns = [
+            ['key' => 'code', 'label' => 'Code'], ['key' => 'fullName', 'label' => 'Name'], ['key' => 'nicNo', 'label' => 'NIC'], ['key' => 'branch', 'label' => 'Branch'],
+            ['key' => 'reason', 'label' => 'Reason'], ['key' => 'blacklistedAt', 'label' => 'Date'], ['key' => 'blacklistedBy', 'label' => 'By'],
+            ['key' => 'outstanding', 'label' => 'Outstanding', 'align' => 'right', 'format' => 'money'],
+        ];
+        $sections = [['columns' => $columns, 'rows' => $rows->all(), 'totalRow' => ['fullName' => 'Total', 'outstanding' => $rows->sum('outstanding')], 'emptyText' => 'No blacklisted customers']];
+
+        return ['Blacklisted Customers', $sections, 'As of ' . now()->toDateString()];
+    }
+
+    /** Every blacklisted customer with the reason, who flagged them and any balance still owed. */
+    private function blacklisted()
+    {
+        $customers = Customer::where('status', 'Blacklisted')->with('branch:id,name,code')->orderByDesc('blacklisted_at')->get();
+        $owed = Loan::whereIn('customer_id', $customers->pluck('id'))->where('status', 'Active')
+            ->select('customer_id')->selectRaw('sum(outstanding_balance_cache) as total_outstanding')
+            ->groupBy('customer_id')->pluck('total_outstanding', 'customer_id');
+        $users = User::whereIn('id', $customers->pluck('blacklisted_by')->filter())->pluck('name', 'id');
+
+        return $customers->map(fn (Customer $c) => [
+            'id' => $c->id, 'code' => $c->code, 'fullName' => $c->full_name, 'nicNo' => $c->nic_no, 'phone' => $c->phone,
+            'branch' => $c->branch ? ['id' => $c->branch->id, 'name' => $c->branch->name, 'code' => $c->branch->code] : null,
+            'reason' => $c->blacklist_reason, 'blacklistedAt' => $c->blacklisted_at, 'blacklistedBy' => $users[$c->blacklisted_by] ?? null,
+            'totalOutstanding' => round((float) ($owed[$c->id] ?? 0), 2),
+        ])->values();
     }
 
     private function summaryPdf(): array

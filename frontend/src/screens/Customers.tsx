@@ -30,7 +30,7 @@ const DOC_TYPE_OPTIONS: { value: CustomerDocType; label: string }[] = [
   { value: 'Photo', label: 'Photo' },
   { value: 'Other', label: 'Other' },
 ]
-const statusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'red', Blacklisted: 'amber' }
+const statusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'amber', Blacklisted: 'red' }
 const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.']
 
 const blankForm = (): Partial<Customer> => ({ status: 'Active' })
@@ -535,6 +535,11 @@ function CustomerView({ customer, me, onEdit, onOpenLoan, onOpenCredit }: { cust
 
   return (
     <div>
+      {customer.status === 'Blacklisted' && (
+        <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 'var(--r-m)', background: 'var(--bad-dim)', color: 'var(--bad)', fontSize: 13, fontWeight: 600 }}>
+          BLACKLISTED — cannot be given any facility in any branch.{customer.blacklistReason ? ` Reason: ${customer.blacklistReason}` : ''}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <Card>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Personal Details</div>
@@ -847,6 +852,11 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
             <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => set('status', e.target.value as any)}>
               <option>Active</option><option>Blacklisted</option><option>Inactive</option>
             </Select></Field>
+            {form.status === 'Blacklisted' && (
+              <Field label="Blacklist Reason (barred from all facilities in every branch)">
+                <Input value={form.blacklistReason || ''} onChange={(e) => set('blacklistReason', e.target.value)} placeholder="Required" />
+              </Field>
+            )}
             <Field label="NIC Number">
               <Input value={form.nicNo || ''} onChange={(e) => onNicChange(e.target.value)} />
               <FieldError msg={formErrors.nic} />

@@ -177,6 +177,64 @@ export function CustomerActivityScreen({ go: _go, user: me }: { go: Go; user?: A
   )
 }
 
+/* ------------------------- Blacklisted ------------------------- */
+
+export function CustomerBlacklistedScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
+
+  useEffect(() => {
+    setLoading(true)
+    customerReportsApi.get('blacklisted', { branchId }).then((d) => setRows(d || [])).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [branchId])
+
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Blacklisted Customers',
+      columns: [
+        { label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'NIC', key: 'nic' }, { label: 'Phone', key: 'phone' }, { label: 'Branch', key: 'branch' },
+        { label: 'Reason', key: 'reason' }, { label: 'Blacklisted On', key: 'on' }, { label: 'By', key: 'by' }, { label: 'Outstanding', key: 'outstanding', align: 'right', format: 'money' },
+      ],
+      rows: rows.map((c) => ({
+        code: c.code, name: c.fullName, nic: c.nicNo || '—', phone: c.phone || '—', branch: c.branch?.name || '—',
+        reason: c.reason || '—', on: dateOnly(c.blacklistedAt), by: c.blacklistedBy || '—', outstanding: Number(c.totalOutstanding || 0),
+      })),
+      totalRow: { name: 'Total', outstanding: rows.reduce((a, c) => a + Number(c.totalOutstanding || 0), 0) },
+      emptyText: 'No blacklisted customers',
+    }, `blacklisted-customers-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await customerReportsApi.pdf('blacklisted', { branchId }), `blacklisted-customers-${today()}.pdf`)
+
+  return (
+    <div>
+      <PageHead crumbs="Customer Management / Reports" title="Blacklisted Customers" icon="shield"
+        sub="Barred from every new facility in every branch."
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
+      {loading ? <Loading /> : err ? <ErrBox msg={err} /> : (
+        <Card pad={0}>
+          <Table cols={[
+            { label: 'Code' }, { label: 'Name' }, { label: 'NIC' }, { label: 'Branch' }, { label: 'Reason' },
+            { label: 'Blacklisted On' }, { label: 'By' }, { label: 'Outstanding', align: 'right' as const },
+          ]} rows={rows} empty="No blacklisted customers"
+            render={(c: any) => <>
+              <Td mono>{c.code}</Td>
+              <Td>{c.fullName}</Td>
+              <Td mono>{c.nicNo || '—'}</Td>
+              <Td>{c.branch?.name || '—'}</Td>
+              <Td>{c.reason || '—'}</Td>
+              <Td>{dateOnly(c.blacklistedAt)}</Td>
+              <Td>{c.blacklistedBy || '—'}</Td>
+              <Td align="right" mono>{money(c.totalOutstanding)}</Td>
+            </>} />
+        </Card>
+      )}
+    </div>
+  )
+}
+
 /* ------------------------- Credit Report ------------------------- */
 
 /* Picker only — search a customer, then open the per-customer internal

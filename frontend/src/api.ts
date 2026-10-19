@@ -229,6 +229,8 @@ export interface Customer {
   businessDetail?: CustomerBusinessDetail | null;
   monthlyIncome?: number | string | null;
   status?: 'Active' | 'Blacklisted' | 'Inactive';
+  /** Required when status is Blacklisted; a blacklisted customer cannot be given any facility in any branch. */
+  blacklistReason?: string | null; blacklistedAt?: string | null;
   /** Label, not a restriction — any customer can still be picked as a loan guarantor regardless. */
   isGuarantor?: boolean;
   notes?: string | null;
@@ -2292,7 +2294,7 @@ export const collectionReportsApi = {
   pdf: (type: CollectionReportType, params?: Record<string, any>) => reportPdf('collection', type, params),
 }
 
-export type CustomerReportType = 'summary' | 'activity'
+export type CustomerReportType = 'summary' | 'activity' | 'blacklisted'
 
 export const customerReportsApi = {
   get: (type: CustomerReportType, params?: Record<string, any>) =>
