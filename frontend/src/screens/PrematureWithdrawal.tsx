@@ -37,23 +37,35 @@ function FullClosureModal({ fd, open, onClose, onClosed }: { fd: FixedDeposit | 
   const [notes, setNotes] = useState('')
   const [closedAt, setClosedAt] = useState(todayIso())
   const [backDated, setBackDated] = useState(false)
+  const [rateInput, setRateInput] = useState('')
   const [preview, setPreview] = useState<FdPrematurePreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (open) { setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setNotes(''); setClosedAt(todayIso()); setBackDated(false); setErr('') } }, [open])
+  useEffect(() => {
+    if (open) {
+      setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setNotes(''); setClosedAt(todayIso()); setBackDated(false); setErr('')
+      const r = fd?.fundingProduct?.prematureWithdrawalRatePercent
+      setRateInput(r != null ? String(Number(r)) : '')
+    }
+  }, [open])
   useEffect(() => {
     if (!open || !fd) return
     setPreview(null)
-    fixedDepositsApi.prematurePreview(fd.id, { closedAt }).then(setPreview).catch((ex) => setErr(getErrorText(ex, 'Could not work out the payout.')))
-  }, [open, fd?.id, closedAt])
+    const rate = rateInput.trim() === '' ? undefined : rateInput
+    // Debounced so typing a rate doesn't fire a request per keystroke.
+    const t = setTimeout(() => {
+      fixedDepositsApi.prematurePreview(fd.id, { closedAt, prematureRatePercent: rate }).then((p) => { setErr(''); setPreview(p) }).catch((ex) => setErr(getErrorText(ex, 'Could not work out the payout.')))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [open, fd?.id, closedAt, rateInput])
   if (!fd) return null
 
   const save = async () => {
     if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     setBusy(true); setErr('')
     try {
-      const result = await fixedDepositsApi.prematureWithdraw(fd.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, notes: notes || undefined, closedAt })
+      const result = await fixedDepositsApi.prematureWithdraw(fd.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, notes: notes || undefined, closedAt, prematureRatePercent: rateInput.trim() === '' ? undefined : rateInput })
       onClosed(result)
       notify.success('Fixed Deposit closed early', fd.fdNumber)
     } catch (ex: any) {
@@ -94,6 +106,7 @@ function FullClosureModal({ fd, open, onClose, onClosed }: { fd: FixedDeposit | 
               <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
             </label>
           </Field>
+          <Field label="Premature Rate (%)"><Input type="number" step="0.01" min="0" value={rateInput} onChange={(e) => setRateInput(e.target.value)} /></Field>
           <Field label="Reference No"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
         </div>
         <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>

@@ -2023,10 +2023,10 @@ export const fixedDepositsApi = {
   /** Undoes a mistaken closure — reverses GL/Cashbook and reopens the FD (see backend FixedDepositController::voidWithdrawal). */
   voidWithdrawal: (id: number) => http.post(`/fixed-deposits/${id}/void-withdrawal`).then((r) => camelize(r.data) as FixedDeposit),
   /** Payout figures for closing the whole FD early on a given date. Rejects (422) if the FD can't be closed early. */
-  prematurePreview: (id: number, params: { closedAt?: string }) =>
+  prematurePreview: (id: number, params: { closedAt?: string; prematureRatePercent?: number | string }) =>
     http.get(`/fixed-deposits/${id}/premature-preview`, { params: snakeize(params) }).then((r) => camelize(r.data) as FdPrematurePreview),
   /** Closes the whole FD before maturity at the product's premature rate (see backend FixedDepositController::prematureWithdraw). */
-  prematureWithdraw: (id: number, body: { paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; closedAt?: string }) =>
+  prematureWithdraw: (id: number, body: { paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; closedAt?: string; prematureRatePercent?: number | string }) =>
     http.post(`/fixed-deposits/${id}/premature-withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
   /** Premature partial withdrawal — FD stays open on the reduced principal (see backend FixedDepositController::partPayment). */
   partPayment: (id: number, body: { amount: number | string; paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; paidAt?: string }) =>

@@ -512,10 +512,10 @@ class FixedDepositController extends Controller
      *
      * @return array{rate: float, held_days: int, entitlement: float, paid_so_far: float, interest_paid: float, clawback: float, principal: float, total: float}
      */
-    private function prematureFigures(FixedDeposit $fd, string $closedAt): array
+    private function prematureFigures(FixedDeposit $fd, string $closedAt, ?float $rateOverride = null): array
     {
         $fd->loadMissing('fundingProduct');
-        $rate = (float) $fd->fundingProduct->premature_withdrawal_rate_percent;
+        $rate = $rateOverride ?? (float) $fd->fundingProduct->premature_withdrawal_rate_percent;
         $principal = (float) $fd->principal_amount;
         $heldDays = max(1, (int) Carbon::parse($fd->start_date)->startOfDay()->diffInDays(Carbon::parse($closedAt)->startOfDay(), false));
         $entitlement = round($principal * ($rate / 100) * ($heldDays / 365), 2);
@@ -558,13 +558,20 @@ class FixedDepositController extends Controller
     /** Read-only preview of an early full closure for a closing date. */
     public function prematurePreview(Request $request, FixedDeposit $fixedDeposit)
     {
-        $data = $request->validate(['closed_at' => 'nullable|date']);
+        $data = $request->validate([
+            'closed_at' => 'nullable|date',
+            'premature_rate_percent' => 'nullable|numeric|min:0|max:999',
+        ]);
         $reason = $this->prematureBlockReason($fixedDeposit);
         if ($reason) {
             return response()->json(['message' => $reason], 422);
         }
 
-        return response()->json($this->prematureFigures($fixedDeposit, $data['closed_at'] ?? now()->format('Y-m-d')));
+        return response()->json($this->prematureFigures(
+            $fixedDeposit,
+            $data['closed_at'] ?? now()->format('Y-m-d'),
+            isset($data['premature_rate_percent']) ? (float) $data['premature_rate_percent'] : null,
+        ));
     }
 
     /** Closes the whole FD before maturity at the product's premature rate and pays out principal + entitled interest. */
@@ -585,11 +592,16 @@ class FixedDepositController extends Controller
             'reference_no' => 'nullable|string|max:64',
             'notes' => 'nullable|string',
             'closed_at' => 'nullable|date|before_or_equal:today',
+            'premature_rate_percent' => 'nullable|numeric|min:0|max:999',
         ]);
 
         $withdrawal = DB::transaction(function () use ($fixedDeposit, $data, $request) {
             $closedAt = $data['closed_at'] ?? now()->format('Y-m-d');
-            $f = $this->prematureFigures($fixedDeposit, $closedAt);
+            $f = $this->prematureFigures(
+                $fixedDeposit,
+                $closedAt,
+                isset($data['premature_rate_percent']) ? (float) $data['premature_rate_percent'] : null,
+            );
             if ($f['total'] <= 0) {
                 throw ValidationException::withMessages(['closed_at' => 'Interest already paid exceeds the principal - nothing is payable. Review the FD before closing.']);
             }
