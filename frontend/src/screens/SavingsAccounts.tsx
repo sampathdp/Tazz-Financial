@@ -8,6 +8,7 @@ import {
   type SavingsAccountSummary, type Branch, type Customer, type AuthUser,
 } from '../api'
 import { Can, userCan } from '../lib/permissions'
+import { AdminEditButton } from '../components/AdminEditButton'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -135,6 +136,17 @@ export function SavingsAccountsScreen({ user: me }: { go: Go; user?: AuthUser | 
       <div>
         <div className="row gap-2 no-print" style={{ marginBottom: 16 }}>
           <Btn variant="solid" icon="chev" onClick={() => { setSelected(null); setTxns([]) }}>Back</Btn>
+          {selected.status !== 'Closed' && (
+            <AdminEditButton user={me} title={`Edit ${selected.accountNumber}`} values={{ ...selected }}
+              hint="Notes can always be changed. Rate and fee terms are blocked once the account has any movement beyond the opening deposit."
+              fields={[
+                { key: 'interestRatePercent', label: 'Interest Rate %', type: 'number', step: '0.001' },
+                { key: 'minBalance', label: 'Minimum Balance', type: 'number', step: '0.01' },
+                { key: 'withdrawalFee', label: 'Withdrawal Fee', type: 'number', step: '0.01' },
+                { key: 'notes', label: 'Notes', type: 'textarea' },
+              ]}
+              onSave={(v) => savingsAccountsApi.adminUpdate(selected.id, v)} onSaved={(a) => { setSelected(a); refresh() }} />
+          )}
           {canEdit && selected.status !== 'Closed' && <>
             <Btn variant="primary" icon="plus" onClick={() => startAction('deposit')}>Deposit</Btn>
             <Btn variant="solid" icon="receipt" onClick={() => startAction('withdraw')} disabled={selected.status === 'Frozen'}>Withdraw</Btn>

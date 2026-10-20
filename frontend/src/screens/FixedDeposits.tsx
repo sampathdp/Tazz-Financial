@@ -13,6 +13,7 @@ import {
   type FdAutoRenewMode, type FdInterestTreatment, type FdWithdrawalPreview,
 } from '../api'
 import { Can } from '../lib/permissions'
+import { AdminEditButton } from '../components/AdminEditButton'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -638,6 +639,17 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
       <div className="row gap-2" style={{ marginBottom: 16 }}>
         <Btn variant="solid" icon="chev" onClick={onBack}>Back to List</Btn>
         <Btn variant="solid" icon="print" onClick={() => onPrint({ kind: 'certificate', fd })}>Print Certificate</Btn>
+        {fd.status === 'Active' && (
+          <AdminEditButton user={me} title={`Edit ${fd.fdNumber}`} values={{ ...fd }}
+            hint="Principal is fixed by the allocated deposit. Editing is blocked once any interest, part payment or lien exists."
+            fields={[
+              { key: 'interestRatePercent', label: 'Annual Rate %', type: 'number', step: '0.001' },
+              { key: 'termMonths', label: 'Term (months)', type: 'number' },
+              { key: 'startDate', label: 'Start Date', type: 'date' },
+              { key: 'interestPaymentMethod', label: 'Interest Payment', type: 'select', options: [{ value: 'monthly', label: 'Monthly' }, { value: 'maturity', label: 'At maturity' }] },
+            ]}
+            onSave={(v) => fixedDepositsApi.adminUpdate(fd.id, v as any)} onSaved={onChanged} />
+        )}
         {fd.status === 'Active' && <Can user={me} module="Fixed Deposits" action="Edit"><Btn variant="solid" icon="swap" onClick={() => setAutoRenewOpen(true)}>Auto-renew</Btn></Can>}
         {canRenewOrWithdraw && (
           <Can user={me} module="Fixed Deposits" action="Edit">

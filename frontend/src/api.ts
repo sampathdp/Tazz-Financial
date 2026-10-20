@@ -2005,6 +2005,9 @@ export const fixedDepositsApi = {
   list: (params?: { status?: FixedDepositStatus; customerId?: number; matured?: boolean; maturingWithinDays?: number }) =>
     http.get('/fixed-deposits', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as FixedDeposit[]),
   get: (id: number) => http.get(`/fixed-deposits/${id}`).then((r) => camelize(r.data) as FixedDeposit),
+  /** Admin only — before any payment/part payment/lien. */
+  adminUpdate: (id: number, body: { interestRatePercent: number | string; termMonths: number | string; startDate: string; interestPaymentMethod: FdInterestMethod }) =>
+    http.put(`/fixed-deposits/${id}`, snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
   create: (body: { depositId: number; fundingProductId: number; termMonths: number; startDate: string; interestPaymentMethod?: FdInterestMethod } & Partial<FdAutoRenewInput>) =>
     http.post('/fixed-deposits', snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
   renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput; interestTreatment?: FdInterestTreatment } & Partial<FdAutoRenewInput>) =>
@@ -2139,6 +2142,8 @@ export const borrowingsApi = {
   list: (params?: { type?: BorrowingType; status?: BorrowingStatus }) =>
     http.get('/borrowings', { params }).then((r) => camelize(r.data) as Borrowing[]),
   get: (id: number) => http.get(`/borrowings/${id}`).then((r) => camelize(r.data) as Borrowing),
+  /** Admin only — before any transaction or accrued interest. */
+  adminUpdate: (id: number, body: Record<string, unknown>) => http.put(`/borrowings/${id}`, snakeize(body)).then((r) => camelize(r.data) as Borrowing),
   nextNumber: (branchId: number) =>
     http.get('/borrowings/next-number', { params: { branch_id: branchId } }).then((r) => r.data.code as string),
   /** Form dropdown data, served under the Borrowings permission (so the form works
@@ -2180,6 +2185,8 @@ export interface BranchFundingCreateInput {
 export const branchFundingApi = {
   list: (params?: { status?: BranchFundingStatus }) => http.get('/branch-funding', { params }).then((r) => camelize(r.data) as BranchFunding[]),
   get: (id: number) => http.get(`/branch-funding/${id}`).then((r) => camelize(r.data) as BranchFunding),
+  /** Admin only — while still Requested. */
+  adminUpdate: (id: number, body: Record<string, unknown>) => http.put(`/branch-funding/${id}`, snakeize(body)).then((r) => camelize(r.data) as BranchFunding),
   lookups: () => http.get('/branch-funding/lookups').then((r) => camelize(r.data) as BranchFundingLookups),
   create: (body: BranchFundingCreateInput) => http.post('/branch-funding', snakeize(body)).then((r) => camelize(r.data) as BranchFunding),
   approve: (id: number, disbursedOn?: string) => http.post(`/branch-funding/${id}/approve`, snakeize({ disbursedOn })).then((r) => camelize(r.data) as BranchFunding),
@@ -2447,6 +2454,8 @@ export const savingsAccountsApi = {
   list: (params?: { status?: SavingsAccountStatus; customerId?: number; productId?: number }) =>
     http.get('/savings-accounts', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as SavingsAccount[]),
   get: (id: number) => http.get(`/savings-accounts/${id}`).then((r) => camelize(r.data) as SavingsAccount),
+  /** Admin only — notes always; interest/fee terms only before any movement beyond the opening deposit. */
+  adminUpdate: (id: number, body: Record<string, unknown>) => http.put(`/savings-accounts/${id}`, snakeize(body)).then((r) => camelize(r.data) as SavingsAccount),
   statement: (id: number, params?: { from?: string; to?: string; postedOnly?: boolean }) =>
     http.get(`/savings-accounts/${id}/statement`, { params: snakeize(params || {}) }).then((r) => camelize(r.data) as { account: SavingsAccount; transactions: SavingsTransaction[]; summary: SavingsAccountSummary }),
   nextNumber: (branchId: number, savingsProductId?: number) =>
@@ -3024,6 +3033,9 @@ export interface OverduePawning extends Pawning {
 export const pawningsApi = {
   list: (status?: PawningStatus) => http.get('/pawnings', { params: { status } }).then((r) => camelize(r.data) as Pawning[]),
   get: (id: number) => http.get(`/pawnings/${id}`).then((r) => camelize(r.data) as Pawning),
+  /** Admin only — article description/remark, before any payment. */
+  adminUpdate: (id: number, body: { articles: { id: number; description: string; remark?: string | null }[] }) =>
+    http.put(`/pawnings/${id}`, body).then((r) => camelize(r.data) as Pawning),
   overdue: () => http.get('/pawnings-overdue').then((r) => camelize(r.data) as OverduePawning[]),
   create: (body: { branchId: number; customerId: number; pawningTypeId: number; principalAmount: number | string; startDate?: string; purpose?: string; previousFacilityId?: number; articles: PawningArticleInput[] }) =>
     http.post('/pawnings', snakeize(body)).then((r) => camelize(r.data) as Pawning),

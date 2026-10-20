@@ -12,6 +12,7 @@ import { Card, Btn, Badge, Field, Input, Table, Td, Modal, ErrorBanner } from '.
 import { Icon } from '../../components/Icon'
 import { pawningsApi, type Pawning, type PawningCollateralItem, type PawningPayment, type PaymentMethod, type AuthUser } from '../../api'
 import { Can } from '../../lib/permissions'
+import { AdminEditButton } from '../../components/AdminEditButton'
 import { useNotify } from '../../components/Notify'
 import { getErrorText } from '../../lib/apiError'
 
@@ -204,6 +205,15 @@ function TicketActions({ pawning: d, me, onChanged }: { pawning: Pawning; me?: A
 
   return (
     <div className="row gap-2">
+      <AdminEditButton user={me} title={`Edit ${d.code}`}
+        values={Object.fromEntries((d.collateral || []).flatMap((c) => [[`d${c.id}`, c.description], [`r${c.id}`, c.pawnDetail?.remark]]))}
+        hint="Only article descriptions and remarks can change; weights and values drive the advance already paid out. Blocked once any payment exists."
+        fields={(d.collateral || []).flatMap((c, i) => [
+          { key: `d${c.id}`, label: `Article ${i + 1} description`, full: true },
+          { key: `r${c.id}`, label: `Article ${i + 1} remark`, full: true },
+        ])}
+        onSave={(v) => pawningsApi.adminUpdate(d.id, { articles: (d.collateral || []).map((c) => ({ id: c.id, description: v[`d${c.id}`] || c.description, remark: v[`r${c.id}`] })) })}
+        onSaved={onChanged} />
       <Can user={me} module="Pawning Payments" action="Create">
         <Btn variant="solid" size="sm" icon="clock" onClick={() => setRenewOpen(true)}>Renew</Btn>
         <Btn variant="primary" size="sm" icon="check" onClick={() => setRedeemOpen(true)}>Redeem</Btn>

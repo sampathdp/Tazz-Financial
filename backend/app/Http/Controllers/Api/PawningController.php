@@ -89,6 +89,34 @@ class PawningController extends Controller
             ->values();
     }
 
+    /**
+     * Admin-only correction of article descriptions / remarks. Weights, rates and values
+     * drive the posted principal, so they are not editable. Only before any payment.
+     */
+    public function adminUpdate(Request $request, Pawning $pawning)
+    {
+        if ($pawning->status !== 'Active' || $pawning->payments()->exists() || $pawning->renewals()->exists() || $pawning->redemptions()->exists()) {
+            return response()->json(['message' => 'This pawn ticket already has payments or is closed and can no longer be edited.'], 422);
+        }
+
+        $data = $request->validate([
+            'articles' => 'required|array|min:1',
+            'articles.*.id' => 'required|integer',
+            'articles.*.description' => 'required|string|max:255',
+            'articles.*.remark' => 'nullable|string|max:255',
+        ]);
+
+        DB::transaction(function () use ($pawning, $data) {
+            foreach ($data['articles'] as $a) {
+                $collateral = $pawning->collateral()->findOrFail($a['id']);
+                $collateral->update(['description' => $a['description']]);
+                $collateral->pawnDetail()->update(['remark' => $a['remark'] ?? null]);
+            }
+        });
+
+        return $this->show($pawning->fresh());
+    }
+
     public function show(Pawning $pawning)
     {
         $pawning->load(self::DETAIL_RELATIONS);

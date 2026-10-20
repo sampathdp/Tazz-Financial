@@ -56,6 +56,43 @@ class BorrowingController extends Controller
         });
     }
 
+    /**
+     * Admin-only correction of a borrowing's terms. Principal, date and the receiving account
+     * are already posted to the ledger, so they are not editable. Only allowed before any
+     * transaction or accrued interest.
+     */
+    public function adminUpdate(Request $request, Borrowing $borrowing)
+    {
+        if ($borrowing->status !== 'Active') {
+            return response()->json(['message' => 'Only an active borrowing can be edited.'], 422);
+        }
+        if ($borrowing->transactions()->exists() || $borrowing->renewals()->exists()
+            || (float) $borrowing->accrued_interest_unpaid > 0
+            || ($borrowing->interest_accrued_through && $borrowing->interest_accrued_through->ne($borrowing->borrowing_date))) {
+            return response()->json(['message' => 'This borrowing already has transactions or accrued interest and can no longer be edited.'], 422);
+        }
+
+        $data = $request->validate([
+            'lender_name' => 'required|string|max:160',
+            'source' => 'nullable|string|max:255',
+            'purpose' => 'nullable|string',
+            'interest_rate_percent' => 'nullable|numeric|min:0|max:999',
+            'term_months' => 'nullable|integer|min:1|max:600',
+            'maturity_date' => 'nullable|date|after_or_equal:' . $borrowing->borrowing_date->toDateString(),
+            'on_maturity' => ['nullable', Rule::in(['Renew', 'Settle'])],
+            'reference_no' => 'nullable|string|max:64',
+            'contract_no' => 'nullable|string|max:80',
+            'notes' => 'nullable|string',
+        ]);
+        if (empty($data['maturity_date']) && !empty($data['term_months'])) {
+            $data['maturity_date'] = $borrowing->borrowing_date->copy()->addMonthsNoOverflow((int) $data['term_months'])->toDateString();
+        }
+
+        $borrowing->update($data);
+
+        return $this->show($borrowing->fresh());
+    }
+
     public function show(Borrowing $borrowing)
     {
         $borrowing->load(array_merge(self::RELATIONS, self::DETAIL_RELATIONS));

@@ -10,6 +10,7 @@ import {
   type BranchFunding, type BranchFundingStatus, type BranchFundingAccrual, type BranchFundingLookups, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
+import { AdminEditButton } from '../components/AdminEditButton'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -168,6 +169,22 @@ export function BranchFundingScreen({ go: _go, user: me }: { go: Go; user?: Auth
             <div><div className="t-2" style={{ fontSize: 11.5 }}>Status</div><Badge tone={STATUS_TONE[detail.status]} dot>{detail.status}</Badge></div>
           </div>
 
+          {detail.status === 'Requested' && (
+            <div className="row gap-2" style={{ marginBottom: 12 }}>
+              <AdminEditButton user={me} title={`Edit ${detail.code}`} values={{ ...detail }}
+                hint="Branches are fixed; amount and terms can change until the agreement is approved."
+                fields={[
+                  { key: 'principalAmount', label: 'Principal', type: 'number', step: '0.01' },
+                  { key: 'interestRatePercent', label: 'Rate % p.a.', type: 'number', step: '0.001' },
+                  { key: 'accrualMode', label: 'Interest Booked', type: 'select', options: Object.entries(MODE_LABEL).map(([value, label]) => ({ value, label: String(label) })) },
+                  { key: 'requestDate', label: 'Request Date', type: 'date' },
+                  { key: 'purpose', label: 'Purpose', full: true },
+                  { key: 'notes', label: 'Notes', type: 'textarea' },
+                ]}
+                onSave={(v) => branchFundingApi.adminUpdate(detail.id, { ...v })}
+                onSaved={(r) => { setDetail(r); refresh() }} />
+            </div>
+          )}
           {detail.status === 'Requested' && (
             <Can user={me} module="Branch Funding" action="Approve">
               <div className="row gap-2" style={{ marginBottom: 16 }}>

@@ -210,7 +210,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('loan-reports/{type}/pdf', [LoanReportController::class, 'exportPdf'])->middleware('perm:Loan Reports,View');
     Route::get('loans/{loan}', [LoanController::class, 'show'])->middleware('perm:Loan Applications,View');
     Route::post('loans', [LoanController::class, 'store'])->middleware('perm:Loan Applications,Create');
-    Route::put('loans/{loan}', [LoanController::class, 'update'])->middleware('perm:Loan Applications,Edit');
+    Route::put('loans/{loan}', [LoanController::class, 'update'])->middleware('admin');
     Route::delete('loans/{loan}', [LoanController::class, 'destroy'])->middleware('perm:Loan Applications,Delete');
     // approve/reject gated inline by ApprovalType::isAuthorized('loan_application', ...) — see LoanController —
     // not the module permission grid, so who may approve an application is admin-manageable data, same as loan_cancel below.
@@ -339,7 +339,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('speed-drafts-status-counts', [SpeedDraftController::class, 'statusCounts'])->middleware('perm:Speed Drafts,View');
     Route::get('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'show'])->middleware('perm:Speed Drafts,View');
     Route::post('speed-drafts', [SpeedDraftController::class, 'store'])->middleware('perm:Speed Drafts,Create');
-    Route::put('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'update'])->middleware('perm:Speed Drafts,Edit');
+    Route::put('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'update'])->middleware('admin');
     Route::delete('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'destroy'])->middleware('perm:Speed Drafts,Delete');
     // approve/reject gated inline by ApprovalType::isAuthorized('speed_draft_application', ...) — see SpeedDraftController —
     // not the module permission grid, so who may approve is admin-manageable data, same as loan_application above.
@@ -389,6 +389,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // Flat path (not pawnings/overdue) so it can never collide with the pawnings/{pawning} route below.
     Route::get('pawnings-overdue', [PawningController::class, 'overdue'])->middleware('perm:Pawnings,View');
     Route::get('pawnings/{pawning}', [PawningController::class, 'show'])->middleware('perm:Pawnings,View');
+    Route::put('pawnings/{pawning}', [PawningController::class, 'adminUpdate'])->middleware('admin');
     Route::post('pawnings', [PawningController::class, 'store'])->middleware('perm:Pawnings,Create');
     Route::post('pawnings/{pawning}/renew', [PawningController::class, 'renew'])->middleware(['perm:Pawning Payments,Create', 'idempotency']);
     Route::post('pawnings/{pawning}/redeem', [PawningController::class, 'redeem'])->middleware(['perm:Pawning Payments,Create', 'idempotency']);
@@ -554,6 +555,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     Route::get('fixed-deposits', [FixedDepositController::class, 'index'])->middleware('perm:Fixed Deposits,View');
     Route::get('fixed-deposits/{fixedDeposit}', [FixedDepositController::class, 'show'])->middleware('perm:Fixed Deposits,View');
+    Route::put('fixed-deposits/{fixedDeposit}', [FixedDepositController::class, 'adminUpdate'])->middleware('admin');
     Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->middleware('perm:Fixed Deposits,Create');
     Route::post('fixed-deposits/{fixedDeposit}/renew', [FixedDepositController::class, 'renew'])->middleware('perm:Fixed Deposits,Edit');
     Route::post('fixed-deposits/{fixedDeposit}/withdraw', [FixedDepositController::class, 'withdraw'])->middleware('perm:Fixed Deposits,Edit');
@@ -576,6 +578,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('borrowings/next-number', [BorrowingController::class, 'nextNumber'])->middleware('perm:Borrowings,Create');
     Route::get('borrowings/lookups', [BorrowingController::class, 'lookups'])->middleware('perm:Borrowings,View');
     Route::get('borrowings/{borrowing}', [BorrowingController::class, 'show'])->middleware('perm:Borrowings,View');
+    Route::put('borrowings/{borrowing}', [BorrowingController::class, 'adminUpdate'])->middleware('admin');
     Route::post('borrowings', [BorrowingController::class, 'store'])->middleware(['perm:Borrowings,Create', 'idempotency']);
     Route::post('borrowings/{borrowing}/renew', [BorrowingController::class, 'renew'])->middleware('perm:Borrowings,Edit');
     Route::post('borrowings/{borrowing}/transactions', [BorrowingController::class, 'addTransaction'])->middleware(['perm:Borrowings,Edit', 'idempotency']);
@@ -586,6 +589,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('branch-funding', [\App\Http\Controllers\Api\BranchFundingController::class, 'index'])->middleware('perm:Branch Funding,View');
     Route::get('branch-funding/lookups', [\App\Http\Controllers\Api\BranchFundingController::class, 'lookups'])->middleware('perm:Branch Funding,View');
     Route::get('branch-funding/{id}', [\App\Http\Controllers\Api\BranchFundingController::class, 'show'])->middleware('perm:Branch Funding,View');
+    Route::put('branch-funding/{id}', [\App\Http\Controllers\Api\BranchFundingController::class, 'adminUpdate'])->middleware('admin');
     Route::post('branch-funding', [\App\Http\Controllers\Api\BranchFundingController::class, 'store'])->middleware('perm:Branch Funding,Create');
     Route::post('branch-funding/{id}/approve', [\App\Http\Controllers\Api\BranchFundingController::class, 'approve'])->middleware('perm:Branch Funding,Approve');
     Route::post('branch-funding/{id}/reject', [\App\Http\Controllers\Api\BranchFundingController::class, 'reject'])->middleware('perm:Branch Funding,Approve');
@@ -602,6 +606,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('savings-accounts', [SavingsAccountController::class, 'index'])->middleware('perm:Savings Accounts,View');
     Route::get('savings-accounts/next-number', [SavingsAccountController::class, 'nextNumber'])->middleware('perm:Savings Accounts,Create');
     Route::get('savings-accounts/{savingsAccount}', [SavingsAccountController::class, 'show'])->middleware('perm:Savings Accounts,View');
+    Route::put('savings-accounts/{savingsAccount}', [SavingsAccountController::class, 'adminUpdate'])->middleware('admin');
     Route::get('savings-accounts/{savingsAccount}/statement', [SavingsAccountController::class, 'statement'])->middleware('perm:Savings Accounts,View');
     Route::post('savings-accounts', [SavingsAccountController::class, 'store'])->middleware(['perm:Savings Accounts,Create', 'idempotency']);
     Route::post('savings-accounts/{savingsAccount}/deposit', [SavingsAccountController::class, 'deposit'])->middleware(['perm:Savings Accounts,Edit', 'idempotency']);

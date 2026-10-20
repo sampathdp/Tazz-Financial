@@ -118,6 +118,37 @@ class BranchFundingController extends Controller
         });
     }
 
+    /** Admin-only edit of an agreement that is still awaiting approval (nothing posted yet). */
+    public function adminUpdate(Request $request, int $id)
+    {
+        $data = $request->validate([
+            'lender_account_id' => 'sometimes|integer|exists:chart_of_accounts,id',
+            'borrower_account_id' => 'sometimes|integer|exists:chart_of_accounts,id',
+            'principal_amount' => 'required|numeric|gt:0',
+            'interest_rate_percent' => 'required|numeric|min:0|max:100',
+            'accrual_mode' => 'required|in:' . implode(',', self::MODES),
+            'request_date' => 'required|date',
+            'purpose' => 'nullable|string|max:255',
+            'notes' => 'nullable|string',
+        ]);
+
+        return DB::transaction(function () use ($id, $data) {
+            $a = BranchFundingAgreement::lockForUpdate()->findOrFail($id);
+            if ($a->status !== 'Requested') {
+                throw ValidationException::withMessages(['status' => "Agreement {$a->code} is {$a->status}; only a requested agreement can be edited."]);
+            }
+            if (isset($data['lender_account_id'])) {
+                $this->assertAccountBelongs((int) $data['lender_account_id'], (int) $a->lender_branch_id, 'lender_account_id');
+            }
+            if (isset($data['borrower_account_id'])) {
+                $this->assertAccountBelongs((int) $data['borrower_account_id'], (int) $a->borrower_branch_id, 'borrower_account_id');
+            }
+            $a->update($data);
+
+            return $a->load(['lenderBranch:id,name,code', 'borrowerBranch:id,name,code']);
+        });
+    }
+
     /** Head Office approves: checks the lender's cash and the borrower's limit, then pays the funding out. */
     public function approve(Request $request, int $id)
     {

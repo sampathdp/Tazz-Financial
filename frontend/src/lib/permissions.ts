@@ -6,6 +6,9 @@ import type { AuthUser } from '../api'
 
 export type Action = 'View' | 'Create' | 'Edit' | 'Delete' | 'Approve' | 'Export'
 
+/** Admin-only features (e.g. editing a facility) — mirrors the backend `admin` middleware. */
+export const isAdmin = (user: AuthUser | null | undefined): boolean => user?.role === 'admin'
+
 export function userCan(user: AuthUser | null | undefined, module: string, action: Action = 'View'): boolean {
   if (!user) return false
   const list = user.permissions || []

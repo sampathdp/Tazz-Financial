@@ -12,7 +12,7 @@ import {
   speedDraftsApi, speedDraftCollateralApi, speedDraftCollateralDocumentsApi, speedDraftPaymentsApi, bankAccountsApi,
   type SpeedDraft, type SpeedDraftPayment, type SpeedDraftCollateralInput, type SpeedDraftCollateralDocument, type AuthUser, type PaymentMethod, type BankAccount,
 } from '../../api'
-import { Can, canApprove } from '../../lib/permissions'
+import { Can, canApprove, isAdmin } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
 import { getErrorText } from '../../lib/apiError'
 import type { Go } from '../types'
@@ -283,9 +283,7 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
   if (d.status === 'Pending') {
     return (
       <div className="row gap-2">
-        <Can user={me} module="Speed Drafts" action="Edit">
-          <Btn variant="solid" size="sm" icon="edit" onClick={() => go?.(`sd/drafts/${d.id}/edit`)}>Edit</Btn>
-        </Can>
+        {isAdmin(me) && <Btn variant="solid" size="sm" icon="edit" onClick={() => go?.(`sd/drafts/${d.id}/edit`)}>Edit</Btn>}
         {canApprove(me, 'speed_draft_application') && me?.id !== d.pendingApplicationRequest?.requester?.id && (
           <>
             <Btn variant="primary" size="sm" icon="check" onClick={approve} disabled={busy}>Approve</Btn>

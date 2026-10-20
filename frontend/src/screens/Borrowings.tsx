@@ -25,6 +25,7 @@ import {
   type BorrowingCreateInput, type FdPaymentMethod, type Branch, type CashAccount, type BankAccount, type Pawning, type AuthUser,
 } from '../api'
 import { Can } from '../lib/permissions'
+import { AdminEditButton } from '../components/AdminEditButton'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -414,6 +415,25 @@ function BorrowingDetail({ borrowing, me, cashAccounts, bankAccounts, onClose, o
 
   return (
     <Modal open onClose={onClose} width={720} title={`${b.borrowingNumber} — ${TYPE_LABEL(b.type)}`}>
+      {b.status === 'Active' && (
+        <div className="row gap-2" style={{ marginBottom: 12 }}>
+          <AdminEditButton user={me} title={`Edit ${b.borrowingNumber}`} values={{ ...b }}
+            hint="Amount, date and receiving account are already posted to the ledger. Editing is blocked once any transaction or interest has been booked."
+            fields={[
+              { key: 'lenderName', label: 'Party / Lender' },
+              { key: 'source', label: 'Source' },
+              { key: 'interestRatePercent', label: 'Rate %', type: 'number', step: '0.001' },
+              { key: 'termMonths', label: 'Term (months)', type: 'number' },
+              { key: 'maturityDate', label: 'Maturity Date', type: 'date' },
+              { key: 'onMaturity', label: 'On Maturity', type: 'select', options: [{ value: '', label: '—' }, { value: 'Renew', label: 'Renew' }, { value: 'Settle', label: 'Settle' }] },
+              { key: 'referenceNo', label: 'Reference No' },
+              { key: 'contractNo', label: 'Contract No' },
+              { key: 'purpose', label: 'Purpose', type: 'textarea' },
+              { key: 'notes', label: 'Notes', type: 'textarea' },
+            ]}
+            onSave={(v) => borrowingsApi.adminUpdate(b.id, v)} onSaved={(r) => onChanged(r)} />
+        </div>
+      )}
       <div className="col gap-2" style={{ fontSize: 13, marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--line)' }}>
         <div className="row between"><span className="t-2">Party / Lender</span><b>{b.lenderName}</b></div>
         <div className="row between"><span className="t-2">Source</span><b>{b.source || '—'}</b></div>

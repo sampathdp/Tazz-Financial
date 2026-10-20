@@ -63,6 +63,53 @@ class FixedDepositController extends Controller
         return $q->get();
     }
 
+    /**
+     * Admin-only correction of rate / term / start date / interest method. The principal is
+     * tied to the allocated deposit's posted cash, so it is not editable. Only allowed before
+     * any interest payment, part payment, lien, renewal or withdrawal.
+     */
+    public function adminUpdate(Request $request, FixedDeposit $fixedDeposit)
+    {
+        if ($fixedDeposit->status !== 'Active' || $fixedDeposit->renewed_to_id || $fixedDeposit->withdrawal()->exists()) {
+            return response()->json(['message' => 'Only an active, un-renewed fixed deposit can be edited.'], 422);
+        }
+        if ($fixedDeposit->interestPayments()->where('paid_amount', '>', 0)->exists()
+            || $fixedDeposit->partPayments()->exists()
+            || (float) $fixedDeposit->lien_amount > 0) {
+            return response()->json(['message' => 'This fixed deposit already has a payment, part payment or lien and can no longer be edited.'], 422);
+        }
+
+        $data = $request->validate([
+            'interest_rate_percent' => 'required|numeric|min:0|max:100',
+            'term_months' => 'required|integer|min:1|max:600',
+            'start_date' => 'required|date',
+            'interest_payment_method' => ['required', Rule::in(self::INTEREST_METHODS)],
+        ]);
+
+        DB::transaction(function () use ($fixedDeposit, $data) {
+            $calc = FdInterestCalculator::calculate((float) $fixedDeposit->principal_amount, (float) $data['interest_rate_percent'], (int) $data['term_months'], $data['interest_payment_method']);
+            $fixedDeposit->update([
+                'interest_rate_percent' => $data['interest_rate_percent'],
+                'interest_payment_method' => $data['interest_payment_method'],
+                'term_months' => $data['term_months'],
+                'start_date' => $data['start_date'],
+                'maturity_date' => Carbon::parse($data['start_date'])->addMonthsNoOverflow((int) $data['term_months'])->format('Y-m-d'),
+                'monthly_interest_amount' => $calc['monthlyInterestAmount'],
+                'total_interest_amount' => $calc['totalInterestAmount'],
+                'maturity_amount' => $calc['maturityAmount'],
+                'next_interest_date' => null,
+            ]);
+            $fixedDeposit->interestPayments()->delete();
+            if ($data['interest_payment_method'] === 'monthly') {
+                $rows = FdInterestCalculator::generateSchedule($fixedDeposit->fresh());
+                $fixedDeposit->interestPayments()->insert($rows);
+                $fixedDeposit->update(['next_interest_date' => $rows[0]['due_date'] ?? null]);
+            }
+        });
+
+        return $this->show($fixedDeposit->fresh());
+    }
+
     public function show(FixedDeposit $fixedDeposit)
     {
         return $fixedDeposit->load(self::DETAIL_RELATIONS);

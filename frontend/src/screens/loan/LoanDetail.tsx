@@ -15,7 +15,7 @@ import {
   type LoanCharge, type PaymentMethod, type LoanCollateralDocument,
   type FacilityStatusEventType, type AuthUser,
 } from '../../api'
-import { Can, canApprove } from '../../lib/permissions'
+import { Can, canApprove, isAdmin } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
 import { CustomerDetailCard } from '../../components/CustomerDetailCard'
 import { getErrorText } from '../../lib/apiError'
@@ -220,9 +220,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
         <div className="row gap-2 wrap">
           {loan.status === 'Pending' && context === 'applications' && (
             <>
-              <Can user={me} module="Loan Applications" action="Edit">
-                <Btn size="sm" variant="solid" icon="edit" onClick={() => go?.(`loan/apps/${loan.id}/edit`)}>Edit</Btn>
-              </Can>
+              {isAdmin(me) && <Btn size="sm" variant="solid" icon="edit" onClick={() => go?.(`loan/apps/${loan.id}/edit`)}>Edit</Btn>}
               {canApprove(me, 'loan_application') && me?.id !== loan.pendingApplicationRequest?.requester?.id && (
                 <>
                   <Btn size="sm" variant="primary" icon="check" onClick={approveApplication} disabled={busy}>Approve</Btn>

@@ -51,6 +51,39 @@ class SavingsAccountController extends Controller
         return $q->get();
     }
 
+    /**
+     * Admin-only edit. Notes are always editable on an open account; interest/fee terms only
+     * before any movement beyond the opening deposit (and its fee).
+     */
+    public function adminUpdate(Request $request, SavingsAccount $savingsAccount)
+    {
+        if ($savingsAccount->status === 'Closed') {
+            return response()->json(['message' => 'A closed account cannot be edited.'], 422);
+        }
+        $data = $request->validate([
+            'notes' => 'nullable|string',
+            'interest_rate_percent' => 'nullable|numeric|min:0|max:100',
+            'interest_calc_method' => 'nullable|string|max:40',
+            'interest_posting_frequency' => 'nullable|string|max:40',
+            'min_balance' => 'nullable|numeric|min:0',
+            'withdrawal_fee' => 'nullable|numeric|min:0',
+        ]);
+
+        $txns = $savingsAccount->transactions();
+        $moved = (clone $txns)->whereNotIn('type', ['Deposit', 'Fee'])->exists()
+            || (clone $txns)->where('type', 'Deposit')->count() > 1
+            || (clone $txns)->where('type', 'Fee')->count() > 1
+            || (float) $savingsAccount->interest_accrued > 0;
+        $terms = array_diff_key($data, ['notes' => 1]);
+        if ($moved && array_filter($terms, fn ($v) => $v !== null)) {
+            return response()->json(['message' => 'This account already has transactions; only the notes can be edited.'], 422);
+        }
+
+        $savingsAccount->update(array_filter($data, fn ($v, $k) => $k === 'notes' || $v !== null, ARRAY_FILTER_USE_BOTH));
+
+        return $this->show($savingsAccount->fresh());
+    }
+
     public function show(SavingsAccount $savingsAccount)
     {
         return $savingsAccount->load(self::DETAIL_RELATIONS);
