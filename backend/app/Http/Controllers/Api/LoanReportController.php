@@ -165,8 +165,12 @@ class LoanReportController extends Controller
             ['key' => 'code', 'label' => 'Loan Code'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'branch', 'label' => 'Branch'], ['key' => 'loanType', 'label' => 'Loan Type'],
             ['key' => 'officer', 'label' => 'Officer'], ['key' => 'principal', 'label' => 'Principal', 'align' => 'right', 'format' => 'money'],
             ['key' => 'disbursed', 'label' => 'Disbursed'], ['key' => 'status', 'label' => 'Status', 'align' => 'center'],
+            ['key' => 'bank', 'label' => 'Bank'], ['key' => 'accountHolder', 'label' => 'Account Holder'], ['key' => 'accountNo', 'label' => 'Account No'],
         ];
         $mapped = $loans->map(fn (Loan $l) => [
+            'bank' => $l->bankDetail ? trim($l->bankDetail->bank?->name . ' ' . $l->bankDetail->bank_branch) : '�',
+            'accountHolder' => $l->bankDetail?->account_holder ?? '�',
+            'accountNo' => $l->bankDetail?->account_number ?? '�',
             'code' => $l->code, 'customer' => $l->customer?->full_name ?? '—', 'branch' => $l->branch?->name ?? '—',
             'loanType' => $l->loanDetail?->loanType?->name ?? '—', 'officer' => $l->loanDetail?->loanOfficer?->name ?? '—',
             'principal' => (float) $l->principal_amount, 'disbursed' => $l->disbursed_at?->format('Y-m-d') ?? '—', 'status' => $l->status,
@@ -344,7 +348,9 @@ class LoanReportController extends Controller
         $from = $request->filled('from') ? Carbon::parse($request->from)->startOfDay() : now()->startOfMonth();
         $to = $request->filled('to') ? Carbon::parse($request->to)->endOfDay() : now()->endOfDay();
 
-        return Loan::with(self::LIST_RELATIONS)
+        // Doubles as the payout list: the finance desk sends each loan's money to the
+        // customer's bank account, so this report (unlike the rest) carries the full number.
+        return Loan::with([...self::LIST_RELATIONS, 'bankDetail.bank:id,name'])
             ->whereNotNull('disbursed_at')
             // A rescheduled loan carries a disbursed_at/disbursed_amount for its
             // schedule math but moves no new money — exclude it from disbursement figures.
@@ -352,7 +358,8 @@ class LoanReportController extends Controller
             ->whereBetween('disbursed_at', [$from, $to])
             ->when($request->filled('loanTypeId'), fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $request->loanTypeId)))
             ->orderByDesc('disbursed_at')
-            ->get();
+            ->get()
+            ->each(fn (Loan $l) => $l->bankDetail?->makeVisible('account_number'));
     }
 
     private function closedLoans(Request $request)

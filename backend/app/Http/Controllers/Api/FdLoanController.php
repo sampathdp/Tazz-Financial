@@ -60,6 +60,7 @@ class FdLoanController extends Controller
         $data = $request->validate([
             'branch_id' => 'required|exists:branches,id',
             'fixed_deposit_id' => 'required|exists:fixed_deposits,id',
+            'customer_bank_detail_id' => 'nullable|exists:customer_bank_details,id',
             'loan_type_id' => 'required|exists:loan_types,id',
             'principal_amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'term_months' => 'required|integer|min:1',
@@ -108,6 +109,8 @@ class FdLoanController extends Controller
                 'branch_id' => $branch->id,
                 'code' => $code,
                 'customer_id' => $fd->customer_id,
+                // Defaults to the account the FD itself pays out to.
+                'customer_bank_detail_id' => \App\Models\CustomerBankDetail::assertBelongsTo((int) ($data['customer_bank_detail_id'] ?? $fd->customer_bank_detail_id), (int) $fd->customer_id),
                 'principal_amount' => $data['principal_amount'],
                 'interest_rate_percent' => $quote['interest_rate_percent'],
                 'rate_period' => $quote['rate_period'],

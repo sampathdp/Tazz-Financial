@@ -364,10 +364,13 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
       columns: [
         { label: 'Loan Code', key: 'code' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' }, { label: 'Loan Type', key: 'loanType' },
         { label: 'Officer', key: 'officer' }, { label: 'Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Disbursed', key: 'disbursed' }, { label: 'Status', key: 'status', align: 'center' },
+        { label: 'Bank', key: 'bank' }, { label: 'Account Holder', key: 'accountHolder' }, { label: 'Account No', key: 'accountNo' },
       ],
       rows: rows.map((l) => ({
         code: l.code, customer: l.customer?.fullName || '—', branch: l.branch?.name || '—', loanType: l.loanDetail?.loanType?.name || '—',
         officer: l.loanDetail?.loanOfficer?.name || '—', principal: Number(l.principalAmount || 0), disbursed: dateOnly(l.disbursedAt), status: l.status,
+        bank: l.bankDetail ? `${l.bankDetail.bank?.name || ''}${l.bankDetail.bankBranch ? ` ${l.bankDetail.bankBranch}` : ''}`.trim() : '—',
+        accountHolder: l.bankDetail?.accountHolder || '—', accountNo: l.bankDetail?.accountNumber || '—',
       })),
       totalRow: { customer: 'Total', principal: total },
       emptyText: 'No disbursements in this range',
@@ -408,6 +411,7 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
             <Table cols={[
               { label: 'Loan Code' }, { label: 'Customer' }, { label: 'Branch' }, { label: 'Loan Type' },
               { label: 'Officer' }, { label: 'Principal', align: 'right' as const }, { label: 'Disbursed' }, { label: 'Status', align: 'center' as const },
+              { label: 'Bank' }, { label: 'Account Holder' }, { label: 'Account No' },
             ]} rows={rows} empty="No disbursements in this range"
               render={(l: Loan) => <>
                 <Td mono>{l.code}</Td>
@@ -418,6 +422,9 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
                 <Td align="right" mono>{money(l.principalAmount)}</Td>
                 <Td>{dateOnly(l.disbursedAt)}</Td>
                 <Td align="center"><Badge tone={l.status === 'Active' ? 'green' : 'neutral'} dot>{l.status}</Badge></Td>
+                <Td>{l.bankDetail ? `${l.bankDetail.bank?.name || ''}${l.bankDetail.bankBranch ? ` · ${l.bankDetail.bankBranch}` : ''}` : '—'}</Td>
+                <Td>{l.bankDetail?.accountHolder || '—'}</Td>
+                <Td mono>{l.bankDetail?.accountNumber || '—'}</Td>
               </>} />
           </Card>
         </>

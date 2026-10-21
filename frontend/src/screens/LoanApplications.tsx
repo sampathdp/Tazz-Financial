@@ -12,6 +12,7 @@ import {
 } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
+import { CustomerBankDetailPicker } from '../components/CustomerBankDetailPicker'
 import { getErrorText } from '../lib/apiError'
 import { DEFAULT_REFERENCE_FORMAT, previewReferenceNumber } from '../lib/referenceNumber'
 import { LoanDetail } from './loan/LoanDetail'
@@ -47,6 +48,7 @@ function loanTypePath(rows: LoanType[], id: number | null | undefined): string {
 
 interface FormState {
   customerId?: number
+  customerBankDetailId?: number
   loanTypeId?: number
   branchId?: number
   principalAmount?: number | string
@@ -164,7 +166,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
         setEditing(loan); setViewing(null)
         const applicationDate = loan.loanDetail?.applicationDate || (loan.createdAt || '').slice(0, 10) || todayIso()
         setForm({
-          customerId: loan.customerId, loanTypeId: loan.loanDetail?.loanTypeId, branchId: loan.branchId,
+          customerId: loan.customerId, customerBankDetailId: loan.customerBankDetailId ?? undefined, loanTypeId: loan.loanDetail?.loanTypeId, branchId: loan.branchId,
           principalAmount: loan.principalAmount, downPayment: loan.loanDetail?.downPayment ?? undefined,
           documentChargeAmount: loan.loanDetail?.documentChargeAmount ?? undefined,
           interestRatePercent: loan.interestRatePercent, termMonths: loan.termMonths,
@@ -217,6 +219,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
 
   const save = async () => {
     if (!form.customerId) { setErr('Select a customer.'); return }
+    if (!form.customerBankDetailId) { setErr("Select or add the customer's payment bank account."); return }
     if (!form.loanTypeId) { setErr('Select a loan product.'); return }
     if (!form.principalAmount) { setErr('Enter the loan amount.'); return }
     if (!form.termMonths) { setErr('Enter the term (months).'); return }
@@ -228,6 +231,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
     const customer = customers.find((c) => c.id === form.customerId)
     const body = {
       customerId: form.customerId,
+      customerBankDetailId: form.customerBankDetailId,
       loanTypeId: form.loanTypeId,
       branchId: customer?.branchId,
       principalAmount: form.principalAmount,
@@ -381,7 +385,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
                 <div style={{ flex: 1 }}>
                   <SearchSelect
                     value={selectedCustomer ? `${selectedCustomer.fullName} (${selectedCustomer.code})` : ''}
-                    onChange={(_n, opt) => setForm((s) => ({ ...s, customerId: opt?.id }))}
+                    onChange={(_n, opt) => setForm((s) => ({ ...s, customerId: opt?.id, customerBankDetailId: opt?.id === s.customerId ? s.customerBankDetailId : undefined }))}
                     options={customers}
                     getLabel={(c) => `${c.fullName} (${c.code})`}
                     getSub={(c) => c.nicNo || c.phone || ''}
@@ -390,6 +394,10 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
                 </div>
                 <Btn variant="solid" icon="plus" onClick={openQuickAdd}>New Customer</Btn>
               </div>
+            </Field>
+
+            <Field label="Payment Bank Account (loan disbursement goes here)" full>
+              <CustomerBankDetailPicker customerId={form.customerId} value={form.customerBankDetailId} onChange={(id) => setForm((s) => ({ ...s, customerBankDetailId: id }))} />
             </Field>
 
             {quickAdd && (

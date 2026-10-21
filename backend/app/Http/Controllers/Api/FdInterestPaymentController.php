@@ -37,10 +37,13 @@ class FdInterestPaymentController extends Controller
             ->where('status', 'Pending')
             ->whereDate('due_date', '<=', $endOfMonth)
             ->whereHas('fixedDeposit', fn ($q) => $q->where('status', 'Active'))
-            ->with(['fixedDeposit:id,fd_number,customer_id', 'fixedDeposit.customer:id,full_name,code,nic_no,phone'])
+            ->with(['fixedDeposit:id,fd_number,customer_id,customer_bank_detail_id', 'fixedDeposit.customer:id,full_name,code,nic_no,phone', 'fixedDeposit.bankDetail.bank:id,name'])
             ->orderBy('due_date')
             ->orderBy('fixed_deposit_id')
             ->get();
+
+        // This list is what the desk keys into the bank transfer batch, so it carries the full account number.
+        $rows->each(fn ($r) => $r->fixedDeposit->bankDetail?->makeVisible('account_number'));
 
         $buckets = ['overdue' => [], 'today' => [], 'this_week' => [], 'this_month' => []];
         foreach ($rows as $row) {

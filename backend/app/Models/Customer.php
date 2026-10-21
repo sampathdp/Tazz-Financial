@@ -90,6 +90,11 @@ class Customer extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function bankDetails()
+    {
+        return $this->hasMany(CustomerBankDetail::class)->orderBy('id');
+    }
+
     public function documents()
     {
         return $this->hasMany(CustomerDocument::class);

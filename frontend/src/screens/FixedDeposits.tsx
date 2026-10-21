@@ -15,6 +15,7 @@ import {
 import { Can } from '../lib/permissions'
 import { AdminEditButton } from '../components/AdminEditButton'
 import { useNotify } from '../components/Notify'
+import { CustomerBankDetailPicker } from '../components/CustomerBankDetailPicker'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
 
@@ -209,6 +210,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   const [deposits, setDeposits] = useState<FdDeposit[]>([])
   const [products, setProducts] = useState<FundingProduct[]>([])
   const [depositLabel, setDepositLabel] = useState('')
+  const [bankDetailId, setBankDetailId] = useState<number | undefined>(undefined)
   const [depositId, setDepositId] = useState<number | undefined>()
   const [productId, setProductId] = useState<number | undefined>()
   const [term, setTerm] = useState<number | '' | 'custom'>('')
@@ -224,7 +226,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
     setAutoRenew(noAutoRenew)
     fdDepositsApi.list({ status: 'Available' }).then(setDeposits).catch(() => setDeposits([]))
     fundingProductsApi.list().then((d) => setProducts(d.filter((p) => (p.status || 'Active') === 'Active'))).catch(() => setProducts([]))
-    setDepositLabel(''); setDepositId(undefined); setProductId(undefined); setTerm(''); setCustomTerm(''); setStartDate(todayIso()); setInterestMethod(''); setErr('')
+    setDepositLabel(''); setDepositId(undefined); setBankDetailId(undefined); setProductId(undefined); setTerm(''); setCustomTerm(''); setStartDate(todayIso()); setInterestMethod(''); setErr('')
   }, [open])
 
   const deposit = deposits.find((d) => d.id === depositId)
@@ -240,11 +242,12 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
 
   const save = async () => {
     if (!depositId) { setErr('Select an available deposit.'); return }
+    if (!bankDetailId) { setErr("Select or add the customer's payment bank account."); return }
     if (!productId) { setErr('Select a funding product.'); return }
     if (!effectiveTerm || effectiveTerm <= 0) { setErr('Select or enter a valid term.'); return }
     setBusy(true); setErr('')
     try {
-      const fd = await fixedDepositsApi.create({ depositId, fundingProductId: productId, termMonths: effectiveTerm, startDate, interestPaymentMethod: interestMethod || undefined, ...autoRenewBody(autoRenew) })
+      const fd = await fixedDepositsApi.create({ depositId, customerBankDetailId: bankDetailId, fundingProductId: productId, termMonths: effectiveTerm, startDate, interestPaymentMethod: interestMethod || undefined, ...autoRenewBody(autoRenew) })
       onCreated(fd)
       notify.success('Fixed Deposit created', fd.fdNumber)
     } catch (ex: any) {
@@ -263,12 +266,15 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
         <Field label="Available Deposit">
           <SearchSelect
             value={depositLabel}
-            onChange={(name, opt: FdDeposit | undefined) => { setDepositId(opt?.id); setDepositLabel(name) }}
+            onChange={(name, opt: FdDeposit | undefined) => { setDepositId(opt?.id); setDepositLabel(name); setBankDetailId(undefined) }}
             options={deposits}
             getLabel={(d: FdDeposit) => `${d.depositNumber} — ${d.customer?.fullName || ''} — ${money(d.amount)}`}
             getSub={(d: FdDeposit) => dateOnly(d.depositDate)}
             placeholder={deposits.length ? 'Search available deposits…' : 'No available deposits — record one first'}
           />
+        </Field>
+        <Field label="Payment Bank Account (interest & maturity payments go here)">
+          <CustomerBankDetailPicker customerId={deposit?.customerId} value={bankDetailId} onChange={setBankDetailId} />
         </Field>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Funding Product"><Select value={productId ?? ''} onChange={(e) => { setProductId(Number(e.target.value) || undefined); setTerm('') }}>

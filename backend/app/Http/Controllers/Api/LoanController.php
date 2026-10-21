@@ -55,6 +55,7 @@ class LoanController extends Controller
         'customer.employmentDetail',
         'customer.businessDetail',
         'branch:id,name,code',
+        'bankDetail.bank:id,name',
         'loanDetail.loanType:id,name,code,parent_id,category,interest_method,interest_rate_percent,rate_period,default_charge_rate_percent,grace_period_days,processing_fee_percent',
         'loanDetail.loanOfficer:id,name',
         'loanDetail.recoveryOfficer:id,name',
@@ -1213,6 +1214,7 @@ class LoanController extends Controller
                 'branch_id' => $loan->branch_id,
                 'code' => $newCode,
                 'customer_id' => $loan->customer_id,
+                'customer_bank_detail_id' => $loan->customer_bank_detail_id,
                 'principal_amount' => $newPrincipal,
                 'interest_rate_percent' => $data['interest_rate_percent'],
                 'rate_period' => $loanType->rate_period,
@@ -1544,6 +1546,7 @@ class LoanController extends Controller
         $validated = $request->validate([
             'branch_id' => 'required|exists:branches,id',
             'customer_id' => 'required|exists:customers,id',
+            'customer_bank_detail_id' => 'required|exists:customer_bank_details,id',
             'loan_type_id' => 'required|exists:loan_types,id',
             'principal_amount' => ['required', 'numeric', 'min:0', new \App\Rules\Money],
             'down_payment' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
@@ -1584,6 +1587,8 @@ class LoanController extends Controller
             'collateral.*.engine_no' => 'nullable|string|max:50',
             'collateral.*.year_of_manufacture' => 'nullable|integer|min:1900|max:' . (date('Y') + 1),
         ]);
+
+        \App\Models\CustomerBankDetail::assertBelongsTo((int) $validated['customer_bank_detail_id'], (int) $validated['customer_id']);
 
         $loanType = LoanType::find($validated['loan_type_id']);
         if (!$loanType->is_product) {
@@ -1634,6 +1639,7 @@ class LoanController extends Controller
         $facilityData = [
             'branch_id' => $validated['branch_id'],
             'customer_id' => $validated['customer_id'],
+            'customer_bank_detail_id' => $validated['customer_bank_detail_id'],
             'principal_amount' => $validated['principal_amount'],
             // The product sets a default rate, but it's negotiable per application.
             'interest_rate_percent' => $validated['interest_rate_percent'] ?? $loanType->interest_rate_percent,

@@ -12,7 +12,7 @@ class FixedDeposit extends Model
     use HasPublicUuid;
 
     protected $fillable = [
-        'fd_number', 'branch_id', 'customer_id', 'funding_product_id',
+        'fd_number', 'branch_id', 'customer_id', 'customer_bank_detail_id', 'funding_product_id',
         'principal_amount', 'interest_rate_percent', 'interest_payment_method',
         'term_months', 'start_date', 'maturity_date',
         'monthly_interest_amount', 'total_interest_amount', 'maturity_amount', 'lien_amount', 'next_interest_date',
@@ -48,6 +48,12 @@ class FixedDeposit extends Model
     public function getIsPledgedAttribute(): bool
     {
         return (float) $this->lien_amount > 0;
+    }
+
+    /** The customer account interest and maturity proceeds are paid to. */
+    public function bankDetail()
+    {
+        return $this->belongsTo(CustomerBankDetail::class, 'customer_bank_detail_id')->withTrashed();
     }
 
     public function liens()

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\CustomerBankDetail;
 use App\Models\FdDeposit;
 use App\Models\FdPartPayment;
 use App\Models\FdRenewal;
@@ -31,6 +32,7 @@ class FixedDepositController extends Controller
 
     private const DETAIL_RELATIONS = [
         'customer:id,full_name,code,nic_no,phone,email,address',
+        'bankDetail.bank:id,name',
         'branch:id,name,code',
         'fundingProduct',
         'deposits.bank:id,name',
@@ -119,6 +121,7 @@ class FixedDepositController extends Controller
     {
         $data = $request->validate([
             'deposit_id' => 'required|exists:fd_deposits,id',
+            'customer_bank_detail_id' => 'required|exists:customer_bank_details,id',
             'funding_product_id' => 'required|exists:funding_products,id',
             'term_months' => 'required|integer|min:1',
             'start_date' => 'required|date',
@@ -132,6 +135,8 @@ class FixedDepositController extends Controller
         if ($deposit->status !== 'Available') {
             throw ValidationException::withMessages(['deposit_id' => 'This deposit has already been allocated to a Fixed Deposit.']);
         }
+
+        CustomerBankDetail::assertBelongsTo((int) $data['customer_bank_detail_id'], (int) $deposit->customer_id);
 
         $product = FundingProduct::findOrFail($data['funding_product_id']);
         if ($product->status !== 'Active') {
@@ -153,6 +158,7 @@ class FixedDepositController extends Controller
                 userId: $request->user()->id,
                 interestMethod: $interestMethod,
                 autoRenew: $this->autoRenewColumns($data, $product),
+                bankDetailId: (int) $data['customer_bank_detail_id'],
             );
 
             // The deposit's cash was already posted to the cashbook/ledger when it
@@ -252,6 +258,8 @@ class FixedDepositController extends Controller
             interestMethod: $fixedDeposit->interest_payment_method,
             renewedFromId: $fixedDeposit->id,
             autoRenew: $autoRenew,
+            // Payouts keep going to the account the customer originally nominated.
+            bankDetailId: $fixedDeposit->customer_bank_detail_id,
         );
 
         // Only the enhancement portion is a real cash event — the old FD's
@@ -841,7 +849,7 @@ class FixedDepositController extends Controller
     }
 
     /** Shared FD-row creation for both a fresh issue (store) and a renewal (renew). */
-    private function createFixedDeposit(int $branchId, int $customerId, FundingProduct $product, float $principal, int $termMonths, Carbon $startDate, int $userId, string $interestMethod, ?int $renewedFromId = null, array $autoRenew = []): FixedDeposit
+    private function createFixedDeposit(int $branchId, int $customerId, FundingProduct $product, float $principal, int $termMonths, Carbon $startDate, int $userId, string $interestMethod, ?int $renewedFromId = null, array $autoRenew = [], ?int $bankDetailId = null): FixedDeposit
     {
         $maturityDate = $startDate->copy()->addMonthsNoOverflow($termMonths);
         $calc = FdInterestCalculator::calculate($principal, (float) $product->annual_rate_percent, $termMonths, $interestMethod);
@@ -859,6 +867,7 @@ class FixedDepositController extends Controller
             'fd_number' => $fdNumber,
             'branch_id' => $branchId,
             'customer_id' => $customerId,
+            'customer_bank_detail_id' => $bankDetailId,
             'funding_product_id' => $product->id,
             'principal_amount' => $principal,
             'interest_rate_percent' => $product->annual_rate_percent,

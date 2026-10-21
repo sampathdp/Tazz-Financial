@@ -26,7 +26,7 @@ class Loan extends Model
     protected $table = 'credit_facilities';
 
     protected $fillable = [
-        'branch_id', 'code', 'customer_id',
+        'branch_id', 'code', 'customer_id', 'customer_bank_detail_id',
         'principal_amount', 'interest_rate_percent', 'rate_period', 'term_months',
         'start_date', 'maturity_date',
         'disbursed_amount', 'disbursed_at', 'outstanding_balance_cache',
@@ -82,6 +82,12 @@ class Loan extends Model
     public function customer()
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /** The customer account the disbursement is paid to. */
+    public function bankDetail()
+    {
+        return $this->belongsTo(CustomerBankDetail::class, 'customer_bank_detail_id')->withTrashed();
     }
 
     /** The loan-specific attributes for this facility — always present for a Loan row. */

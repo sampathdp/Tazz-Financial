@@ -475,6 +475,7 @@ export interface Loan {
   id: number; code: string;
   branchId: number; branch?: { id: number; name: string; code: string };
   customerId: number;
+  customerBankDetailId?: number | null; bankDetail?: CustomerBankDetail | null;
   /** On loansApi.get()'s detail load, the server sends the wider column set below
    *  (see LoanController::DETAIL_RELATIONS); list/create responses only populate
    *  the narrower id/fullName/code/nicNo/phone subset. */
@@ -855,6 +856,20 @@ export interface Bank {
   sortOrder?: number;
 }
 export const banksApi = resource<Bank>('banks')
+
+/** A customer's payout bank account (loan disbursements, FD interest/maturity transfers).
+ *  Encrypted at rest; accountNumber is only sent on the payout lists, elsewhere just accountNumberMasked. */
+export interface CustomerBankDetail {
+  id: number; customerId: number; bankId: number; bank?: { id: number; name: string } | null;
+  accountHolder: string; bankBranch?: string | null;
+  accountNumber?: string; accountNumberMasked: string;
+}
+export const customerBankDetailsApi = {
+  list: (customerId: number) => http.get(`/customers/${customerId}/bank-details`).then((r) => camelize(r.data) as CustomerBankDetail[]),
+  create: (customerId: number, body: { bankId: number; accountHolder: string; bankBranch?: string; accountNumber: string }) =>
+    http.post(`/customers/${customerId}/bank-details`, snakeize(body)).then((r) => camelize(r.data) as CustomerBankDetail),
+  remove: (customerId: number, id: number) => http.delete(`/customers/${customerId}/bank-details/${id}`),
+}
 
 export type BankAccountType = 'Savings' | 'Current' | 'Fixed Deposit'
 
@@ -1946,6 +1961,7 @@ export interface FixedDeposit {
   id: number; fdNumber: string;
   branchId: number; branch?: { id: number; name: string; code: string };
   customerId: number; customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null; email?: string | null; address?: string | null };
+  customerBankDetailId?: number | null; bankDetail?: CustomerBankDetail | null;
   fundingProductId: number; fundingProduct?: FundingProduct;
   principalAmount: number | string;
   interestRatePercent: number | string;
@@ -2008,7 +2024,7 @@ export const fixedDepositsApi = {
   /** Admin only — before any payment/part payment/lien. */
   adminUpdate: (id: number, body: { interestRatePercent: number | string; termMonths: number | string; startDate: string; interestPaymentMethod: FdInterestMethod }) =>
     http.put(`/fixed-deposits/${id}`, snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
-  create: (body: { depositId: number; fundingProductId: number; termMonths: number; startDate: string; interestPaymentMethod?: FdInterestMethod } & Partial<FdAutoRenewInput>) =>
+  create: (body: { depositId: number; customerBankDetailId: number; fundingProductId: number; termMonths: number; startDate: string; interestPaymentMethod?: FdInterestMethod } & Partial<FdAutoRenewInput>) =>
     http.post('/fixed-deposits', snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
   renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput; interestTreatment?: FdInterestTreatment } & Partial<FdAutoRenewInput>) =>
     http.post(`/fixed-deposits/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { fixedDeposit: FixedDeposit; enhancementDeposit: FdDeposit | null }),
@@ -2229,6 +2245,7 @@ export interface FdInterestDueItem {
   fixedDeposit: {
     id: number; fdNumber: string; customerId: number;
     customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null } | null;
+    bankDetail?: CustomerBankDetail | null;
   };
 }
 export interface FdInterestDueBucket { count: number; total: number; items: FdInterestDueItem[] }

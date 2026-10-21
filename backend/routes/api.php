@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\CompanyProfileController;
 use App\Http\Controllers\Api\ChartOfAccountController;
 use App\Http\Controllers\Api\CollectionReportController;
 use App\Http\Controllers\Api\BlacklistController;
+use App\Http\Controllers\Api\CustomerBankDetailController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerCribReportController;
 use App\Http\Controllers\Api\CustomerDocumentController;
@@ -184,6 +185,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('customers/{customer}/photo', [CustomerPhotoController::class, 'destroy'])->middleware('perm:Customer Management,Edit');
 
     // --- Customer Documents ---
+    Route::get('customers/{customer}/bank-details', [CustomerBankDetailController::class, 'index'])->middleware('perm:Customer Management,View');
+    Route::post('customers/{customer}/bank-details', [CustomerBankDetailController::class, 'store'])->middleware('perm:Customer Management,Create');
+    Route::delete('customers/{customer}/bank-details/{bankDetail}', [CustomerBankDetailController::class, 'destroy'])->middleware('perm:Customer Management,Delete');
     Route::get('customers/{customer}/documents/{document}/file', [CustomerDocumentController::class, 'show'])->middleware('perm:Customer Management,View');
     Route::post('customers/{customer}/documents', [CustomerDocumentController::class, 'store'])->middleware('perm:Customer Management,Create');
     Route::delete('customers/{customer}/documents/{document}', [CustomerDocumentController::class, 'destroy'])->middleware('perm:Customer Management,Delete');

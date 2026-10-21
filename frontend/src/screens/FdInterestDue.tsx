@@ -107,7 +107,7 @@ function BucketCard({ meta, bucket, me, onPay }: {
       </div>
       <Table
         cols={[
-          { label: 'FD No' }, { label: 'Customer' }, { label: 'NIC' }, { label: '#', align: 'center' },
+          { label: 'FD No' }, { label: 'Customer' }, { label: 'NIC' }, { label: 'Bank' }, { label: 'Account No' }, { label: '#', align: 'center' },
           { label: 'Due Date' }, { label: 'Amount', align: 'right' }, { label: '', align: 'right', w: 90 },
         ]}
         rows={bucket.items} empty="Nothing due in this window"
@@ -115,6 +115,8 @@ function BucketCard({ meta, bucket, me, onPay }: {
           <Td mono>{i.fixedDeposit.fdNumber}</Td>
           <Td>{i.fixedDeposit.customer?.fullName || '—'}</Td>
           <Td>{i.fixedDeposit.customer?.nicNo || '—'}</Td>
+          <Td>{i.fixedDeposit.bankDetail ? `${i.fixedDeposit.bankDetail.bank?.name || ''}${i.fixedDeposit.bankDetail.bankBranch ? ` · ${i.fixedDeposit.bankDetail.bankBranch}` : ''}` : '—'}</Td>
+          <Td mono>{i.fixedDeposit.bankDetail ? `${i.fixedDeposit.bankDetail.accountNumber ?? ''} (${i.fixedDeposit.bankDetail.accountHolder})` : '—'}</Td>
           <Td align="center">{i.installmentNo}</Td>
           <Td>{dateOnly(i.dueDate)}</Td>
           <Td align="right" mono>{money(i.amount)}</Td>
