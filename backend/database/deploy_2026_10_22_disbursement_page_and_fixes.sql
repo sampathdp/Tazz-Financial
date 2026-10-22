@@ -12,7 +12,7 @@ SET @sql := IF(@has_col = 0,
   'SELECT ''settled_credit_facility_id already present'' AS info');
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
--- 2) ---------------------------------------------------------------------
+-- 2) -- -------------------------------------------------------------------
 UPDATE `finance_settings` SET `value` = '0' WHERE `key` = 'require_cash_session';
 
 -- 3) ---------------------------------------------------------------------
