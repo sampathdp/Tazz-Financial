@@ -314,7 +314,7 @@ export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Expense Category"><Select value={spendForm.expenseCategoryId} onChange={(e) => setSpendForm((s) => ({ ...s, expenseCategoryId: Number(e.target.value) || '' }))}>
             <option value="">Select category…</option>
-            {categories.map((c) => <option key={c.id} value={c.id} disabled={!c.chartOfAccountId}>{c.name}{!c.chartOfAccountId ? ' (not linked to GL)' : ''}</option>)}
+            {categories.map((c) => <option key={c.id} value={c.id} disabled={!c.chartOfAccountId}>{c.parent?.name ? `${c.parent.name} › ` : ''}{c.name}{!c.chartOfAccountId ? ' (not linked to GL)' : ''}</option>)}
           </Select></Field>
           <Field label="Vendor (optional)"><Select value={spendForm.vendorId} onChange={(e) => setSpendForm((s) => ({ ...s, vendorId: Number(e.target.value) || '' }))}>
             <option value="">No vendor</option>

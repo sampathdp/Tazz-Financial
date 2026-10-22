@@ -28,7 +28,12 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
 
   const refresh = () => {
     setLoading(true)
-    expenseCategoriesApi.list().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+    expenseCategoriesApi.list().then((list) => {
+      // Mains first, each followed by its sub-categories; anything orphaned goes last.
+      const mains = list.filter((c) => !c.parentId)
+      const ordered = mains.flatMap((mc) => [mc, ...list.filter((c) => c.parentId === mc.id)])
+      setRows([...ordered, ...list.filter((c) => c.parentId && !mains.some((mc) => mc.id === c.parentId))])
+    }).catch(() => setRows([])).finally(() => setLoading(false))
   }
   useEffect(refresh, [])
   useEffect(() => { chartOfAccountsApi.list().then((d) => setExpenseAccounts(d.filter((a) => a.accountType === 'Expense'))).catch(() => setExpenseAccounts([])) }, [])
@@ -64,11 +69,13 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
         actions={<Can user={me} module="Masters" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Expense Category</Btn></Can>} />
       <Card pad={0}>
         {loading ? <LoadingBlock /> :
-        <Table cols={[{ label: 'Name' }, { label: 'Code' }, { label: 'Posts To' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+        <Table cols={[{ label: 'Category' }, { label: 'Code' }, { label: 'Posts To' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No expense categories yet"
           rows={rows}
           render={(r) => <>
-            <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}</Td>
+            <Td c="var(--tx-0)" style={r.parentId ? { paddingLeft: 28 } : { fontWeight: 700 }}>
+              {r.parentId ? <span className="t-2">↳ </span> : null}{r.name}{!r.parentId && <Badge tone="blue">Main</Badge>}
+            </Td>
             <Td>{r.code || '—'}</Td>
             <Td>{r.chartOfAccount ? `${r.chartOfAccount.code} ${r.chartOfAccount.name}` : <span style={{ color: 'var(--bad)' }}>Not linked — expenses can't be paid</span>}</Td>
             <Td align="center"><Badge tone={(r.status || 'Active') === 'Active' ? 'green' : 'red'} dot>{r.status || 'Active'}</Badge></Td>
@@ -89,6 +96,12 @@ export function ExpenseCategoriesScreen({ user: me }: { go: Go; user?: AuthUser 
           <Field label="Name" full><Input value={form.name || ''} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></Field>
           <Field label="Code"><Input value={form.code || ''} onChange={(e) => setForm((s) => ({ ...s, code: e.target.value }))} /></Field>
           <Field label="Status"><Select value={form.status || 'Active'} onChange={(e) => setForm((s) => ({ ...s, status: e.target.value as any }))}><option>Active</option><option>Inactive</option></Select></Field>
+          <Field label="Main Category" full>
+            <Select value={form.parentId ?? ''} onChange={(e) => setForm((s) => ({ ...s, parentId: Number(e.target.value) || null }))}>
+              <option value="">None — this is a main category</option>
+              {rows.filter((c) => !c.parentId && c.id !== editing?.id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
           <Field label="Posts To (GL Account)" full>
             <Select value={form.chartOfAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, chartOfAccountId: Number(e.target.value) || undefined }))}>
               <option value="">Not linked yet — expenses in this category can't be paid</option>

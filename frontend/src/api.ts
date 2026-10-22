@@ -1259,6 +1259,9 @@ export interface ExpenseCategory {
   chartOfAccount?: { id: number; code: string; name: string } | null;
   status?: 'Active' | 'Inactive';
   sortOrder?: number;
+  /** Main category this one sits under; null/absent = this IS a main category. */
+  parentId?: number | null;
+  parent?: { id: number; name: string } | null;
 }
 export const expenseCategoriesApi = resource<ExpenseCategory>('expense-categories')
 

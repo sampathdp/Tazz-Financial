@@ -297,7 +297,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
           </Select></Field>
           <Field label="Expense Category"><Select value={createForm.expenseCategoryId} onChange={(e) => setCreateForm((s) => ({ ...s, expenseCategoryId: Number(e.target.value) || '' }))}>
             <option value="">Select category…</option>
-            {categories.map((c) => <option key={c.id} value={c.id} disabled={!c.chartOfAccountId}>{c.name}{!c.chartOfAccountId ? ' (not linked to GL)' : ''}</option>)}
+            {categories.map((c) => <option key={c.id} value={c.id} disabled={!c.chartOfAccountId}>{c.parent?.name ? `${c.parent.name} › ` : ''}{c.name}{!c.chartOfAccountId ? ' (not linked to GL)' : ''}</option>)}
           </Select></Field>
           <Field label="Vendor (optional)"><Select value={createForm.vendorId} onChange={(e) => setCreateForm((s) => ({ ...s, vendorId: Number(e.target.value) || '' }))}>
             <option value="">No vendor</option>

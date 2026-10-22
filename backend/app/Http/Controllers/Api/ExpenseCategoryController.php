@@ -11,7 +11,7 @@ class ExpenseCategoryController extends Controller
 {
     public function index()
     {
-        return ExpenseCategory::with('chartOfAccount:id,code,name')->orderBy('sort_order')->orderBy('name')->get();
+        return ExpenseCategory::with('chartOfAccount:id,code,name', 'parent:id,name')->orderBy('sort_order')->orderBy('name')->get();
     }
 
     public function store(Request $request)
@@ -52,6 +52,8 @@ class ExpenseCategoryController extends Controller
             'chart_of_account_id' => 'nullable|exists:chart_of_accounts,id',
             'status' => [Rule::in(['Active', 'Inactive'])],
             'sort_order' => 'nullable|integer',
+            // Two levels only: the parent must itself be a main category, and never the row itself.
+            'parent_id' => ['nullable', Rule::exists('expense_categories', 'id')->whereNull('parent_id'), Rule::notIn([$expenseCategory?->id])],
         ]);
     }
 }
