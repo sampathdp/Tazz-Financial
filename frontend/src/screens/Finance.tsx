@@ -9,7 +9,7 @@ import {
 } from '../components/ui'
 import {
   financeRequestsApi, financeDashboardApi, cashAccountsApi, bankAccountsApi, chartOfAccountsApi, branchesApi,
-  cashFloatsApi, cashSessionsApi, financeSettingsApi, financeTransactionsApi, financeAuditApi, api,
+  cashFloatsApi, financeSettingsApi, financeTransactionsApi, financeAuditApi, api,
   type FinanceRequest, type FinanceRequestType, type FinanceRequestStatus, type FinanceDashboard,
   type CashAccount, type BankAccount, type ChartOfAccount, type Branch, type AuthUser,
   type CashFloat, type CashSession, type FinanceSettings,
@@ -779,109 +779,9 @@ export function AuditLogScreen({ user: _me }: { go: Go; user?: AuthUser | null }
   )
 }
 
-/* =========================== Daily Cash Sessions =========================== */
-
-export function CashSessionsScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
-  const notify = useNotify()
-  const [rows, setRows] = useState<CashSession[]>([])
-  const [loading, setLoading] = useState(true)
-  const [tills, setTills] = useState<CashAccount[]>([])
-  const [openForm, setOpenForm] = useState(false)
-  const [oForm, setOForm] = useState({ account: '', opening: '', notes: '' })
-  const [closeFor, setCloseFor] = useState<CashSession | null>(null)
-  const [counted, setCounted] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-
-  useEffect(() => {
-    cashAccountsApi.list().then((a) => setTills(a.filter((x) => x.status !== 'Inactive' && x.accountType !== 'InTransit'))).catch(() => setTills([]))
-  }, [])
-  const refresh = () => { setLoading(true); cashSessionsApi.list({ page: 1 }).then((p) => setRows(p.data)).catch(() => setRows([])).finally(() => setLoading(false)) }
-  useEffect(refresh, [])
-
-  const doOpen = async () => {
-    if (!oForm.account || oForm.opening === '') { setErr('Pick the account and enter the opening count.'); return }
-    setBusy(true); setErr('')
-    try {
-      await cashSessionsApi.open({ cashAccountId: Number(oForm.account), openingAmount: oForm.opening, notes: oForm.notes || undefined })
-      setOpenForm(false); setOForm({ account: '', opening: '', notes: '' }); refresh()
-      notify.success('Session opened')
-    } catch (ex: any) { setErr(getErrorText(ex, 'Could not open the session')) }
-    finally { setBusy(false) }
-  }
-  const doClose = async () => {
-    if (!closeFor) return
-    if (counted === '') { setErr('Enter the counted amount.'); return }
-    setBusy(true); setErr('')
-    try {
-      await cashSessionsApi.close(closeFor.id, { countedClosing: counted })
-      setCloseFor(null); setCounted(''); refresh()
-      notify.success('Session closed', 'Awaiting a manager to verify')
-    } catch (ex: any) { setErr(getErrorText(ex, 'Could not close the session')) }
-    finally { setBusy(false) }
-  }
-  const verify = async (s: CashSession) => {
-    try { await cashSessionsApi.verify(s.id); refresh(); notify.success('Session verified') }
-    catch (ex: any) { notify.error('Failed', getErrorText(ex)) }
-  }
-
-  const tone = (s: CashSession['status']) => s === 'Verified' ? 'green' : s === 'Closed' ? 'amber' : 'blue'
-
-  return (
-    <div>
-      <PageHead crumbs="Finance" title="Daily Cash Sessions" icon="clock" sub="Open, count and verify each cash account by day"
-        actions={<Can user={me} module="Cash Sessions" action="Create"><Btn variant="primary" icon="plus" onClick={() => { setErr(''); setOpenForm(true) }}>Open Session</Btn></Can>} />
-      <Card pad={0}>
-        {loading ? <LoadingBlock /> :
-        <Table cols={[{ label: 'Date' }, { label: 'Account' }, { label: 'Opening', align: 'right' }, { label: 'Expected', align: 'right' }, { label: 'Counted', align: 'right' }, { label: 'Variance', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 170 }]}
-          empty="No sessions" rows={rows}
-          render={(s) => <>
-            <Td>{dateOnly(s.businessDate)}</Td>
-            <Td c="var(--tx-0)">{s.cashAccount?.name || '—'}</Td>
-            <Td align="right" mono>{money(s.openingAmount)}</Td>
-            <Td align="right" mono>{s.expectedClosing == null ? '—' : money(s.expectedClosing)}</Td>
-            <Td align="right" mono>{s.countedClosing == null ? '—' : money(s.countedClosing)}</Td>
-            <Td align="right" mono c={Number(s.variance) < 0 ? 'var(--bad)' : Number(s.variance) > 0 ? 'var(--warn)' : undefined}>{s.status === 'Open' ? '—' : money(s.variance)}</Td>
-            <Td align="center"><Badge tone={tone(s.status)} dot>{s.status}</Badge></Td>
-            <Td align="right"><div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
-              {s.status === 'Open' && me?.id === s.opener?.id && <Btn variant="primary" size="sm" onClick={() => { setCloseFor(s); setCounted(String(s.openingAmount)); setErr('') }}>Close</Btn>}
-              {s.status === 'Closed' && me?.id !== s.closer?.id && <Can user={me} module="Cash Sessions" action="Edit"><Btn variant="primary" size="sm" icon="check" onClick={() => verify(s)}>Verify</Btn></Can>}
-            </div></Td>
-          </>} />}
-      </Card>
-
-      <Modal open={openForm} onClose={() => setOpenForm(false)} width={420} title="Open Cash Session"
-        footer={<><Btn variant="plain" onClick={() => setOpenForm(false)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={doOpen} disabled={busy}>{busy ? 'Opening…' : 'Open'}</Btn></>}>
-        <ErrorBanner error={err} />
-        <div className="col gap-3">
-          <Field label="Cash account"><Select value={oForm.account} onChange={(e) => setOForm((s) => ({ ...s, account: e.target.value }))}>
-            <option value="">Select…</option>{tills.map((a) => <option key={a.id} value={a.id}>{a.name} — books {money(a.currentBalance)}</option>)}
-          </Select></Field>
-          <Field label="Opening cash counted"><Input type="number" step="0.01" value={oForm.opening} onChange={(e) => setOForm((s) => ({ ...s, opening: e.target.value }))} /></Field>
-          {(() => {
-            const till = tills.find((a) => String(a.id) === oForm.account)
-            const diff = till && oForm.opening !== '' ? Number(oForm.opening) - Number(till.currentBalance) : 0
-            return Math.abs(diff) >= 0.005
-              ? <Field label={`Counted differs from the books by ${money(diff)} — explain why`}><Input value={oForm.notes} onChange={(e) => setOForm((s) => ({ ...s, notes: e.target.value }))} placeholder="e.g. cash brought in from head office" /></Field>
-              : null
-          })()}
-        </div>
-      </Modal>
-
-      <Modal open={!!closeFor} onClose={() => setCloseFor(null)} width={420} title="Close Cash Session"
-        sub={closeFor ? `${closeFor.cashAccount?.name} — ${dateOnly(closeFor.businessDate)}` : undefined}
-        footer={<><Btn variant="plain" onClick={() => setCloseFor(null)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={doClose} disabled={busy}>{busy ? 'Closing…' : 'Close'}</Btn></>}>
-        <ErrorBanner error={err} />
-        <Field label="Closing cash counted"><Input type="number" step="0.01" value={counted} onChange={(e) => setCounted(e.target.value)} /></Field>
-      </Modal>
-    </div>
-  )
-}
-
 /* =========================== Finance Settings =========================== */
 
 const BOOL_SETTINGS: { key: string; label: string; help: string }[] = [
-  { key: 'require_cash_session', label: 'Require an open cash session for cash collections', help: 'A cashier must open the day’s session before recording cash loan payments.' },
   { key: 'reversal_requires_approval', label: 'Reversing a completed finance transaction needs approval', help: 'Routes every reversal through the finance_reversal maker-checker.' },
 ]
 

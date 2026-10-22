@@ -6,9 +6,8 @@ use App\Models\Concerns\BelongsToBranch;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * A day's open/close for a cash account — see the
- * create_finance_settings_and_cash_sessions migration and
- * App\Support\CashSessionService.
+ * A day's open/close for a cash account — historical rows only; the daily
+ * session feature (screen, endpoints, gate) has been removed.
  */
 class CashSession extends Model
 {

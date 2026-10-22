@@ -4,8 +4,10 @@
    action (create/renew/withdraw/pay-interest) prints a document following the
    same window.print()/.no-print pattern as PaymentReceipt.tsx. */
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, SearchSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock , BankAccountSelect } from '../components/ui'
 import { Icon } from '../components/Icon'
+import { DetailSummary } from '../components/DetailSummary'
 import {
   fixedDepositsApi, fdDepositsApi, fundingProductsApi, fdInterestPaymentsApi, company,
   type FixedDeposit, type FdDeposit, type FundingProduct, type FdInterestPayment, type FdWithdrawal,
@@ -665,31 +667,48 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
         )}
       </div>
 
-      <Card style={{ marginBottom: 16 }}>
-        <div className="row between wrap gap-2" style={{ marginBottom: 10 }}>
-          <div className="eyebrow">{fd.fdNumber}</div>
-          <div className="row gap-2">
+      <div style={{ marginBottom: 24 }}>
+        <DetailSummary
+          code={fd.fdNumber} title={fd.customer?.fullName} titleNote={fd.fundingProduct?.name}
+          badges={<>
             <Badge tone={statusTone[fd.status] || 'neutral'} dot>{fd.status}</Badge>
             {fd.isMatured && <Badge tone="amber" dot>Matured</Badge>}
             {fd.status === 'Active' && fd.autoRenew && <Badge tone="blue" dot>Auto-renew{fd.autoRenewMode === 'principal_and_interest' ? ' (principal + interest)' : ''}</Badge>}
             {fd.isPledged && <Badge tone="red" dot>Pledged — {Number(fd.lienAmount).toLocaleString()} lien</Badge>}
-          </div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5 }}>
-          <div><span className="t-2">Customer: </span><b>{fd.customer?.fullName}</b></div>
-          <div><span className="t-2">NIC: </span><b>{fd.customer?.nicNo || '—'}</b></div>
-          <div><span className="t-2">Product: </span><b>{fd.fundingProduct?.name}</b></div>
-          <div><span className="t-2">Interest Method: </span><b>{fd.interestPaymentMethod === 'monthly' ? 'Monthly Interest' : 'Interest at Maturity'}</b></div>
-          <div><span className="t-2">Principal: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(fd.principalAmount)}</b></div>
-          <div><span className="t-2">Annual Rate: </span><b>{Number(fd.interestRatePercent).toFixed(2)}%</b></div>
-          <div><span className="t-2">Term: </span><b>{fd.termMonths} months</b></div>
-          <div><span className="t-2">Start Date: </span><b>{dateOnly(fd.startDate)}</b></div>
-          <div><span className="t-2">Maturity Date: </span><b>{dateOnly(fd.maturityDate)}</b></div>
-          <div><span className="t-2">Maturity Amount: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(fd.maturityAmount)}</b></div>
-          {fd.renewedFrom && <div><span className="t-2">Renewed From: </span><b>{fd.renewedFrom.fdNumber}</b></div>}
-          {fd.renewedTo && <div><span className="t-2">Renewed To: </span><b>{fd.renewedTo.fdNumber}</b></div>}
-        </div>
-      </Card>
+          </>}
+          amountLabel="Principal" amount={money(fd.principalAmount)}
+          stats={[
+            { label: 'Annual Rate', value: `${Number(fd.interestRatePercent).toFixed(2)}%` },
+            { label: 'Term', value: `${fd.termMonths} months` },
+            { label: 'Interest', value: fd.interestPaymentMethod === 'monthly' ? 'Monthly' : 'At maturity' },
+            { label: 'Maturity Amount', value: money(fd.maturityAmount) },
+          ]}
+          steps={[
+            { label: 'Start', date: fd.startDate },
+            { label: 'Maturity', date: fd.maturityDate, done: !!fd.isMatured || fd.status !== 'Active' },
+          ]}
+          groups={[
+            { title: 'Depositor', rows: [
+              ['Customer', fd.customer?.fullName],
+              ['NIC', fd.customer?.nicNo || '—'],
+              ['Product', fd.fundingProduct?.name],
+              ['Interest Method', fd.interestPaymentMethod === 'monthly' ? 'Monthly Interest' : 'Interest at Maturity'],
+              ...(fd.renewedFrom ? [['Renewed From', fd.renewedFrom.fdNumber] as [string, ReactNode]] : []),
+              ...(fd.renewedTo ? [['Renewed To', fd.renewedTo.fdNumber] as [string, ReactNode]] : []),
+            ] },
+            { title: 'Terms', rows: [
+              ['Principal', money(fd.principalAmount)],
+              ['Annual Rate', `${Number(fd.interestRatePercent).toFixed(2)}%`],
+              ['Term', `${fd.termMonths} months`],
+              ['Maturity Amount', money(fd.maturityAmount)],
+            ] },
+            { title: 'Dates', rows: [
+              ['Start Date', dateOnly(fd.startDate)],
+              ['Maturity Date', dateOnly(fd.maturityDate)],
+            ] },
+          ]}
+        />
+      </div>
 
       {fd.interestPaymentMethod === 'monthly' && (
         <Card pad={0} style={{ marginBottom: 16 }}>

@@ -7,7 +7,6 @@ use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\Loan;
 use App\Models\User;
-use App\Support\CashSessionService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -140,28 +139,6 @@ class CashLedgerAuditProbeTest extends TestCase
         }
     }
 
-    // AUD-03: a stale session from a previous day must not satisfy the "today's session" gate.
-    public function test_yesterdays_open_session_does_not_unlock_todays_collections(): void
-    {
-        \App\Models\FinanceSetting::put('require_cash_session', '1');
-        $till = $this->till('Main');
-        $session = CashSessionService::open($till->id, '0.00', $this->admin->id);
-        DB::table('cash_sessions')->where('id', $session->id)->update(['business_date' => now()->subDay()->toDateString()]);
-
-        $loan = $this->approvedLoan();
-        $this->docCharge($loan);
-        $res = $this->postJson("/api/loans/{$loan->id}/payments", ['amount' => 2000, 'payment_method' => 'Cash']);
-        $this->assertSame(422, $res->status(), 'collection accepted against a session opened yesterday');
-    }
-
-    // AUD-04: a session opened with a count that differs from the book balance needs an explanation.
-    public function test_opening_count_must_match_book_balance_or_carry_a_note(): void
-    {
-        $till = $this->till('Main', '0.00');
-        $this->postJson('/api/cash-sessions/open', ['cash_account_id' => $till->id, 'opening_amount' => 20000])->assertStatus(422);
-        $this->postJson('/api/cash-sessions/open', ['cash_account_id' => $till->id, 'opening_amount' => 20000, 'notes' => 'cash brought from head office'])->assertStatus(201);
-    }
-
     // AUD-05: petty-cash top-up must not drive a till negative.
     public function test_petty_cash_topup_cannot_overdraw_a_till(): void
     {
@@ -193,21 +170,5 @@ class CashLedgerAuditProbeTest extends TestCase
         $this->postJson("/api/loans/{$loan->id}/payments", ['amount' => 2000, 'payment_method' => 'Bank'])->assertStatus(201);
         $this->assertSame('0.00', (string) $bank->fresh()->current_balance);
         $this->assertSame('2000.00', number_format((float) $this->glBalance($c1030) - (float) $before, 2, '.', ''));
-    }
-
-    // AUD-07: the cash-session gate only exists on loan collections.
-    public function test_session_gate_also_applies_to_cash_disbursement(): void
-    {
-        \App\Models\FinanceSetting::put('require_cash_session', '1');
-        $till = $this->till('Main', '500000.00');
-        $loan = $this->approvedLoan(0.0);
-        $res = $this->postJson("/api/loans/{$loan->id}/disburse", [
-            'first_installment_date' => now()->addMonth()->toDateString(), 'disbursement_method' => 'Cash', 'disbursed_at' => now()->toDateString(),
-        ]);
-        if ($res->status() === 200) {
-            $this->markTestIncomplete('OPEN POLICY GAP: cash disbursed from a till with no open session while require_cash_session is on (the setting only gates loan collections).');
-        }
-        $this->assertSame(422, $res->status());
-        unset($till);
     }
 }

@@ -12,7 +12,7 @@ use Illuminate\Http\Request;
  */
 class FinanceSettingController extends Controller
 {
-    private const BOOL_KEYS = ['require_cash_session', 'reversal_requires_approval'];
+    private const BOOL_KEYS = ['reversal_requires_approval'];
 
     public function index()
     {

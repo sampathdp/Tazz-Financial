@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, ErrorBanner, statusTone } from '../../components/ui'
 import { Icon } from '../../components/Icon'
+import { DetailSummary } from '../../components/DetailSummary'
 import { useFilePreview } from '../../components/FilePreview'
 import {
   speedDraftsApi, speedDraftCollateralApi, speedDraftCollateralDocumentsApi, speedDraftPaymentsApi, bankAccountsApi,
@@ -25,18 +26,6 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const CATEGORY_LABEL: Record<string, string> = { Loan: 'Loan', Mortgage: 'Mortgage', GoldPawning: 'Gold Pawning', Lease: 'Lease' }
 const PAYMENT_TYPE_LABEL: Record<string, string> = { Interest: 'Interest', CapitalReduction: 'Capital Reduction', Settlement: 'Full Settlement' }
-
-function Kpi({ label, value, tone }: { label: string; value: ReactNode; tone?: string }) {
-  return (
-    <div style={{ padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
-      <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 18, fontWeight: 700, marginTop: 4, color: tone || 'var(--tx-0)' }}>{value}</div>
-    </div>
-  )
-}
-function KpiGrid({ children }: { children: ReactNode }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>{children}</div>
-}
 
 const SECTIONS = [
   { id: 'overview', label: 'Overview', icon: 'chart' },
@@ -122,54 +111,70 @@ function PaymentTable({ rows, empty }: { rows: SpeedDraftPayment[]; empty: strin
 
 function OverviewPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
   const s = d.summary
+  const typeName = d.speedDraftDetail?.speedDraftType?.name
+  const cat = CATEGORY_LABEL[d.speedDraftDetail?.speedDraftType?.category || ''] || d.speedDraftDetail?.speedDraftType?.category
+  const rate = `${Number(d.interestRatePercent).toFixed(3)}% ${d.ratePeriod === 'annual' ? 'p.a.' : d.ratePeriod === 'daily' ? 'p.d.' : 'p.m.'}`
+  const rows = (r: ([string, ReactNode] | false)[]) => r.filter(Boolean) as [string, ReactNode][]
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5, marginBottom: 20 }}>
-        <div><span className="t-2">Customer: </span><b>{d.customer?.fullName}</b></div>
-        <div><span className="t-2">Type: </span><b>{d.speedDraftDetail?.speedDraftType?.name} ({CATEGORY_LABEL[d.speedDraftDetail?.speedDraftType?.category || ''] || d.speedDraftDetail?.speedDraftType?.category})</b></div>
-        <div><span className="t-2">Rate: </span><b>{Number(d.interestRatePercent).toFixed(3)}% {d.ratePeriod === 'annual' ? 'p.a.' : d.ratePeriod === 'daily' ? 'p.d.' : 'p.m.'}</b></div>
-        <div><span className="t-2">Period: </span><b>{d.termMonths} months</b></div>
-        <div><span className="t-2">Application Date: </span><b>{d.createdAt ? dateOnly(d.createdAt) : '—'}</b></div>
-        <div><span className="t-2">Approved On: </span><b>{d.approvedAt ? dateOnly(d.approvedAt) : '—'}</b></div>
-        <div><span className="t-2">Disbursed On: </span><b>{d.disbursedAt ? dateOnly(d.disbursedAt) : '—'}</b></div>
-        <div><span className="t-2">Start: </span><b>{dateOnly(d.startDate)}</b></div>
-        <div><span className="t-2">Maturity: </span><b>{dateOnly(d.maturityDate)}</b></div>
-        <div><span className="t-2">Closed On: </span><b>{d.closedAt ? dateOnly(d.closedAt) : '—'}</b></div>
-        {!!d.speedDraftDetail?.vehicleNo && <div><span className="t-2">Vehicle No: </span><b>{d.speedDraftDetail.vehicleNo}</b></div>}
-      </div>
-
-      {d.insurance && (
-        <div style={{ marginBottom: 20 }}>
-          <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Insurance Policy</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px', fontSize: 12.5 }}>
-            <div><span className="t-2">Company: </span>{d.insurance.insuranceCompany || '—'}</div>
-            <div><span className="t-2">Policy No: </span>{d.insurance.policyNo || '—'}</div>
-            <div><span className="t-2">Amount: </span>{d.insurance.amount != null ? money(d.insurance.amount) : '—'}</div>
-            <div><span className="t-2">Contact Person: </span>{d.insurance.contactPerson || '—'}</div>
-            <div><span className="t-2">Coverage: </span>{d.insurance.coverage || '—'}</div>
-            {d.insurance.remarks && <div style={{ gridColumn: '1/-1' }}><span className="t-2">Remark: </span>{d.insurance.remarks}</div>}
-          </div>
-        </div>
-      )}
-
-      {s ? (
-        <KpiGrid>
-          <Kpi label="Principal" value={money(s.principalAmount)} />
-          <Kpi label="Outstanding Capital" value={money(s.outstandingCapital)} tone={s.outstandingCapital > 0 ? 'var(--bad)' : 'var(--ok)'} />
-          <Kpi label="Capital Paid" value={money(s.totalCapitalPaid)} />
-          <Kpi label="Interest Paid" value={money(s.totalInterestPaid)} />
-          <Kpi label="Outstanding Interest" value={money(s.outstandingInterest)} tone={s.outstandingInterest > 0 ? 'var(--bad)' : 'var(--ok)'} />
-          {s.penaltyDue > 0 && <Kpi label="Penalty Due" value={money(s.penaltyDue)} tone="var(--bad)" />}
-          <Kpi label="Amount to Settle Today" value={money(s.amountToSettleToday)} />
-          <Kpi label="Next Due" value={s.nextDueDate ? `${dateOnly(s.nextDueDate)} — ${money(s.nextDueAmount)}` : '—'} />
-          {s.overdueInstallments > 0 && <Kpi label="Overdue Installments" value={`${s.overdueInstallments} (${s.daysOverdue}d)`} tone="var(--bad)" />}
-        </KpiGrid>
-      ) : (
-        <div className="t-2" style={{ fontSize: 12.5 }}>Summary figures are available once the draft is disbursed and active.</div>
-      )}
+      <DetailSummary
+        code={d.code} title={d.customer?.fullName} titleNote={`${typeName} (${cat})`}
+        amountLabel="Principal" amount={money(s?.principalAmount ?? d.principalAmount)}
+        stats={s ? [
+          { label: 'Outstanding Capital', value: money(s.outstandingCapital), tone: s.outstandingCapital > 0 ? 'var(--bad)' : 'var(--ok)' },
+          { label: 'Outstanding Interest', value: money(s.outstandingInterest), tone: s.outstandingInterest > 0 ? 'var(--bad)' : 'var(--ok)' },
+          { label: 'Capital Paid', value: money(s.totalCapitalPaid) },
+          { label: 'Interest Paid', value: money(s.totalInterestPaid) },
+          { label: 'Amount to Settle Today', value: money(s.amountToSettleToday) },
+        ] : []}
+        steps={[
+          { label: 'Applied', date: d.createdAt },
+          { label: 'Approved', date: d.approvedAt },
+          { label: 'Disbursed', date: d.disbursedAt },
+          { label: 'Maturity', date: d.maturityDate, done: d.status === 'Closed' },
+          { label: 'Closed', date: d.closedAt },
+        ]}
+        groups={[
+          { title: 'Draft', rows: rows([
+            ['Customer', d.customer?.fullName],
+            ['Type', `${typeName} (${cat})`],
+            ['Rate', rate],
+            ['Period', `${d.termMonths} months`],
+            !!d.speedDraftDetail?.vehicleNo && ['Vehicle No', d.speedDraftDetail.vehicleNo],
+          ]) },
+          { title: 'Dates', rows: [
+            ['Application Date', d.createdAt ? dateOnly(d.createdAt) : '—'],
+            ['Approved On', d.approvedAt ? dateOnly(d.approvedAt) : '—'],
+            ['Disbursed On', d.disbursedAt ? dateOnly(d.disbursedAt) : '—'],
+            ['Start', dateOnly(d.startDate)],
+            ['Maturity', dateOnly(d.maturityDate)],
+            ['Closed On', d.closedAt ? dateOnly(d.closedAt) : '—'],
+          ] },
+          { title: 'Balances', rows: !s ? [] : rows([
+            ['Principal', money(s.principalAmount)],
+            ['Outstanding Capital', money(s.outstandingCapital)],
+            ['Capital Paid', money(s.totalCapitalPaid)],
+            ['Interest Paid', money(s.totalInterestPaid)],
+            ['Outstanding Interest', money(s.outstandingInterest)],
+            s.penaltyDue > 0 && ['Penalty Due', money(s.penaltyDue)],
+            ['Amount to Settle Today', money(s.amountToSettleToday)],
+            ['Next Due', s.nextDueDate ? `${dateOnly(s.nextDueDate)} — ${money(s.nextDueAmount)}` : '—'],
+            s.overdueInstallments > 0 && ['Overdue Installments', `${s.overdueInstallments} (${s.daysOverdue}d)`],
+          ]) },
+          { title: 'Insurance Policy', rows: !d.insurance ? [] : rows([
+            ['Company', d.insurance.insuranceCompany || '—'],
+            ['Policy No', d.insurance.policyNo || '—'],
+            ['Amount', d.insurance.amount != null ? money(d.insurance.amount) : '—'],
+            ['Contact Person', d.insurance.contactPerson || '—'],
+            ['Coverage', d.insurance.coverage || '—'],
+            !!d.insurance.remarks && ['Remark', d.insurance.remarks],
+          ]) },
+        ]}
+      />
+      {!s && <div className="t-2" style={{ fontSize: 12.5, marginTop: 16 }}>Summary figures are available once the draft is disbursed and active.</div>}
 
       {d.rejectedReason && (
-        <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '10px 14px', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
+        <div style={{ background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', padding: '10px 14px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginTop: 16 }}>
           Rejected: {d.rejectedReason}
         </div>
       )}

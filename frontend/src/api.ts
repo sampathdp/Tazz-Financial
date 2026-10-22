@@ -1207,18 +1207,6 @@ export interface CashSession {
   openedAt?: string | null; closedAt?: string | null; verifiedAt?: string | null;
 }
 
-export const cashSessionsApi = {
-  list: (params?: { status?: string; cashAccountId?: number; from?: string; to?: string; page?: number }) =>
-    http.get('/cash-sessions', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as Paginated<CashSession>),
-  current: (cashAccountId: number) =>
-    http.get('/cash-sessions/current', { params: { cash_account_id: cashAccountId } }).then((r) => r.status === 204 ? null : (camelize(r.data) as CashSession)),
-  open: (body: { cashAccountId: number; openingAmount: number | string; notes?: string }) =>
-    http.post('/cash-sessions/open', snakeize(body)).then((r) => camelize(r.data) as CashSession),
-  close: (id: number, body: { countedClosing: number | string; denominations?: Record<string, number>; coinsAmount?: number | string }) =>
-    http.post(`/cash-sessions/${id}/close`, snakeize(body)).then((r) => camelize(r.data) as CashSession),
-  verify: (id: number, postVariance = true) =>
-    http.post(`/cash-sessions/${id}/verify`, { post_variance: postVariance }).then((r) => camelize(r.data) as CashSession),
-}
 
 export type FinanceSettings = Record<string, string>
 export const financeSettingsApi = {
@@ -1356,6 +1344,10 @@ export const loansApi = {
   /** Counts per LIVE_STATUSES status for the Active Loans filter chips — independent of the current search text, same as before pagination. */
   statusCounts: () => http.get('/loans-status-counts').then((r) => camelize(r.data) as Record<string, number>),
   get: (id: number) => http.get(`/loans/${id}`).then((r) => camelize(r.data) as Loan),
+  /** Loan Disbursement queue (Approved + half-finished disbursements) — gated by Loan Disbursement:View, not Loan Applications. */
+  awaitingDisbursement: (params: { search?: string; page: number; perPage?: number }) =>
+    http.get('/loans-disbursement', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<Loan>),
+  getForDisbursement: (id: number) => http.get(`/loans-disbursement/${id}`).then((r) => camelize(r.data) as Loan),
   create: (body: Partial<Loan>) => http.post('/loans', snakeize(body)).then((r) => camelize(r.data) as Loan),
   update: (id: number, body: Partial<Loan>) => http.put(`/loans/${id}`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   remove: (id: number, reason: string) => http.delete(`/loans/${id}`, { data: { rejected_reason: reason } }).then((r) => r.data),
@@ -2270,7 +2262,7 @@ const reportPdf = (prefix: string, type: string, params?: Record<string, any>) =
 
 export type FundingReportType =
   | 'active' | 'maturing-soon' | 'matured' | 'monthly-interest' | 'interest-paid'
-  | 'deposit-history' | 'customer-funding-history' | 'renewal-history' | 'capital-enhancements'
+  | 'deposit-history' | 'customer-funding-history' | 'renewal-history' | 'capital-enhancements' | 'withdrawals'
 
 export const fundingReportsApi = {
   get: (type: FundingReportType, params?: Record<string, any>) =>

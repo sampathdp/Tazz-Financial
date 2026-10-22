@@ -9,7 +9,6 @@ use App\Models\FacilityPayment;
 use App\Models\FinanceSetting;
 use App\Models\Loan;
 use App\Models\User;
-use App\Support\CashSessionService;
 use App\Support\FinancePostingService;
 use App\Support\LoanLedgerPoster;
 use Carbon\Carbon;
@@ -148,55 +147,6 @@ class CashFloatsLedgerTest extends TestCase
     }
 
     // =============================================================
-    // CF-06 (excess) — cash session excess posts to 4905 and trues the till up
-    // =============================================================
-    public function test_cf06_cash_session_excess_posts_to_4905_and_trues_the_till(): void
-    {
-        $branchId = $this->branch('EX');
-        $till = $this->till($branchId, '400000.00');
-        $tillLeaf = ChartOfAccount::forCashTill($till->fresh());
-        $c4905 = $this->acct('4905');
-
-        $closer = User::create(['public_uuid' => (string) Str::uuid(), 'name' => 'Closer',
-            'email' => 'cl' . Str::random(6) . '@t.local', 'password' => bcrypt('x'),
-            'role_id' => DB::table('roles')->where('slug', 'staff')->value('id') ?? 1, 'branch_id' => $branchId, 'status' => 'Active']);
-
-        $session = CashSessionService::open($till->id, '400000.00', $closer->id);
-        // Counted 400,150 -> +150 excess
-        $session = CashSessionService::close($session, '400150.00', [], '0.00', $closer->id);
-        $before4905 = $this->glBalance($c4905);
-
-        CashSessionService::verify($session->fresh(), $this->admin->id);
-
-        // Dr till leaf 150 / Cr 4905 150 ; till trued to 400,150
-        $this->assertBc('400150.00', (string) $till->fresh()->current_balance);
-        $this->assertBc('150.00', $this->glBalance($tillLeaf->id), 'till leaf +150');
-        $this->assertBc('150.00', bcsub($this->glBalance($c4905), $before4905, 2), '4905 +150');
-    }
-
-    // =============================================================
-    // CF-07 — day-end count matches exactly: no GL entry
-    // =============================================================
-    public function test_cf07_exact_count_posts_no_gl(): void
-    {
-        $branchId = $this->branch('EQ');
-        $till = $this->till($branchId, '250000.00');
-        $closer = User::create(['public_uuid' => (string) Str::uuid(), 'name' => 'Closer2',
-            'email' => 'c2' . Str::random(6) . '@t.local', 'password' => bcrypt('x'),
-            'role_id' => DB::table('roles')->where('slug', 'staff')->value('id') ?? 1, 'branch_id' => $branchId, 'status' => 'Active']);
-
-        $session = CashSessionService::open($till->id, '250000.00', $closer->id);
-        $session = CashSessionService::close($session, '250000.00', [], '0.00', $closer->id);
-
-        $entriesBefore = DB::table('journal_entries')->count();
-        $session = CashSessionService::verify($session->fresh(), $this->admin->id);
-
-        $this->assertSame('Verified', $session->status);
-        $this->assertSame($entriesBefore, DB::table('journal_entries')->count(), 'no GL entry on a matched count');
-        $this->assertBc('250000.00', (string) $till->fresh()->current_balance);
-    }
-
-    // =============================================================
     // CF-09 — negative till balance is impossible (till side, hand-computed)
     // =============================================================
     public function test_cf09_negative_till_balance_is_impossible(): void
@@ -293,13 +243,7 @@ class CashFloatsLedgerTest extends TestCase
         $tillLeaf = ChartOfAccount::forCashTill($till->fresh());
         $exp = $this->acct('5010');
 
-        // An open session with business_date = today.
-        $closer = User::create(['public_uuid' => (string) Str::uuid(), 'name' => 'Closer3',
-            'email' => 'c3' . Str::random(6) . '@t.local', 'password' => bcrypt('x'),
-            'role_id' => DB::table('roles')->where('slug', 'staff')->value('id') ?? 1, 'branch_id' => $branchId, 'status' => 'Active']);
-        CashSessionService::open($till->id, '500000.00', $closer->id);
-
-        // A payment dated in a PRIOR period, recorded while today's session is open.
+        // A payment dated in a PRIOR period, 
         FinancePostingService::execute([
             'txn_type' => 'CASH_OUT', 'amount' => '1000.00', 'entry_date' => '2025-11-15',
             'branch_id' => $branchId,
@@ -314,53 +258,6 @@ class CashFloatsLedgerTest extends TestCase
         $entry = DB::table('journal_entries')->where('source_type', 'FinanceTransaction')->latest('id')->first();
         $this->assertSame('2025-11-15', Carbon::parse($entry->entry_date)->toDateString(),
             'entry_date follows the transaction date, not the open session business_date — no reconciliation between the two');
-    }
-
-    // =============================================================
-    // CF-16 — require_cash_session gates Cash collection when enabled
-    // =============================================================
-    public function test_cf16_require_cash_session_setting_gates_cash_collection(): void
-    {
-        $branchId = $this->branch('RCS');
-        $till = $this->till($branchId);
-
-        $custId = DB::table('customers')->insertGetId([
-            'public_uuid' => (string) Str::uuid(), 'branch_id' => $branchId, 'code' => 'C' . Str::random(7),
-            'full_name' => 'RCS Cust', 'status' => 'Active', 'created_at' => now(), 'updated_at' => now(),
-        ]);
-        $ltId = DB::table('loan_types')->insertGetId([
-            'name' => 'RCS LT', 'code' => 'RCS' . Str::random(3), 'interest_method' => 'flat',
-            'rate_period' => 'monthly', 'status' => 'Active', 'created_at' => now(), 'updated_at' => now(),
-        ]);
-        $loanId = DB::table('credit_facilities')->insertGetId([
-            'public_uuid' => (string) Str::uuid(), 'code' => 'L' . Str::random(9), 'facility_type' => 'Loan',
-            'branch_id' => $branchId, 'customer_id' => $custId, 'principal_amount' => '100000.00',
-            'interest_rate_percent' => '2.000', 'term_months' => 10, 'rate_period' => 'monthly',
-            'disbursed_amount' => '100000.00', 'disbursed_at' => now(), 'status' => 'Active',
-            'outstanding_balance_cache' => '100000.00', 'approved_by' => $this->admin->id,
-            'created_at' => now(), 'updated_at' => now(),
-        ]);
-        DB::table('loan_facility_details')->insert([
-            'credit_facility_id' => $loanId, 'loan_type_id' => $ltId, 'interest_method' => 'flat',
-            'installment_frequency' => 'monthly', 'down_payment' => '0.00',
-        ]);
-        DB::table('facility_schedules')->insert([
-            'credit_facility_id' => $loanId, 'installment_no' => 1, 'due_date' => '2026-04-01',
-            'principal_due' => '10000.00', 'interest_due' => '2000.00', 'total_due' => '12000.00',
-            'paid_amount' => '0.00', 'status' => 'Pending', 'created_at' => now(), 'updated_at' => now(),
-        ]);
-
-        FinanceSetting::put('require_cash_session', '1', $this->admin->id);
-
-        // No session open -> 422.
-        $this->postJson("/api/loans/{$loanId}/payments", ['amount' => 1000, 'payment_method' => 'Cash'])
-            ->assertStatus(422)
-            ->assertJsonFragment(['message' => "Open today's cash session for {$till->name} before recording cash payments."]);
-
-        // Default (setting off) -> the same payment is accepted with no session.
-        FinanceSetting::put('require_cash_session', '0', $this->admin->id);
-        $this->postJson("/api/loans/{$loanId}/payments", ['amount' => 1000, 'payment_method' => 'Cash'])
-            ->assertStatus(201);
     }
 
     // =============================================================

@@ -8,11 +8,11 @@ import { Icon } from '../../components/Icon'
 import { useFilePreview } from '../../components/FilePreview'
 import { PrintDocumentsPanel } from './PrintDocuments'
 import {
-  loansApi, customersApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, branchesApi, api,
+  company, loansApi, customersApi, fdLoansApi, loanPostDatedChequesApi, loanDocumentsApi, loanDiaryNotesApi, loanChargesApi, loanPaymentsApi, loanCollateralDocumentsApi, documentCategoriesApi, chargeCategoriesApi, bankAccountsApi, branchesApi, api,
   type Customer, type Loan, type LoanStatus, type LoanSchedule, type BankAccount,
   type LoanPostDatedCheque, type ChequeStatus,
   type LoanDocument, type DocumentCategory, type LoanDiaryNote,
-  type LoanCharge, type PaymentMethod, type LoanCollateralDocument,
+  type LoanCharge, type LoanPayment, type PaymentMethod, type LoanCollateralDocument,
   type FacilityStatusEventType, type AuthUser,
 } from '../../api'
 import { Can, canApprove, isAdmin } from '../../lib/permissions'
@@ -57,6 +57,13 @@ const SECTIONS = [
   { id: 'print', label: 'Print Documents', icon: 'print' },
 ]
 
+/** Icon-chip colour per section, grouped loosely: overview/customer blue, repayment green, recovery amber, documents neutral. */
+const SECTION_TONE: Record<string, 'blue' | 'green' | 'amber' | 'red' | 'neutral'> = {
+  summary: 'blue', 'contract-status': 'blue', customer: 'blue', security: 'blue',
+  schedule: 'green', receipts: 'green', 'due-types': 'green', cheques: 'green', ledger: 'green', waivers: 'green',
+  recovery: 'amber', diary: 'amber', images: 'neutral', print: 'neutral',
+}
+
 export function LoanDetail({ loan, me, onChanged, go, context }: {
   loan: Loan; me?: AuthUser | null; onChanged: () => void; go?: Go; context: 'applications' | 'active'
 }) {
@@ -65,9 +72,20 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
   const [tab, setTab] = useState(SECTIONS[0].id)
   const [busy, setBusy] = useState(false)
 
-  if ((loan.status === 'Approved' || loan.disbursementIncomplete) && context === 'active') {
-    return <DisburseForm loan={loan} me={me} onChanged={onChanged} notify={notify} />
-  }
+  const awaitingDisbursement = (loan.status === 'Approved' || loan.disbursementIncomplete) && context === 'active'
+  const awaitingBanner = awaitingDisbursement && (
+      <Card style={{ marginBottom: 16 }}>
+        <div className="row between wrap gap-2" style={{ alignItems: 'center' }}>
+          <div className="eyebrow">{loan.disbursementIncomplete ? 'Disbursement did not finish' : 'Awaiting disbursement'} — handled by Finance on the Loan Disbursement page</div>
+          <div className="row gap-2 wrap">
+            <DocumentChargeButton loan={loan} me={me} onChanged={onChanged} notify={notify} />
+            <Can user={me} module="Loan Disbursement" action="View">
+              <Btn size="sm" variant="solid" icon="upload" onClick={() => go?.(`loan/disbursement/${loan.id}`)}>Open in Loan Disbursement</Btn>
+            </Can>
+          </div>
+        </div>
+      </Card>
+  )
 
   // Submitting a cancel request uses the same module as today's other decisions
   // on this loan; approving/rejecting one is a deliberately separate permission
@@ -209,6 +227,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
 
   return (
     <div>
+      {awaitingBanner}
       <div className="row between wrap gap-2 no-print" style={{ marginBottom: 14 }}>
         <div className="row gap-2 wrap" style={{ alignItems: 'center' }}>
           <Badge tone={statusTone[loan.status]} dot>{loan.status}</Badge>
@@ -232,6 +251,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
               </Can>
             </>
           )}
+          {loan.status === 'Approved' && !awaitingDisbursement && <DocumentChargeButton loan={loan} me={me} onChanged={onChanged} notify={notify} />}
           {!pendingCancel && (loan.status === 'Approved' || (loan.status === 'Active' && !loan.payments?.length)) && (
             <Can user={me} module={cancelModule} action="Delete">
               <Btn size="sm" variant="danger" icon="x" onClick={cancelLoan}>Cancel Loan</Btn>
@@ -330,26 +350,37 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
       )}
 
       {/* Tabs — one section loaded at a time, matching the reference screen's button row without the scroll-everything sprawl. */}
-      <div className="row gap-2 no-print" style={{ marginBottom: 16, overflowX: 'auto', paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
-        {SECTIONS.map((s) => (
-          <Btn key={s.id} size="sm" variant="ghost" active={tab === s.id} icon={s.icon} onClick={() => setTab(s.id)} style={{ flexShrink: 0 }}>{s.label}</Btn>
-        ))}
-      </div>
+      <div>
+        <div className="ld-tiles no-print" role="tablist" aria-label="Loan sections">
+          {SECTIONS.map((s) => {
+            const on = tab === s.id
+            const tone = SECTION_TONE[s.id] ?? 'blue'
+            return (
+              <button key={s.id} role="tab" aria-selected={on} className={`ld-tile${on ? ' on' : ''}`} onClick={() => setTab(s.id)}>
+                <span className="ld-chip" style={{ background: toneDim[tone], color: toneColor[tone] }}><Icon n={s.icon} s={13} /></span>
+                <span className="ld-label">{s.label}</span>
+              </button>
+            )
+          })}
+        </div>
 
-      {tab === 'summary' && <ContractSummary loan={loan} />}
-      {tab === 'customer' && <CustomerTab loan={loan} />}
-      {tab === 'due-types' && <DueTypeBreakdown loan={loan} />}
-      {tab === 'contract-status' && <ArrearsPanel loan={loan} />}
-      {tab === 'recovery' && <RecoveryDetails loan={loan} me={me} onChanged={onChanged} notify={notify} />}
-      {tab === 'schedule' && <ScheduleTable loan={loan} />}
-      {tab === 'receipts' && <ReceiptsPanel loan={loan} me={me} />}
-      {tab === 'security' && <SecurityPanel loan={loan} />}
-      {tab === 'cheques' && <ChequesPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
-      {tab === 'ledger' && <LedgerCard loan={loan} />}
-      {tab === 'diary' && <DiaryPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
-      {tab === 'waivers' && <WaiversPanel loan={loan} />}
-      {tab === 'images' && <ImagesPanel loan={loan} me={me} />}
-      {tab === 'print' && <PrintDocumentsPanel loan={loan} me={me} />}
+        <div className="ld-body">
+          {tab === 'summary' && <ContractSummary loan={loan} />}
+          {tab === 'customer' && <CustomerTab loan={loan} />}
+          {tab === 'due-types' && <DueTypeBreakdown loan={loan} />}
+          {tab === 'contract-status' && <ArrearsPanel loan={loan} />}
+          {tab === 'recovery' && <RecoveryDetails loan={loan} me={me} onChanged={onChanged} notify={notify} />}
+          {tab === 'schedule' && <ScheduleTable loan={loan} />}
+          {tab === 'receipts' && <ReceiptsPanel loan={loan} me={me} />}
+          {tab === 'security' && <SecurityPanel loan={loan} />}
+          {tab === 'cheques' && <ChequesPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
+          {tab === 'ledger' && <LedgerCard loan={loan} />}
+          {tab === 'diary' && <DiaryPanel loan={loan} me={me} onChanged={onChanged} notify={notify} />}
+          {tab === 'waivers' && <WaiversPanel loan={loan} />}
+          {tab === 'images' && <ImagesPanel loan={loan} me={me} />}
+          {tab === 'print' && <PrintDocumentsPanel loan={loan} me={me} />}
+        </div>
+      </div>
 
       <StatusFlagsModal open={statusModal} onClose={() => setStatusModal(false)} loan={loan} onChanged={onChanged} notify={notify} />
     </div>
@@ -405,36 +436,85 @@ function ContractSummary({ loan }: { loan: Loan }) {
   const isFlat = loan.loanDetail?.interestMethod === 'flat'
   const aer = loan.loanDetail?.effectiveAnnualRate
   const emr = loan.loanDetail?.effectiveMonthlyRate
+  const dash = <span className="t-2">—</span>
+  const co = (loan.coApplicants || []).map((ca) => ca.coApplicant?.fullName).filter(Boolean).join(', ')
+  const stat = (label: string, value: React.ReactNode, big?: boolean) => (
+    <div className={`ld-stat${big ? ' big' : ''}`}><span>{label}</span><b>{value}</b></div>
+  )
+  const steps: { label: string; date?: string | null }[] = [
+    { label: 'Applied', date: loan.applicationDate || loan.loanDetail?.applicationDate || loan.createdAt },
+    { label: 'Approved', date: loan.approvedAt },
+    { label: 'Disbursed', date: loan.disbursedAt },
+    { label: 'Expiry', date: expiry },
+    { label: 'Closed', date: loan.closedAt },
+  ]
+  const firstOpen = steps.findIndex((st) => !st.date)
+  type Row = [string, React.ReactNode]
+  const details: { title: string; rows: Row[] }[] = [
+    { title: 'Contract', rows: [
+      ['Contract No', loan.code],
+      ['Member', <>{loan.customer?.fullName} <span className="t-2" style={{ fontWeight: 400, fontSize: 11 }}>{loan.customer?.code}</span></>],
+      ...(co ? [[`Co-Applicant${(loan.coApplicants?.length || 0) > 1 ? 's' : ''}`, co]] as Row[] : []),
+      ['Branch', loan.branch?.name || dash],
+      ['Product', loan.loanDetail?.loanType?.name || dash],
+    ] },
+    { title: 'Terms', rows: [
+      ['Contract Amount', money(loan.principalAmount)],
+      ['Down Payment', money(loan.loanDetail?.downPayment)],
+      ['Installment Amount', installmentAmount ? money(installmentAmount) : dash],
+      ['Period', `${loan.termMonths} mo`],
+      ['Interest Type', isFlat ? 'Flat' : 'Reducing Rate'],
+      [isFlat ? 'Entered Rate' : 'Annual Rate', isFlat ? `${loan.interestRatePercent}% Flat` : `${loan.interestRatePercent}%`],
+      ...(isFlat && aer != null ? [
+        ['Equivalent Annual Effective Rate (AER)', `${pct(aer)}%`],
+        ['Equivalent Monthly Effective Rate', `${pct(emr)}%`],
+      ] as Row[] : []),
+    ] },
+    { title: 'Dates', rows: [
+      ['Application Date', dateOnly(loan.applicationDate || loan.loanDetail?.applicationDate || loan.createdAt)],
+      ['Created On', dateOnly(loan.createdAt)],
+      ['Approved On', loan.approvedAt ? dateOnly(loan.approvedAt) : dash],
+      ['Disbursed / Activated', loan.disbursedAt ? dateOnly(loan.disbursedAt) : dash],
+      ['Expiry', expiry ? dateOnly(expiry) : dash],
+      ['Closed On', loan.closedAt ? dateOnly(loan.closedAt) : dash],
+    ] },
+  ]
   return (
-    <>
-      <div className="eyebrow" style={{ marginBottom: 10 }}>Contract Summary</div>
-      <KpiGrid items={[
-        { label: 'Contract No', value: loan.code, icon: 'doc', tone: 'blue' },
-        {
-          label: 'Member', icon: 'users', tone: 'blue',
-          value: <>{loan.customer?.fullName}<div className="t-2" style={{ fontSize: 11, fontWeight: 400 }}>{loan.customer?.code}</div>
-            {!!loan.coApplicants?.length && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ac-bright)', marginTop: 2 }}>+{loan.coApplicants.length} Co-Applicant{loan.coApplicants.length > 1 ? 's' : ''}: {loan.coApplicants.map((ca) => ca.coApplicant?.fullName).filter(Boolean).join(', ')}</div>}</>,
-        },
-        { label: 'Branch', value: loan.branch?.name || '—', icon: 'building', tone: 'neutral' },
-        { label: 'Product', value: loan.loanDetail?.loanType?.name || '—', icon: 'tag', tone: 'blue' },
-        { label: 'Contract Amount', value: money(loan.principalAmount), icon: 'coins', tone: 'green' },
-        { label: 'Down Payment', value: money(loan.loanDetail?.downPayment), icon: 'wallet', tone: 'neutral' },
-        { label: 'Installment Amount', value: installmentAmount ? money(installmentAmount) : '—', icon: 'wallet', tone: 'green' },
-        { label: 'Period', value: `${loan.termMonths} mo`, icon: 'calendar', tone: 'neutral' },
-        { label: 'Interest Type', value: isFlat ? 'Flat' : 'Reducing Rate', icon: 'chart', tone: 'amber' },
-        { label: isFlat ? 'Entered Rate' : 'Annual Rate', value: isFlat ? `${loan.interestRatePercent}% Flat` : `${loan.interestRatePercent}%`, icon: 'chart', tone: 'amber' },
-        ...(isFlat && aer != null ? [
-          { label: 'Equivalent Annual Effective Rate (AER)', value: `${pct(aer)}%`, icon: 'chart', tone: 'amber' as const },
-          { label: 'Equivalent Monthly Effective Rate', value: `${pct(emr)}%`, icon: 'chart', tone: 'amber' as const },
-        ] : []),
-        { label: 'Application Date', value: dateOnly(loan.applicationDate || loan.loanDetail?.applicationDate || loan.createdAt), icon: 'calendar', tone: 'blue' },
-        { label: 'Created On', value: dateOnly(loan.createdAt), icon: 'calendar', tone: 'neutral' },
-        { label: 'Approved On', value: loan.approvedAt ? dateOnly(loan.approvedAt) : '—', icon: 'calendar', tone: 'blue' },
-        { label: 'Disbursed / Activated', value: loan.disbursedAt ? dateOnly(loan.disbursedAt) : '—', icon: 'calendar', tone: 'green' },
-        { label: 'Expiry', value: expiry ? dateOnly(expiry) : '—', icon: 'clock', tone: 'red' },
-        { label: 'Closed On', value: loan.closedAt ? dateOnly(loan.closedAt) : '—', icon: 'clock', tone: loan.closedAt ? 'red' : 'neutral' },
-      ]} />
-    </>
+    <div className="ld-sum">
+      <div className="ld-hero">
+        <div>
+          <div className="ld-hero-code">{loan.code}</div>
+          <div className="ld-hero-member">{loan.customer?.fullName} <span>{loan.customer?.code}</span></div>
+        </div>
+        <div className="ld-hero-amt"><span>Contract Amount</span><b>{money(loan.principalAmount)}</b></div>
+      </div>
+
+      <div className="ld-stats">
+        {stat('Installment', installmentAmount ? money(installmentAmount) : dash)}
+        {stat('Period', `${loan.termMonths} months`)}
+        {stat(isFlat ? 'Rate (flat)' : 'Annual rate', `${loan.interestRatePercent}%`)}
+        {stat('Down payment', money(loan.loanDetail?.downPayment))}
+      </div>
+
+      <ol className="ld-steps">
+        {steps.map((st, i) => (
+          <li key={st.label} className={st.date ? 'done' : i === firstOpen ? 'next' : ''}>
+            <i />
+            <b>{st.date ? dateOnly(st.date) : 'Not yet'}</b>
+            <span>{st.label}</span>
+          </li>
+        ))}
+      </ol>
+
+      <div className="ld-details">
+        {details.map((g) => (
+          <section key={g.title}>
+            <h4>{g.title}</h4>
+            <dl>{g.rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+          </section>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -1074,7 +1154,7 @@ function StatusFlagsModal({ open, onClose, loan, onChanged, notify }: {
 }
 
 /* ---------- Disburse (Approved -> Active) ---------- */
-function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
+export function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
   const financedAmount = num(loan.principalAmount) - num(loan.loanDetail?.downPayment)
   const [amount, setAmount] = useState<string>(String(financedAmount))
   const [disbursedAt, setDisbursedAt] = useState(loan.disbursementIncomplete && loan.disbursedAt ? loan.disbursedAt.slice(0, 10) : todayIso())
@@ -1235,10 +1315,10 @@ function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
       </div>
       {!pendingDisb && (
         <div className="row gap-2 wrap" style={{ alignItems: 'center' }}>
-          <Can user={me} module="Active Loans" action="Create">
+          <Can user={me} module="Loan Disbursement" action="Create">
             <Btn variant="solid" icon="receipt" onClick={requestDisburse} disabled={busy || chargeBlocking || !!pendingCancel}>{busy ? 'Sending…' : 'Request Disbursement'}</Btn>
           </Can>
-          <Can user={me} module="Active Loans" action="Approve">
+          <Can user={me} module="Loan Disbursement" action="Approve">
             <Btn variant="primary" icon="check" onClick={disburse} disabled={busy || chargeBlocking || !!pendingCancel}>{busy ? 'Disbursing…' : 'Disburse Now'}</Btn>
           </Can>
           {chargeBlocking && !pendingCancel && <span className="t-2" style={{ fontSize: 12 }}>{docCharge ? 'Settle' : 'Add and settle'} the document charge above first.</span>}
@@ -1373,11 +1453,6 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
         <span style={{ fontSize: 12.5 }}>Due {money(docCharge.dueAmount)} · Paid {money(docCharge.paidAmount)} · Balance <b style={{ fontFamily: 'JetBrains Mono' }}>{money(docBalance)}</b></span>
       </div>
       <ErrorBanner error={payErr} style={{ marginBottom: 10 }} />
-      {/cash session/i.test(payErr) && (
-        <div className="t-2" style={{ fontSize: 12.5, marginBottom: 10 }}>
-          <b>How to fix:</b> go to <b>Finance → Daily Cash Sessions</b>, click <b>Open Session</b>, choose the cash account and enter the opening amount, then come back and record this payment.
-        </div>
-      )}
       <Can user={me} module="Active Loans" action="Edit">
         <div className="row gap-2 wrap" style={{ alignItems: 'flex-end', marginBottom: 12 }}>
           <Field label="Charge Amount"><Input type="number" value={dueEdit} onChange={(e) => setDueEdit(e.target.value)} style={{ maxWidth: 160 }} /></Field>
@@ -1402,6 +1477,63 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
         <Btn variant="primary" icon="check" onClick={payCharge} disabled={payBusy} style={{ marginTop: 12 }}>{payBusy ? 'Recording…' : `Record Payment (${money(docBalance)})`}</Btn>
       </Can>
     </Card>
+  )
+}
+
+/* ---------- Document Charge modal + printable receipt (Approved loans) ---------- */
+const escHtml = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
+
+function printDocChargeReceipt(loan: Loan, charge: LoanCharge, payment: LoanPayment | undefined, brand: { name: string; tagline: string }) {
+  const w = window.open('', '_blank', 'width=720,height=900')
+  if (!w) return
+  const row = (k: string, v: unknown) => `<div class="r"><span>${k}</span><b>${escHtml(v)}</b></div>`
+  w.document.write(`<!doctype html><html><head><title>Document Charge Receipt ${escHtml(loan.code)}</title>
+<style>@page{size:A5;margin:12mm}body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#000;margin:0}
+.c{text-align:center;border-bottom:1px dashed #888;padding-bottom:12px;margin-bottom:14px}.c h1{margin:0;font-size:20px}.c h2{margin:8px 0 0;font-size:14px;letter-spacing:.08em}
+.r{display:flex;justify-content:space-between;padding:4px 0}.s{border-bottom:1px solid #ccc;padding-bottom:10px;margin-bottom:10px}
+.t{font-size:15px;border-top:1px solid #000;margin-top:8px;padding-top:8px}.sig{display:flex;justify-content:space-between;margin-top:36px}</style></head><body>
+<div class="c"><h1>${escHtml(brand.name || 'Company')}</h1>${brand.tagline ? `<div>${escHtml(brand.tagline)}</div>` : ''}<h2>DOCUMENT CHARGE RECEIPT</h2></div>
+<div class="s">${row('Receipt No', payment?.code || '—')}${row('Date', dateOnly(payment?.paidAt))}</div>
+<div class="s">${row('Received From', loan.customer?.fullName)}${row('NIC No', loan.customer?.nicNo || '—')}${row('Loan / Contract No', loan.code)}${row('Product', loan.loanDetail?.loanType?.name || '—')}</div>
+<div class="s">${row('Payment Method', payment?.paymentMethod || '—')}${payment?.receiptNo ? row('Reference', payment.receiptNo) : ''}${payment?.bank?.name ? row('Bank', payment.bank.name) : ''}</div>
+${row('Document Charge', money(charge.dueAmount))}
+<div class="r t"><span>Amount Paid</span><b>${money(payment?.amount ?? charge.paidAmount)}</b></div>
+<div class="sig"><div>Received By: <b>${escHtml(payment?.receiver?.name || '—')}</b></div><div>Signature: ____________</div></div>
+<script>window.onload=function(){window.print()}</script></body></html>`)
+  w.document.close()
+}
+
+function DocumentChargeButton({ loan, me, onChanged, notify }: {
+  loan: Loan; me?: AuthUser | null; onChanged: () => void; notify: ReturnType<typeof useNotify>
+}) {
+  const [open, setOpen] = useState(false)
+  const [brand, setBrand] = useState<{ name: string; tagline: string }>({ name: '', tagline: '' })
+  useEffect(() => { if (open) company.branding().then(setBrand).catch(() => {}) }, [open])
+
+  const feePercent = num(loan.loanDetail?.loanType?.processingFeePercent)
+  const financed = num(loan.principalAmount) - num(loan.loanDetail?.downPayment)
+  const appDocCharge = loan.loanDetail?.documentChargeAmount
+  const computed = appDocCharge != null && appDocCharge !== '' ? num(appDocCharge) : Math.round(financed * feePercent) / 100
+  const docCharge = loan.charges?.find((c) => c.category?.name === 'Document')
+  const docBalance = docCharge ? Math.max(0, num(docCharge.dueAmount) - num(docCharge.paidAmount)) : 0
+  const paid = !!docCharge && docBalance <= 0
+  const payment = [...(loan.payments || [])]
+    .filter((p) => p.status !== 'Voided' && (p.notes || '').startsWith('Document charge'))
+    .sort((a, b) => (a.paidAt < b.paidAt ? 1 : -1))[0]
+
+  if (feePercent <= 0 && !docCharge) return null
+  return (
+    <>
+      <Can user={me} module="Loan Disbursement" action="View">
+        <Btn size="sm" variant="solid" icon="receipt" onClick={() => setOpen(true)}>Document Charge</Btn>
+      </Can>
+      <Modal open={open} onClose={() => setOpen(false)} title={`Document Charge — ${loan.code}`} sub={loan.customer?.fullName} width={720}>
+        <DocumentChargeSection loan={loan} me={me} docCharge={docCharge} docBalance={docBalance} computedAmount={computed} feePercent={feePercent} onChanged={onChanged} notify={notify} />
+        {paid && docCharge && (
+          <Btn variant="primary" icon="print" onClick={() => printDocChargeReceipt(loan, docCharge, payment, brand)}>Print Receipt</Btn>
+        )}
+      </Modal>
+    </>
   )
 }
 

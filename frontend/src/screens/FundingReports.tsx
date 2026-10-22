@@ -52,6 +52,18 @@ const renewalRows = (rows: FdRenewal[]) => rows.map((r) => ({
   oldPrincipal: Number(r.oldPrincipal || 0), additional: Number(r.additionalDepositAmount || 0), newPrincipal: Number(r.newPrincipal || 0), renewedAt: dateOnly(r.renewedAt),
 }))
 
+const WITHDRAWAL_COLS: ExcelColumn[] = [
+  { label: 'Voucher No', key: 'voucherNo' }, { label: 'FD No', key: 'fdNo' }, { label: 'Customer', key: 'customer' }, { label: 'Type', key: 'type', align: 'center' },
+  { label: 'Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Interest', key: 'interest', align: 'right', format: 'money' },
+  { label: 'Clawback', key: 'clawback', align: 'right', format: 'money' }, { label: 'Total Paid', key: 'total', align: 'right', format: 'money' },
+  { label: 'Method', key: 'method' }, { label: 'Closed At', key: 'closedAt' },
+]
+const withdrawalRows = (rows: any[]) => rows.map((w) => ({
+  voucherNo: w.voucherNo, fdNo: w.fixedDeposit?.fdNumber || '—', customer: w.fixedDeposit?.customer?.fullName || '—', type: w.isPremature ? 'Premature' : 'Matured',
+  principal: Number(w.principalAmount || 0), interest: Number(w.interestAmount || 0), clawback: Number(w.prematureClawback || 0), total: Number(w.totalAmount || 0),
+  method: w.paymentMethod, closedAt: dateOnly(w.closedAt),
+}))
+
 const money = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
@@ -66,6 +78,7 @@ const TABS: { id: FundingReportType; label: string }[] = [
   { id: 'customer-funding-history', label: 'Customer Funding' },
   { id: 'renewal-history', label: 'Renewal History' },
   { id: 'capital-enhancements', label: 'Capital Enhancements' },
+  { id: 'withdrawals', label: 'Withdrawals' },
 ]
 
 function fdCols() {
@@ -124,6 +137,23 @@ function RenewalRows({ rows }: { rows: FdRenewal[] }) {
     </>} />
 }
 
+function WithdrawalRows({ rows }: { rows: any[] }) {
+  return <Table cols={[{ label: 'Voucher No' }, { label: 'FD No' }, { label: 'Customer' }, { label: 'Type', align: 'center' }, { label: 'Principal', align: 'right' }, { label: 'Interest', align: 'right' }, { label: 'Clawback', align: 'right' }, { label: 'Total Paid', align: 'right' }, { label: 'Method' }, { label: 'Closed At' }]}
+    rows={rows} empty="No records"
+    render={(w: any) => <>
+      <Td mono>{w.voucherNo}</Td>
+      <Td mono>{w.fixedDeposit?.fdNumber || '—'}</Td>
+      <Td>{w.fixedDeposit?.customer?.fullName || '—'}</Td>
+      <Td align="center"><Badge tone={w.isPremature ? 'amber' : 'green'} dot>{w.isPremature ? 'Premature' : 'Matured'}</Badge></Td>
+      <Td align="right" mono>{money(w.principalAmount)}</Td>
+      <Td align="right" mono>{money(w.interestAmount)}</Td>
+      <Td align="right" mono>{Number(w.prematureClawback) > 0 ? money(w.prematureClawback) : '—'}</Td>
+      <Td align="right" mono>{money(w.totalAmount)}</Td>
+      <Td>{w.paymentMethod}</Td>
+      <Td>{dateOnly(w.closedAt)}</Td>
+    </>} />
+}
+
 export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const [tab, setTab] = useState<FundingReportType>('active')
   const [loading, setLoading] = useState(true)
@@ -136,6 +166,7 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
   const [monthlyStatus, setMonthlyStatus] = useState<'' | 'Pending' | 'Paid'>('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [wdKind, setWdKind] = useState<'' | 'matured' | 'premature'>('')
   const [customers, setCustomers] = useState<Customer[]>([])
   const [customerLabel, setCustomerLabel] = useState('')
   const [customerId, setCustomerId] = useState<number | undefined>()
@@ -147,6 +178,7 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
     ...(tab === 'maturing-soon' ? { days } :
       tab === 'monthly-interest' ? { status: monthlyStatus || undefined } :
       tab === 'interest-paid' ? { from: fromDate || undefined, to: toDate || undefined } :
+      tab === 'withdrawals' ? { from: fromDate || undefined, to: toDate || undefined, kind: wdKind || undefined } :
       tab === 'deposit-history' ? { customerId: customerId || undefined } :
       tab === 'customer-funding-history' ? { customerId } : {}),
   })
@@ -157,7 +189,7 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
     setLoading(true)
     fundingReportsApi.get(tab, buildParams()).then(setData).catch((ex) => { setErr(getErrorText(ex, 'Failed to load report')); setData(null) }).finally(() => setLoading(false))
   }
-  useEffect(() => { load() }, [tab, days, monthlyStatus, fromDate, toDate, customerId, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [tab, days, monthlyStatus, fromDate, toDate, wdKind, customerId, branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const tabLabel = TABS.find((t) => t.id === tab)?.label || tab
   const exportExcel = () => {
@@ -179,6 +211,9 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
       void exportFlatTableToExcel({ reportTitle: tabLabel, columns: INTEREST_COLS, rows: interestRows(rows), totalRow: { customer: 'Total', amount: rows.reduce((a, r) => a + Number(r.amount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
     } else if (tab === 'deposit-history') {
       void exportFlatTableToExcel({ reportTitle: tabLabel, columns: DEPOSIT_COLS, rows: depositRows(rows), totalRow: { customer: 'Total', amount: rows.reduce((a, r) => a + Number(r.amount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
+    } else if (tab === 'withdrawals') {
+      const sum = (k: string) => rows.reduce((a, r) => a + Number(r[k] || 0), 0)
+      void exportFlatTableToExcel({ reportTitle: tabLabel, columns: WITHDRAWAL_COLS, rows: withdrawalRows(rows), totalRow: { customer: 'Total', principal: sum('principalAmount'), interest: sum('interestAmount'), clawback: sum('prematureClawback'), total: sum('totalAmount') }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
     } else if (tab === 'renewal-history' || tab === 'capital-enhancements') {
       void exportFlatTableToExcel({ reportTitle: tabLabel, columns: RENEWAL_COLS, rows: renewalRows(rows), emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
     }
@@ -204,12 +239,17 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
           <option value="">All</option><option value="Pending">Pending</option><option value="Paid">Paid</option>
         </Select></Field></Card>
       )}
-      {tab === 'interest-paid' && (
+      {(tab === 'interest-paid' || tab === 'withdrawals') && (
         <Card style={{ marginBottom: 16 }}>
           <div className="row gap-3 wrap">
             <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
             <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
             <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
+            {tab === 'withdrawals' && (
+              <Field label="Type"><Select value={wdKind} onChange={(e) => setWdKind(e.target.value as any)} style={{ minWidth: 160 }}>
+                <option value="">All</option><option value="matured">Matured</option><option value="premature">Premature</option>
+              </Select></Field>
+            )}
           </div>
         </Card>
       )}
@@ -228,6 +268,7 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
          tab === 'customer-funding-history' && !customerId ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Pick a customer to view their funding history.</div> :
          (tab === 'active' || tab === 'maturing-soon' || tab === 'matured') ? <FdRows rows={data || []} /> :
          (tab === 'monthly-interest' || tab === 'interest-paid') ? <InterestPaymentRows rows={data || []} /> :
+         tab === 'withdrawals' ? <WithdrawalRows rows={data || []} /> :
          tab === 'deposit-history' ? <DepositRows rows={data || []} /> :
          tab === 'customer-funding-history' ? (
            <div className="col gap-4" style={{ padding: 16 }}>

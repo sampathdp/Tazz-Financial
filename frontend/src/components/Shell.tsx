@@ -31,7 +31,7 @@ export const NAV: NavNode[] = [
   { section: 'Loan Management', icon: 'coins', items: [
     { id: 'loan/types', label: 'Loan Types', icon: 'layers' },
     { id: 'loan/apps', label: 'Loan Applications', icon: 'doc' },
-    { id: 'loan/active', label: 'Active Loans', icon: 'coins' },
+    { id: 'loan/disbursement', label: 'Loan Disbursement', icon: 'upload' },
     { id: 'loan/payments', label: 'Loan Payments', icon: 'receipt' },
     /** Admin-only — cheque realize/reject. Intentionally left out of
      *  lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back to its
@@ -88,7 +88,6 @@ export const NAV: NavNode[] = [
     { id: 'finance/transactions', label: 'Cash Transactions', icon: 'receipt' },
     { id: 'finance/transfers', label: 'Transfers', icon: 'swap' },
     { id: 'finance/floats', label: 'Cash Floats', icon: 'coins' },
-    { id: 'finance/sessions', label: 'Daily Cash Sessions', icon: 'clock' },
     { id: 'cash/recon', label: 'Cash Reconciliation', icon: 'adjust' },
     { id: 'finance/reports', label: 'Finance Reports', icon: 'receipt' },
     { id: 'finance/audit', label: 'Audit Log', icon: 'list' },
@@ -102,6 +101,7 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Expense Management', icon: 'wallet', items: [
+    { id: 'masters/expense-categories', label: 'Expense Categories', icon: 'tag' },
     { id: 'exp/vendors', label: 'Vendors', icon: 'store' },
     { id: 'exp/expenses', label: 'Expenses', icon: 'wallet' },
     /** View/void only — a voucher is only ever created as the result of
@@ -164,7 +164,6 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Masters', icon: 'layers', items: [
-    { id: 'masters/expense-categories', label: 'Expense Categories', icon: 'tag' },
     { id: 'masters/banks', label: 'Banks', icon: 'building' },
     { id: 'masters/document-categories', label: 'Document Categories', icon: 'file-text' },
     { id: 'masters/charge-categories', label: 'Charge Categories', icon: 'tag' },

@@ -308,19 +308,6 @@ class LoanLifecycleScenariosTest extends TestCase
         $this->assertEqualsWithDelta(50000.0, $sum, 0.01, 'schedule principal must equal the disbursed amount');
     }
 
-    // =============================================================
-    // Cash-session gate
-    // =============================================================
-    public function test_cash_session_gate_blocks_doc_charge_cash_payment_without_session(): void
-    {
-        \App\Models\FinanceSetting::put('require_cash_session', '1');
-        $loan = $this->approvedLoan();
-        $this->addDocCharge($loan, 2000)->assertStatus(201);
-        $res = $this->pay($loan, 2000);
-        $this->assertContains($res->status(), [201, 422]);
-        $this->assertSame(0, DB::table('facility_payments')->where('credit_facility_id', $loan->id)->count() === 0 ? 0 : ($res->status() === 422 ? 1 : 0));
-    }
-
     // A counter that fell behind its data (restored DB, lost counter row) must skip taken numbers, not 409.
     public function test_number_generator_skips_codes_that_already_exist(): void
     {

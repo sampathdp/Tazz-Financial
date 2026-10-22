@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Card, Btn, Badge, Field, Input, Table, Td, Modal, ErrorBanner } from '../../components/ui'
 import { Icon } from '../../components/Icon'
+import { DetailSummary } from '../../components/DetailSummary'
 import { pawningsApi, type Pawning, type PawningCollateralItem, type PawningPayment, type PaymentMethod, type AuthUser } from '../../api'
 import { Can } from '../../lib/permissions'
 import { AdminEditButton } from '../../components/AdminEditButton'
@@ -25,18 +26,6 @@ const ITEM_STATUS_TONE: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = 
   Pledged: 'green', Released: 'neutral', Auctioned: 'amber', Forfeited: 'red',
 }
 const PAYMENT_TYPE_LABEL: Record<string, string> = { Regular: 'Renewal (Interest + Capital)', Interest: 'Renewal (Interest)', CapitalReduction: 'Capital Reduction', Settlement: 'Redemption' }
-
-function Kpi({ label, value, tone }: { label: string; value: ReactNode; tone?: string }) {
-  return (
-    <div style={{ padding: 14, background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-m)' }}>
-      <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 18, fontWeight: 700, marginTop: 4, color: tone || 'var(--tx-0)' }}>{value}</div>
-    </div>
-  )
-}
-function KpiGrid({ children }: { children: ReactNode }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>{children}</div>
-}
 
 const SECTIONS = [
   { id: 'overview', label: 'Overview', icon: 'chart' },
@@ -69,33 +58,53 @@ export function PawningDetail({ pawning, me, onChanged }: { pawning: Pawning; me
 function OverviewPanel({ pawning: d }: { pawning: Pawning }) {
   const detail = d.pawningDetail
   const s = d.summary
+  const active = !!s && d.status === 'Active'
+  const rows = (r: ([string, ReactNode] | false)[]) => r.filter(Boolean) as [string, ReactNode][]
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px 20px', fontSize: 12.5, marginBottom: 20 }}>
-        <div><span className="t-2">Customer: </span><b>{d.customer?.fullName}</b></div>
-        <div><span className="t-2">Scheme: </span><b>{detail?.pawningType?.name}</b></div>
-        <div><span className="t-2">Applied Rate: </span><b>{Number(detail?.appliedRatePercent).toFixed(3)}% {detail?.isSpecialRate ? '(special)' : '(normal)'}</b></div>
-        <div><span className="t-2">Created On: </span><b>{d.createdAt ? dateOnly(d.createdAt) : '—'}</b></div>
-        <div><span className="t-2">Issued / Disbursed: </span><b>{dateOnly(d.disbursedAt || d.startDate)}</b></div>
-        <div><span className="t-2">Repay Due: </span><b>{dateOnly(detail?.repayDueDate)}</b></div>
-        <div><span className="t-2">Closed On: </span><b>{d.closedAt ? dateOnly(d.closedAt) : '—'}</b></div>
-        <div><span className="t-2">Renewals: </span><b>{detail?.renewalCount ?? 0}</b></div>
-        {detail?.previousFacility && <div><span className="t-2">Renewed From: </span><b>{detail.previousFacility.code}</b></div>}
-        {detail?.purpose && <div><span className="t-2">Purpose: </span><b>{detail.purpose}</b></div>}
-      </div>
-
-      <KpiGrid>
-        <Kpi label="Amount Advanced" value={money(d.principalAmount)} />
-        <Kpi label="Outstanding Capital" value={money(d.outstandingBalanceCache)} tone={num(d.outstandingBalanceCache) > 0 ? 'var(--bad)' : 'var(--ok)'} />
-        <Kpi label="Total Gross Weight" value={`${Number(detail?.totalGrossWeightGrams ?? 0).toFixed(3)} g`} />
-        <Kpi label="Total Net Weight" value={`${Number(detail?.totalNetWeightGrams ?? 0).toFixed(3)} g`} />
-        <Kpi label="Total Appraised Value" value={money(detail?.totalAppraisedValue)} />
-        {s && d.status === 'Active' && (
-          <Kpi label="Interest if Settled Today" value={money(s.interest)} tone="var(--bad)" />
-        )}
-      </KpiGrid>
+      <DetailSummary
+        code={d.code} title={d.customer?.fullName} titleNote={detail?.pawningType?.name}
+        amountLabel="Amount Advanced" amount={money(d.principalAmount)}
+        stats={[
+          { label: 'Outstanding Capital', value: money(d.outstandingBalanceCache), tone: num(d.outstandingBalanceCache) > 0 ? 'var(--bad)' : 'var(--ok)' },
+          { label: 'Gross Weight', value: `${Number(detail?.totalGrossWeightGrams ?? 0).toFixed(3)} g` },
+          { label: 'Net Weight', value: `${Number(detail?.totalNetWeightGrams ?? 0).toFixed(3)} g` },
+          { label: 'Appraised Value', value: money(detail?.totalAppraisedValue) },
+          ...(active ? [{ label: 'Interest if Settled Today', value: money(s!.interest), tone: 'var(--bad)' }] : []),
+        ]}
+        steps={[
+          { label: 'Created', date: d.createdAt },
+          { label: 'Issued', date: d.disbursedAt || d.startDate },
+          { label: 'Repay Due', date: detail?.repayDueDate, done: d.status !== 'Active' },
+          { label: 'Closed', date: d.closedAt },
+        ]}
+        groups={[
+          { title: 'Ticket', rows: rows([
+            ['Customer', d.customer?.fullName],
+            ['Scheme', detail?.pawningType?.name],
+            ['Applied Rate', `${Number(detail?.appliedRatePercent).toFixed(3)}% ${detail?.isSpecialRate ? '(special)' : '(normal)'}`],
+            ['Renewals', detail?.renewalCount ?? 0],
+            !!detail?.previousFacility && ['Renewed From', detail.previousFacility.code],
+            !!detail?.purpose && ['Purpose', detail.purpose],
+          ]) },
+          { title: 'Amounts', rows: rows([
+            ['Amount Advanced', money(d.principalAmount)],
+            ['Outstanding Capital', money(d.outstandingBalanceCache)],
+            ['Total Gross Weight', `${Number(detail?.totalGrossWeightGrams ?? 0).toFixed(3)} g`],
+            ['Total Net Weight', `${Number(detail?.totalNetWeightGrams ?? 0).toFixed(3)} g`],
+            ['Total Appraised Value', money(detail?.totalAppraisedValue)],
+            active && ['Interest if Settled Today', money(s!.interest)],
+          ]) },
+          { title: 'Dates', rows: [
+            ['Created On', d.createdAt ? dateOnly(d.createdAt) : '—'],
+            ['Issued / Disbursed', dateOnly(d.disbursedAt || d.startDate)],
+            ['Repay Due', dateOnly(detail?.repayDueDate)],
+            ['Closed On', d.closedAt ? dateOnly(d.closedAt) : '—'],
+          ] },
+        ]}
+      />
       {s && d.status === 'Active' && (
-        <div className="t-2" style={{ fontSize: 11.5 }}>
+        <div className="t-2" style={{ fontSize: 11.5, marginTop: 16 }}>
           {s.isSpecial ? `Within the special-rate window (${s.daysElapsed} days into this cycle) — ${s.rate.toFixed(3)}% applies.` : `Special-rate window has passed (${s.daysElapsed} days into this cycle) — the normal ${s.rate.toFixed(3)}% rate applies.`}
         </div>
       )}

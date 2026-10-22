@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\FdDeposit;
 use App\Models\FdInterestPayment;
 use App\Models\FdRenewal;
+use App\Models\FdWithdrawal;
 use App\Models\FixedDeposit;
 use App\Support\CurrentBranch;
 use App\Support\ReportExport;
@@ -17,7 +18,7 @@ class FundingReportController extends Controller
 {
     private const TYPES = [
         'active', 'maturing-soon', 'matured', 'monthly-interest', 'interest-paid',
-        'deposit-history', 'customer-funding-history', 'renewal-history', 'capital-enhancements',
+        'deposit-history', 'customer-funding-history', 'renewal-history', 'capital-enhancements', 'withdrawals',
     ];
 
     public function show(Request $request, string $type)
@@ -71,6 +72,15 @@ class FundingReportController extends Controller
                 ->whereHas('oldFixedDeposit', fn ($q) => CurrentBranch::applyScope($q))
                 ->orderByDesc('id')->get(),
 
+            // fd_withdrawals has no branch_id of its own — scope via its fixed deposit's branch.
+            'withdrawals' => FdWithdrawal::with(['fixedDeposit:id,fd_number,customer_id', 'fixedDeposit.customer:id,full_name,code'])
+                ->when($request->query('kind') === 'premature', fn ($q) => $q->where('is_premature', true))
+                ->when($request->query('kind') === 'matured', fn ($q) => $q->where('is_premature', false))
+                ->when($request->query('from'), fn ($q, $d) => $q->whereDate('closed_at', '>=', $d))
+                ->when($request->query('to'), fn ($q, $d) => $q->whereDate('closed_at', '<=', $d))
+                ->whereHas('fixedDeposit', fn ($q) => CurrentBranch::applyScope($q))
+                ->orderByDesc('closed_at')->orderByDesc('id')->get(),
+
             default => [],
         };
     }
@@ -78,7 +88,7 @@ class FundingReportController extends Controller
     private const TITLES = [
         'active' => 'Active Fixed Deposits', 'maturing-soon' => 'Maturing Soon', 'matured' => 'Matured Fixed Deposits',
         'monthly-interest' => 'Monthly Interest', 'interest-paid' => 'Interest Paid', 'deposit-history' => 'Deposit History',
-        'customer-funding-history' => 'Customer Funding History', 'renewal-history' => 'Renewal History', 'capital-enhancements' => 'Capital Enhancements',
+        'customer-funding-history' => 'Customer Funding History', 'renewal-history' => 'Renewal History', 'capital-enhancements' => 'Capital Enhancements', 'withdrawals' => 'FD Withdrawals',
     ];
 
     public function exportPdf(Request $request, string $type)
@@ -93,6 +103,7 @@ class FundingReportController extends Controller
             'monthly-interest', 'interest-paid' => [$this->interestSection($data)],
             'deposit-history' => [$this->depositSection($data)],
             'renewal-history', 'capital-enhancements' => [$this->renewalSection($data)],
+            'withdrawals' => [$this->withdrawalSection($data)],
             'customer-funding-history' => [
                 $this->depositSection(collect($data['deposits'])) + ['title' => 'Deposits'],
                 $this->fdSection(collect($data['fixed_deposits'])) + ['title' => 'Fixed Deposits'],
@@ -164,6 +175,27 @@ class FundingReportController extends Controller
                 ['key' => 'newPrincipal', 'label' => 'New Principal', 'align' => 'right', 'format' => 'money'], ['key' => 'renewedAt', 'label' => 'Renewed At'],
             ],
             'rows' => $mapped->all(), 'totalRow' => ['customer' => 'Total', 'oldPrincipal' => $mapped->sum('oldPrincipal'), 'additional' => $mapped->sum('additional'), 'newPrincipal' => $mapped->sum('newPrincipal')], 'emptyText' => 'No records',
+        ];
+    }
+
+    private function withdrawalSection(Collection $rows): array
+    {
+        $mapped = $rows->map(fn (FdWithdrawal $w) => [
+            'voucherNo' => $w->voucher_no, 'fdNo' => $w->fixedDeposit?->fd_number ?? '—', 'customer' => $w->fixedDeposit?->customer?->full_name ?? '—',
+            'type' => $w->is_premature ? 'Premature' : 'Matured', 'principal' => (float) $w->principal_amount, 'interest' => (float) $w->interest_amount,
+            'clawback' => (float) $w->premature_clawback, 'total' => (float) $w->total_amount, 'method' => $w->payment_method, 'closedAt' => $w->closed_at?->format('Y-m-d') ?? '—',
+        ]);
+
+        return [
+            'columns' => [
+                ['key' => 'voucherNo', 'label' => 'Voucher No'], ['key' => 'fdNo', 'label' => 'FD No'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'type', 'label' => 'Type', 'align' => 'center'],
+                ['key' => 'principal', 'label' => 'Principal', 'align' => 'right', 'format' => 'money'], ['key' => 'interest', 'label' => 'Interest', 'align' => 'right', 'format' => 'money'],
+                ['key' => 'clawback', 'label' => 'Clawback', 'align' => 'right', 'format' => 'money'], ['key' => 'total', 'label' => 'Total Paid', 'align' => 'right', 'format' => 'money'],
+                ['key' => 'method', 'label' => 'Method'], ['key' => 'closedAt', 'label' => 'Closed At'],
+            ],
+            'rows' => $mapped->all(),
+            'totalRow' => ['customer' => 'Total', 'principal' => $mapped->sum('principal'), 'interest' => $mapped->sum('interest'), 'clawback' => $mapped->sum('clawback'), 'total' => $mapped->sum('total')],
+            'emptyText' => 'No records',
         ];
     }
 

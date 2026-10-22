@@ -6,7 +6,6 @@ use App\Models\BankAccount;
 use App\Models\CashAccount;
 use App\Models\ChartOfAccount;
 use App\Models\User;
-use App\Support\CashSessionService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -77,12 +76,11 @@ class BranchIsolationProbeTest extends TestCase
             'cash_account_id' => $till->id, 'entry_date' => now()->toDateString(), 'direction' => 'In', 'category' => 'Other',
             'description' => 'Entry ' . $this->marker, 'amount' => 10, 'offset_account_id' => ChartOfAccount::system('3015')->id,
         ])->assertStatus(201);
-        CashSessionService::open($till->id, '5000.00', $this->admin->id, 'Sess ' . $this->marker);
         $fund = $this->postJson('/api/petty-cash-funds', ['branch_id' => $this->branchB, 'name' => 'Fund ' . $this->marker, 'float_limit' => 1000]);
 
         $this->asBranchAUser();
         $leaks = [];
-        foreach (['cash-accounts', 'bank-accounts', 'cashbook-entries', 'finance-transactions', 'cash-sessions', 'petty-cash-funds', 'bank-transactions'] as $ep) {
+        foreach (['cash-accounts', 'bank-accounts', 'cashbook-entries', 'finance-transactions', 'petty-cash-funds', 'bank-transactions'] as $ep) {
             $res = $this->getJson("/api/{$ep}");
             if ($res->status() === 200 && str_contains($res->getContent(), $this->marker)) {
                 $leaks[] = $ep;

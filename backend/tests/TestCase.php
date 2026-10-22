@@ -20,8 +20,5 @@ abstract class TestCase extends BaseTestCase
         // a test run is one long process, so clear it between cases or a
         // prior test's figures leak into the next.
         \App\Models\ChartOfAccount::flushBalancesCache();
-        // Tests assume the factory-default finance policy, whatever the cloned working database has
-        // switched on (rolled back with each test's transaction).
-        \App\Models\FinanceSetting::put('require_cash_session', '0');
     }
 }

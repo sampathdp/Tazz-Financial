@@ -103,10 +103,25 @@ class FdLoanTest extends TestCase
         return FixedDeposit::findOrFail($id);
     }
 
+    /** Payout bank account the API now requires for every new facility (one per customer, created on first use). */
+    private function bankDetailFor(int $customerId): int
+    {
+        $existing = DB::table('customer_bank_details')->where('customer_id', $customerId)->whereNull('deleted_at')->value('id');
+        if ($existing) {
+            return (int) $existing;
+        }
+        $bankId = DB::table('banks')->insertGetId(['name' => 'FL Bank ' . Str::random(4), 'created_at' => now(), 'updated_at' => now()]);
+
+        return (int) \App\Models\Customer::findOrFail($customerId)->bankDetails()->create([
+            'bank_id' => $bankId, 'account_holder' => 'FL Customer', 'bank_branch' => 'Main', 'account_number' => '1234567890',
+        ])->id;
+    }
+
     private function body(FixedDeposit $fd, array $o = []): array
     {
         return array_merge([
             'branch_id' => $this->branchId, 'fixed_deposit_id' => $fd->id, 'loan_type_id' => $this->loanTypeId,
+            'customer_bank_detail_id' => $this->bankDetailFor((int) $fd->customer_id),
             'principal_amount' => 90000, 'term_months' => 10, 'installment_frequency' => 'monthly',
         ], $o);
     }
@@ -324,6 +339,7 @@ class FdLoanTest extends TestCase
 
         $this->putJson("/api/loans/{$loan->id}", [
             'branch_id' => $this->branchId, 'customer_id' => $this->customerId, 'loan_type_id' => $this->loanTypeId,
+            'customer_bank_detail_id' => $this->bankDetailFor($this->customerId),
             'principal_amount' => 80000, 'term_months' => 10, 'installment_frequency' => 'monthly',
             'collateral' => [['collateral_type' => 'Other', 'description' => 'Bond']],
         ])->assertStatus(200);
@@ -342,12 +358,13 @@ class FdLoanTest extends TestCase
         $loan = $this->createLoan($fd);
         $payload = [
             'branch_id' => $this->branchId, 'customer_id' => $this->customerId, 'loan_type_id' => $this->loanTypeId,
+            'customer_bank_detail_id' => $this->bankDetailFor($this->customerId),
             'principal_amount' => 95000, 'term_months' => 10, 'installment_frequency' => 'monthly', 'interest_rate_percent' => 1,
         ];
         $this->putJson("/api/loans/{$loan->id}", $payload)->assertStatus(422);
 
         $other = $this->customer();
-        $this->putJson("/api/loans/{$loan->id}", array_merge($payload, ['principal_amount' => 85000, 'customer_id' => $other]))->assertStatus(200);
+        $this->putJson("/api/loans/{$loan->id}", array_merge($payload, ['principal_amount' => 85000, 'customer_id' => $other, 'customer_bank_detail_id' => $this->bankDetailFor($other)]))->assertStatus(200);
         $fresh = $loan->fresh();
         $this->assertSame($this->customerId, (int) $fresh->customer_id, 'customer cannot be swapped away from the FD owner');
         $this->assertEquals('10.000', $fresh->interest_rate_percent, 'rate stays the policy rate');
@@ -361,6 +378,7 @@ class FdLoanTest extends TestCase
 
         $r = $this->postJson('/api/loans', [
             'branch_id' => $this->branchId, 'customer_id' => $this->customerId, 'loan_type_id' => $this->loanTypeId,
+            'customer_bank_detail_id' => $this->bankDetailFor($this->customerId),
             'principal_amount' => 1000, 'term_months' => 5, 'installment_frequency' => 'monthly', 'interest_rate_percent' => 5,
             'collateral' => [['collateral_type' => 'FixedDeposit', 'description' => 'fake FD']],
         ]);

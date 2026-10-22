@@ -19,6 +19,7 @@ const CustomersScreen = lazy(() => import('./screens/Customers').then((m) => ({ 
 const LoanTypesScreen = lazy(() => import('./screens/LoanTypes').then((m) => ({ default: m.LoanTypesScreen })))
 const LoanCalculatorScreen = lazy(() => import('./screens/LoanCalculator').then((m) => ({ default: m.LoanCalculatorScreen })))
 const LoanApplicationsScreen = lazy(() => import('./screens/LoanApplications').then((m) => ({ default: m.LoanApplicationsScreen })))
+const LoanDisbursementPageScreen = lazy(() => import('./screens/LoanDisbursement').then((m) => ({ default: m.LoanDisbursementScreen })))
 const ActiveLoansScreen = lazy(() => import('./screens/ActiveLoans').then((m) => ({ default: m.ActiveLoansScreen })))
 const OverdueLoansScreen = lazy(() => import('./screens/OverdueLoans').then((m) => ({ default: m.OverdueLoansScreen })))
 const LoanProvisionsScreen = lazy(() => import('./screens/LoanProvisions').then((m) => ({ default: m.LoanProvisionsScreen })))
@@ -67,7 +68,6 @@ const FinanceDashboardScreen = named(() => import('./screens/Finance'), 'Finance
 const FinanceRequestsScreen = named(() => import('./screens/Finance'), 'FinanceRequestsScreen')
 const FinanceTransfersScreen = named(() => import('./screens/Finance'), 'FinanceTransfersScreen')
 const CashFloatsScreen = named(() => import('./screens/Finance'), 'CashFloatsScreen')
-const CashSessionsScreen = named(() => import('./screens/Finance'), 'CashSessionsScreen')
 const FinanceSettingsScreen = named(() => import('./screens/Finance'), 'FinanceSettingsScreen')
 const CashTransactionsScreen = named(() => import('./screens/Finance'), 'CashTransactionsScreen')
 const AuditLogScreen = named(() => import('./screens/Finance'), 'AuditLogScreen')
@@ -187,7 +187,6 @@ const SCREENS: Record<string, ScreenComp> = {
   'finance/requests': FinanceRequestsScreen,
   'finance/transfers': FinanceTransfersScreen,
   'finance/floats': CashFloatsScreen,
-  'finance/sessions': CashSessionsScreen,
   'finance/settings': FinanceSettingsScreen,
   'finance/transactions': CashTransactionsScreen,
   'finance/audit': AuditLogScreen,
@@ -195,6 +194,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'loan/apps': LoanApplicationsScreen,
   'loan/fd-loan': FdLoanApplicationScreen,
   'loan/active': ActiveLoansScreen,
+  'loan/disbursement': LoanDisbursementPageScreen,
   'loan/overdue': OverdueLoansScreen,
   'loan/provisions': LoanProvisionsScreen,
   'loan/payments': PaymentReceiptScreen,
@@ -289,7 +289,7 @@ const ROUTE_IDS = Object.keys(flatNav)
 // sibling routes, so which record/form is open lives in the URL — that's
 // what makes a hard refresh land back on the same form instead of the list.
 const FORM_ROUTE_IDS = new Set([
-  'loan/apps', 'loan/active', 'loan/overdue', 'customers', 'sd/drafts', 'pawn/tickets', 'pawn/auctions',
+  'loan/apps', 'loan/active', 'loan/disbursement', 'loan/overdue', 'customers', 'sd/drafts', 'pawn/tickets', 'pawn/auctions',
 ])
 
 // One-off deeper sub-paths (a screen nested inside another screen's record

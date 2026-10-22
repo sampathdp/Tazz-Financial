@@ -137,6 +137,28 @@ class LoanController extends Controller
     }
 
     /**
+     * Queue for the Loan Disbursement screen: approved loans not yet paid out, plus loans whose
+     * last disbursement stopped halfway (Active, disbursed_at set, no schedule).
+     */
+    public function awaitingDisbursement(Request $request)
+    {
+        $query = Loan::with(self::SUMMARY_RELATIONS)
+            ->where(function ($q) {
+                $q->where('status', 'Approved')
+                    ->orWhere(fn ($qq) => $qq->where('status', 'Active')->whereNotNull('disbursed_at')->whereDoesntHave('schedules'));
+            });
+        if ($request->filled('search')) {
+            $term = $request->search;
+            $query->where(function ($q) use ($term) {
+                $q->where('code', 'like', "%{$term}%")
+                    ->orWhereHas('customer', fn ($qq) => $qq->where('full_name', 'like', "%{$term}%")->orWhere('code', 'like', "%{$term}%"));
+            });
+        }
+
+        return $query->orderByDesc('id')->paginate((int) $request->input('perPage', 25));
+    }
+
+    /**
      * Per-status counts for the Active Loans screen's filter chips — kept as
      * its own cheap GROUP BY query rather than derived from a full loan list
      * on the client (which is exactly the unbounded fetch index() above now

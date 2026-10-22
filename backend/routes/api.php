@@ -33,7 +33,6 @@ use App\Http\Controllers\Api\PettyCashReplenishmentController;
 use App\Http\Controllers\Api\PettyCashVoucherController;
 use App\Http\Controllers\Api\ExpenseReportController;
 use App\Http\Controllers\Api\CashFloatController;
-use App\Http\Controllers\Api\CashSessionController;
 use App\Http\Controllers\Api\FinanceAuditController;
 use App\Http\Controllers\Api\FinanceCalculatorController;
 use App\Http\Controllers\Api\FinanceSettingController;
@@ -228,10 +227,12 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Loan Management: Active Loans ---
     // Direct disburse (Finance / admin): finishes the loan and releases the money in one call.
-    Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware(['perm:Active Loans,Approve', 'idempotency']);
+    Route::get('loans-disbursement', [LoanController::class, 'awaitingDisbursement'])->middleware('perm:Loan Disbursement,View');
+    Route::get('loans-disbursement/{loan}', [LoanController::class, 'show'])->middleware('perm:Loan Disbursement,View');
+    Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware(['perm:Loan Disbursement,Approve', 'idempotency']);
     // Request disburse (loan officer): raises a LoanDisbursement finance request; Finance
     // approves + executes it, then a listener finishes the loan (see the Finance module plan, D2).
-    Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware(['perm:Active Loans,Create', 'idempotency']);
+    Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware(['perm:Loan Disbursement,Create', 'idempotency']);
     // Write-off is maker-checker (shared approval_requests table, code 'loan_write_off'),
     // same pattern as loan_cancel below. Submitting needs the module permission; who may
     // approve/reject is admin-manageable data via ApprovalType::isAuthorized('loan_write_off').
@@ -471,12 +472,6 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('finance-reports/{type}', [FinanceReportController::class, 'show'])->middleware('perm:Finance Reports,View');
     Route::get('finance-reports/{type}/pdf', [FinanceReportController::class, 'exportPdf'])->middleware('perm:Finance Reports,View');
 
-    // --- Finance: Daily Cash Sessions (open / close / verify per cash account) ---
-    Route::get('cash-sessions', [CashSessionController::class, 'index'])->middleware('perm:Cash Sessions,View');
-    Route::get('cash-sessions/current', [CashSessionController::class, 'current'])->middleware('perm:Cash Sessions,View');
-    Route::post('cash-sessions/open', [CashSessionController::class, 'open'])->middleware('perm:Cash Sessions,Create');
-    Route::post('cash-sessions/{cashSession}/close', [CashSessionController::class, 'close'])->middleware('perm:Cash Sessions,Create');
-    Route::post('cash-sessions/{cashSession}/verify', [CashSessionController::class, 'verify'])->middleware('perm:Cash Sessions,Edit');
 
     // --- Finance: Settings ---
     Route::get('finance-settings', [FinanceSettingController::class, 'index'])->middleware('perm:Finance Settings,View');

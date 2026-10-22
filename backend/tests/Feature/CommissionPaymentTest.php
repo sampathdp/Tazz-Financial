@@ -40,7 +40,6 @@ class CommissionPaymentTest extends TestCase
             'commission_type' => 'fixed', 'commission_value' => 500, 'commission_amount' => 500, 'required_installments' => 0,
         ]);
         $this->actingAs($admin, 'sanctum');
-        DB::table('finance_settings')->where('key', 'require_cash_session')->update(['value' => '0']);
     }
 
     private function pay(float $amount)

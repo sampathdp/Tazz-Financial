@@ -215,6 +215,51 @@ input,select,textarea{ font-family:inherit; }
 }
 select option{ background:var(--bg-1); color:var(--tx-0); }
 
+/* Loan detail: section tiles — every section one click away, card style like the KPI tiles. */
+.ld-tiles{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px; margin-bottom:14px; }
+.ld-tile{ display:flex; align-items:center; gap:7px; padding:5px 8px; min-width:0; font:inherit; text-align:left; color:var(--tx-1); background:var(--bg-1); border:1px solid var(--line); border-radius:var(--r-s); cursor:pointer; transition:border-color .15s,box-shadow .15s; }
+.ld-tile:hover{ border-color:var(--ac-line); }
+.ld-tile.on{ border-color:var(--ac-bright); background:var(--ac-dim); box-shadow:0 0 0 1px var(--ac-bright) inset; }
+.ld-chip{ width:22px; height:22px; border-radius:6px; display:grid; place-items:center; flex-shrink:0; }
+.ld-label{ font-size:11.5px; font-weight:600; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ld-tile.on .ld-label{ color:var(--ac-bright); }
+
+/* Loan summary: hero figure, stat strip, date timeline, quiet detail list — no cards. */
+.ld-sum{ display:flex; flex-direction:column; gap:28px; }
+.ld-hero{ display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px; }
+.ld-hero-code{ font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:.06em; color:var(--tx-2); }
+.ld-hero-member{ font-size:22px; font-weight:700; color:var(--tx-0); margin-top:2px; }
+.ld-hero-member span{ font-size:12px; font-weight:500; color:var(--tx-2); margin-left:6px; }
+.ld-hero-amt{ text-align:right; }
+.ld-hero-amt span{ display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--tx-2); }
+.ld-hero-amt b{ font-size:38px; line-height:1.1; font-weight:800; letter-spacing:-.02em; background:linear-gradient(90deg,var(--ac-bright),var(--ok)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.ld-stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); }
+.ld-stat{ padding:2px 20px; border-left:1px solid var(--line); }
+.ld-stat:first-child{ padding-left:0; border-left:0; }
+.ld-stat span{ display:block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--tx-2); margin-bottom:4px; }
+.ld-stat b{ font-size:19px; font-weight:700; color:var(--tx-0); }
+.ld-steps{ list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); }
+.ld-steps li{ position:relative; padding-top:22px; }
+.ld-steps li::before{ content:''; position:absolute; top:6px; left:0; right:0; height:2px; background:var(--line); }
+.ld-steps li.done::before{ background:var(--ac-bright); }
+.ld-steps li i{ position:absolute; top:0; left:0; width:14px; height:14px; border-radius:50%; background:var(--bg-1); border:2px solid var(--line); z-index:1; }
+.ld-steps li.done i{ background:var(--ac-bright); border-color:var(--ac-bright); }
+.ld-steps li.next i{ border-color:var(--ac-bright); box-shadow:0 0 0 4px var(--ac-dim); }
+.ld-steps li b{ display:block; font-size:13.5px; font-weight:700; color:var(--tx-0); }
+.ld-steps li:not(.done) b{ color:var(--tx-2); font-weight:500; }
+.ld-steps li span{ font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--tx-2); }
+.ld-details{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:20px 40px; padding-top:20px; border-top:1px solid var(--line); }
+.ld-details h4{ margin:0 0 6px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--ac-bright); }
+.ld-details dl{ margin:0; }
+.ld-details dl > div{ display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding:7px 0; border-bottom:1px solid var(--line); }
+.ld-details dt{ font-size:12.5px; color:var(--tx-2); flex-shrink:0; }
+.ld-details dd{ margin:0; font-size:13.5px; font-weight:600; color:var(--tx-0); text-align:right; }
+@media (max-width:640px){
+  .ld-hero-amt{ text-align:left; } .ld-hero-amt b{ font-size:30px; }
+  .ld-stat{ padding:8px 12px; } .ld-stat:first-child{ padding-left:12px; border-left:1px solid var(--line); }
+  .ld-steps{ grid-template-columns:repeat(2,1fr); gap:14px 0; }
+}
+
 @media print{
   .mms-sb,.mms-top,.sb-scrim,.no-print{ display:none!important; }
   .mms-main{ display:block!important; }

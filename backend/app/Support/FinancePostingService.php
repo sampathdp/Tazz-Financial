@@ -75,7 +75,6 @@ class FinancePostingService
                 }
             }
 
-            self::assertCashSessionOpen($spec);
 
             // 2 + 3 + 5 — lock, validate, move, in a deterministic account order.
             $movements = collect($spec['movements'])
@@ -169,34 +168,6 @@ class FinancePostingService
     {
         if (\App\Models\FinanceSetting::bool('reversal_requires_approval', true)) {
             throw new FinancePostingException('Reversals need approval. Open Finance > Cash Transactions, find this entry and use "Request reversal" so an approver can sign it off.');
-        }
-    }
-
-    /** Money-in/out types that need the till's session open when the Finance setting requires one. Transfers, float issue/return, adjustments (incl. a session's own variance) and reversals are deliberately exempt. */
-    private const SESSION_GATED = ['COLLECTION', 'CASH_IN', 'CASH_OUT', 'DISBURSEMENT', 'EXPENSE_PAYMENT'];
-
-    /**
-     * One place for the "no cash through a till without today's session" rule (back-dated entries excepted), so every module
-     * (loan, FD, savings, pawning, speed draft, borrowing, expense, disbursement) obeys the same
-     * setting instead of each controller remembering to check it.
-     */
-    private static function assertCashSessionOpen(array $spec): void
-    {
-        if (!in_array($spec['txn_type'], self::SESSION_GATED, true) || !\App\Models\FinanceSetting::bool('require_cash_session')) {
-            return;
-        }
-        // A back-dated entry belongs to an earlier business day; today's session does not apply to it.
-        if (!empty($spec['entry_date']) && \Carbon\Carbon::parse($spec['entry_date'])->startOfDay()->lt(\Carbon\Carbon::today())) {
-            return;
-        }
-        foreach ($spec['movements'] as $m) {
-            if ($m['account_type'] !== 'cash') {
-                continue;
-            }
-            $till = CashAccount::find($m['account_id']);
-            if ($till && in_array($till->account_type, CashAccount::PRIMARY_TYPES, true) && !CashSessionService::openToday((int) $till->id)) {
-                throw new FinancePostingException("Open today's cash session for {$till->name} before moving cash through it.");
-            }
         }
     }
 

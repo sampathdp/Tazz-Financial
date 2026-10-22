@@ -102,17 +102,6 @@ class LoanPaymentController extends Controller
                 return response()->json(['message' => 'The payment date cannot be before ' . $floor->toDateString() . ' (when this loan was ' . ($loan->disbursed_at ? 'disbursed' : 'applied for') . ').'], 422);
             }
         }
-        // A cash collection needs an open cash session for the branch till when
-        // the Finance module requires it (off by default — see FinanceSetting). A back-dated receipt belongs to
-        // an earlier business day, so today's session is not required for it.
-        $backDated = !empty($data['paid_at']) && Carbon::parse($data['paid_at'])->startOfDay()->lt(Carbon::today());
-        if (!$backDated && ($data['payment_method'] ?? 'Cash') === 'Cash' && \App\Models\FinanceSetting::bool('require_cash_session')) {
-            $till = \App\Models\CashAccount::branchPrimary((int) ($request->input('collected_branch_id') ?: $loan->branch_id), \App\Support\LoanLedgerPoster::receiptPurpose($loan));
-            // Only a session for TODAY counts - one left open from a previous day must be closed first.
-            if ($till && !\App\Support\CashSessionService::openToday($till->id)) {
-                return response()->json(['message' => "Open today's cash session for {$till->name} before recording cash payments."], 422);
-            }
-        }
         $isSettlement = (bool) ($data['is_settlement'] ?? false);
         $isManual = ($data['allocation_mode'] ?? 'auto') === 'manual';
         $isCheque = ($data['payment_method'] ?? 'Cash') === 'Cheque';

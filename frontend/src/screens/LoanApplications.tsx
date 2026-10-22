@@ -346,7 +346,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
             sub={`${viewing.customer?.fullName} — ${viewing.loanDetail?.loanType?.name}`}
             actions={<Btn variant="solid" onClick={back}>← Back to Applications</Btn>} />
         </div>
-        <LoanDetail loan={viewing} me={me} onChanged={reloadViewing} go={go} context="applications" />
+        <LoanDetail loan={viewing} me={me} onChanged={reloadViewing} go={go} context={['Pending', 'Rejected', 'Cancelled'].includes(viewing.status) ? 'applications' : 'active'} />
       </div>
     )
   }
@@ -639,7 +639,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
         actions={<Can user={me} module="Loan Applications" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>New Application</Btn></Can>} />
 
       <div className="row gap-2 wrap" style={{ marginBottom: 14 }}>
-        {(['All', 'Pending', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Closed'] as const).map((s) => (
+        {(['All', 'Pending', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Closed', 'WrittenOff', 'Restructured'] as const).map((s) => (
           <Btn key={s} size="sm" variant={statusFilter === s ? 'primary' : 'solid'} onClick={() => setStatusFilter(s)}>
             {s} {counts[s] ? <span style={{ opacity: 0.7 }}>({counts[s]})</span> : ''}
           </Btn>
