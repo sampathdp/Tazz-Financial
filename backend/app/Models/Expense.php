@@ -8,7 +8,7 @@ class Expense extends Model
 {
     use \App\Models\Concerns\BelongsToBranch;
     protected $fillable = [
-        'code', 'branch_id', 'expense_category_id', 'vendor_id', 'amount', 'expense_date',
+        'code', 'branch_id', 'expense_category_id', 'vendor_id', 'staff_id', 'amount', 'expense_date',
         'description', 'status', 'requested_by', 'approved_by', 'approved_at',
     ];
 
@@ -28,6 +28,11 @@ class Expense extends Model
     public function category()
     {
         return $this->belongsTo(ExpenseCategory::class, 'expense_category_id');
+    }
+
+    public function staff()
+    {
+        return $this->belongsTo(Staff::class);
     }
 
     public function vendor()

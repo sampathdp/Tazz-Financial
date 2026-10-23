@@ -60,6 +60,17 @@ class UserController extends Controller
             'status' => $data['status'] ?? 'Active',
         ]);
 
+        // Every login belongs to a staff member: link the one with this email, else register a new one.
+        $staff = \App\Models\Staff::where('email', $user->email)->whereNull('user_id')->first();
+        if ($staff) {
+            $staff->update(['user_id' => $user->id]);
+        } else {
+            \App\Models\Staff::createWithCode([
+                'name' => $user->name, 'email' => $user->email, 'branch_id' => $user->branch_id,
+                'user_id' => $user->id, 'status' => $user->status,
+            ]);
+        }
+
         return response()->json($this->present($user->load(['role', 'branch'])), 201);
     }
 

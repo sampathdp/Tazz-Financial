@@ -100,6 +100,10 @@ export const NAV: NavNode[] = [
     { id: 'bank/recon', label: 'Bank Reconciliation', icon: 'adjust' },
   ] },
 
+  { section: 'Staff', icon: 'users', items: [
+    { id: 'exp/staff', label: 'Staff Members', icon: 'users' },
+  ] },
+
   { section: 'Expense Management', icon: 'wallet', items: [
     { id: 'masters/expense-categories', label: 'Expense Categories', icon: 'tag' },
     { id: 'exp/vendors', label: 'Vendors', icon: 'store' },

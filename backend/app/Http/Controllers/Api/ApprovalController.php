@@ -95,7 +95,7 @@ class ApprovalController extends Controller
             'expense:id,code,amount,status,branch_id,expense_category_id,vendor_id',
             'expense.branch:id,name',
             'expense.category:id,name',
-            'expense.vendor:id,name',
+            'expense.vendor:id,name', 'expense.staff:id,staff_code,name',
         ])->whereHas('approvalType', fn ($q) => $q->where('code', 'expense_approval'))
             ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
 

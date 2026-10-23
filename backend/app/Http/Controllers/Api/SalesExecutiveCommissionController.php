@@ -20,6 +20,7 @@ class SalesExecutiveCommissionController extends Controller
     private const PAYMENT_METHODS = ['Cash', 'Bank', 'Cheque'];
 
     private const RELATIONS = [
+        'staff:id,staff_code,name',
         'facility:id,code,customer_id,principal_amount,status',
         'facility.customer:id,full_name',
         'facility.schedules:id,credit_facility_id,installment_no,status,due_date',
@@ -273,7 +274,9 @@ class SalesExecutiveCommissionController extends Controller
             'loan_type_id' => $c->loan_type_id,
             'loan_type_name' => $c->loanType?->name,
             'sales_executive_id' => $c->sales_executive_id,
-            'sales_executive_name' => $c->salesExecutive?->name,
+            'sales_executive_name' => $c->staff?->name ?? $c->salesExecutive?->name,
+            'staff_id' => $c->staff_id,
+            'staff_code' => $c->staff?->staff_code,
             'cycle_no' => $c->cycle_no,
             'loan_amount' => $loan->principal_amount,
             'commission_amount' => self::commissionAmount($c),

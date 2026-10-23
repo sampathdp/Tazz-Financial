@@ -131,7 +131,7 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
           ]}
           rows={rows} empty="No commissions recorded yet."
           render={(c) => <>
-            <Td>{c.salesExecutiveName || '—'}</Td>
+            <Td>{c.salesExecutiveName || '—'}{c.staffCode ? <span className="mono" style={{ marginLeft: 6, color: 'var(--tx-2)' }}>{c.staffCode}</span> : null}</Td>
             <Td>{c.loanCode}</Td>
             <Td align="center">{c.cycleNo}</Td>
             <Td>{c.customerName || '—'}</Td>

@@ -17,7 +17,7 @@ class PaymentVoucher extends Model
     }
 
     protected $fillable = [
-        'code', 'expense_id', 'vendor_id', 'amount', 'payment_method', 'paid_at', 'paid_by',
+        'code', 'expense_id', 'vendor_id', 'staff_id', 'amount', 'payment_method', 'paid_at', 'paid_by',
         'cash_account_id', 'bank_account_id', 'cheque_no', 'status', 'journal_entry_id', 'finance_transaction_id',
         'void_reason', 'voided_by', 'voided_at',
     ];
@@ -31,6 +31,11 @@ class PaymentVoucher extends Model
     public function expense()
     {
         return $this->belongsTo(Expense::class);
+    }
+
+    public function staff()
+    {
+        return $this->belongsTo(Staff::class);
     }
 
     public function vendor()

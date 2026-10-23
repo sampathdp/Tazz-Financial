@@ -10,6 +10,9 @@ class SalesExecutiveCommission extends Model
     protected static function booted(): void
     {
         static::creating(function ($m) {
+            if (empty($m->staff_id) && $m->sales_executive_id) {
+                $m->staff_id = Staff::where('user_id', $m->sales_executive_id)->value('id');
+            }
             if (empty($m->branch_id) && $m->credit_facility_id) {
                 $m->branch_id = \App\Models\Loan::withoutGlobalScopes()->whereKey($m->credit_facility_id)->value('branch_id');
             }
@@ -19,7 +22,7 @@ class SalesExecutiveCommission extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'credit_facility_id', 'sales_executive_id', 'loan_type_id', 'cycle_no', 'from_installment',
+        'credit_facility_id', 'sales_executive_id', 'staff_id', 'loan_type_id', 'cycle_no', 'from_installment',
         'commission_type', 'commission_value', 'commission_amount', 'required_installments',
         'paid_at', 'payment_amount', 'payment_method', 'cash_account_id', 'bank_account_id', 'reference_no', 'notes', 'paid_by',
     ];
@@ -37,6 +40,11 @@ class SalesExecutiveCommission extends Model
     public function facility()
     {
         return $this->belongsTo(Loan::class, 'credit_facility_id');
+    }
+
+    public function staff()
+    {
+        return $this->belongsTo(Staff::class);
     }
 
     public function salesExecutive()

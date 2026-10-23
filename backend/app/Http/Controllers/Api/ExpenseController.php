@@ -18,7 +18,7 @@ class ExpenseController extends Controller
 {
     public function index(Request $request)
     {
-        return Expense::with(['branch:id,name,code', 'category:id,name,chart_of_account_id', 'vendor:id,name', 'requester:id,name', 'approver:id,name', 'voucher',
+        return Expense::with(['branch:id,name,code', 'category:id,name,chart_of_account_id', 'vendor:id,name', 'staff:id,staff_code,name', 'requester:id,name', 'approver:id,name', 'voucher',
             'pendingApprovalRequest:id,subject_id,status,required_approvals,requested_by,first_approved_by',
             'pendingApprovalRequest.requester:id,name', 'pendingApprovalRequest.firstApprover:id,name',
             'pendingPaymentRequest:id,code,source_id,status,amount,requested_by',
@@ -34,7 +34,8 @@ class ExpenseController extends Controller
         $data = $request->validate([
             'branch_id' => 'required|exists:branches,id',
             'expense_category_id' => 'required|exists:expense_categories,id',
-            'vendor_id' => 'nullable|exists:vendors,id',
+            'vendor_id' => 'nullable|exists:vendors,id|prohibits:staff_id',
+            'staff_id' => 'nullable|exists:staff,id',
             'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'expense_date' => 'required|date',
             'description' => 'nullable|string|max:255',
@@ -229,9 +230,9 @@ class ExpenseController extends Controller
             'branch_id' => $expense->branch_id,
             'source_module' => 'Expense',
             'source_id' => $expense->id,
-            'payee_type' => $expense->vendor_id ? 'Vendor' : 'Other',
-            'payee_id' => $expense->vendor_id,
-            'payee_name' => $expense->vendor?->name,
+            'payee_type' => $expense->staff_id ? 'Staff' : ($expense->vendor_id ? 'Vendor' : 'Other'),
+            'payee_id' => $expense->staff_id ?: $expense->vendor_id,
+            'payee_name' => $expense->staff?->name ?? $expense->vendor?->name,
             'preferred_method' => $method,
             'purpose' => "Expense payment - {$expense->code}",
             'requested_by' => $request->user()->id,

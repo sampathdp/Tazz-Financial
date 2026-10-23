@@ -86,6 +86,7 @@ class ExpensePaymentExecutor
             'code' => $code,
             'expense_id' => $expense->id,
             'vendor_id' => $expense->vendor_id,
+            'staff_id' => $expense->staff_id,
             'amount' => $txn->amount,
             'payment_method' => $method,
             'paid_at' => $txn->executed_at ?? now(),

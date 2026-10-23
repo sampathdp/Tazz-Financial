@@ -18,7 +18,7 @@ class PaymentVoucherController extends Controller
     {
         return PaymentVoucher::with([
             'expense:id,code,branch_id,description', 'expense.branch:id,name,code',
-            'vendor:id,name', 'payer:id,name', 'cashAccount:id,name', 'bankAccount:id,name', 'voider:id,name',
+            'vendor:id,name', 'staff:id,staff_code,name', 'payer:id,name', 'cashAccount:id,name', 'bankAccount:id,name', 'voider:id,name',
         ])
             ->whereHas('expense') // Expense carries the branch scope, so another branch's vouchers drop out
             ->when($request->query('status'), fn ($q, $s) => $q->where('status', $s))

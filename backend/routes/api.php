@@ -84,6 +84,7 @@ use App\Http\Controllers\Api\SpeedDraftTypeController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\SystemMaintenanceController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\StaffController;
 use App\Http\Controllers\Api\VendorController;
 use Illuminate\Support\Facades\Route;
 
@@ -147,6 +148,13 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // open to any authenticated user (see UserController::marketingExecutives()).
     Route::get('users/marketing-executives', [UserController::class, 'marketingExecutives']);
     Route::get('users/active', [UserController::class, 'active']);
+    // --- Staff register (picklist is open to any signed-in user, like users/active) ---
+    Route::get('staff/options', [StaffController::class, 'options']);
+    Route::get('staff', [StaffController::class, 'index'])->middleware('perm:Staff,View');
+    Route::post('staff', [StaffController::class, 'store'])->middleware('perm:Staff,Create');
+    Route::put('staff/{staff}', [StaffController::class, 'update'])->middleware('perm:Staff,Edit');
+    Route::delete('staff/{staff}', [StaffController::class, 'destroy'])->middleware('perm:Staff,Delete');
+    Route::post('staff/{staff}/create-login', [StaffController::class, 'createLogin'])->middleware('perm:Staff,Edit');
     Route::get('users', [UserController::class, 'index'])->middleware('perm:User Management,View');
     Route::post('users', [UserController::class, 'store'])->middleware('perm:User Management,Create');
     Route::put('users/{user}', [UserController::class, 'update'])->middleware('perm:User Management,Edit');

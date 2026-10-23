@@ -97,6 +97,7 @@ const InterBranchScreen = named(() => import('./screens/Accounting'), 'InterBran
 const LedgerDriftScreen = named(() => import('./screens/Accounting'), 'LedgerDriftScreen')
 
 const VendorsScreen = named(() => import('./screens/Expenses'), 'VendorsScreen')
+const StaffScreen = named(() => import('./screens/Staff'), 'StaffScreen')
 const ExpensesScreen = named(() => import('./screens/Expenses'), 'ExpensesScreen')
 const PaymentVouchersScreen = named(() => import('./screens/Expenses'), 'PaymentVouchersScreen')
 const PettyCashScreen = named(() => import('./screens/PettyCash'), 'PettyCashScreen')
@@ -237,6 +238,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'acc/ib': InterBranchScreen,
   'acc/drift': LedgerDriftScreen,
   'exp/vendors': VendorsScreen,
+  'exp/staff': StaffScreen,
   'exp/expenses': ExpensesScreen,
   'exp/vouchers': PaymentVouchersScreen,
   'exp/petty-cash': PettyCashScreen,

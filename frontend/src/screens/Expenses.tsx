@@ -6,8 +6,8 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner , LoadingBlock } from '../components/ui'
 import {
-  vendorsApi, expensesApi, expenseCategoriesApi, branchesApi, cashAccountsApi, bankAccountsApi, paymentVouchersApi,
-  type Vendor, type Expense, type ExpenseStatus, type ExpenseCategory, type Branch, type CashAccount, type BankAccount,
+  vendorsApi, staffApi, expensesApi, expenseCategoriesApi, branchesApi, cashAccountsApi, bankAccountsApi, paymentVouchersApi,
+  type Vendor, type StaffOption, type Expense, type ExpenseStatus, type ExpenseCategory, type Branch, type CashAccount, type BankAccount,
   type PaymentMethod, type PaymentVoucher, type VoucherStatus, type AuthUser,
 } from '../api'
 import { Can, canApprove } from '../lib/permissions'
@@ -111,11 +111,11 @@ export function VendorsScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
 /* ---------------------------- Expenses ---------------------------- */
 
 interface CreateForm {
-  branchId: number | ''; expenseCategoryId: number | ''; vendorId: number | '';
+  branchId: number | ''; expenseCategoryId: number | ''; vendorId: number | ''; staffId: number | '';
   amount: number | string; expenseDate: string; description: string
 }
 const blankCreateForm = (): CreateForm => ({
-  branchId: '', expenseCategoryId: '', vendorId: '', amount: '', expenseDate: new Date().toISOString().slice(0, 10), description: '',
+  branchId: '', expenseCategoryId: '', vendorId: '', staffId: '', amount: '', expenseDate: new Date().toISOString().slice(0, 10), description: '',
 })
 
 interface PayForm {
@@ -133,6 +133,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
   const [branches, setBranches] = useState<Branch[]>([])
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
+  const [staff, setStaff] = useState<StaffOption[]>([])
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([])
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
 
@@ -147,6 +148,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
     branchesApi.list().then(setBranches).catch(() => setBranches([]))
     expenseCategoriesApi.list().then(setCategories).catch(() => setCategories([]))
     vendorsApi.list().then(setVendors).catch(() => setVendors([]))
+    staffApi.options().then(setStaff).catch(() => setStaff([]))
     cashAccountsApi.list().then(setCashAccounts).catch(() => setCashAccounts([]))
     bankAccountsApi.list().then(setBankAccounts).catch(() => setBankAccounts([]))
   }, [])
@@ -169,6 +171,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
       await expensesApi.create({
         branchId: Number(createForm.branchId), expenseCategoryId: Number(createForm.expenseCategoryId),
         vendorId: createForm.vendorId ? Number(createForm.vendorId) : undefined,
+        staffId: createForm.staffId ? Number(createForm.staffId) : undefined,
         amount: createForm.amount, expenseDate: createForm.expenseDate, description: createForm.description || undefined,
       })
       closeCreate(); refresh()
@@ -248,13 +251,13 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
       <Card pad={0}>
         {loading ? <LoadingBlock /> :
         <Table
-          cols={[{ label: 'Code' }, { label: 'Branch' }, { label: 'Category' }, { label: 'Vendor' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 200 }]}
+          cols={[{ label: 'Code' }, { label: 'Branch' }, { label: 'Category' }, { label: 'Payee' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 200 }]}
           empty="No expenses recorded yet" rows={rows}
           render={(e) => <>
             <Td mono>{e.code}</Td>
             <Td>{e.branch?.name || '—'}</Td>
             <Td>{e.category?.name || '—'}</Td>
-            <Td>{e.vendor?.name || '—'}</Td>
+            <Td>{e.staff ? `${e.staff.name} (${e.staff.staffCode})` : (e.vendor?.name || '—')}</Td>
             <Td>{dateOnly(e.expenseDate)}</Td>
             <Td align="right" mono>{money(e.amount)}</Td>
             <Td align="center">
@@ -299,9 +302,13 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
             <option value="">Select category…</option>
             {categories.map((c) => <option key={c.id} value={c.id} disabled={!c.chartOfAccountId}>{c.parent?.name ? `${c.parent.name} › ` : ''}{c.name}{!c.chartOfAccountId ? ' (not linked to GL)' : ''}</option>)}
           </Select></Field>
-          <Field label="Vendor (optional)"><Select value={createForm.vendorId} onChange={(e) => setCreateForm((s) => ({ ...s, vendorId: Number(e.target.value) || '' }))}>
+          <Field label="Vendor (optional)"><Select value={createForm.vendorId} onChange={(e) => setCreateForm((s) => ({ ...s, vendorId: Number(e.target.value) || '', staffId: '' }))}>
             <option value="">No vendor</option>
             {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </Select></Field>
+          <Field label="Staff (optional)"><Select value={createForm.staffId} onChange={(e) => setCreateForm((s) => ({ ...s, staffId: Number(e.target.value) || '', vendorId: '' }))}>
+            <option value="">No staff</option>
+            {staff.map((p) => <option key={p.id} value={p.id}>{p.staffCode} · {p.name}{p.phone ? ` · ${p.phone}` : ''}</option>)}
           </Select></Field>
           <Field label="Amount"><Input type="number" step="0.01" value={createForm.amount} onChange={(e) => setCreateForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
           <Field label="Expense Date"><DateInput value={createForm.expenseDate} onChange={(iso) => setCreateForm((s) => ({ ...s, expenseDate: iso }))} /></Field>
@@ -401,12 +408,12 @@ export function PaymentVouchersScreen({ user: me }: { go: Go; user?: AuthUser | 
       <Card pad={0}>
         {loading ? <LoadingBlock /> :
         <Table
-          cols={[{ label: 'Code' }, { label: 'Expense' }, { label: 'Vendor' }, { label: 'Method' }, { label: 'Paid At' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+          cols={[{ label: 'Code' }, { label: 'Expense' }, { label: 'Payee' }, { label: 'Method' }, { label: 'Paid At' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           empty="No payment vouchers yet" rows={rows}
           render={(v) => <>
             <Td mono>{v.code}</Td>
             <Td>{v.expense?.code || '—'}</Td>
-            <Td>{v.vendor?.name || '—'}</Td>
+            <Td>{v.staff ? `${v.staff.name} (${v.staff.staffCode})` : (v.vendor?.name || '—')}</Td>
             <Td>{v.paymentMethod}{v.paymentMethod === 'Cheque' && v.chequeNo ? ` · ${v.chequeNo}` : ''}</Td>
             <Td>{dateOnly(v.paidAt)}</Td>
             <Td align="right" mono>{money(v.amount)}</Td>

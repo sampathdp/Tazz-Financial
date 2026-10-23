@@ -75,6 +75,7 @@ class Permissions
         'Accounting Reports',
         'Manual Journal Entries',
         'Vendors',
+        'Staff',
         'Expenses',
         'Payment Vouchers',
         'Petty Cash',

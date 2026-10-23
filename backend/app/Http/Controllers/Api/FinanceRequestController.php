@@ -68,7 +68,7 @@ class FinanceRequestController extends Controller
             'branch_id' => 'nullable|exists:branches,id',
             'source_module' => 'nullable|string|max:64',
             'source_id' => 'nullable|integer',
-            'payee_type' => ['nullable', Rule::in(['Customer', 'Vendor', 'User', 'Other'])],
+            'payee_type' => ['nullable', Rule::in(['Customer', 'Vendor', 'Staff', 'User', 'Other'])],
             'payee_id' => 'nullable|integer',
             'payee_name' => 'nullable|string|max:191',
             'preferred_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],

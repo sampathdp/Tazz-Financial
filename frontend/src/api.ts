@@ -585,6 +585,7 @@ export interface SalesExecutiveCommission {
   loanId: number; loanCode: string; customerName: string;
   loanTypeId: number; loanTypeName: string;
   salesExecutiveId: number; salesExecutiveName: string;
+  staffId?: number | null; staffCode?: string | null;
   /** 1-based cycle number for this loan — cycle 2+ only exists for a percentage-type
    *  commission whose previous cycle has already been paid. */
   cycleNo: number;
@@ -2728,6 +2729,24 @@ export interface Vendor {
 }
 export const vendorsApi = resource<Vendor>('vendors')
 
+/* Staff register: system staff code, optional login (userId), picklist for payees/commissions. */
+export interface Staff {
+  id: number; staffCode: string; name: string;
+  nicNo?: string | null; phone?: string | null; email?: string | null; designation?: string | null;
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  userId?: number | null; hasLogin?: boolean; roleName?: string | null;
+  status?: 'Active' | 'Inactive';
+}
+export interface StaffOption { id: number; staffCode: string; name: string; phone?: string | null; nicNo?: string | null }
+export const staffApi = {
+  ...resource<Staff>('staff'),
+  search: (search?: string) => http.get('/staff', { params: { search: search || undefined } }).then((r) => camelize(r.data) as Staff[]),
+  /** Active staff — the payee / commission picklist (open to any signed-in user). */
+  options: () => http.get('/staff/options').then((r) => camelize(r.data) as StaffOption[]),
+  createLogin: (id: number, body: { password: string; roleId: number; branchId?: number | null }) =>
+    http.post(`/staff/${id}/create-login`, snakeize(body)).then((r) => { listCache.delete('staff'); return camelize(r.data) as Staff }),
+}
+
 export type ExpenseStatus = 'Pending' | 'Approved' | 'Rejected' | 'Paid'
 export type VoucherStatus = 'Issued' | 'Voided'
 export interface PaymentVoucher {
@@ -2737,13 +2756,14 @@ export interface PaymentVoucher {
   status: VoucherStatus; journalEntryId?: number | null; journalEntry?: JournalEntry | null;
   voidReason?: string | null; voidedBy?: number | null; voidedAt?: string | null; voider?: { id: number; name: string } | null;
   expense?: { id: number; code: string; branchId: number; description?: string | null; branch?: { id: number; name: string; code: string } | null } | null;
-  vendor?: { id: number; name: string } | null; payer?: { id: number; name: string } | null;
+  vendor?: { id: number; name: string } | null; staff?: { id: number; staffCode: string; name: string } | null; payer?: { id: number; name: string } | null;
   cashAccount?: { id: number; name: string } | null; bankAccount?: { id: number; name: string } | null;
 }
 export interface Expense {
   id: number; code: string; branchId: number; branch?: { id: number; name: string; code: string } | null;
   expenseCategoryId: number; category?: { id: number; name: string; chartOfAccountId?: number | null } | null;
   vendorId?: number | null; vendor?: { id: number; name: string } | null;
+  staffId?: number | null; staff?: { id: number; staffCode: string; name: string } | null;
   amount: string | number; expenseDate: string; description?: string | null;
   status: ExpenseStatus;
   requestedBy?: number | null; requester?: { id: number; name: string } | null;
@@ -2758,7 +2778,7 @@ export interface Expense {
 export const expensesApi = {
   list: (params?: { status?: ExpenseStatus; branchId?: number }) =>
     http.get('/expenses', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as Expense[]),
-  create: (body: { branchId: number; expenseCategoryId: number; vendorId?: number; amount: number | string; expenseDate: string; description?: string }) =>
+  create: (body: { branchId: number; expenseCategoryId: number; vendorId?: number; staffId?: number; amount: number | string; expenseDate: string; description?: string }) =>
     http.post('/expenses', snakeize(body)).then((r) => camelize(r.data) as Expense),
   approve: (id: number) => http.put(`/expenses/${id}/approve`).then((r) => camelize(r.data) as Expense),
   reject: (id: number, rejectReason?: string) => http.put(`/expenses/${id}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data) as Expense),
@@ -2816,6 +2836,7 @@ export interface PettyCashVoucher {
   id: number; code: string; pettyCashFundId: number; fund?: { id: number; code: string; name: string; branchId: number; branch?: { id: number; name: string; code: string } | null } | null;
   expenseCategoryId: number; category?: { id: number; name: string } | null;
   vendorId?: number | null; vendor?: { id: number; name: string } | null;
+  staffId?: number | null; staff?: { id: number; staffCode: string; name: string } | null;
   amount: string | number; description?: string | null; spentAt: string;
   paidBy?: number | null; payer?: { id: number; name: string } | null;
   status: VoucherStatus; voidReason?: string | null; voidedBy?: number | null; voidedAt?: string | null; voider?: { id: number; name: string } | null;
@@ -2824,7 +2845,7 @@ export interface PettyCashVoucher {
 export const pettyCashVouchersApi = {
   list: (params?: { pettyCashFundId?: number; status?: VoucherStatus }) =>
     http.get('/petty-cash-vouchers', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as PettyCashVoucher[]),
-  create: (body: { pettyCashFundId: number; expenseCategoryId: number; vendorId?: number; amount: number | string; description?: string; spentAt?: string }) =>
+  create: (body: { pettyCashFundId: number; expenseCategoryId: number; vendorId?: number; staffId?: number; amount: number | string; description?: string; spentAt?: string }) =>
     http.post('/petty-cash-vouchers', snakeize(body)).then((r) => camelize(r.data) as PettyCashVoucher),
   void: (id: number, voidReason?: string) =>
     http.delete(`/petty-cash-vouchers/${id}`, { data: { void_reason: voidReason } }).then((r) => camelize(r.data) as PettyCashVoucher),

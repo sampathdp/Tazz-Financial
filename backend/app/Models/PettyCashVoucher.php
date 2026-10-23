@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class PettyCashVoucher extends Model
 {
     protected $fillable = [
-        'code', 'petty_cash_fund_id', 'expense_category_id', 'vendor_id', 'amount', 'description',
+        'code', 'petty_cash_fund_id', 'expense_category_id', 'vendor_id', 'staff_id', 'amount', 'description',
         'spent_at', 'paid_by', 'status', 'void_reason', 'voided_by', 'voided_at', 'journal_entry_id',
     ];
 
@@ -25,6 +25,11 @@ class PettyCashVoucher extends Model
     public function category()
     {
         return $this->belongsTo(ExpenseCategory::class, 'expense_category_id');
+    }
+
+    public function staff()
+    {
+        return $this->belongsTo(Staff::class);
     }
 
     public function vendor()

@@ -111,6 +111,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'acc/ib': 'Accounting Reports',
   'acc/drift': 'Accounting Reports',
   'exp/vendors': 'Vendors',
+  'exp/staff': 'Staff',
   'exp/expenses': 'Expenses',
   'exp/vouchers': 'Payment Vouchers',
   'exp/petty-cash': 'Petty Cash',

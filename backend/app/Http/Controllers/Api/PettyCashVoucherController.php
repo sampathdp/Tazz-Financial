@@ -19,7 +19,7 @@ class PettyCashVoucherController extends Controller
     {
         return PettyCashVoucher::with([
             'fund:id,code,name,branch_id', 'fund.branch:id,name,code',
-            'category:id,name', 'vendor:id,name', 'payer:id,name', 'voider:id,name',
+            'category:id,name', 'vendor:id,name', 'staff:id,staff_code,name', 'payer:id,name', 'voider:id,name',
         ])
             ->when($request->query('petty_cash_fund_id'), fn ($q, $f) => $q->where('petty_cash_fund_id', $f))
             ->when($request->query('status'), fn ($q, $s) => $q->where('status', $s))
@@ -39,7 +39,8 @@ class PettyCashVoucherController extends Controller
         $data = $request->validate([
             'petty_cash_fund_id' => 'required|exists:petty_cash_funds,id',
             'expense_category_id' => 'required|exists:expense_categories,id',
-            'vendor_id' => 'nullable|exists:vendors,id',
+            'vendor_id' => 'nullable|exists:vendors,id|prohibits:staff_id',
+            'staff_id' => 'nullable|exists:staff,id',
             'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'description' => 'nullable|string|max:255',
             'spent_at' => 'nullable|date',
@@ -70,6 +71,7 @@ class PettyCashVoucherController extends Controller
                 'petty_cash_fund_id' => $fundLocked->id,
                 'expense_category_id' => $category->id,
                 'vendor_id' => $data['vendor_id'] ?? null,
+                'staff_id' => $data['staff_id'] ?? null,
                 'amount' => $data['amount'],
                 'description' => $data['description'] ?? null,
                 'spent_at' => $spentAt,

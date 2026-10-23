@@ -5,9 +5,9 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner , LoadingBlock } from '../components/ui'
 import {
-  api, branchesApi, cashAccountsApi, bankAccountsApi, expenseCategoriesApi, vendorsApi,
+  api, branchesApi, cashAccountsApi, bankAccountsApi, expenseCategoriesApi, vendorsApi, staffApi,
   pettyCashFundsApi, pettyCashReplenishmentsApi, pettyCashVouchersApi,
-  type Branch, type CashAccount, type BankAccount, type ExpenseCategory, type Vendor, type AuthUser,
+  type Branch, type CashAccount, type BankAccount, type ExpenseCategory, type Vendor, type StaffOption, type AuthUser,
   type PettyCashFund, type PettyCashReplenishment, type PettyCashVoucher, type VoucherStatus,
 } from '../api'
 import { Can } from '../lib/permissions'
@@ -27,8 +27,8 @@ const blankFundForm = (): FundForm => ({ status: 'Active' })
 interface ReplenishForm { amount: number | string; fundingMethod: 'Cash' | 'Bank'; cashAccountId: number | ''; bankAccountId: number | ''; paidAt: string }
 const blankReplenishForm = (): ReplenishForm => ({ amount: '', fundingMethod: 'Cash', cashAccountId: '', bankAccountId: '', paidAt: todayIso() })
 
-interface SpendForm { expenseCategoryId: number | ''; vendorId: number | ''; amount: number | string; description: string; spentAt: string }
-const blankSpendForm = (): SpendForm => ({ expenseCategoryId: '', vendorId: '', amount: '', description: '', spentAt: todayIso() })
+interface SpendForm { expenseCategoryId: number | ''; vendorId: number | ''; staffId: number | ''; amount: number | string; description: string; spentAt: string }
+const blankSpendForm = (): SpendForm => ({ expenseCategoryId: '', vendorId: '', staffId: '', amount: '', description: '', spentAt: todayIso() })
 
 export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
@@ -39,6 +39,7 @@ export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
+  const [staff, setStaff] = useState<StaffOption[]>([])
   const [activeUsers, setActiveUsers] = useState<{ id: number; name: string }[]>([])
 
   const [vouchers, setVouchers] = useState<PettyCashVoucher[]>([])
@@ -69,6 +70,7 @@ export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }
     bankAccountsApi.list().then(setBankAccounts).catch(() => setBankAccounts([]))
     expenseCategoriesApi.list().then(setCategories).catch(() => setCategories([]))
     vendorsApi.list().then(setVendors).catch(() => setVendors([]))
+    staffApi.options().then(setStaff).catch(() => setStaff([]))
     api.users.active().then(setActiveUsers).catch(() => setActiveUsers([]))
   }, [])
 
@@ -160,6 +162,7 @@ export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }
       await pettyCashVouchersApi.create({
         pettyCashFundId: fundId, expenseCategoryId: Number(spendForm.expenseCategoryId),
         vendorId: spendForm.vendorId ? Number(spendForm.vendorId) : undefined,
+        staffId: spendForm.staffId ? Number(spendForm.staffId) : undefined,
         amount: spendForm.amount, description: spendForm.description || undefined, spentAt: spendForm.spentAt,
       })
       closeSpend(); refresh(); refreshFunds()
@@ -200,12 +203,12 @@ export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 13.5 }}>Spend</div>
         {loading ? <LoadingBlock /> :
         <Table
-          cols={[{ label: 'Code' }, { label: 'Category' }, { label: 'Vendor' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 90 }]}
+          cols={[{ label: 'Code' }, { label: 'Category' }, { label: 'Payee' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 90 }]}
           empty="No spend recorded against this float yet" rows={vouchers}
           render={(v) => <>
             <Td mono>{v.code}</Td>
             <Td>{v.category?.name || '—'}</Td>
-            <Td>{v.vendor?.name || '—'}</Td>
+            <Td>{v.staff ? `${v.staff.name} (${v.staff.staffCode})` : (v.vendor?.name || '—')}</Td>
             <Td>{dateOnly(v.spentAt)}</Td>
             <Td align="right" mono>{money(v.amount)}</Td>
             <Td align="center"><Badge tone={voucherTone(v.status)} dot>{v.status}</Badge></Td>
@@ -316,9 +319,13 @@ export function PettyCashScreen({ user: me }: { go: Go; user?: AuthUser | null }
             <option value="">Select category…</option>
             {categories.map((c) => <option key={c.id} value={c.id} disabled={!c.chartOfAccountId}>{c.parent?.name ? `${c.parent.name} › ` : ''}{c.name}{!c.chartOfAccountId ? ' (not linked to GL)' : ''}</option>)}
           </Select></Field>
-          <Field label="Vendor (optional)"><Select value={spendForm.vendorId} onChange={(e) => setSpendForm((s) => ({ ...s, vendorId: Number(e.target.value) || '' }))}>
+          <Field label="Vendor (optional)"><Select value={spendForm.vendorId} onChange={(e) => setSpendForm((s) => ({ ...s, vendorId: Number(e.target.value) || '', staffId: '' }))}>
             <option value="">No vendor</option>
             {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </Select></Field>
+          <Field label="Staff (optional)"><Select value={spendForm.staffId} onChange={(e) => setSpendForm((s) => ({ ...s, staffId: Number(e.target.value) || '', vendorId: '' }))}>
+            <option value="">No staff</option>
+            {staff.map((p) => <option key={p.id} value={p.id}>{p.staffCode} · {p.name}{p.phone ? ` · ${p.phone}` : ''}</option>)}
           </Select></Field>
           <Field label="Amount"><Input type="number" step="0.01" value={spendForm.amount} onChange={(e) => setSpendForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
           <Field label="Spent At"><DateInput value={spendForm.spentAt} onChange={(iso) => setSpendForm((s) => ({ ...s, spentAt: iso }))} /></Field>
