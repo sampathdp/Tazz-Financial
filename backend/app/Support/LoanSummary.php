@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\FacilityPayment;
 use App\Models\Loan;
 use Carbon\Carbon;
 
@@ -237,7 +238,19 @@ class LoanSummary
             ->withSum('schedules as paid_sum', 'paid_amount')
             ->get();
 
-        return $loans->map(function ($loan) use ($asOf) {
+        // Latest real collection per loan (skips voided and charge-only receipts with no
+        // schedule allocation, and anything after the as-of date).
+        $lastPayments = FacilityPayment::whereIn('credit_facility_id', $loans->pluck('id'))
+            ->where(fn ($q) => $q->whereNull('status')->orWhere('status', '!=', 'Voided'))
+            ->whereHas('allocations')
+            ->where('paid_at', '<', $asOf->copy()->addDay())
+            ->orderByDesc('paid_at')->orderByDesc('id')
+            ->get(['id', 'credit_facility_id', 'amount', 'paid_at'])
+            ->unique('credit_facility_id')
+            ->keyBy('credit_facility_id');
+
+        return $loans->map(function ($loan) use ($asOf, $lastPayments) {
+            $lastPayment = $lastPayments->get($loan->id);
             $loanType = $loan->loanDetail?->loanType;
             $graceDays = (int) ($loanType?->grace_period_days ?? 5);
             $chargeRate = (float) ($loanType?->default_charge_rate_percent ?? 0);
@@ -247,6 +260,8 @@ class LoanSummary
 
             $data = $loan->toArray();
             $data['oldestOverdueDate'] = $oldestDueDate;
+            $data['lastPaymentDate'] = $lastPayment?->paid_at?->toDateString();
+            $data['lastPaymentAmount'] = $lastPayment ? round((float) $lastPayment->amount, 2) : null;
             $data['daysOverdue'] = $oldestDueDate ? (int) $asOf->diffInDays($oldestDueDate) : 0;
             // Fractional, not a plain row count: a partially paid installment (e.g.
             // 60% collected) contributes 0.4, not a full 1 — mirrors penaltyDueForRow's

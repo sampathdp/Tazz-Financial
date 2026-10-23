@@ -47,6 +47,8 @@ class NumberGenerator
         'fixed_deposit' => '{BRANCH}-{CODE}-{YEAR:2}-{MONTH:2}-{SEQ:6}',
         'fd_withdrawal' => '{BRANCH}-FDV-{YEAR:2}-{SEQ:5}',
         'fd_part_payment' => '{BRANCH}-FDP-{YEAR:2}-{SEQ:5}',
+        // Monthly FD interest payout voucher (the slip that goes with the bank transfer).
+        'fd_interest' => '{BRANCH}-FDI-{YEAR:2}-{SEQ:5}',
         // One company-wide series, no {BRANCH} — a journal entry isn't tied to a
         // single branch the way a receipt is (see LedgerPoster).
         'journal' => 'JV-{YEAR:2}-{SEQ:6}',

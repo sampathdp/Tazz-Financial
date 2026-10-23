@@ -16,6 +16,7 @@ import {
   type FixedDeposit, type FdInterestPayment, type FdWithdrawal, type FdPartPayment,
   type FdPaymentMethod, type AuthUser,
 } from '../api'
+import { InterestVoucherPage } from './FdInterestVoucher'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -52,6 +53,7 @@ function DocRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function PrintView({ doc, brand, onClose }: { doc: PrintDoc; brand: { name: string; tagline: string }; onClose: () => void }) {
+  if (doc.kind === 'interest') return <InterestVoucherPage payment={doc.payment} brand={brand} onClose={onClose} />
   return (
     <div>
       <div className="row gap-2 no-print" style={{ marginBottom: 16 }}>
@@ -59,25 +61,6 @@ export function PrintView({ doc, brand, onClose }: { doc: PrintDoc; brand: { nam
         <Btn variant="solid" icon="x" onClick={onClose}>Close</Btn>
       </div>
       <Card style={{ maxWidth: 560, margin: '0 auto', fontFamily: 'Outfit' }}>
-        {doc.kind === 'interest' && (() => {
-          const { payment, fd } = doc
-          return <>
-            <DocHeader brand={brand} title="INTEREST PAYMENT RECEIPT" />
-            <div className="col gap-2" style={{ fontSize: 13, marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--line)' }}>
-              <DocRow label="FD No" value={fd.fdNumber} />
-              <DocRow label="Customer" value={fd.customer?.fullName || '—'} />
-              <DocRow label="NIC No" value={fd.customer?.nicNo || '—'} />
-              <DocRow label="Installment #" value={payment.installmentNo} />
-              <DocRow label="Due Date" value={dateOnly(payment.dueDate)} />
-              <DocRow label="Paid Date" value={dateOnly(payment.paidAt)} />
-              <DocRow label="Payment Method" value={payment.paymentMethod || '—'} />
-            </div>
-            <div className="row between" style={{ fontSize: 15, fontWeight: 700 }}>
-              <span>Amount Paid</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(payment.paidAmount)}</span>
-            </div>
-          </>
-        })()}
-
         {doc.kind === 'partpayment' && (() => {
           const { partPayment, fd } = doc
           return <>

@@ -759,6 +759,9 @@ export interface OverdueLoan extends Loan {
   overdueAmount: number;
   /** Default/OD interest accrued on the overdue installments. */
   penaltyDue: number;
+  /** Latest non-voided collection against the schedule (ISO date) — null if none yet. */
+  lastPaymentDate: string | null;
+  lastPaymentAmount: number | null;
 }
 
 /** One Active loan currently NPL or with a required/posted provision mismatch — see loanProvisionsApi.list(). */
@@ -1909,7 +1912,17 @@ export interface FdInterestPayment {
   status: 'Pending' | 'Partial' | 'Paid';
   paidAmount?: number | string; paidAt?: string | null;
   paymentMethod?: FdPaymentMethod | null; referenceNo?: string | null;
+  /** Payout voucher number (slip that goes with the bank transfer) — null for payments made before vouchers existed. */
+  voucherNo?: string | null;
   payer?: { id: number; name: string } | null;
+  /** Company account the payout was made from. Present on pay()/voucher() responses and the Interest Paid report. */
+  bankAccount?: { id: number; name: string; accountNumber?: string | null; bank?: { id: number; name: string } | null } | null;
+  /** Present on pay()/voucher() responses and the Interest Paid report — the payee and the account the money goes to. */
+  fixedDeposit?: {
+    id: number; fdNumber: string;
+    customer?: { id: number; fullName: string; code: string; nicNo?: string | null } | null;
+    bankDetail?: { accountHolder?: string | null; bankBranch?: string | null; accountNumber?: string | null; bank?: { id: number; name: string } | null } | null;
+  } | null;
 }
 
 export interface FdWithdrawal {
@@ -2255,6 +2268,8 @@ export const fdInterestPaymentsApi = {
   due: () => http.get('/fd-interest-payments/due').then((r) => camelize(r.data) as FdInterestDue),
   pay: (id: number, body: { paidAt?: string; paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string }) =>
     http.post(`/fd-interest-payments/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as FdInterestPayment),
+  /** One paid installment with payee + company-account details, for (re)printing its payout voucher. */
+  voucher: (id: number) => http.get(`/fd-interest-payments/${id}/voucher`).then((r) => camelize(r.data) as FdInterestPayment),
   /** Undoes a mistaken interest payment — reverses GL/Cashbook and puts the installment back to Pending (see backend FdInterestPaymentController::void). */
   void: (id: number) => http.post(`/fd-interest-payments/${id}/void`).then((r) => camelize(r.data) as FdInterestPayment),
 }

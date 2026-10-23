@@ -8,9 +8,10 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Table, Td, Modal, ErrorBanner, LoadingBlock , BankAccountSelect } from '../components/ui'
 import {
-  fdInterestPaymentsApi,
-  type FdInterestDue, type FdInterestDueBucket, type FdInterestDueItem, type FdPaymentMethod, type AuthUser,
+  fdInterestPaymentsApi, company,
+  type FdInterestPayment, type FdInterestDue, type FdInterestDueBucket, type FdInterestDueItem, type FdPaymentMethod, type AuthUser,
 } from '../api'
+import { InterestVoucherPage } from './FdInterestVoucher'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -28,7 +29,7 @@ const METHODS: { value: FdPaymentMethod; label: string }[] = [
 ]
 
 function PayInterestModal({ item, open, onClose, onPaid }: {
-  item: FdInterestDueItem | null; open: boolean; onClose: () => void; onPaid: () => void
+  item: FdInterestDueItem | null; open: boolean; onClose: () => void; onPaid: (p: FdInterestPayment) => void
 }) {
   const notify = useNotify()
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')
@@ -46,8 +47,8 @@ function PayInterestModal({ item, open, onClose, onPaid }: {
     if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     setBusy(true); setErr('')
     try {
-      await fdInterestPaymentsApi.pay(item.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, paidAt })
-      onPaid()
+      const result = await fdInterestPaymentsApi.pay(item.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, paidAt })
+      onPaid(result)
       notify.success('Interest payment recorded')
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Could not record this interest payment.'))
@@ -60,7 +61,7 @@ function PayInterestModal({ item, open, onClose, onPaid }: {
       sub={`${item.fixedDeposit.customer?.fullName || ''} — Due ${dateOnly(item.dueDate)} — Amount ${money(item.amount)}`}
       footer={<>
         <Btn variant="plain" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Recording...' : 'Record Payment'}</Btn>
+        <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Recording...' : 'Record & Print Voucher'}</Btn>
       </>}>
       <ErrorBanner error={err} style={{ marginBottom: 14 }} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -138,13 +139,17 @@ export function FdInterestDueScreen({ go: _go, user: me }: { go: Go; user?: Auth
   const [data, setData] = useState<FdInterestDue | null>(null)
   const [loading, setLoading] = useState(true)
   const [payTarget, setPayTarget] = useState<FdInterestDueItem | null>(null)
+  const [voucher, setVoucher] = useState<FdInterestPayment | null>(null)
+  const [brand, setBrand] = useState({ name: '', tagline: '' })
 
   const refresh = () => {
     setLoading(true)
     fdInterestPaymentsApi.due().then(setData).catch(() => setData(null)).finally(() => setLoading(false))
   }
   useEffect(() => { refresh() }, [])
+  useEffect(() => { company.branding().then((b) => setBrand({ name: b.name, tagline: b.tagline })).catch(() => {}) }, [])
 
+  if (voucher) return <InterestVoucherPage payment={voucher} brand={brand} onClose={() => setVoucher(null)} />
   if (loading) return <LoadingBlock />
   if (!data) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)' }}>Failed to load interest due.</div>
 
@@ -168,7 +173,7 @@ export function FdInterestDueScreen({ go: _go, user: me }: { go: Go; user?: Auth
       ))}
 
       <PayInterestModal item={payTarget} open={!!payTarget} onClose={() => setPayTarget(null)}
-        onPaid={() => { setPayTarget(null); refresh() }} />
+        onPaid={(p) => { setPayTarget(null); setVoucher(p); refresh() }} />
     </div>
   )
 }

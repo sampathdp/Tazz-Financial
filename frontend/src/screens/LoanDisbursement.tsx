@@ -88,13 +88,14 @@ export function LoanDisbursementScreen({ user: me }: { go: Go; user?: AuthUser |
           </div>
         </div>
         {loading ? <LoadingBlock /> : <>
-          <Table cols={[{ label: 'Loan' }, { label: 'Approved' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Principal' }, { label: 'Status', align: 'center' }]}
+          <Table cols={[{ label: 'Loan' }, { label: 'Approved' }, { label: 'Branch' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Principal' }, { label: 'Status', align: 'center' }]}
             rows={rows}
             empty="No loans waiting for disbursement."
             onRow={(l) => navigate(`${ROUTE_BASE}/${l.id}`)}
             render={(l) => <>
               <Td c="var(--tx-0)" mono style={{ fontWeight: 600 }}>{l.code}</Td>
               <Td mono>{l.approvedAt ? fmtDate(l.approvedAt) : '—'}</Td>
+              <Td>{l.branch?.name || '—'}</Td>
               <Td>
                 <div style={{ fontWeight: 600 }}>{l.customer?.fullName}</div>
                 <div className="t-2" style={{ fontSize: 11.5 }}>{l.customer?.code}</div>

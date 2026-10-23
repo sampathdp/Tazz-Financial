@@ -33,6 +33,25 @@ const interestRows = (rows: FdInterestPayment[]) => (rows as any[]).map((p) => (
   amount: Number(p.amount || 0), status: p.status, paidAt: dateOnly(p.paidAt),
 }))
 
+// "Interest Paid" is the payout register: who got each payment, into which account, and how it left the company.
+const INTEREST_PAID_COLS: ExcelColumn[] = [
+  { label: 'Voucher No', key: 'voucherNo' }, { label: 'Paid At', key: 'paidAt' }, { label: 'FD No', key: 'fdNo' },
+  { label: '#', key: 'installment', align: 'center' }, { label: 'Paid To', key: 'customer' },
+  { label: 'Payee Bank', key: 'payeeBank' }, { label: 'Account No', key: 'payeeAccount' },
+  { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'Method', key: 'method' },
+  { label: 'Paid From', key: 'paidFrom' }, { label: 'Reference', key: 'reference' }, { label: 'Paid By', key: 'paidBy' },
+]
+const payeeBank = (p: any) => {
+  const bd = p.fixedDeposit?.bankDetail
+  return bd ? `${bd.bank?.name || ''}${bd.bankBranch ? ` · ${bd.bankBranch}` : ''}`.trim() || '—' : '—'
+}
+const paidFrom = (p: any) => p.bankAccount?.name || (p.paymentMethod === 'Cash' ? 'Cash' : '—')
+const interestPaidRows = (rows: any[]) => rows.map((p) => ({
+  voucherNo: p.voucherNo || '—', paidAt: dateOnly(p.paidAt), fdNo: p.fixedDeposit?.fdNumber || '—', installment: p.installmentNo,
+  customer: p.fixedDeposit?.customer?.fullName || '—', payeeBank: payeeBank(p), payeeAccount: p.fixedDeposit?.bankDetail?.accountNumber || '—',
+  amount: Number(p.paidAmount || 0), method: p.paymentMethod || '—', paidFrom: paidFrom(p), reference: p.referenceNo || '—', paidBy: p.payer?.name || '—',
+}))
+
 const DEPOSIT_COLS: ExcelColumn[] = [
   { label: 'Deposit No', key: 'depositNo' }, { label: 'Customer', key: 'customer' }, { label: 'Date', key: 'date' }, { label: 'Method', key: 'method' },
   { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'Status', key: 'status', align: 'center' }, { label: 'FD No', key: 'fdNo' },
@@ -73,7 +92,7 @@ const TABS: { id: FundingReportType; label: string }[] = [
   { id: 'maturing-soon', label: 'Maturing Soon' },
   { id: 'matured', label: 'Matured' },
   { id: 'monthly-interest', label: 'Monthly Interest' },
-  { id: 'interest-paid', label: 'Interest Paid' },
+  { id: 'interest-paid', label: 'Interest Payments' },
   { id: 'deposit-history', label: 'Deposit History' },
   { id: 'customer-funding-history', label: 'Customer Funding' },
   { id: 'renewal-history', label: 'Renewal History' },
@@ -106,6 +125,29 @@ function InterestPaymentRows({ rows }: { rows: FdInterestPayment[] }) {
       <Td align="right" mono>{money(p.amount)}</Td>
       <Td align="center"><Badge tone={p.status === 'Paid' ? 'green' : 'amber'} dot>{p.status}</Badge></Td>
       <Td>{dateOnly(p.paidAt)}</Td>
+    </>} />
+}
+
+function InterestPaidRows({ rows }: { rows: any[] }) {
+  return <Table cols={[{ label: 'Voucher No' }, { label: 'Paid At' }, { label: 'FD No' }, { label: '#', align: 'center' }, { label: 'Paid To' }, { label: 'Payee Bank' }, { label: 'Account No' },
+      { label: 'Amount', align: 'right' }, { label: 'Method' }, { label: 'Paid From' }, { label: 'Reference' }, { label: 'Paid By' }]}
+    rows={rows} empty="No records"
+    render={(p: any) => <>
+      <Td mono>{p.voucherNo || '—'}</Td>
+      <Td>{dateOnly(p.paidAt)}</Td>
+      <Td mono>{p.fixedDeposit?.fdNumber || '—'}</Td>
+      <Td align="center">{p.installmentNo}</Td>
+      <Td>
+        <div style={{ fontWeight: 600 }}>{p.fixedDeposit?.customer?.fullName || '—'}</div>
+        {p.fixedDeposit?.bankDetail?.accountHolder && <div className="t-2" style={{ fontSize: 11.5 }}>{p.fixedDeposit.bankDetail.accountHolder}</div>}
+      </Td>
+      <Td>{payeeBank(p)}</Td>
+      <Td mono>{p.fixedDeposit?.bankDetail?.accountNumber || '—'}</Td>
+      <Td align="right" mono>{money(p.paidAmount)}</Td>
+      <Td>{p.paymentMethod || '—'}</Td>
+      <Td>{paidFrom(p)}</Td>
+      <Td>{p.referenceNo || '—'}</Td>
+      <Td>{p.payer?.name || '—'}</Td>
     </>} />
 }
 
@@ -207,7 +249,9 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
     const rows: any[] = data || []
     if (tab === 'active' || tab === 'maturing-soon' || tab === 'matured') {
       void exportFlatTableToExcel({ reportTitle: tabLabel, columns: FD_COLS, rows: fdRows(rows), totalRow: { customer: 'Total', principal: rows.reduce((a, r) => a + Number(r.principalAmount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
-    } else if (tab === 'monthly-interest' || tab === 'interest-paid') {
+    } else if (tab === 'interest-paid') {
+      void exportFlatTableToExcel({ reportTitle: tabLabel, columns: INTEREST_PAID_COLS, rows: interestPaidRows(rows), totalRow: { customer: 'Total', amount: rows.reduce((a, r) => a + Number(r.paidAmount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
+    } else if (tab === 'monthly-interest') {
       void exportFlatTableToExcel({ reportTitle: tabLabel, columns: INTEREST_COLS, rows: interestRows(rows), totalRow: { customer: 'Total', amount: rows.reduce((a, r) => a + Number(r.amount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
     } else if (tab === 'deposit-history') {
       void exportFlatTableToExcel({ reportTitle: tabLabel, columns: DEPOSIT_COLS, rows: depositRows(rows), totalRow: { customer: 'Total', amount: rows.reduce((a, r) => a + Number(r.amount || 0), 0) }, emptyText: 'No records' }, `${tab}-${today()}.xlsx`)
@@ -267,7 +311,8 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
          err ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)', whiteSpace: 'pre-line' }}>{err}</div> :
          tab === 'customer-funding-history' && !customerId ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--tx-2)' }}>Pick a customer to view their funding history.</div> :
          (tab === 'active' || tab === 'maturing-soon' || tab === 'matured') ? <FdRows rows={data || []} /> :
-         (tab === 'monthly-interest' || tab === 'interest-paid') ? <InterestPaymentRows rows={data || []} /> :
+         tab === 'monthly-interest' ? <InterestPaymentRows rows={data || []} /> :
+         tab === 'interest-paid' ? <InterestPaidRows rows={data || []} /> :
          tab === 'withdrawals' ? <WithdrawalRows rows={data || []} /> :
          tab === 'deposit-history' ? <DepositRows rows={data || []} /> :
          tab === 'customer-funding-history' ? (

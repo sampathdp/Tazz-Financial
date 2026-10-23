@@ -570,6 +570,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('fd-interest-payments/due', [FdInterestPaymentController::class, 'due'])->middleware('perm:Fixed Deposits,View');
     Route::get('fixed-deposits/{fixedDeposit}/interest-payments', [FdInterestPaymentController::class, 'index'])->middleware('perm:Fixed Deposits,View');
     Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
+    Route::get('fd-interest-payments/{fdInterestPayment}/voucher', [FdInterestPaymentController::class, 'voucher'])->middleware('perm:Fixed Deposits,View');
     Route::post('fd-interest-payments/{fdInterestPayment}/void', [FdInterestPaymentController::class, 'void'])->middleware('perm:Fixed Deposits,Delete');
 
     // --- Funding Management: Borrowings (money the company itself borrows) ---

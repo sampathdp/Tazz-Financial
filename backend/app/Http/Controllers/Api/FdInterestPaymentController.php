@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\FdInterestPayment;
 use App\Models\FixedDeposit;
+use App\Services\NumberGenerator;
 use App\Support\FdLedgerPoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -98,7 +99,14 @@ class FdInterestPaymentController extends Controller
         ]);
 
         DB::transaction(function () use ($fdInterestPayment, $data, $request, $fd) {
+            $voucherNo = NumberGenerator::next('fd_interest', [
+                'branch_id' => $fd->branch_id,
+                'branch_code' => $fd->branch->code,
+                'user_id' => $request->user()->id,
+            ]);
+
             $fdInterestPayment->update([
+                'voucher_no' => $voucherNo,
                 'status' => 'Paid',
                 'paid_amount' => $fdInterestPayment->amount,
                 'paid_at' => $data['paid_at'] ?? now()->format('Y-m-d'),
@@ -111,10 +119,42 @@ class FdInterestPaymentController extends Controller
             $next = $fd->interestPayments()->where('status', 'Pending')->orderBy('due_date')->first();
             $fd->update(['next_interest_date' => $next?->due_date]);
 
+            NumberGenerator::attach($voucherNo, $fdInterestPayment);
+
             FdLedgerPoster::postInterestPaid($fdInterestPayment->fresh());
         });
 
-        return $fdInterestPayment->fresh(['fixedDeposit:id,fd_number,customer_id', 'payer:id,name']);
+        return $this->withVoucherRelations($fdInterestPayment->fresh());
+    }
+
+    /**
+     * The payment plus everything its voucher prints: the payee (customer + the
+     * bank account the transfer goes to — full account number, since this is the
+     * slip that goes to the bank) and the company account it was paid from.
+     */
+    private function withVoucherRelations(FdInterestPayment $payment): FdInterestPayment
+    {
+        $payment->load([
+            'fixedDeposit:id,fd_number,branch_id,customer_id,customer_bank_detail_id',
+            'fixedDeposit.customer:id,full_name,code,nic_no',
+            'fixedDeposit.bankDetail.bank:id,name',
+            'bankAccount:id,name,account_number,bank_id',
+            'bankAccount.bank:id,name',
+            'payer:id,name',
+        ]);
+        $payment->fixedDeposit?->bankDetail?->makeVisible('account_number');
+
+        return $payment;
+    }
+
+    /** The voucher for one already-paid installment, for reprinting. */
+    public function voucher(FdInterestPayment $fdInterestPayment)
+    {
+        if ($fdInterestPayment->status !== 'Paid') {
+            return response()->json(['message' => 'This installment has not been paid.'], 422);
+        }
+
+        return $this->withVoucherRelations($fdInterestPayment);
     }
 
     /** Undoes a mistaken interest payment — reverses the ledger/till and puts the installment back to Pending. */
@@ -129,6 +169,7 @@ class FdInterestPaymentController extends Controller
         DB::transaction(function () use ($fdInterestPayment, $fd) {
             FdLedgerPoster::reverseInterestPaid($fdInterestPayment);
             $fdInterestPayment->update([
+                'voucher_no' => null,
                 'status' => 'Pending',
                 'paid_amount' => 0,
                 'paid_at' => null,

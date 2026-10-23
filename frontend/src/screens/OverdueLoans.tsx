@@ -92,7 +92,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
         <Table cols={[
           { label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Days Overdue', align: 'center' },
           { label: 'Installments', align: 'center' }, { label: 'Overdue Amount', align: 'right' }, { label: 'OD / Penalty', align: 'right' },
-          { label: 'Total Arrears', align: 'right' }, { label: 'Outstanding', align: 'right' }, { label: 'Recovery Officer' },
+          { label: 'Total Arrears', align: 'right' }, { label: 'Outstanding', align: 'right' }, { label: 'Last Paid Date', align: 'center' }, { label: 'Last Paid Amount', align: 'right' }, { label: 'Recovery Officer' },
         ]}
           rows={filtered} empty="No overdue loans — every active loan is up to date."
           onRow={openRow}
@@ -110,6 +110,8 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
             <Td mono align="right">{money(l.penaltyDue)}</Td>
             <Td mono align="right" style={{ fontWeight: 600 }}>{money(num(l.overdueAmount) + num(l.penaltyDue))}</Td>
             <Td mono align="right">{money(num(l.totalDueSum) - num(l.paidSum))}</Td>
+            <Td align="center">{l.lastPaymentDate || '—'}</Td>
+            <Td mono align="right">{l.lastPaymentAmount != null ? money(l.lastPaymentAmount) : '—'}</Td>
             <Td>{l.loanDetail?.recoveryOfficer?.name || '—'}</Td>
           </>} />}
       </Card>

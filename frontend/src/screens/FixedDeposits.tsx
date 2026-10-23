@@ -14,6 +14,7 @@ import {
   type FdPaymentMethod, type FixedDepositStatus, type FdInterestMethod, type AuthUser,
   type FdAutoRenewMode, type FdInterestTreatment, type FdWithdrawalPreview,
 } from '../api'
+import { InterestVoucherPage } from './FdInterestVoucher'
 import { Can } from '../lib/permissions'
 import { AdminEditButton } from '../components/AdminEditButton'
 import { useNotify } from '../components/Notify'
@@ -57,6 +58,7 @@ type PrintDoc =
   | { kind: 'certificate'; fd: FixedDeposit }
   | { kind: 'renewal'; fd: FixedDeposit; enhancementDeposit: FdDeposit | null }
   | { kind: 'withdrawal'; withdrawal: FdWithdrawal; fd: FixedDeposit }
+  | { kind: 'interest'; payment: FdInterestPayment }
 
 function DocHeader({ brand, title }: { brand: { name: string; tagline: string }; title: string }) {
   return (
@@ -72,6 +74,7 @@ function DocRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function PrintView({ doc, brand, onClose }: { doc: PrintDoc; brand: { name: string; tagline: string }; onClose: () => void }) {
+  if (doc.kind === 'interest') return <InterestVoucherPage payment={doc.payment} brand={brand} onClose={onClose} />
   return (
     <div>
       <div className="row gap-2 no-print" style={{ marginBottom: 16 }}>
@@ -558,7 +561,7 @@ function AutoRenewModal({ fd, open, onClose, onSaved }: { fd: FixedDeposit; open
 
 /* ============================ Pay interest modal ============================ */
 
-function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInterestPayment | null; open: boolean; onClose: () => void; onPaid: () => void }) {
+function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInterestPayment | null; open: boolean; onClose: () => void; onPaid: (p: FdInterestPayment) => void }) {
   const notify = useNotify()
   const [method, setMethod] = useState<FdPaymentMethod>('Cash')
   const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
@@ -575,8 +578,8 @@ function PayInterestModal({ payment, open, onClose, onPaid }: { payment: FdInter
     if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     setBusy(true); setErr('')
     try {
-      await fdInterestPaymentsApi.pay(payment.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, paidAt })
-      onPaid()
+      const result = await fdInterestPaymentsApi.pay(payment.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, paidAt })
+      onPaid(result)
       notify.success('Interest payment recorded')
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Could not record this interest payment.'))
@@ -633,6 +636,11 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
     if (!ok) return
     try { await fdInterestPaymentsApi.void(p.id); notify.success('Payment voided'); onChanged() }
     catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
+  }
+
+  const printInterestVoucher = async (p: FdInterestPayment) => {
+    try { onPrint({ kind: 'interest', payment: await fdInterestPaymentsApi.voucher(p.id) }) }
+    catch (ex: any) { notify.error('Could not load voucher', getErrorText(ex)) }
   }
 
   const voidWithdrawal = async () => {
@@ -731,11 +739,12 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
                     )}
                   </Can>
                 )}
-                {p.status === 'Paid' && (
+                {p.status === 'Paid' && <>
+                  <button className="mms-act" title="Print voucher" onClick={() => printInterestVoucher(p)}><Icon n="print" s={14} /></button>
                   <Can user={me} module="Fixed Deposits" action="Delete">
                     <button className="mms-act" title="Void" onClick={() => voidInterestPayment(p)}><Icon n="trash" s={14} /></button>
                   </Can>
-                )}
+                </>}
               </Td>
             </>} />
         </Card>
@@ -773,7 +782,7 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
       <RenewModal fd={fd} open={renewOpen} onClose={() => setRenewOpen(false)} onRenewed={(newFd, enh) => { setRenewOpen(false); onPrint({ kind: 'renewal', fd: newFd, enhancementDeposit: enh }); onChanged() }} />
       <AutoRenewModal fd={fd} open={autoRenewOpen} onClose={() => setAutoRenewOpen(false)} onSaved={() => { setAutoRenewOpen(false); onChanged() }} />
       <WithdrawModal fd={fd} open={withdrawOpen} onClose={() => setWithdrawOpen(false)} onWithdrawn={(w, newFd) => { setWithdrawOpen(false); onPrint({ kind: 'withdrawal', withdrawal: w, fd: newFd }); onChanged() }} />
-      <PayInterestModal payment={payTarget} open={!!payTarget} onClose={() => setPayTarget(null)} onPaid={() => { setPayTarget(null); onChanged() }} />
+      <PayInterestModal payment={payTarget} open={!!payTarget} onClose={() => setPayTarget(null)} onPaid={(p) => { setPayTarget(null); onPrint({ kind: 'interest', payment: p }); onChanged() }} />
     </div>
   )
 }

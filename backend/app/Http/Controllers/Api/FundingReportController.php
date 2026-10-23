@@ -49,12 +49,21 @@ class FundingReportController extends Controller
                 ->whereHas('fixedDeposit', fn ($q) => CurrentBranch::applyScope($q))
                 ->orderBy('due_date')->get(),
 
-            'interest-paid' => FdInterestPayment::with(['fixedDeposit:id,fd_number,customer_id', 'fixedDeposit.customer:id,full_name,code', 'payer:id,name'])
+            // Carries the payee (customer + the bank account the money went to) and the company
+            // account it left from, so the report shows who received each payout and how.
+            'interest-paid' => FdInterestPayment::with([
+                    'fixedDeposit:id,fd_number,customer_id,customer_bank_detail_id',
+                    'fixedDeposit.customer:id,full_name,code,nic_no',
+                    'fixedDeposit.bankDetail.bank:id,name',
+                    'bankAccount:id,name,bank_id', 'bankAccount.bank:id,name',
+                    'payer:id,name',
+                ])
                 ->where('status', 'Paid')
                 ->when($request->query('from'), fn ($q, $d) => $q->whereDate('paid_at', '>=', $d))
                 ->when($request->query('to'), fn ($q, $d) => $q->whereDate('paid_at', '<=', $d))
                 ->whereHas('fixedDeposit', fn ($q) => CurrentBranch::applyScope($q))
-                ->orderByDesc('paid_at')->get(),
+                ->orderByDesc('paid_at')->orderByDesc('id')->get()
+                ->each(fn ($p) => $p->fixedDeposit?->bankDetail?->makeVisible('account_number')),
 
             'deposit-history' => CurrentBranch::applyScope(FdDeposit::with(['customer:id,full_name,code', 'branch:id,name,code', 'fixedDeposit:id,fd_number'])
                 ->when($request->query('customerId'), fn ($q, $c) => $q->where('customer_id', $c)))
@@ -100,7 +109,8 @@ class FundingReportController extends Controller
         $data = $this->show($request, $type);
         $sections = match ($type) {
             'active', 'maturing-soon', 'matured' => [$this->fdSection($data)],
-            'monthly-interest', 'interest-paid' => [$this->interestSection($data)],
+            'monthly-interest' => [$this->interestSection($data)],
+            'interest-paid' => [$this->interestPaidSection($data)],
             'deposit-history' => [$this->depositSection($data)],
             'renewal-history', 'capital-enhancements' => [$this->renewalSection($data)],
             'withdrawals' => [$this->withdrawalSection($data)],
@@ -140,6 +150,35 @@ class FundingReportController extends Controller
             'columns' => [
                 ['key' => 'fdNo', 'label' => 'FD No'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'due', 'label' => 'Due Date'],
                 ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money'], ['key' => 'status', 'label' => 'Status', 'align' => 'center'], ['key' => 'paidAt', 'label' => 'Paid At'],
+            ],
+            'rows' => $mapped->all(), 'totalRow' => ['customer' => 'Total', 'amount' => $mapped->sum('amount')], 'emptyText' => 'No records',
+        ];
+    }
+
+    private function interestPaidSection(Collection $rows): array
+    {
+        $mapped = $rows->map(function (FdInterestPayment $p) {
+            $bd = $p->fixedDeposit?->bankDetail;
+
+            return [
+                'voucherNo' => $p->voucher_no ?? '—', 'paidAt' => $p->paid_at?->format('Y-m-d') ?? '—',
+                'fdNo' => $p->fixedDeposit?->fd_number ?? '—', 'installment' => $p->installment_no,
+                'customer' => $p->fixedDeposit?->customer?->full_name ?? '—',
+                'payeeBank' => $bd ? trim(($bd->bank?->name ?? '') . ' ' . ($bd->bank_branch ?? '')) : '—',
+                'payeeAccount' => $bd ? ($bd->account_number ?? '—') : '—',
+                'amount' => (float) $p->paid_amount, 'method' => $p->payment_method ?? '—',
+                'paidFrom' => $p->bankAccount?->name ?? ($p->payment_method === 'Cash' ? 'Cash' : '—'),
+                'reference' => $p->reference_no ?? '—', 'paidBy' => $p->payer?->name ?? '—',
+            ];
+        });
+
+        return [
+            'columns' => [
+                ['key' => 'voucherNo', 'label' => 'Voucher No'], ['key' => 'paidAt', 'label' => 'Paid At'], ['key' => 'fdNo', 'label' => 'FD No'],
+                ['key' => 'installment', 'label' => '#', 'align' => 'center'], ['key' => 'customer', 'label' => 'Paid To'],
+                ['key' => 'payeeBank', 'label' => 'Payee Bank'], ['key' => 'payeeAccount', 'label' => 'Account No'],
+                ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money'], ['key' => 'method', 'label' => 'Method'],
+                ['key' => 'paidFrom', 'label' => 'Paid From'], ['key' => 'reference', 'label' => 'Reference'], ['key' => 'paidBy', 'label' => 'Paid By'],
             ],
             'rows' => $mapped->all(), 'totalRow' => ['customer' => 'Total', 'amount' => $mapped->sum('amount')], 'emptyText' => 'No records',
         ];
