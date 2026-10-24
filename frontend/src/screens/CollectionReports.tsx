@@ -59,19 +59,26 @@ export function CollectionDailyCashScreen({ go: _go, user: me }: { go: Go; user?
 
   const methods = data ? Object.entries(data.byMethod || {}).map(([label, value], i) => ({ label, value: Number(value), color: PALETTE[i % PALETTE.length] })) : []
 
+  const receivers = data ? Object.entries(data.byReceiver || {}).map(([name, v]: [string, any]) => ({ name, count: v.count, amount: v.amount })) : []
+
   const exportExcel = () => {
     if (!data) return
     void exportFlatTableToExcel({
       reportTitle: 'Daily Cash Collection', meta: `Date: ${data.date}  •  ${data.count ?? 0} payment(s)`,
       columns: [
         { label: 'Receipt', key: 'receipt' }, { label: 'Loan', key: 'loan' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' },
-        { label: 'Method', key: 'method' }, { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'Received By', key: 'receiver' }, { label: 'Time', key: 'time' },
+        { label: 'Method', key: 'method' },
+        { label: 'Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Interest', key: 'interest', align: 'right', format: 'money' },
+        { label: 'Penalty', key: 'penalty', align: 'right', format: 'money' }, { label: 'Charges', key: 'charges', align: 'right', format: 'money' },
+        { label: 'Amount', key: 'amount', align: 'right', format: 'money' }, { label: 'Received By', key: 'receiver' }, { label: 'Time', key: 'time' },
       ],
       rows: (data.payments || []).map((p: any) => ({
         receipt: p.receiptNo || p.code, loan: p.facility?.code || '—', customer: p.facility?.customer?.fullName || '—', branch: p.branch?.name || '—',
-        method: p.paymentMethod, amount: Number(p.amount || 0), receiver: p.receiver?.name || '—', time: typeof p.paidAt === 'string' ? p.paidAt.slice(11, 16) : '—',
+        method: p.paymentMethod, principal: Number(p.principalApplied || 0), interest: Number(p.interestApplied || 0),
+        penalty: Number(p.penaltyApplied || 0), charges: Number(p.chargesApplied || 0),
+        amount: Number(p.amount || 0), receiver: p.receiver?.name || '—', time: typeof p.paidAt === 'string' ? p.paidAt.slice(11, 16) : '—',
       })),
-      totalRow: { customer: 'Total', amount: Number(data.totalAmount || 0) },
+      totalRow: { customer: 'Total', principal: Number(data.totalPrincipal || 0), interest: Number(data.totalInterest || 0), penalty: Number(data.totalPenalty || 0), charges: Number(data.totalCharges || 0), amount: Number(data.totalAmount || 0) },
       emptyText: 'No collections recorded',
     }, `daily-cash-${data.date}.xlsx`)
   }
@@ -92,16 +99,31 @@ export function CollectionDailyCashScreen({ go: _go, user: me }: { go: Go; user?
           <TileGrid>
             <Tile icon="wallet" label="Total Collected" value={money(data.totalAmount)} tone="green" />
             <Tile icon="receipt" label="Payments" value={String(data.count ?? 0)} />
+            <Tile icon="coins" label="Principal" value={money(data.totalPrincipal)} />
+            <Tile icon="chart" label="Interest" value={money(data.totalInterest)} />
+            <Tile icon="alert" label="Penalty" value={money(data.totalPenalty)} tone="amber" />
+            <Tile icon="receipt" label="Other Charges" value={money(data.totalCharges)} />
           </TileGrid>
-          {methods.length > 0 && (
-            <ChartCard title="Collected by Payment Method">
-              <Donut data={methods} center={money(data.totalAmount)} />
-            </ChartCard>
-          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+            {methods.length > 0 && (
+              <ChartCard title="Collected by Payment Method">
+                <Donut data={methods} center={money(data.totalAmount)} />
+              </ChartCard>
+            )}
+            {receivers.length > 0 && (
+              <ChartCard title="Collected by Receiver">
+                <Table cols={[{ label: 'Received By' }, { label: 'Payments', align: 'right' as const }, { label: 'Amount', align: 'right' as const }]}
+                  rows={receivers} empty="—"
+                  render={(r: any) => <><Td>{r.name}</Td><Td align="right" mono>{r.count}</Td><Td align="right" mono>{money(r.amount)}</Td></>} />
+              </ChartCard>
+            )}
+          </div>
           <Card pad={0}>
             <Table cols={[
-              { label: 'Receipt' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Branch' },
-              { label: 'Method' }, { label: 'Amount', align: 'right' as const }, { label: 'Received By' }, { label: 'Time' },
+              { label: 'Receipt' }, { label: 'Loan' }, { label: 'Customer' }, { label: 'Branch' }, { label: 'Method' },
+              { label: 'Principal', align: 'right' as const }, { label: 'Interest', align: 'right' as const },
+              { label: 'Penalty', align: 'right' as const }, { label: 'Charges', align: 'right' as const },
+              { label: 'Amount', align: 'right' as const }, { label: 'Received By' }, { label: 'Time' },
             ]} rows={data.payments || []} empty="No collections recorded"
               render={(p: any) => <>
                 <Td mono>{p.receiptNo || p.code}</Td>
@@ -109,6 +131,10 @@ export function CollectionDailyCashScreen({ go: _go, user: me }: { go: Go; user?
                 <Td>{p.facility?.customer?.fullName || '—'}</Td>
                 <Td>{p.branch?.name || '—'}</Td>
                 <Td>{p.paymentMethod}</Td>
+                <Td align="right" mono>{money(p.principalApplied)}</Td>
+                <Td align="right" mono>{money(p.interestApplied)}</Td>
+                <Td align="right" mono>{money(p.penaltyApplied)}</Td>
+                <Td align="right" mono>{money(p.chargesApplied)}</Td>
                 <Td align="right" mono>{money(p.amount)}</Td>
                 <Td>{p.receiver?.name || '—'}</Td>
                 <Td>{typeof p.paidAt === 'string' ? p.paidAt.slice(11, 16) : '—'}</Td>
@@ -142,8 +168,16 @@ export function CollectionSummaryScreen({ go: _go, user: me }: { go: Go; user?: 
       reportTitle: 'Collection Summary', meta: `Period: ${data.from} to ${data.to}`,
       columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right' }],
       rows: [
-        { metric: 'Due Amount', value: money(data.dueAmount) }, { metric: 'Collected Amount', value: money(data.collectedAmount) },
+        { metric: 'Loans With Installments Due', value: String(data.loanCount ?? 0) }, { metric: 'Installments Due', value: String(data.installmentCount ?? 0) },
+        { metric: 'Payments Received', value: String(data.paymentCount ?? 0) },
+        { metric: 'Due Amount', value: money(data.dueAmount) },
+        { metric: '   Principal Due', value: money(data.dueBreakdown?.principal) }, { metric: '   Interest Due', value: money(data.dueBreakdown?.interest) },
+        { metric: '   Penalty Due', value: money(data.dueBreakdown?.penalty) },
+        { metric: 'Collected Amount', value: money(data.collectedAmount) },
+        { metric: '   Principal Collected', value: money(data.collectedBreakdown?.principal) }, { metric: '   Interest Collected', value: money(data.collectedBreakdown?.interest) },
+        { metric: '   Penalty Collected', value: money(data.collectedBreakdown?.penalty) },
         { metric: 'Outstanding Amount', value: money(data.outstandingAmount) }, { metric: 'Collection Rate %', value: pct(data.collectionRatePct) },
+        ...(data.byMethod || []).map((m: any) => ({ metric: `Method: ${m.method} (${m.count})`, value: money(m.amount) })),
       ],
     }, `collection-summary-${today()}.xlsx`)
   }
@@ -162,18 +196,40 @@ export function CollectionSummaryScreen({ go: _go, user: me }: { go: Go; user?: 
         </div>
       </Card>
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
-          <TileGrid>
-            <Tile icon="wallet" label="Due Amount" value={money(data.dueAmount)} />
-            <Tile icon="coins" label="Collected Amount" value={money(data.collectedAmount)} tone="green" />
-            <Tile icon="alert" label="Outstanding" value={money(data.outstandingAmount)} tone={data.outstandingAmount > 0 ? 'red' : 'green'} />
-          </TileGrid>
-          <ChartCard title="Collection Rate">
-            <div className="row center">
-              <Gauge pct={Math.round(data.collectionRatePct ?? 0)} label="collected of due" color={data.collectionRatePct >= 90 ? 'var(--ok)' : data.collectionRatePct < 70 ? 'var(--bad)' : 'var(--warn)'} />
-            </div>
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
+            <TileGrid>
+              <Tile icon="wallet" label="Due Amount" value={money(data.dueAmount)} />
+              <Tile icon="coins" label="Collected Amount" value={money(data.collectedAmount)} tone="green" />
+              <Tile icon="alert" label="Outstanding" value={money(data.outstandingAmount)} tone={data.outstandingAmount > 0 ? 'red' : 'green'} />
+              <Tile icon="users" label="Loans Due" value={String(data.loanCount ?? 0)} />
+              <Tile icon="receipt" label="Installments Due" value={String(data.installmentCount ?? 0)} />
+              <Tile icon="receipt" label="Payments Received" value={String(data.paymentCount ?? 0)} />
+            </TileGrid>
+            <ChartCard title="Collection Rate">
+              <div className="row center">
+                <Gauge pct={Math.round(data.collectionRatePct ?? 0)} label="collected of due" color={data.collectionRatePct >= 90 ? 'var(--ok)' : data.collectionRatePct < 70 ? 'var(--bad)' : 'var(--warn)'} />
+              </div>
+            </ChartCard>
+          </div>
+          <ChartCard title="Due vs Collected by Component">
+            <Table cols={[{ label: 'Component' }, { label: 'Due', align: 'right' as const }, { label: 'Collected', align: 'right' as const }, { label: 'Rate', align: 'right' as const }]}
+              rows={[
+                { name: 'Principal', due: data.dueBreakdown?.principal, col: data.collectedBreakdown?.principal },
+                { name: 'Interest', due: data.dueBreakdown?.interest, col: data.collectedBreakdown?.interest },
+                { name: 'Penalty', due: data.dueBreakdown?.penalty, col: data.collectedBreakdown?.penalty },
+              ]} empty="—"
+              render={(r: any) => <><Td>{r.name}</Td><Td align="right" mono>{money(r.due)}</Td><Td align="right" mono>{money(r.col)}</Td>
+                <Td align="right" mono>{Number(r.due) > 0 ? pct((Number(r.col) / Number(r.due)) * 100) : '—'}</Td></>} />
           </ChartCard>
-        </div>
+          {(data.byMethod || []).length > 0 && (
+            <ChartCard title="Collected by Payment Method">
+              <Table cols={[{ label: 'Method' }, { label: 'Payments', align: 'right' as const }, { label: 'Amount', align: 'right' as const }]}
+                rows={data.byMethod} empty="—"
+                render={(m: any) => <><Td>{m.method}</Td><Td align="right" mono>{m.count}</Td><Td align="right" mono>{money(m.amount)}</Td></>} />
+            </ChartCard>
+          )}
+        </>
       )}
     </div>
   )

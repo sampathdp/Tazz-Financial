@@ -56,15 +56,27 @@ class CollectionReportController extends Controller
         $d = $this->dailyCash($request);
         $columns = [
             ['key' => 'receipt', 'label' => 'Receipt'], ['key' => 'loan', 'label' => 'Loan'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'branch', 'label' => 'Branch'],
-            ['key' => 'method', 'label' => 'Method'], ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'method', 'label' => 'Method'],
+            ['key' => 'principal', 'label' => 'Principal', 'align' => 'right', 'format' => 'money'], ['key' => 'interest', 'label' => 'Interest', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'penalty', 'label' => 'Penalty', 'align' => 'right', 'format' => 'money'], ['key' => 'charges', 'label' => 'Charges', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money'],
             ['key' => 'receiver', 'label' => 'Received By'], ['key' => 'time', 'label' => 'Time'],
         ];
         $mapped = $d['payments']->map(fn ($p) => [
             'receipt' => $p->receipt_no ?: $p->code, 'loan' => $p->facility?->code ?? '—', 'customer' => $p->facility?->customer?->full_name ?? '—',
-            'branch' => $p->branch?->name ?? '—', 'method' => $p->payment_method, 'amount' => (float) $p->amount,
+            'branch' => $p->branch?->name ?? '—', 'method' => $p->payment_method,
+            'principal' => $p->principal_applied, 'interest' => $p->interest_applied, 'penalty' => $p->penalty_applied, 'charges' => $p->charges_applied,
+            'amount' => (float) $p->amount,
             'receiver' => $p->receiver?->name ?? '—', 'time' => $p->paid_at?->format('H:i') ?? '—',
         ]);
-        $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => ['customer' => 'Total', 'amount' => $d['totalAmount']], 'emptyText' => 'No payments received on this date']];
+        $totalRow = ['customer' => 'Total', 'principal' => $d['totalPrincipal'], 'interest' => $d['totalInterest'], 'penalty' => $d['totalPenalty'], 'charges' => $d['totalCharges'], 'amount' => $d['totalAmount']];
+        $methodRows = $d['byMethod']->map(fn ($amt, $m) => ['name' => $m, 'amount' => $amt])->values()->all();
+        $receiverRows = $d['byReceiver']->map(fn ($v, $n) => ['name' => $n, 'count' => $v['count'], 'amount' => $v['amount']])->values()->all();
+        $sections = [
+            ['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No payments received on this date'],
+            ['title' => 'By Payment Method', 'columns' => [['key' => 'name', 'label' => 'Method'], ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money']], 'rows' => $methodRows],
+            ['title' => 'By Receiver', 'columns' => [['key' => 'name', 'label' => 'Received By'], ['key' => 'count', 'label' => 'Payments', 'align' => 'right', 'format' => 'number'], ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money']], 'rows' => $receiverRows],
+        ];
 
         return ['Daily Cash Collection', $sections, 'Date: ' . $d['date'] . '  •  ' . $d['count'] . ' payment(s)'];
     }
@@ -72,13 +84,26 @@ class CollectionReportController extends Controller
     private function collectionSummaryPdf(Request $request): array
     {
         $d = $this->collectionSummary($request);
+        $n = fn ($v) => number_format($v, 2);
         $rows = [
-            ['metric' => 'Due Amount', 'value' => number_format($d['dueAmount'], 2)],
-            ['metric' => 'Collected Amount', 'value' => number_format($d['collectedAmount'], 2)],
-            ['metric' => 'Outstanding Amount', 'value' => number_format($d['outstandingAmount'], 2)],
-            ['metric' => 'Collection Rate %', 'value' => $d['collectionRatePct'] === null ? '—' : number_format($d['collectionRatePct'], 2) . '%'],
+            ['metric' => 'Loans With Installments Due', 'value' => (string) $d['loanCount']],
+            ['metric' => 'Installments Due', 'value' => (string) $d['installmentCount']],
+            ['metric' => 'Payments Received', 'value' => (string) $d['paymentCount']],
+            ['metric' => 'Due Amount', 'value' => $n($d['dueAmount'])],
+            ['metric' => '   Principal Due', 'value' => $n($d['dueBreakdown']['principal'])],
+            ['metric' => '   Interest Due', 'value' => $n($d['dueBreakdown']['interest'])],
+            ['metric' => '   Penalty Due', 'value' => $n($d['dueBreakdown']['penalty'])],
+            ['metric' => 'Collected Amount', 'value' => $n($d['collectedAmount'])],
+            ['metric' => '   Principal Collected', 'value' => $n($d['collectedBreakdown']['principal'])],
+            ['metric' => '   Interest Collected', 'value' => $n($d['collectedBreakdown']['interest'])],
+            ['metric' => '   Penalty Collected', 'value' => $n($d['collectedBreakdown']['penalty'])],
+            ['metric' => 'Outstanding Amount', 'value' => $n($d['outstandingAmount'])],
+            ['metric' => 'Collection Rate %', 'value' => $d['collectionRatePct'] === null ? '—' : $n($d['collectionRatePct']) . '%'],
         ];
-        $sections = [['columns' => [['key' => 'metric', 'label' => 'Metric'], ['key' => 'value', 'label' => 'Value', 'align' => 'right']], 'rows' => $rows]];
+        $sections = [
+            ['columns' => [['key' => 'metric', 'label' => 'Metric'], ['key' => 'value', 'label' => 'Value', 'align' => 'right']], 'rows' => $rows],
+            ['title' => 'Collected by Payment Method', 'columns' => [['key' => 'method', 'label' => 'Method'], ['key' => 'count', 'label' => 'Payments', 'align' => 'right', 'format' => 'number'], ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'format' => 'money']], 'rows' => $d['byMethod']->all()],
+        ];
 
         return ['Collection Summary', $sections, "Period: {$d['from']} to {$d['to']}"];
     }
@@ -123,14 +148,33 @@ class CollectionReportController extends Controller
         $payments = FacilityPayment::whereHas('facility')
             ->where('status', 'Active')->where('approval_status', 'Approved')
             ->whereDate('paid_at', $date)
-            ->with(['facility:id,code,customer_id,branch_id', 'facility.customer:id,full_name,code', 'branch:id,name,code', 'receiver:id,name'])
+            ->with(['facility:id,code,customer_id,branch_id', 'facility.customer:id,full_name,code', 'branch:id,name,code', 'receiver:id,name', 'allocations', 'chargeAllocations'])
             ->orderByDesc('paid_at')->get();
+
+        // Split each payment into what it settled: principal / interest / penalty / other charges.
+        $payments->each(function ($p) {
+            $p->setAttribute('principal_applied', round((float) $p->allocations->sum('principal_applied'), 2));
+            $p->setAttribute('interest_applied', round((float) $p->allocations->sum('interest_applied'), 2));
+            $p->setAttribute('penalty_applied', round((float) $p->allocations->sum('penalty_applied'), 2));
+            $p->setAttribute('charges_applied', round((float) $p->chargeAllocations->sum('amount_applied'), 2));
+            $p->makeHidden(['allocations', 'chargeAllocations']);
+        });
 
         return [
             'date' => $date->toDateString(),
             'totalAmount' => round((float) $payments->sum('amount'), 2),
             'count' => $payments->count(),
+            'totalPrincipal' => round((float) $payments->sum('principal_applied'), 2),
+            'totalInterest' => round((float) $payments->sum('interest_applied'), 2),
+            'totalPenalty' => round((float) $payments->sum('penalty_applied'), 2),
+            'totalCharges' => round((float) $payments->sum('charges_applied'), 2),
             'byMethod' => $payments->groupBy('payment_method')->map(fn ($g) => round((float) $g->sum('amount'), 2)),
+            'byReceiver' => $payments->groupBy(fn ($p) => $p->receiver?->name ?? '—')->map(fn ($g) => [
+                'count' => $g->count(), 'amount' => round((float) $g->sum('amount'), 2),
+            ]),
+            'byBranch' => $payments->groupBy(fn ($p) => $p->branch?->name ?? '—')->map(fn ($g) => [
+                'count' => $g->count(), 'amount' => round((float) $g->sum('amount'), 2),
+            ]),
             'payments' => $payments,
         ];
     }
@@ -153,8 +197,47 @@ class CollectionReportController extends Controller
             ->whereBetween('fp.paid_at', [$from, $to]);
         $collected = (float) CurrentBranch::applyScope($collectedQuery, 'cf.branch_id')->sum('fp.amount');
 
+        // Collected split by what it settled (principal / interest / penalty).
+        $splitQuery = DB::table('facility_payment_allocations as fpa')
+            ->join('facility_payments as fp', 'fp.id', '=', 'fpa.facility_payment_id')
+            ->join('credit_facilities as cf', 'cf.id', '=', 'fp.credit_facility_id')
+            ->where('cf.facility_type', 'Loan')
+            ->where('fp.status', 'Active')->where('fp.approval_status', 'Approved')
+            ->whereBetween('fp.paid_at', [$from, $to]);
+        $split = CurrentBranch::applyScope($splitQuery, 'cf.branch_id')
+            ->selectRaw('coalesce(sum(fpa.principal_applied),0) as p, coalesce(sum(fpa.interest_applied),0) as i, coalesce(sum(fpa.penalty_applied),0) as pen')
+            ->first();
+
+        // Due split by component.
+        $dueSplitQuery = DB::table('facility_schedules as fs')
+            ->join('credit_facilities as cf', 'cf.id', '=', 'fs.credit_facility_id')
+            ->where('cf.facility_type', 'Loan')
+            ->whereBetween('fs.due_date', [$from->toDateString(), $to->toDateString()]);
+        $dueSplit = CurrentBranch::applyScope($dueSplitQuery, 'cf.branch_id')
+            ->selectRaw('coalesce(sum(fs.principal_due),0) as p, coalesce(sum(fs.interest_due),0) as i, coalesce(sum(fs.penalty_due),0) as pen, count(*) as installments, count(distinct cf.id) as loans')
+            ->first();
+
+        // Collected by payment method.
+        $methodQuery = DB::table('facility_payments as fp')
+            ->join('credit_facilities as cf', 'cf.id', '=', 'fp.credit_facility_id')
+            ->where('cf.facility_type', 'Loan')
+            ->where('fp.status', 'Active')->where('fp.approval_status', 'Approved')
+            ->whereBetween('fp.paid_at', [$from, $to]);
+        $byMethod = CurrentBranch::applyScope($methodQuery, 'cf.branch_id')
+            ->groupBy('fp.payment_method')
+            ->selectRaw('fp.payment_method as method, count(*) as payment_count, sum(fp.amount) as amount')
+            ->get()->map(fn ($r) => ['method' => $r->method, 'count' => (int) $r->payment_count, 'amount' => round((float) $r->amount, 2)])->values();
+
         return [
             'from' => $from->toDateString(), 'to' => $to->toDateString(),
+            'installmentCount' => (int) ($dueSplit->installments ?? 0),
+            'loanCount' => (int) ($dueSplit->loans ?? 0),
+            'paymentCount' => (int) $byMethod->sum('count'),
+            'dueBreakdown' => ['principal' => round((float) ($dueSplit->p ?? 0), 2), 'interest' => round((float) ($dueSplit->i ?? 0), 2), 'penalty' => round((float) ($dueSplit->pen ?? 0), 2)],
+            'collectedBreakdown' => [
+                'principal' => round((float) ($split->p ?? 0), 2), 'interest' => round((float) ($split->i ?? 0), 2), 'penalty' => round((float) ($split->pen ?? 0), 2),
+            ],
+            'byMethod' => $byMethod,
             'dueAmount' => round($due, 2),
             'collectedAmount' => round($collected, 2),
             'outstandingAmount' => round(max(0, $due - $collected), 2),

@@ -251,12 +251,14 @@ export function FinanceRequestsScreen({ user: me }: { go: Go; user?: AuthUser | 
     setErr('')
   }
   const isTransfer = execTarget ? TRANSFER_TYPES.includes(execTarget.requestType) : false
+  // The server fixes the GL account for expense / loan payments when the request is raised.
+  const fixedOffset = !!(execTarget?.meta && (execTarget.meta.offsetAccountId ?? execTarget.meta.offset_account_id))
   const saveExec = async () => {
     if (!execTarget) return
     if (execForm.method === 'Cash' && !execForm.cashAccountId) { setErr('Choose the source cash account.'); return }
     if (execForm.method === 'Bank' && !execForm.bankAccountId) { setErr('Choose the source bank account.'); return }
     if (isTransfer && !execForm.destCashAccountId && !execForm.destBankAccountId) { setErr('Choose the destination account.'); return }
-    if (!isTransfer && !execForm.offsetAccountId) { setErr('Choose the account this payment posts against.'); return }
+    if (!isTransfer && !fixedOffset && !execForm.offsetAccountId) { setErr('Choose the account this payment posts against.'); return }
     setBusy(true); setErr('')
     try {
       await financeRequestsApi.execute(execTarget.id, {
@@ -392,7 +394,7 @@ export function FinanceRequestsScreen({ user: me }: { go: Go; user?: AuthUser | 
               <optgroup label="Cash accounts">{cashAccounts.map((a) => <option key={`c${a.id}`} value={a.id}>{a.name}</option>)}</optgroup>
               <optgroup label="Bank accounts">{bankAccounts.map((a) => <option key={`b${a.id}`} value={`b${a.id}`}>{a.name}</option>)}</optgroup>
             </Select></Field>
-          ) : (
+          ) : fixedOffset ? null : (
             <Field label="Post against (GL account)" full><Select value={execForm.offsetAccountId} onChange={(e) => setExecForm((s) => ({ ...s, offsetAccountId: Number(e.target.value) || '' }))}>
               <option value="">Select account…</option>
               {postable.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}

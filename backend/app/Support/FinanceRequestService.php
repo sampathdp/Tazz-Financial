@@ -268,7 +268,9 @@ class FinanceRequestService
         [$srcType, $srcId, $srcLeaf] = self::resolveAccount($method, $exec['cash_account_id'] ?? null, $bankId);
         $movements = [['account_type' => $srcType, 'account_id' => $srcId, 'delta' => '-' . $amount]];
 
-        $offsetId = $exec['offset_account_id'] ?? $meta['offset_account_id'] ?? null;
+        // An account fixed when the request was raised (expense -> 2300 payable, loan -> 1100) wins over the
+        // executor's pick, otherwise Finance posts the payment to the expense account a second time.
+        $offsetId = $meta['offset_account_id'] ?? $exec['offset_account_id'] ?? null;
         if (!$offsetId) {
             throw new FinancePostingException('Choose the account this payment should be posted against.');
         }
