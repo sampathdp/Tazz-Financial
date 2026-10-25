@@ -33,8 +33,12 @@ class LoanSummary
         $chargeRate = (float) ($loanType?->default_charge_rate_percent ?? 0);
 
         $rows = $schedules->map(function ($s) use ($today, $graceDays, $chargeRate) {
-            $paidPrincipal = (float) $s->allocations->sum('principal_applied');
-            $paidInterest = (float) $s->allocations->sum('interest_applied');
+            // Voided / pending-approval payments keep their allocation rows (voids
+            // are soft), so they must be excluded here or a cancelled receipt
+            // would still count as collected in the Due Types breakdown.
+            $activeAllocations = self::activeAllocations($s);
+            $paidPrincipal = (float) $activeAllocations->sum('principal_applied');
+            $paidInterest = (float) $activeAllocations->sum('interest_applied');
             $penaltyDue = self::penaltyDueForRow($s, $graceDays, $chargeRate, $today);
             // A real payment can earmark part of itself against penalty — see
             // LoanPaymentController::applyAllocation() — so net that off here.
@@ -338,11 +342,21 @@ class LoanSummary
      * be excluded explicitly here instead. Expects the schedule's
      * `allocations.payment` relation eager-loaded (id, status, approval_status).
      */
+    /**
+     * A schedule's allocation rows minus those of voided / pending-approval
+     * payments (voids are soft � the rows stay). Use this, never raw
+     * ->allocations, for any "how much has been collected" figure.
+     * Expects `allocations.payment` eager-loaded.
+     */
+    public static function activeAllocations($schedule)
+    {
+        return $schedule->allocations
+            ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval');
+    }
+
     public static function activePenaltyPaid($schedule): float
     {
-        return (float) $schedule->allocations
-            ->filter(fn ($a) => $a->payment && $a->payment->status !== 'Voided' && $a->payment->approval_status !== 'PendingApproval')
-            ->sum('penalty_applied');
+        return (float) self::activeAllocations($schedule)->sum('penalty_applied');
     }
 
     /**

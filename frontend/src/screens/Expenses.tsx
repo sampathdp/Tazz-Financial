@@ -112,10 +112,10 @@ export function VendorsScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
 
 interface CreateForm {
   branchId: number | ''; expenseCategoryId: number | ''; vendorId: number | ''; staffId: number | '';
-  amount: number | string; expenseDate: string; description: string
+  amount: number | string; expenseDate: string; description: string; backDated: boolean
 }
 const blankCreateForm = (): CreateForm => ({
-  branchId: '', expenseCategoryId: '', vendorId: '', staffId: '', amount: '', expenseDate: new Date().toISOString().slice(0, 10), description: '',
+  branchId: '', expenseCategoryId: '', vendorId: '', staffId: '', amount: '', expenseDate: new Date().toISOString().slice(0, 10), description: '', backDated: false,
 })
 
 interface PayForm {
@@ -311,7 +311,16 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
             {staff.map((p) => <option key={p.id} value={p.id}>{p.staffCode} · {p.name}{p.phone ? ` · ${p.phone}` : ''}</option>)}
           </Select></Field>
           <Field label="Amount"><Input type="number" step="0.01" value={createForm.amount} onChange={(e) => setCreateForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
-          <Field label="Expense Date"><DateInput value={createForm.expenseDate} onChange={(iso) => setCreateForm((s) => ({ ...s, expenseDate: iso }))} /></Field>
+          <Field label="Expense Date">
+            <DateInput value={createForm.expenseDate} disabled={!createForm.backDated} onChange={(iso) => setCreateForm((s) => ({ ...s, expenseDate: iso }))} />
+            <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>
+              <input type="checkbox" checked={createForm.backDated} onChange={(e) => {
+                const checked = e.target.checked
+                setCreateForm((s) => ({ ...s, backDated: checked, expenseDate: checked ? s.expenseDate : new Date().toISOString().slice(0, 10) }))
+              }} />
+              <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
+            </label>
+          </Field>
           <Field label="Description" full><Input value={createForm.description} onChange={(e) => setCreateForm((s) => ({ ...s, description: e.target.value }))} /></Field>
         </div>
       </Modal>

@@ -266,7 +266,7 @@ function LedgerCard({ loan }: { loan: Loan }) {
   for (const s of loan.schedules || []) rows.push({ date: s.dueDate, particulars: `Installment #${s.installmentNo} due`, debit: num(s.totalDue), credit: 0, typeOrder: 2 })
   for (const w of loan.waivers || []) rows.push({ date: w.waivedAt, particulars: `${w.waiverType} waived${w.reason ? ` — ${w.reason}` : ''}`, debit: 0, credit: num(w.amount), typeOrder: 3 })
   for (const p of loan.payments || []) {
-    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval') continue
+    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval' || (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending')) continue
     rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4 })
   }
 

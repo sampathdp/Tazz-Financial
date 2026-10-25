@@ -147,6 +147,7 @@ class CollectionReportController extends Controller
 
         $payments = FacilityPayment::whereHas('facility')
             ->where('status', 'Active')->where('approval_status', 'Approved')
+            ->where(fn ($q) => $q->whereNull('clearance_status')->orWhere('clearance_status', 'Realized'))
             ->whereDate('paid_at', $date)
             ->with(['facility:id,code,customer_id,branch_id', 'facility.customer:id,full_name,code', 'branch:id,name,code', 'receiver:id,name', 'allocations', 'chargeAllocations'])
             ->orderByDesc('paid_at')->get();
@@ -194,6 +195,7 @@ class CollectionReportController extends Controller
             ->join('credit_facilities as cf', 'cf.id', '=', 'fp.credit_facility_id')
             ->where('cf.facility_type', 'Loan')
             ->where('fp.status', 'Active')->where('fp.approval_status', 'Approved')
+            ->where(fn ($q) => $q->whereNull('fp.clearance_status')->orWhere('fp.clearance_status', 'Realized'))
             ->whereBetween('fp.paid_at', [$from, $to]);
         $collected = (float) CurrentBranch::applyScope($collectedQuery, 'cf.branch_id')->sum('fp.amount');
 
@@ -203,6 +205,7 @@ class CollectionReportController extends Controller
             ->join('credit_facilities as cf', 'cf.id', '=', 'fp.credit_facility_id')
             ->where('cf.facility_type', 'Loan')
             ->where('fp.status', 'Active')->where('fp.approval_status', 'Approved')
+            ->where(fn ($q) => $q->whereNull('fp.clearance_status')->orWhere('fp.clearance_status', 'Realized'))
             ->whereBetween('fp.paid_at', [$from, $to]);
         $split = CurrentBranch::applyScope($splitQuery, 'cf.branch_id')
             ->selectRaw('coalesce(sum(fpa.principal_applied),0) as p, coalesce(sum(fpa.interest_applied),0) as i, coalesce(sum(fpa.penalty_applied),0) as pen')
@@ -222,6 +225,7 @@ class CollectionReportController extends Controller
             ->join('credit_facilities as cf', 'cf.id', '=', 'fp.credit_facility_id')
             ->where('cf.facility_type', 'Loan')
             ->where('fp.status', 'Active')->where('fp.approval_status', 'Approved')
+            ->where(fn ($q) => $q->whereNull('fp.clearance_status')->orWhere('fp.clearance_status', 'Realized'))
             ->whereBetween('fp.paid_at', [$from, $to]);
         $byMethod = CurrentBranch::applyScope($methodQuery, 'cf.branch_id')
             ->groupBy('fp.payment_method')
@@ -266,6 +270,7 @@ class CollectionReportController extends Controller
             ->join('loan_facility_details as lfd', 'lfd.credit_facility_id', '=', 'cf.id')
             ->where('cf.facility_type', 'Loan')
             ->where('fp.status', 'Active')->where('fp.approval_status', 'Approved')
+            ->where(fn ($q) => $q->whereNull('fp.clearance_status')->orWhere('fp.clearance_status', 'Realized'))
             ->whereBetween('fp.paid_at', [$from, $to])
             ->whereNotNull('lfd.recovery_officer_id');
         $collected = CurrentBranch::applyScope($collectedQuery, 'cf.branch_id')
@@ -311,6 +316,7 @@ class CollectionReportController extends Controller
             ->join('credit_facilities as cf', 'cf.id', '=', 'fp.credit_facility_id')
             ->where('cf.facility_type', 'Loan')
             ->where('fp.status', 'Active')->where('fp.approval_status', 'Approved')
+            ->where(fn ($q) => $q->whereNull('fp.clearance_status')->orWhere('fp.clearance_status', 'Realized'))
             ->where('fp.paid_at', '>=', $since);
         $rows = CurrentBranch::applyScope($rowsQuery, 'cf.branch_id')
             ->selectRaw("{$groupExpr} as bucket_key, sum(fp.amount) as collected_amount, count(*) as payment_count")

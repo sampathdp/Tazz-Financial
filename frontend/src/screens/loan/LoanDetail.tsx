@@ -912,7 +912,7 @@ function LedgerCard({ loan }: { loan: Loan }) {
   
   // 4. Payments (Credits)
   for (const p of loan.payments || []) {
-    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval') continue
+    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval' || (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending')) continue
     rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4 })
   }
 

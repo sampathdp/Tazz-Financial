@@ -41,6 +41,7 @@ class DashboardController extends Controller
 
             $todaysCollections = FacilityPayment::whereHas('facility')
                 ->where('status', 'Active')->where('approval_status', 'Approved')
+                ->where(fn ($q) => $q->whereNull('clearance_status')->orWhere('clearance_status', 'Realized'))
                 ->whereDate('paid_at', $today)->sum('amount');
 
             // Same statement as Accounting > Balance Sheet (contra accounts netted, inter-branch
@@ -111,6 +112,7 @@ class DashboardController extends Controller
             ->join('credit_facilities', 'credit_facilities.id', '=', 'facility_payments.credit_facility_id')
             ->where('credit_facilities.facility_type', 'Loan')
             ->where('facility_payments.status', 'Active')->where('facility_payments.approval_status', 'Approved')
+            ->where(fn ($q) => $q->whereNull('facility_payments.clearance_status')->orWhere('facility_payments.clearance_status', 'Realized'))
             ->where('facility_payments.paid_at', '>=', $start)
             ->selectRaw("DATE_FORMAT(facility_payments.paid_at, '%Y-%m') as ym, SUM(facility_payments.amount) as amt")
             ->groupBy('ym')->get();
