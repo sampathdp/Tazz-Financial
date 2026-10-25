@@ -10,6 +10,7 @@ import { DateRangeSelect } from '../components/DateRangeSelect'
 import { Donut, Gauge, ProgressRow, AreaChart } from '../components/charts'
 import { collectionReportsApi, type AuthUser } from '../api'
 import { getErrorText } from '../lib/apiError'
+import { DATE_RANGE_PRESETS } from '../lib/dateRanges'
 import { downloadBlob, exportFlatTableToExcel } from '../lib/export'
 import type { Go } from './types'
 
@@ -46,16 +47,20 @@ function ErrBox({ msg }: { msg: string }) { return <div style={{ padding: 40, te
 /* ---------------------------- Daily Cash ---------------------------- */
 
 export function CollectionDailyCashScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [fromDate, setFromDate] = useState(() => DATE_RANGE_PRESETS[0].range().from)
+  const [toDate, setToDate] = useState(() => DATE_RANGE_PRESETS[0].range().to)
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const { branches, branchId, setBranchId } = useBranchFilter(me)
+  const isRange = !!data && data.from !== data.to
 
   useEffect(() => {
     setLoading(true); setErr('')
-    collectionReportsApi.get('daily-cash', { date, branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
-  }, [date, branchId])
+    collectionReportsApi.get('daily-cash', { from: fromDate || undefined, to: toDate || undefined, branchId }).then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [fromDate, toDate, branchId])
+
+  const fmtTime = (p: any) => (typeof p.paidAt === 'string' ? (isRange ? p.paidAt.slice(0, 16).replace('T', ' ') : p.paidAt.slice(11, 16)) : '—')
 
   const methods = data ? Object.entries(data.byMethod || {}).map(([label, value], i) => ({ label, value: Number(value), color: PALETTE[i % PALETTE.length] })) : []
 
@@ -76,13 +81,13 @@ export function CollectionDailyCashScreen({ go: _go, user: me }: { go: Go; user?
         receipt: p.receiptNo || p.code, loan: p.facility?.code || '—', customer: p.facility?.customer?.fullName || '—', branch: p.branch?.name || '—',
         method: p.paymentMethod, principal: Number(p.principalApplied || 0), interest: Number(p.interestApplied || 0),
         penalty: Number(p.penaltyApplied || 0), charges: Number(p.chargesApplied || 0),
-        amount: Number(p.amount || 0), receiver: p.receiver?.name || '—', time: typeof p.paidAt === 'string' ? p.paidAt.slice(11, 16) : '—',
+        amount: Number(p.amount || 0), receiver: p.receiver?.name || '—', time: fmtTime(p),
       })),
       totalRow: { customer: 'Total', principal: Number(data.totalPrincipal || 0), interest: Number(data.totalInterest || 0), penalty: Number(data.totalPenalty || 0), charges: Number(data.totalCharges || 0), amount: Number(data.totalAmount || 0) },
       emptyText: 'No collections recorded',
     }, `daily-cash-${data.date}.xlsx`)
   }
-  const exportPdf = async () => downloadBlob(await collectionReportsApi.pdf('daily-cash', { date, branchId }), `daily-cash-${date}.pdf`)
+  const exportPdf = async () => downloadBlob(await collectionReportsApi.pdf('daily-cash', { from: fromDate || undefined, to: toDate || undefined, branchId }), `daily-cash-${fromDate || today()}.pdf`)
 
   return (
     <div>
@@ -90,7 +95,9 @@ export function CollectionDailyCashScreen({ go: _go, user: me }: { go: Go; user?
         actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
       <Card style={{ marginBottom: 16 }}>
         <div className="row gap-3 wrap">
-          <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ maxWidth: 200 }} /></Field>
+          <DateRangeSelect from={fromDate} to={toDate} onChange={(f, t) => { setFromDate(f); setToDate(t) }} style={{ minWidth: 190 }} />
+          <Field label="From"><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></Field>
+          <Field label="To"><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></Field>
           <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
         </div>
       </Card>
@@ -137,7 +144,7 @@ export function CollectionDailyCashScreen({ go: _go, user: me }: { go: Go; user?
                 <Td align="right" mono>{money(p.chargesApplied)}</Td>
                 <Td align="right" mono>{money(p.amount)}</Td>
                 <Td>{p.receiver?.name || '—'}</Td>
-                <Td>{typeof p.paidAt === 'string' ? p.paidAt.slice(11, 16) : '—'}</Td>
+                <Td>{fmtTime(p)}</Td>
               </>} />
           </Card>
         </>

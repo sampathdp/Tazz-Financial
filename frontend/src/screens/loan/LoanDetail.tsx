@@ -457,6 +457,8 @@ function ContractSummary({ loan }: { loan: Loan }) {
       ...(co ? [[`Co-Applicant${(loan.coApplicants?.length || 0) > 1 ? 's' : ''}`, co]] as Row[] : []),
       ['Branch', loan.branch?.name || dash],
       ['Product', loan.loanDetail?.loanType?.name || dash],
+      ['Loan Officer', loan.loanDetail?.loanOfficer?.name || dash],
+      ['Recovery Officer', loan.loanDetail?.recoveryOfficer?.name || dash],
     ] },
     { title: 'Terms', rows: [
       ['Contract Amount', money(loan.principalAmount)],

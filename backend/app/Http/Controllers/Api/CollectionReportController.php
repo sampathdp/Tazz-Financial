@@ -140,15 +140,17 @@ class CollectionReportController extends Controller
         return 'Period: ' . $from->toDateString() . ' to ' . $to->toDateString();
     }
 
-    /** Payments actually banked/received on a given day (default today). */
+    /** Payments actually banked/received in a date range (`from`/`to`, or a single `date`; default today). */
     private function dailyCash(Request $request): array
     {
-        $date = $request->filled('date') ? Carbon::parse($request->date)->startOfDay() : now()->startOfDay();
+        $single = $request->filled('date') ? Carbon::parse($request->date) : now();
+        $from = ($request->filled('from') ? Carbon::parse($request->from) : $single)->startOfDay();
+        $to = ($request->filled('to') ? Carbon::parse($request->to) : ($request->filled('from') ? now() : $single))->endOfDay();
 
         $payments = FacilityPayment::whereHas('facility')
             ->where('status', 'Active')->where('approval_status', 'Approved')
             ->where(fn ($q) => $q->whereNull('clearance_status')->orWhere('clearance_status', 'Realized'))
-            ->whereDate('paid_at', $date)
+            ->whereBetween('paid_at', [$from, $to])
             ->with(['facility:id,code,customer_id,branch_id', 'facility.customer:id,full_name,code', 'branch:id,name,code', 'receiver:id,name', 'allocations', 'chargeAllocations'])
             ->orderByDesc('paid_at')->get();
 
@@ -162,7 +164,9 @@ class CollectionReportController extends Controller
         });
 
         return [
-            'date' => $date->toDateString(),
+            'date' => $from->toDateString() === $to->toDateString() ? $from->toDateString() : $from->toDateString() . ' to ' . $to->toDateString(),
+            'from' => $from->toDateString(),
+            'to' => $to->toDateString(),
             'totalAmount' => round((float) $payments->sum('amount'), 2),
             'count' => $payments->count(),
             'totalPrincipal' => round((float) $payments->sum('principal_applied'), 2),
