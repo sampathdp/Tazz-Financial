@@ -25,6 +25,7 @@ class CompanyProfileController extends Controller
             'phone' => 'nullable|string|max:32',
             'email' => 'nullable|email|max:191',
             'tax_no' => 'nullable|string|max:64',
+            'registration_no' => 'nullable|string|max:64',
             'currency' => 'nullable|string|max:32',
         ]);
         $profile = CompanyProfile::current();

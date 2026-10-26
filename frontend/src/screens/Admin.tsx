@@ -636,6 +636,7 @@ export function CompanyScreen({ go: _go, setBrand }: { go: Go; setBrand?: (v: { 
               <Field label="Phone"><Input value={data.phone || ''} onChange={(e) => set('phone', e.target.value)} /></Field>
               <Field label="Email"><Input value={data.email || ''} onChange={(e) => set('email', e.target.value)} /></Field>
               <Field label="Tax / VAT No"><Input value={data.taxNo || ''} onChange={(e) => set('taxNo', e.target.value)} /></Field>
+              <Field label="Company Registration No"><Input value={data.registrationNo || ''} onChange={(e) => set('registrationNo', e.target.value)} /></Field>
               <Field label="Currency"><Select value={data.currency || ''} onChange={(e) => set('currency', e.target.value)}>{['LKR — Sri Lankan Rupee', 'PKR — Pakistani Rupee', 'INR — Indian Rupee', 'USD — US Dollar'].map((c) => <option key={c}>{c}</option>)}</Select></Field>
             </div>
           </Card>
