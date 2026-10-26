@@ -24,7 +24,7 @@ class SalesExecutiveCommissionController extends Controller
         'facility:id,code,customer_id,principal_amount,status',
         'facility.customer:id,full_name',
         'facility.schedules:id,credit_facility_id,installment_no,status,due_date',
-        'facility.schedules.allocations:id,facility_schedule_id,interest_applied',
+        'facility.schedules.allocations:id,facility_schedule_id,facility_payment_id,interest_applied',
         'facility.schedules.allocations.payment:id,status,approval_status',
         'loanType:id,name',
         'salesExecutive:id,name',
