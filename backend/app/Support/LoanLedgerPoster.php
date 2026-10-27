@@ -419,11 +419,20 @@ class LoanLedgerPoster
      *  Same shape as postSettlementApplied(). */
     public static function postManualAllocationApplied(FacilityPayment $payment): void
     {
-        if (!in_array($payment->payment_method, ['Cash', 'Bank'], true)) {
-            return;
-        }
         $credits = self::splitLines($payment);
         if (!$credits) {
+            return;
+        }
+        // A cheque was never parked in 2100 (postCashReceipt posts nothing for one), but approval has
+        // already applied it to the schedule — so book it now the way postChequeRealized() would,
+        // otherwise the instalment shows paid with no receipt and no income in the ledger.
+        if ($payment->payment_method === 'Cheque') {
+            $lines = array_merge([['account_id' => ChartOfAccount::system('1030')->id, 'debit' => $payment->amount, 'credit' => 0]], $credits);
+            LedgerPoster::post($lines, now()->toDateString(), self::meta($payment, "Cheque allocation applied {$payment->code}"));
+
+            return;
+        }
+        if (!in_array($payment->payment_method, ['Cash', 'Bank'], true)) {
             return;
         }
         $suspense = ChartOfAccount::system('2100');

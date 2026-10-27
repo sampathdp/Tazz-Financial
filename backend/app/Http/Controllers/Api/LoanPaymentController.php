@@ -333,12 +333,11 @@ class LoanPaymentController extends Controller
         return $payment->fresh()->load('voider:id,name');
     }
 
-    /** Manually realize or bounce a cheque payment that's been held pending clearance. */
+    /** Manually realize or bounce a cheque payment that's been held pending clearance. A cheque that already
+     *  cleared (Realized, or a manual-allocation cheque that was applied on approval) can still bounce — that
+     *  takes back what it paid, see below. */
     public function clearCheque(Request $request, FacilityPayment $payment)
     {
-        if ($payment->payment_method !== 'Cheque' || $payment->clearance_status !== 'Pending') {
-            return response()->json(['message' => 'This payment is not a pending cheque awaiting clearance.'], 422);
-        }
         $data = $request->validate([
             'status' => ['required', Rule::in(['Realized', 'Bounced'])],
             // The date the cheque actually cleared at the bank (check-in date) —
@@ -347,6 +346,16 @@ class LoanPaymentController extends Controller
             // happens to click "Realize" here.
             'realized_at' => 'required_if:status,Realized|nullable|date',
         ]);
+
+        if ($payment->payment_method !== 'Cheque' || $payment->status === 'Voided') {
+            return response()->json(['message' => 'This payment is not a live cheque payment.'], 422);
+        }
+        if ($data['status'] === 'Realized' && $payment->clearance_status !== 'Pending') {
+            return response()->json(['message' => 'This payment is not a pending cheque awaiting clearance.'], 422);
+        }
+        if ($data['status'] === 'Bounced' && !in_array($payment->clearance_status, ['Pending', 'Realized', null], true)) {
+            return response()->json(['message' => "This cheque has already been marked {$payment->clearance_status}."], 422);
+        }
 
         if ($data['status'] === 'Realized') {
             $loan = Loan::findOrFail($payment->credit_facility_id);
@@ -361,16 +370,24 @@ class LoanPaymentController extends Controller
                 LoanLedgerPoster::postChequeRealized($payment);
             });
         } else {
-            // Bounced — it was never applied to the schedule, so there's nothing to
-            // reverse. Void it so it stops counting as a live payment while keeping
+            // Bounced — void it so it stops counting as a live payment while keeping
             // the audit trail (same "voided, not deleted" convention as destroy()).
-            $payment->update([
-                'clearance_status' => 'Bounced',
-                'status' => 'Voided',
-                'void_reason' => 'Cheque bounced',
-                'voided_by' => $request->user()->id,
-                'voided_at' => now(),
-            ]);
+            // A cheque that was still Pending was never applied, so the two reversals
+            // below are no-ops; one that had already cleared (or a manual-allocation
+            // cheque, applied on approval) must give back its schedule/charge
+            // allocation and reverse its "Cheque realized" journal entry.
+            DB::transaction(function () use ($payment, $request) {
+                Loan::whereKey($payment->credit_facility_id)->lockForUpdate()->first();
+                $payment->update([
+                    'clearance_status' => 'Bounced',
+                    'status' => 'Voided',
+                    'void_reason' => 'Cheque bounced',
+                    'voided_by' => $request->user()->id,
+                    'voided_at' => now(),
+                ]);
+                LoanPaymentAllocator::reverseAllocation($payment);
+                LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
+            });
         }
 
         return $payment->fresh()->load('receiver:id,name');
@@ -446,36 +463,6 @@ class LoanPaymentController extends Controller
                 return;
             }
 
-            foreach ($payment->allocations as $alloc) {
-                $row = $alloc->schedule;
-                // Undo the accrued-to-date interest waiver this settlement applied
-                // (see LoanPaymentAllocator::applySettlementWaiver()) before
-                // recomputing status below — voiding the settlement means the
-                // loan carries on, so the full future interest is owed again.
-                if ($payment->payment_type === 'Settlement' && (float) $row->waived_interest > 0) {
-                    $restore = (float) $row->waived_interest;
-                    $row->interest_due = round((float) $row->interest_due + $restore, 2);
-                    $row->total_due = round((float) $row->total_due + $restore, 2);
-                    $row->waived_interest = 0;
-                }
-                // paid_amount tracks principal+interest only (an installment's total_due
-                // never includes penalty — see LoanAmortizer), so only reverse those two;
-                // penalty_applied is netted off separately via LoanSummary's live estimate.
-                $newPaid = max(0, round((float) $row->paid_amount - $alloc->principal_applied - $alloc->interest_applied, 2));
-                $row->update([
-                    'paid_amount' => $newPaid,
-                    'status' => $newPaid <= 0 ? 'Pending' : ($newPaid >= (float) $row->total_due ? 'Paid' : 'Partial'),
-                    'paid_at' => $newPaid >= (float) $row->total_due ? $row->paid_at : null,
-                ]);
-            }
-            foreach ($payment->chargeAllocations as $chargeAlloc) {
-                $charge = $chargeAlloc->charge;
-                $charge->update(['paid_amount' => max(0, round((float) $charge->paid_amount - $chargeAlloc->amount_applied, 2))]);
-            }
-            $loan = Loan::findOrFail($payment->credit_facility_id);
-            if ($loan->status === 'Closed') {
-                $loan->update(['status' => 'Active', 'closed_at' => null]);
-            }
             // Kept as a voided row (not deleted) so it still appears as a
             // "Cancelled Receipt" on the loan's history rather than vanishing.
             $payment->update([
@@ -484,7 +471,7 @@ class LoanPaymentController extends Controller
                 'voided_by' => $request->user()->id,
                 'voided_at' => now(),
             ]);
-            $this->refreshOutstandingCache($loan);
+            LoanPaymentAllocator::reverseAllocation($payment);
             LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
             $voidRequest->update(['status' => 'Approved']);
         });
@@ -612,11 +599,5 @@ class LoanPaymentController extends Controller
         });
 
         return $allocationRequest->fresh()->load('requester:id,name', 'rejecter:id,name');
-    }
-
-    /** Keeps credit_facilities.outstanding_balance_cache in step with LoanPaymentAllocator::outstandingBalance() after every mutation that could change it — see that column's docblock on the credit_facilities migration. */
-    private function refreshOutstandingCache(Loan $loan): void
-    {
-        $loan->update(['outstanding_balance_cache' => LoanPaymentAllocator::outstandingBalance($loan->fresh())]);
     }
 }

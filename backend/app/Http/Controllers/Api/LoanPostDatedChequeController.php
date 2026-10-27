@@ -242,6 +242,29 @@ class LoanPostDatedChequeController extends Controller
                     'notes' => $data['notes'] ?? $cheque->notes,
                 ]);
             });
+        } elseif ($cheque->status === 'Realized') {
+            // Already cleared and applied to the loan: the only way out is the bank sending it back. That
+            // takes back what it paid — the schedule/charge allocation and the "Cheque realized" entry —
+            // exactly like cancelling the linked receipt; relabelling it alone would leave the loan paid.
+            if ($data['status'] !== 'Bounced') {
+                return response()->json(['message' => 'This cheque has already been realized and applied to the loan — it can only be marked Bounced (which reverses the payment).'], 422);
+            }
+            DB::transaction(function () use ($cheque, $data, $request) {
+                Loan::whereKey($cheque->credit_facility_id)->lockForUpdate()->first();
+                $payment = $cheque->facility_payment_id ? FacilityPayment::find($cheque->facility_payment_id) : null;
+                if ($payment && $payment->status !== 'Voided') {
+                    $payment->update([
+                        'clearance_status' => 'Bounced',
+                        'status' => 'Voided',
+                        'void_reason' => 'Cheque bounced',
+                        'voided_by' => $request->user()->id,
+                        'voided_at' => now(),
+                    ]);
+                    LoanPaymentAllocator::reverseAllocation($payment);
+                    LoanLedgerPoster::reverseAllFor($payment, $request->user()->id);
+                }
+                $cheque->update(['status' => 'Bounced', 'notes' => $data['notes'] ?? $cheque->notes]);
+            });
         } else {
             $cheque->update([
                 'status' => $data['status'],

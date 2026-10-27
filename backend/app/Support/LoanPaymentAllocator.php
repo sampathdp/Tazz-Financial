@@ -574,4 +574,49 @@ class LoanPaymentAllocator
             'capital' => round($capital, 2),
         ];
     }
+
+    /**
+     * Undoes what applyAllocation()/applyManualAllocation() did for a payment — the installment and
+     * charge paid amounts, a settlement's interest waiver, and a Closed loan's status — then refreshes
+     * the loan's outstanding cache. Shared by a cancelled receipt (LoanPaymentController::approveVoidRequest)
+     * and a realized cheque that later bounces, so both put the schedule back identically. The caller
+     * marks the payment Voided and reverses its ledger entries (LoanLedgerPoster::reverseAllFor).
+     */
+    public static function reverseAllocation(FacilityPayment $payment): void
+    {
+        $payment->loadMissing(['allocations.schedule', 'chargeAllocations.charge']);
+
+        foreach ($payment->allocations as $alloc) {
+            $row = $alloc->schedule;
+            // Undo the accrued-to-date interest waiver this settlement applied
+            // (see applySettlementWaiver()) before recomputing status below —
+            // voiding the settlement means the loan carries on, so the full
+            // future interest is owed again.
+            if ($payment->payment_type === 'Settlement' && (float) $row->waived_interest > 0) {
+                $restore = (float) $row->waived_interest;
+                $row->interest_due = round((float) $row->interest_due + $restore, 2);
+                $row->total_due = round((float) $row->total_due + $restore, 2);
+                $row->waived_interest = 0;
+            }
+            // paid_amount tracks principal+interest only (an installment's total_due
+            // never includes penalty — see LoanAmortizer), so only reverse those two;
+            // penalty_applied is netted off separately via LoanSummary's live estimate.
+            $newPaid = max(0, round((float) $row->paid_amount - $alloc->principal_applied - $alloc->interest_applied, 2));
+            $row->update([
+                'paid_amount' => $newPaid,
+                'status' => $newPaid <= 0 ? 'Pending' : ($newPaid >= (float) $row->total_due ? 'Paid' : 'Partial'),
+                'paid_at' => $newPaid >= (float) $row->total_due ? $row->paid_at : null,
+            ]);
+        }
+        foreach ($payment->chargeAllocations as $chargeAlloc) {
+            $charge = $chargeAlloc->charge;
+            $charge->update(['paid_amount' => max(0, round((float) $charge->paid_amount - $chargeAlloc->amount_applied, 2))]);
+        }
+
+        $loan = Loan::findOrFail($payment->credit_facility_id);
+        if ($loan->status === 'Closed') {
+            $loan->update(['status' => 'Active', 'closed_at' => null]);
+        }
+        $loan->update(['outstanding_balance_cache' => self::outstandingBalance($loan->fresh())]);
+    }
 }

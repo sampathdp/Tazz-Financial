@@ -103,8 +103,8 @@ class AccountingReportController extends Controller
             ->whereDate('journal_entries.entry_date', '<=', $asOf)
             ->groupBy('journal_entries.branch_id', 'journal_entries.counterparty_branch_id')
             ->selectRaw('journal_entries.branch_id, journal_entries.counterparty_branch_id, '
-                . 'SUM(CASE WHEN journal_lines.account_id = ? THEN journal_lines.debit - journal_lines.credit ELSE 0 END) AS receivable, '
-                . 'SUM(CASE WHEN journal_lines.account_id = ? THEN journal_lines.credit - journal_lines.debit ELSE 0 END) AS payable', [$ids['1400'] ?? 0, $ids['2400'] ?? 0])
+                . 'SUM(CASE WHEN journal_lines.account_id = ? THEN journal_lines.debit ELSE 0 END) - SUM(CASE WHEN journal_lines.account_id = ? THEN journal_lines.credit ELSE 0 END) AS receivable, '
+                . 'SUM(CASE WHEN journal_lines.account_id = ? THEN journal_lines.credit ELSE 0 END) - SUM(CASE WHEN journal_lines.account_id = ? THEN journal_lines.debit ELSE 0 END) AS payable', [$ids['1400'] ?? 0, $ids['1400'] ?? 0, $ids['2400'] ?? 0, $ids['2400'] ?? 0])
             ->get();
         $names = DB::table('branches')->pluck('name', 'id');
         $row = fn ($branch, $other, $receivable, $payable) => [
@@ -453,7 +453,7 @@ class AccountingReportController extends Controller
             ->whereIn('chart_of_accounts.code', ['4010', '4020', '4030'])
             ->when($from, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '>=', $d))
             ->when($to, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '<=', $d))
-            ->selectRaw("COALESCE(loan_types.name, 'Unclassified') as loan_type_name, chart_of_accounts.code as code, SUM(journal_lines.credit - journal_lines.debit) as amount")
+            ->selectRaw("COALESCE(loan_types.name, 'Unclassified') as loan_type_name, chart_of_accounts.code as code, SUM(journal_lines.credit) - SUM(journal_lines.debit) as amount")
             ->groupBy('loan_type_name', 'code')
             ->get();
 
@@ -837,7 +837,7 @@ class AccountingReportController extends Controller
             ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'journal_lines.account_id')
             ->whereIn('journal_lines.journal_entry_id', $entryIds)
             ->whereNotIn('journal_lines.account_id', $excluded)
-            ->selectRaw('chart_of_accounts.code, chart_of_accounts.name, SUM(journal_lines.credit - journal_lines.debit) as net_amount')
+            ->selectRaw('chart_of_accounts.code, chart_of_accounts.name, SUM(journal_lines.credit) - SUM(journal_lines.debit) as net_amount')
             ->groupBy('chart_of_accounts.code', 'chart_of_accounts.name')
             ->orderBy('chart_of_accounts.code')
             ->get();
