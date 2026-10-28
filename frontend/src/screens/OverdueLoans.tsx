@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Input, Table, Td, Field , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
-import { loansApi, type Loan, type OverdueLoan, type AuthUser } from '../api'
+import { loansApi, loanReportsApi, type Loan, type OverdueLoan, type AuthUser } from '../api'
+import { ExportButtons } from '../components/ExportButtons'
+import { downloadBlob, exportFlatTableToExcel, type ExcelColumn } from '../lib/export'
 import { LoanDetail } from './loan/LoanDetail'
 import { useNotify } from '../components/Notify'
 import type { Go } from './types'
@@ -57,6 +59,32 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
   })
   const totalOverdueAmount = rows.reduce((a, l) => a + num(l.overdueAmount) + num(l.penaltyDue), 0)
 
+  const columns: ExcelColumn[] = [
+    { label: 'Loan', key: 'code' }, { label: 'Customer', key: 'customer' }, { label: 'Product', key: 'product' },
+    { label: 'Days Overdue', key: 'daysOverdue', align: 'right', format: 'number' }, { label: 'Installments', key: 'installments', align: 'right', format: 'number' },
+    { label: 'Overdue Amount', key: 'overdueAmount', align: 'right', format: 'money' }, { label: 'OD / Penalty', key: 'penaltyDue', align: 'right', format: 'money' },
+    { label: 'Total Arrears', key: 'totalArrears', align: 'right', format: 'money' }, { label: 'Outstanding', key: 'outstanding', align: 'right', format: 'money' },
+    { label: 'Last Paid Date', key: 'lastPaidDate' }, { label: 'Last Paid Amount', key: 'lastPaidAmount', align: 'right', format: 'money' },
+    { label: 'Recovery Officer', key: 'officer' },
+  ]
+  const exportExcel = () => {
+    const data = filtered.map((l) => ({
+      code: l.code, customer: l.customer?.fullName || '—', product: l.loanDetail?.loanType?.name || '—',
+      daysOverdue: l.daysOverdue, installments: num(l.overdueInstallments), overdueAmount: num(l.overdueAmount), penaltyDue: num(l.penaltyDue),
+      totalArrears: num(l.overdueAmount) + num(l.penaltyDue), outstanding: num(l.totalDueSum) - num(l.paidSum),
+      lastPaidDate: l.lastPaymentDate || '—', lastPaidAmount: l.lastPaymentAmount != null ? num(l.lastPaymentAmount) : null,
+      officer: l.loanDetail?.recoveryOfficer?.name || '—',
+    }))
+    const sum = (k: 'overdueAmount' | 'penaltyDue' | 'totalArrears' | 'outstanding') => data.reduce((a, r) => a + r[k], 0)
+    void exportFlatTableToExcel({
+      reportTitle: 'Overdue Loans', meta: `As of ${to || todayIso()}${from ? ` (from ${from})` : ''}`, columns, rows: data,
+      totalRow: { customer: 'Total', overdueAmount: sum('overdueAmount'), penaltyDue: sum('penaltyDue'), totalArrears: sum('totalArrears'), outstanding: sum('outstanding') },
+      emptyText: 'No overdue loans',
+    }, `overdue-loans-${todayIso()}.xlsx`)
+  }
+  // The PDF is built server-side from the same date range; the search box is not applied.
+  const exportPdf = async () => downloadBlob(await loanReportsApi.pdf('overdue-loans', { from: from || undefined, to: to || undefined }), `overdue-loans-${todayIso()}.pdf`)
+
   if (mode === 'detail') {
     return (
       <div>
@@ -74,6 +102,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
   return (
     <div>
       <PageHead crumbs="Loan Management" title="Overdue Loans" icon="alert"
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />}
         sub={`${rows.length} loans with a past-due installment${rows.length ? ` — ${money(totalOverdueAmount)} total overdue` : ''}`} />
 
       <Card pad={0}>

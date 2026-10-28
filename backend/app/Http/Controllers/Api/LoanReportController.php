@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\DB;
  */
 class LoanReportController extends Controller
 {
-    private const TYPES = ['portfolio-summary', 'arrears', 'par-aging', 'disbursement', 'closed-loans', 'loan-detail'];
+    private const TYPES = ['portfolio-summary', 'arrears', 'overdue-loans', 'par-aging', 'disbursement', 'closed-loans', 'loan-detail'];
 
     private const LIST_RELATIONS = [
         'customer:id,full_name,code,nic_no,phone',
@@ -57,7 +57,7 @@ class LoanReportController extends Controller
 
         return match ($type) {
             'portfolio-summary' => $this->portfolioSummary($request),
-            'arrears' => $this->arrears($request),
+            'arrears', 'overdue-loans' => $this->arrears($request),
             'par-aging' => $this->parAging($request),
             'disbursement' => $this->disbursement($request),
             'closed-loans' => $this->closedLoans($request),
@@ -80,6 +80,7 @@ class LoanReportController extends Controller
         [$title, $sections, $meta] = match ($type) {
             'portfolio-summary' => $this->portfolioSummaryPdf($request),
             'arrears' => $this->arrearsPdf($request),
+            'overdue-loans' => $this->overdueLoansPdf($request),
             'par-aging' => $this->parAgingPdf($request),
             'disbursement' => $this->disbursementPdf($request),
             'closed-loans' => $this->closedLoansPdf($request),
@@ -156,6 +157,37 @@ class LoanReportController extends Controller
         $meta = $request->filled('from') ? 'As of ' . $to . ' (from ' . Carbon::parse($request->from)->toDateString() . ')' : 'As of ' . $to;
 
         return ['Loan Arrears', $sections, $meta];
+    }
+
+    /** Same rows as the Loan Management > Overdue Loans screen (wider than the Arrears report). */
+    private function overdueLoansPdf(Request $request): array
+    {
+        $rows = $this->arrears($request);
+        $columns = [
+            ['key' => 'code', 'label' => 'Loan'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'product', 'label' => 'Product'],
+            ['key' => 'daysOverdue', 'label' => 'Days', 'align' => 'right', 'format' => 'number'], ['key' => 'installments', 'label' => 'Inst.', 'align' => 'right', 'format' => 'number'],
+            ['key' => 'overdueAmount', 'label' => 'Overdue', 'align' => 'right', 'format' => 'money'], ['key' => 'penaltyDue', 'label' => 'Penalty', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'totalArrears', 'label' => 'Total Arrears', 'align' => 'right', 'format' => 'money'], ['key' => 'outstanding', 'label' => 'Outstanding', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'lastPaidDate', 'label' => 'Last Paid'], ['key' => 'lastPaidAmount', 'label' => 'Last Amount', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'officer', 'label' => 'Recovery Officer'],
+        ];
+        $mapped = collect($rows)->map(fn ($r) => [
+            'code' => $r['code'] ?? '', 'customer' => $r['customer']['full_name'] ?? '-',
+            'product' => $r['loan_detail']['loan_type']['name'] ?? '-',
+            'daysOverdue' => $r['daysOverdue'] ?? 0, 'installments' => $r['overdueInstallments'] ?? 0,
+            'overdueAmount' => $r['overdueAmount'] ?? 0, 'penaltyDue' => $r['penaltyDue'] ?? 0,
+            'totalArrears' => (float) ($r['overdueAmount'] ?? 0) + (float) ($r['penaltyDue'] ?? 0),
+            'outstanding' => (float) ($r['total_due_sum'] ?? 0) - (float) ($r['paid_sum'] ?? 0),
+            'lastPaidDate' => $r['lastPaymentDate'] ?? '-', 'lastPaidAmount' => $r['lastPaymentAmount'] ?? null,
+            'officer' => $r['loan_detail']['recovery_officer']['name'] ?? '-',
+        ]);
+        $totalRow = ['customer' => 'Total', 'overdueAmount' => $mapped->sum('overdueAmount'), 'penaltyDue' => $mapped->sum('penaltyDue'), 'totalArrears' => $mapped->sum('totalArrears'), 'outstanding' => $mapped->sum('outstanding')];
+        $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No overdue loans']];
+
+        $to = $request->filled('to') ? Carbon::parse($request->to)->toDateString() : now()->toDateString();
+        $meta = $request->filled('from') ? 'As of ' . $to . ' (from ' . Carbon::parse($request->from)->toDateString() . ')' : 'As of ' . $to;
+
+        return ['Overdue Loans', $sections, $meta];
     }
 
     private function disbursementPdf(Request $request): array

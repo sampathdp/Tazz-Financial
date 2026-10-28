@@ -9,11 +9,16 @@ import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect
 import { Icon } from '../components/Icon'
 import { DetailSummary } from '../components/DetailSummary'
 import {
-  fixedDepositsApi, fdDepositsApi, fundingProductsApi, fdInterestPaymentsApi, company,
+  fixedDepositsApi, fdDepositsApi, fdCommissionsApi, fundingProductsApi, fdInterestPaymentsApi, company,
   type FixedDeposit, type FdDeposit, type FundingProduct, type FdInterestPayment, type FdWithdrawal,
   type FdPaymentMethod, type FixedDepositStatus, type FdInterestMethod, type AuthUser,
-  type FdAutoRenewMode, type FdInterestTreatment, type FdWithdrawalPreview,
+  type FdAutoRenewMode, type FdInterestTreatment, type FdWithdrawalPreview, type FdCommission,
 } from '../api'
+import {
+  CommissionFields, JointHolderFields, NomineeFields, PayFdCommissionModal,
+  noCommission, commissionBody, jointHoldersBody, nomineesBody,
+  type CommissionState, type JointHolderRow, type NomineeRow,
+} from '../components/FdExtras'
 import { InterestVoucherPage } from './FdInterestVoucher'
 import { Can } from '../lib/permissions'
 import { AdminEditButton } from '../components/AdminEditButton'
@@ -223,12 +228,18 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   const [startDate, setStartDate] = useState(todayIso())
   const [interestMethod, setInterestMethod] = useState<FdInterestMethod | ''>('')
   const [autoRenew, setAutoRenew] = useState<AutoRenewState>(noAutoRenew)
+  // Unticked = the payout account is decided later (at withdrawal / interest payout).
+  const [requireAccount, setRequireAccount] = useState(true)
+  const [rate, setRate] = useState('')
+  const [commission, setCommission] = useState<CommissionState>(noCommission)
+  const [jointRows, setJointRows] = useState<JointHolderRow[]>([])
+  const [nomineeRows, setNomineeRows] = useState<NomineeRow[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     if (!open) return
-    setAutoRenew(noAutoRenew)
+    setAutoRenew(noAutoRenew); setRequireAccount(true); setRate(''); setCommission(noCommission); setJointRows([]); setNomineeRows([])
     fdDepositsApi.list({ status: 'Available' }).then(setDeposits).catch(() => setDeposits([]))
     fundingProductsApi.list().then((d) => setProducts(d.filter((p) => (p.status || 'Active') === 'Active'))).catch(() => setProducts([]))
     setDepositLabel(''); setDepositId(undefined); setBankDetailId(undefined); setProductId(undefined); setTerm(''); setCustomTerm(''); setStartDate(todayIso()); setInterestMethod(''); setErr('')
@@ -237,22 +248,29 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   const deposit = deposits.find((d) => d.id === depositId)
   const product = products.find((p) => p.id === productId)
   // Reset to the product's default whenever the selected product changes.
-  useEffect(() => { setInterestMethod(product?.interestMethod || '') }, [product?.id])
+  useEffect(() => { setInterestMethod(product?.interestMethod || ''); setRate(product ? String(Number(product.annualRatePercent)) : '') }, [product?.id])
   const effectiveInterestMethod = interestMethod || product?.interestMethod
   const effectiveTerm = term === 'custom' ? parseInt(customTerm, 10) : (term || undefined)
   const preview = deposit && product && effectiveTerm && effectiveInterestMethod
-    ? previewInterest(Number(deposit.amount), Number(product.annualRatePercent), effectiveTerm, effectiveInterestMethod)
+    ? previewInterest(Number(deposit.amount), rate !== '' ? Number(rate) : Number(product.annualRatePercent), effectiveTerm, effectiveInterestMethod)
     : null
   const maturityPreview = startDate && effectiveTerm ? addMonths(startDate, effectiveTerm) : null
 
   const save = async () => {
     if (!depositId) { setErr('Select an available deposit.'); return }
-    if (!bankDetailId) { setErr("Select or add the customer's payment bank account."); return }
+    if (requireAccount && !bankDetailId) { setErr("Select or add the customer's payment bank account, or untick 'Payout account required now'."); return }
     if (!productId) { setErr('Select a funding product.'); return }
     if (!effectiveTerm || effectiveTerm <= 0) { setErr('Select or enter a valid term.'); return }
+    if (rate !== '' && (Number(rate) < 0 || Number(rate) > 100)) { setErr('Interest rate must be between 0 and 100.'); return }
+    const com = commissionBody(commission); if (com.error) { setErr(com.error); return }
+    const nom = nomineesBody(nomineeRows); if (nom.error) { setErr(nom.error); return }
     setBusy(true); setErr('')
     try {
-      const fd = await fixedDepositsApi.create({ depositId, customerBankDetailId: bankDetailId, fundingProductId: productId, termMonths: effectiveTerm, startDate, interestPaymentMethod: interestMethod || undefined, ...autoRenewBody(autoRenew) })
+      const fd = await fixedDepositsApi.create({
+        depositId, customerBankDetailId: requireAccount ? bankDetailId : undefined, fundingProductId: productId, termMonths: effectiveTerm, startDate,
+        interestRatePercent: rate !== '' ? rate : undefined, interestPaymentMethod: interestMethod || undefined,
+        jointHolders: jointHoldersBody(jointRows), nominees: nom.body, commission: com.body, ...autoRenewBody(autoRenew),
+      })
       onCreated(fd)
       notify.success('Fixed Deposit created', fd.fdNumber)
     } catch (ex: any) {
@@ -261,7 +279,7 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   }
 
   return (
-    <Modal open={open} onClose={onClose} width={620} title="Create Fixed Deposit"
+    <Modal open={open} onClose={onClose} width={680} title="Create Fixed Deposit"
       footer={<>
         <Btn variant="plain" onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Creating...' : 'Create & Print Certificate'}</Btn>
@@ -271,16 +289,21 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
         <Field label="Available Deposit">
           <SearchSelect
             value={depositLabel}
-            onChange={(name, opt: FdDeposit | undefined) => { setDepositId(opt?.id); setDepositLabel(name); setBankDetailId(undefined) }}
+            onChange={(name, opt: FdDeposit | undefined) => { setDepositId(opt?.id); setDepositLabel(name); setBankDetailId(undefined); setJointRows([]) }}
             options={deposits}
             getLabel={(d: FdDeposit) => `${d.depositNumber} — ${d.customer?.fullName || ''} — ${money(d.amount)}`}
             getSub={(d: FdDeposit) => dateOnly(d.depositDate)}
             placeholder={deposits.length ? 'Search available deposits…' : 'No available deposits — record one first'}
           />
         </Field>
-        <Field label="Payment Bank Account (interest & maturity payments go here)">
-          <CustomerBankDetailPicker customerId={deposit?.customerId} value={bankDetailId} onChange={setBankDetailId} />
-        </Field>
+        <label className="row gap-2" style={{ fontSize: 12.5 }}>
+          <input type="checkbox" checked={requireAccount} onChange={(e) => setRequireAccount(e.target.checked)} /> Payout account required now (untick to choose it later, at withdrawal)
+        </label>
+        {requireAccount && (
+          <Field label="Payment Bank Account (interest & maturity payments go here)">
+            <CustomerBankDetailPicker customerId={deposit?.customerId} value={bankDetailId} onChange={setBankDetailId} />
+          </Field>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Funding Product"><Select value={productId ?? ''} onChange={(e) => { setProductId(Number(e.target.value) || undefined); setTerm('') }}>
             <option value="">—</option>
@@ -307,7 +330,15 @@ function CreateFdModal({ open, onClose, onCreated }: { open: boolean; onClose: (
             </div>
           </Field>
         )}
+        {product && (
+          <Field label={`Customer Interest Rate % (product rate ${Number(product.annualRatePercent).toFixed(2)}%)`}>
+            <Input type="number" step="0.001" value={rate} onChange={(e) => setRate(e.target.value)} />
+          </Field>
+        )}
         {product && <AutoRenewFields value={autoRenew} onChange={setAutoRenew} terms={product.allowedTermsMonths} interestMethod={effectiveInterestMethod || undefined} />}
+        <JointHolderFields rows={jointRows} onChange={setJointRows} primaryCustomerId={deposit?.customerId} />
+        <NomineeFields rows={nomineeRows} onChange={setNomineeRows} />
+        <CommissionFields value={commission} onChange={setCommission} principal={deposit ? Number(deposit.amount) : undefined} />
         {deposit && product && (
           <div style={{ background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', padding: 14 }}>
             {deposit.amount < product.minDepositAmount || (product.maxDepositAmount && deposit.amount > product.maxDepositAmount) ? (
@@ -344,12 +375,15 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
   const [bankId, setBankId] = useState<number | undefined>(undefined)
   const [treatment, setTreatment] = useState<FdInterestTreatment>('payout')
   const [autoRenew, setAutoRenew] = useState<AutoRenewState>(noAutoRenew)
+  const [rate, setRate] = useState('')
+  const [commission, setCommission] = useState<CommissionState>(noCommission)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     if (!open || !fd) return
-    setTreatment('payout'); setAutoRenew(autoRenewFrom(fd))
+    setTreatment('payout'); setAutoRenew(autoRenewFrom(fd)); setCommission(noCommission)
+    setRate(String(Number(fd.fundingProduct?.annualRatePercent ?? fd.interestRatePercent)))
     setTerm(fd.termMonths); setCustomTerm(''); setNotes(''); setEnhance(false)
     setAmount(''); setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setBankId(undefined); setErr('')
   }, [open, fd])
@@ -360,16 +394,18 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
   const maturityInterest = fd.interestPaymentMethod === 'maturity' ? Number(fd.totalInterestAmount) : 0
   const capitalised = treatment === 'capitalise' ? maturityInterest : 0
   const newPrincipal = Number(fd.principalAmount) + capitalised + (enhance ? Number(amount || 0) : 0)
-  const preview = product && effectiveTerm ? previewInterest(newPrincipal, Number(fd.interestRatePercent), effectiveTerm, fd.interestPaymentMethod) : null
+  const preview = product && effectiveTerm ? previewInterest(newPrincipal, rate !== '' ? Number(rate) : Number(fd.interestRatePercent), effectiveTerm, fd.interestPaymentMethod) : null
 
   const save = async () => {
     if (!effectiveTerm || effectiveTerm <= 0) { setErr('Select or enter a valid term.'); return }
     if (enhance && (!amount || Number(amount) <= 0)) { setErr('Enter the additional deposit amount.'); return }
     if (enhance && method !== 'Cash' && !bankId) { setErr('Bank name is required for Cheque/Bank Transfer.'); return }
+    if (rate !== '' && (Number(rate) < 0 || Number(rate) > 100)) { setErr('Interest rate must be between 0 and 100.'); return }
+    const com = commissionBody(commission); if (com.error) { setErr(com.error); return }
     setBusy(true); setErr('')
     try {
       const result = await fixedDepositsApi.renew(fd.id, {
-        termMonths: effectiveTerm, notes: notes || undefined,
+        termMonths: effectiveTerm, notes: notes || undefined, interestRatePercent: rate !== '' ? rate : undefined, commission: com.body,
         interestTreatment: maturityInterest > 0 ? treatment : undefined,
         ...autoRenewBody(autoRenew),
         enhancement: enhance ? { amount, paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, bankId: method !== 'Cash' ? bankId : undefined } : undefined,
@@ -422,7 +458,9 @@ function RenewModal({ fd, open, onClose, onRenewed }: { fd: FixedDeposit | null;
             {method !== 'Cash' && <Field label="Bank Name"><BankSelect value={bankId} onChange={setBankId} /></Field>}
           </div>
         )}
+        <Field label="Interest Rate % for the new term"><Input type="number" step="0.001" value={rate} onChange={(e) => setRate(e.target.value)} /></Field>
         <AutoRenewFields value={autoRenew} onChange={setAutoRenew} terms={product?.allowedTermsMonths || []} interestMethod={fd.interestPaymentMethod} />
+        <CommissionFields value={commission} onChange={setCommission} principal={newPrincipal} />
         <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
 
         {preview && (
@@ -627,6 +665,12 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [autoRenewOpen, setAutoRenewOpen] = useState(false)
   const [payTarget, setPayTarget] = useState<FdInterestPayment | null>(null)
+  const [commissionPay, setCommissionPay] = useState<FdCommission | null>(null)
+  const [commissionOpen, setCommissionOpen] = useState(false)
+  const [commissionForm, setCommissionForm] = useState<CommissionState>({ ...noCommission, on: true })
+  const [commissionErr, setCommissionErr] = useState('')
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [accountId, setAccountId] = useState<number | undefined>(undefined)
 
   const canRenewOrWithdraw = fd.status === 'Active' && fd.isMatured && !fd.isPledged
   const hasPendingInterest = fd.interestPaymentMethod === 'monthly' && (fd.interestPayments || []).some((p) => p.status === 'Pending')
@@ -641,6 +685,30 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
   const printInterestVoucher = async (p: FdInterestPayment) => {
     try { onPrint({ kind: 'interest', payment: await fdInterestPaymentsApi.voucher(p.id) }) }
     catch (ex: any) { notify.error('Could not load voucher', getErrorText(ex)) }
+  }
+
+  const addCommission = async () => {
+    const com = commissionBody(commissionForm)
+    if (com.error || !com.body) { setCommissionErr(com.error || ''); return }
+    try { await fdCommissionsApi.create(fd.id, com.body); setCommissionOpen(false); notify.success('Commission added'); onChanged() }
+    catch (ex: any) { setCommissionErr(getErrorText(ex, 'Could not add the commission.')) }
+  }
+  const removeCommission = async (c: FdCommission) => {
+    const ok = await notify.confirm({ title: `Delete the commission for ${c.recipientName}?`, msg: 'Only unpaid commissions can be deleted.', danger: true, okText: 'Delete' })
+    if (!ok) return
+    try { await fdCommissionsApi.remove(c.id); notify.success('Commission deleted'); onChanged() }
+    catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
+  }
+  const voidCommission = async (c: FdCommission) => {
+    const ok = await notify.confirm({ title: 'Void this commission payment?', msg: `Reverses ${money(c.paymentAmount)} paid to ${c.recipientName} and restores the till/bank balance.`, danger: true, okText: 'Void' })
+    if (!ok) return
+    try { await fdCommissionsApi.void(c.id); notify.success('Payment voided'); onChanged() }
+    catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
+  }
+  const savePayoutAccount = async () => {
+    if (!accountId) { notify.error('Select a bank account'); return }
+    try { await fixedDepositsApi.setPayoutAccount(fd.id, accountId); setAccountOpen(false); notify.success('Payout account saved'); onChanged() }
+    catch (ex: any) { notify.error('Could not save the account', getErrorText(ex)) }
   }
 
   const voidWithdrawal = async () => {
@@ -718,6 +786,54 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
         />
       </div>
 
+      <Card style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Payout Account, Joint Holders &amp; Nominees</div>
+        <div className="col gap-2" style={{ fontSize: 12.5 }}>
+          <div className="row gap-2" style={{ alignItems: 'center' }}>
+            <span className="t-2">Payout account:</span>
+            {fd.bankDetail
+              ? <b>{fd.bankDetail.bank?.name || 'Bank'} — {fd.bankDetail.accountNumberMasked} ({fd.bankDetail.accountHolder})</b>
+              : <Badge tone="amber" dot>Not set</Badge>}
+            {fd.status === 'Active' && <Can user={me} module="Fixed Deposits" action="Edit"><Btn size="sm" variant="ghost" onClick={() => { setAccountId(undefined); setAccountOpen(true) }}>{fd.bankDetail ? 'Change' : 'Set account'}</Btn></Can>}
+          </div>
+          <div><span className="t-2">Joint holders: </span>{(fd.jointHolders || []).length
+            ? (fd.jointHolders || []).map((j) => `${j.customer?.fullName}${j.relationship ? ` (${j.relationship})` : ''} — ${j.operatingInstruction === 'both_to_sign' ? 'both to sign' : 'either or survivor'}`).join('; ')
+            : <b>None</b>}</div>
+          <div><span className="t-2">Nominees: </span>{(fd.nominees || []).length
+            ? (fd.nominees || []).map((n) => `${n.fullName}${n.relationship ? ` (${n.relationship})` : ''}${(fd.nominees || []).length > 1 ? ` ${Number(n.sharePercent)}%` : ''}`).join('; ')
+            : <b>None</b>}</div>
+        </div>
+      </Card>
+
+      <Card pad={0} style={{ marginBottom: 16 }}>
+        <div className="row between" style={{ padding: '14px 16px 0' }}>
+          <div className="eyebrow">Commission</div>
+          {fd.status === 'Active' && <Can user={me} module="Fixed Deposits" action="Edit"><Btn size="sm" variant="ghost" icon="plus" onClick={() => { setCommissionForm({ ...noCommission, on: true }); setCommissionErr(''); setCommissionOpen(true) }}>Add commission</Btn></Can>}
+        </div>
+        <Table cols={[{ label: 'Paid To' }, { label: 'Basis' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: 'Paid On' }, { label: '', align: 'right', w: 150 }]}
+          rows={fd.commissions || []} empty="No commission on this FD"
+          render={(c: FdCommission) => <>
+            <Td>{c.recipientName}<div className="t-2" style={{ fontSize: 11 }}>{c.recipientType === 'staff' ? 'Executive' : 'Outsider'}</div></Td>
+            <Td>{c.commissionType === 'percentage' ? `${Number(c.commissionValue)}% of principal` : 'Fixed'}</Td>
+            <Td align="right" mono>{money(c.commissionAmount)}</Td>
+            <Td align="center"><Badge tone={c.commissionStatus === 'Paid' ? 'green' : 'amber'} dot>{c.commissionStatus}</Badge></Td>
+            <Td>{dateOnly(c.paidAt)}</Td>
+            <Td align="right">
+              {c.commissionStatus === 'Pending' && (
+                <Can user={me} module="Fixed Deposits" action="Edit">
+                  <Btn size="sm" variant="primary" icon="check" onClick={() => setCommissionPay(c)}>Pay</Btn>
+                  <button className="mms-act" title="Delete" onClick={() => removeCommission(c)}><Icon n="trash" s={14} /></button>
+                </Can>
+              )}
+              {c.commissionStatus === 'Paid' && (
+                <Can user={me} module="Fixed Deposits" action="Delete">
+                  <button className="mms-act" title="Void payment" onClick={() => voidCommission(c)}><Icon n="x" s={14} /></button>
+                </Can>
+              )}
+            </Td>
+          </>} />
+      </Card>
+
       {fd.interestPaymentMethod === 'monthly' && (
         <Card pad={0} style={{ marginBottom: 16 }}>
           <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Monthly Interest Schedule</div>
@@ -782,6 +898,16 @@ function FDDetail({ fd, me, onBack, onChanged, onPrint }: {
       <RenewModal fd={fd} open={renewOpen} onClose={() => setRenewOpen(false)} onRenewed={(newFd, enh) => { setRenewOpen(false); onPrint({ kind: 'renewal', fd: newFd, enhancementDeposit: enh }); onChanged() }} />
       <AutoRenewModal fd={fd} open={autoRenewOpen} onClose={() => setAutoRenewOpen(false)} onSaved={() => { setAutoRenewOpen(false); onChanged() }} />
       <WithdrawModal fd={fd} open={withdrawOpen} onClose={() => setWithdrawOpen(false)} onWithdrawn={(w, newFd) => { setWithdrawOpen(false); onPrint({ kind: 'withdrawal', withdrawal: w, fd: newFd }); onChanged() }} />
+      <PayFdCommissionModal commission={commissionPay} open={!!commissionPay} onClose={() => setCommissionPay(null)} onPaid={() => { setCommissionPay(null); onChanged() }} />
+      <Modal open={commissionOpen} onClose={() => setCommissionOpen(false)} width={520} title="Add Commission" sub={`${fd.fdNumber} — principal ${money(fd.principalAmount)}`}
+        footer={<><Btn variant="plain" onClick={() => setCommissionOpen(false)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={addCommission}>Save</Btn></>}>
+        <ErrorBanner error={commissionErr} style={{ marginBottom: 14 }} />
+        <CommissionFields value={commissionForm} onChange={setCommissionForm} principal={Number(fd.principalAmount)} />
+      </Modal>
+      <Modal open={accountOpen} onClose={() => setAccountOpen(false)} width={520} title="Payout Account" sub="Interest and maturity proceeds are paid to this account"
+        footer={<><Btn variant="plain" onClick={() => setAccountOpen(false)}>Cancel</Btn><Btn variant="primary" icon="check" onClick={savePayoutAccount}>Save</Btn></>}>
+        <CustomerBankDetailPicker customerId={fd.customerId} value={accountId} onChange={setAccountId} />
+      </Modal>
       <PayInterestModal payment={payTarget} open={!!payTarget} onClose={() => setPayTarget(null)} onPaid={(p) => { setPayTarget(null); onPrint({ kind: 'interest', payment: p }); onChanged() }} />
     </div>
   )

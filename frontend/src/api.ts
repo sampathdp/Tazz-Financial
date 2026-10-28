@@ -1966,6 +1966,37 @@ export interface FdRenewal {
   creator?: { id: number; name: string } | null;
 }
 
+export type FdOperatingInstruction = 'either_or_survivor' | 'both_to_sign'
+export interface FdJointHolder {
+  id: number; customerId: number; relationship?: string | null; operatingInstruction: FdOperatingInstruction
+  customer?: { id: number; fullName: string; code: string; nicNo?: string | null; phone?: string | null }
+}
+export interface FdNominee {
+  id: number; fullName: string; relationship?: string | null; nicNo?: string | null; dateOfBirth?: string | null
+  address?: string | null; phone?: string | null; sharePercent: number | string; guardianName?: string | null; guardianNicNo?: string | null
+}
+export type FdCommissionRecipient = 'staff' | 'outsider'
+export type FdCommissionType = 'percentage' | 'fixed'
+/** Commission typed in by hand when an FD is created or renewed. */
+export interface FdCommissionInput {
+  recipientType: FdCommissionRecipient; staffId?: number; recipientName?: string; recipientPhone?: string
+  commissionType: FdCommissionType; commissionValue: number | string; notes?: string
+}
+export interface FdCommission {
+  id: number; fixedDepositId: number; recipientType: FdCommissionRecipient; staffId?: number | null
+  recipientName: string; recipientPhone?: string | null
+  commissionType: FdCommissionType; commissionValue: number | string; commissionAmount: number | string; notes?: string | null
+  commissionStatus: 'Pending' | 'Paid'
+  paidAt?: string | null; paymentAmount?: number | string | null; paymentMethod?: PaymentMethod | null; referenceNo?: string | null
+  staff?: { id: number; staffCode: string; name: string } | null
+  fixedDeposit?: { id: number; fdNumber: string; principalAmount: number | string; customer?: { id: number; fullName: string; code: string } }
+}
+export interface FdJointHolderInput { customerId: number; relationship?: string; operatingInstruction?: FdOperatingInstruction }
+export interface FdNomineeInput {
+  fullName: string; relationship?: string; nicNo?: string; dateOfBirth?: string; address?: string; phone?: string
+  sharePercent?: number | string; guardianName?: string; guardianNicNo?: string
+}
+
 export interface FixedDeposit {
   id: number; fdNumber: string;
   branchId: number; branch?: { id: number; name: string; code: string };
@@ -1994,7 +2025,22 @@ export interface FixedDeposit {
   interestPayments?: FdInterestPayment[];
   withdrawal?: FdWithdrawal | null;
   partPayments?: FdPartPayment[];
+  jointHolders?: FdJointHolder[]; nominees?: FdNominee[]; commissions?: FdCommission[];
   createdAt?: string;
+}
+
+export const fdCommissionsApi = {
+  list: (params: { status?: 'Pending' | 'Paid'; recipientType?: FdCommissionRecipient; fixedDepositId?: number } = {}) =>
+    http.get('/fd-commissions', { params: snakeize(params) }).then((r) => camelize(r.data) as FdCommission[]),
+  /** Adds a commission to an existing FD. */
+  create: (fixedDepositId: number, body: FdCommissionInput) =>
+    http.post(`/fixed-deposits/${fixedDepositId}/commissions`, snakeize(body)).then((r) => camelize(r.data) as FdCommission),
+  update: (id: number, body: FdCommissionInput) =>
+    http.put(`/fd-commissions/${id}`, snakeize(body)).then((r) => camelize(r.data) as FdCommission),
+  remove: (id: number) => http.delete(`/fd-commissions/${id}`).then((r) => r.data),
+  pay: (id: number, body: { paymentDate: string; paymentAmount: number | string; paymentMethod: PaymentMethod; cashAccountId?: number; bankAccountId?: number; referenceNo?: string; notes?: string }) =>
+    http.post(`/fd-commissions/${id}/pay`, snakeize(body)).then((r) => camelize(r.data) as FdCommission),
+  void: (id: number) => http.post(`/fd-commissions/${id}/void`).then((r) => camelize(r.data) as FdCommission),
 }
 
 export const fundingProductsApi = resource<FundingProduct>('funding-products')
@@ -2033,15 +2079,22 @@ export const fixedDepositsApi = {
   /** Admin only — before any payment/part payment/lien. */
   adminUpdate: (id: number, body: { interestRatePercent: number | string; termMonths: number | string; startDate: string; interestPaymentMethod: FdInterestMethod }) =>
     http.put(`/fixed-deposits/${id}`, snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
-  create: (body: { depositId: number; customerBankDetailId: number; fundingProductId: number; termMonths: number; startDate: string; interestPaymentMethod?: FdInterestMethod } & Partial<FdAutoRenewInput>) =>
+  create: (body: {
+    depositId: number; customerBankDetailId?: number; fundingProductId: number; termMonths: number; startDate: string
+    interestRatePercent?: number | string; interestPaymentMethod?: FdInterestMethod
+    jointHolders?: FdJointHolderInput[]; nominees?: FdNomineeInput[]; commission?: FdCommissionInput
+  } & Partial<FdAutoRenewInput>) =>
     http.post('/fixed-deposits', snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
-  renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput; interestTreatment?: FdInterestTreatment } & Partial<FdAutoRenewInput>) =>
+  renew: (id: number, body: { termMonths: number; notes?: string; enhancement?: FdEnhancementInput; interestTreatment?: FdInterestTreatment; interestRatePercent?: number | string; commission?: FdCommissionInput } & Partial<FdAutoRenewInput>) =>
     http.post(`/fixed-deposits/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { fixedDeposit: FixedDeposit; enhancementDeposit: FdDeposit | null }),
   withdraw: (id: number, body: { paymentMethod: FdPaymentMethod; bankAccountId?: number; referenceNo?: string; notes?: string; closedAt?: string; postMaturityRatePercent?: number | string; postMaturityInterest?: number | string }) =>
     http.post(`/fixed-deposits/${id}/withdraw`, snakeize(body)).then((r) => camelize(r.data) as FdWithdrawal & { fixedDeposit: FixedDeposit }),
   /** Late days + default post-maturity interest for a closing date / rate, so the Withdraw form can pre-fill an editable amount. */
   withdrawalPreview: (id: number, params: { closedAt?: string; postMaturityRatePercent?: number | string }) =>
     http.get(`/fixed-deposits/${id}/withdrawal-preview`, { params: snakeize(params) }).then((r) => camelize(r.data) as FdWithdrawalPreview),
+  /** For an FD created without a payout account: sets the account interest and maturity proceeds go to. */
+  setPayoutAccount: (id: number, customerBankDetailId: number) =>
+    http.put(`/fixed-deposits/${id}/payout-account`, snakeize({ customerBankDetailId })).then((r) => camelize(r.data) as FixedDeposit),
   /** Sets or clears the customer's auto-renew instruction on an active FD. */
   setAutoRenew: (id: number, body: FdAutoRenewInput) =>
     http.put(`/fixed-deposits/${id}/auto-renew`, snakeize(body)).then((r) => camelize(r.data) as FixedDeposit),
@@ -2289,7 +2342,7 @@ export const fundingReportsApi = {
   pdf: (type: FundingReportType, params?: Record<string, any>) => reportPdf('funding', type, params),
 }
 
-export type LoanReportType = 'portfolio-summary' | 'arrears' | 'par-aging' | 'disbursement' | 'closed-loans' | 'loan-detail'
+export type LoanReportType = 'portfolio-summary' | 'arrears' | 'overdue-loans' | 'par-aging' | 'disbursement' | 'closed-loans' | 'loan-detail'
 
 /** One flattened row returned by loanReportsApi.get('loan-detail', ...) — see
  *  LoanReportController::loanDetail(). Distinct from Loan (which mirrors the

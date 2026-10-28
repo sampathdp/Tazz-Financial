@@ -56,6 +56,21 @@ class FixedDeposit extends Model
         return $this->belongsTo(CustomerBankDetail::class, 'customer_bank_detail_id')->withTrashed();
     }
 
+    public function jointHolders()
+    {
+        return $this->hasMany(FdJointHolder::class);
+    }
+
+    public function nominees()
+    {
+        return $this->hasMany(FdNominee::class);
+    }
+
+    public function commissions()
+    {
+        return $this->hasMany(FdCommission::class)->orderBy('id');
+    }
+
     public function liens()
     {
         return $this->hasMany(FacilityCollateralFdDetail::class);

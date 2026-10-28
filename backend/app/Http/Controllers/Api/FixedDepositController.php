@@ -4,12 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CustomerBankDetail;
+use App\Models\FdCommission;
 use App\Models\FdDeposit;
 use App\Models\FdPartPayment;
 use App\Models\FdRenewal;
 use App\Models\FdWithdrawal;
 use App\Models\FixedDeposit;
 use App\Models\FundingProduct;
+use App\Models\Staff;
 use App\Services\NumberGenerator;
 use App\Support\FdInterestCalculator;
 use App\Support\FdLedgerPoster;
@@ -28,6 +30,32 @@ class FixedDepositController extends Controller
 
     private const AUTO_RENEW_MODES = ['principal_only', 'principal_and_interest'];
 
+    /** Joint holders, nominees and a manually-set commission sent with an FD create. */
+    private const EXTRAS_RULES = [
+        'joint_holders' => 'nullable|array|max:5',
+        'joint_holders.*.customer_id' => 'required|exists:customers,id',
+        'joint_holders.*.relationship' => 'nullable|string|max:64',
+        'joint_holders.*.operating_instruction' => 'nullable|in:either_or_survivor,both_to_sign',
+        'nominees' => 'nullable|array|max:5',
+        'nominees.*.full_name' => 'required|string|max:150',
+        'nominees.*.relationship' => 'nullable|string|max:64',
+        'nominees.*.nic_no' => 'nullable|string|max:32',
+        'nominees.*.date_of_birth' => 'nullable|date',
+        'nominees.*.address' => 'nullable|string|max:255',
+        'nominees.*.phone' => 'nullable|string|max:32',
+        'nominees.*.share_percent' => 'nullable|numeric|min:0.01|max:100',
+        'nominees.*.guardian_name' => 'nullable|string|max:150',
+        'nominees.*.guardian_nic_no' => 'nullable|string|max:32',
+        'commission' => 'nullable|array',
+        'commission.recipient_type' => 'required_with:commission|in:staff,outsider',
+        'commission.staff_id' => 'required_if:commission.recipient_type,staff|nullable|exists:staff,id',
+        'commission.recipient_name' => 'required_if:commission.recipient_type,outsider|nullable|string|max:150',
+        'commission.recipient_phone' => 'nullable|string|max:32',
+        'commission.commission_type' => 'required_with:commission|in:percentage,fixed',
+        'commission.commission_value' => 'required_with:commission|numeric|min:0.01',
+        'commission.notes' => 'nullable|string|max:255',
+    ];
+
     private const SUMMARY_RELATIONS = ['customer:id,full_name,code,nic_no,phone', 'branch:id,name,code', 'fundingProduct:id,name,code,interest_method'];
 
     private const DETAIL_RELATIONS = [
@@ -41,6 +69,9 @@ class FixedDepositController extends Controller
         'partPayments.creator:id,name',
         'renewedFrom:id,fd_number',
         'renewedTo:id,fd_number',
+        'jointHolders.customer:id,full_name,code,nic_no,phone',
+        'nominees',
+        'commissions.staff:id,staff_code,name',
     ];
 
     public function index(Request $request)
@@ -121,22 +152,27 @@ class FixedDepositController extends Controller
     {
         $data = $request->validate([
             'deposit_id' => 'required|exists:fd_deposits,id',
-            'customer_bank_detail_id' => 'required|exists:customer_bank_details,id',
+            // Optional: the payout account can be chosen later (see setPayoutAccount()).
+            'customer_bank_detail_id' => 'nullable|exists:customer_bank_details,id',
             'funding_product_id' => 'required|exists:funding_products,id',
             'term_months' => 'required|integer|min:1',
             'start_date' => 'required|date',
+            'interest_rate_percent' => 'nullable|numeric|min:0|max:100',
             'interest_payment_method' => ['nullable', Rule::in(self::INTEREST_METHODS)],
             'auto_renew' => 'nullable|boolean',
             'auto_renew_mode' => ['nullable', Rule::in(self::AUTO_RENEW_MODES)],
             'auto_renew_term_months' => 'nullable|integer|min:1',
-        ]);
+        ] + self::EXTRAS_RULES);
 
         $deposit = FdDeposit::findOrFail($data['deposit_id']);
         if ($deposit->status !== 'Available') {
             throw ValidationException::withMessages(['deposit_id' => 'This deposit has already been allocated to a Fixed Deposit.']);
         }
 
-        CustomerBankDetail::assertBelongsTo((int) $data['customer_bank_detail_id'], (int) $deposit->customer_id);
+        if (!empty($data['customer_bank_detail_id'])) {
+            CustomerBankDetail::assertBelongsTo((int) $data['customer_bank_detail_id'], (int) $deposit->customer_id);
+        }
+        $this->assertExtras($data, (int) $deposit->customer_id);
 
         $product = FundingProduct::findOrFail($data['funding_product_id']);
         if ($product->status !== 'Active') {
@@ -158,8 +194,10 @@ class FixedDepositController extends Controller
                 userId: $request->user()->id,
                 interestMethod: $interestMethod,
                 autoRenew: $this->autoRenewColumns($data, $product),
-                bankDetailId: (int) $data['customer_bank_detail_id'],
+                bankDetailId: !empty($data['customer_bank_detail_id']) ? (int) $data['customer_bank_detail_id'] : null,
+                ratePercent: isset($data['interest_rate_percent']) ? (float) $data['interest_rate_percent'] : null,
             );
+            $this->saveExtras($fd, $data, (int) $request->user()->id);
 
             // The deposit's cash was already posted to the cashbook/ledger when it
             // was recorded (see FdDepositController::store()) — allocating it to
@@ -190,6 +228,15 @@ class FixedDepositController extends Controller
             'auto_renew' => 'nullable|boolean',
             'auto_renew_mode' => ['nullable', Rule::in(self::AUTO_RENEW_MODES)],
             'auto_renew_term_months' => 'nullable|integer|min:1',
+            'interest_rate_percent' => 'nullable|numeric|min:0|max:100',
+            'commission' => 'nullable|array',
+            'commission.recipient_type' => 'required_with:commission|in:staff,outsider',
+            'commission.staff_id' => 'required_if:commission.recipient_type,staff|nullable|exists:staff,id',
+            'commission.recipient_name' => 'required_if:commission.recipient_type,outsider|nullable|string|max:150',
+            'commission.recipient_phone' => 'nullable|string|max:32',
+            'commission.commission_type' => 'required_with:commission|in:percentage,fixed',
+            'commission.commission_value' => 'required_with:commission|numeric|min:0.01',
+            'commission.notes' => 'nullable|string|max:255',
             'enhancement' => 'nullable|array',
             'enhancement.amount' => 'required_with:enhancement|numeric|min:0.01',
             'enhancement.deposit_date' => 'nullable|date',
@@ -218,6 +265,8 @@ class FixedDepositController extends Controller
             (int) $request->user()->id,
             false,
             $autoRenew,
+            isset($data['interest_rate_percent']) ? (float) $data['interest_rate_percent'] : null,
+            $data['commission'] ?? null,
         ));
 
         return response()->json([
@@ -234,7 +283,7 @@ class FixedDepositController extends Controller
      *
      * @return array{0: FixedDeposit, 1: ?FdDeposit}
      */
-    public function performRenewal(FixedDeposit $fixedDeposit, int $termMonths, ?array $enhancement, ?string $notes, string $interestTreatment, int $userId, bool $auto, array $autoRenew): array
+    public function performRenewal(FixedDeposit $fixedDeposit, int $termMonths, ?array $enhancement, ?string $notes, string $interestTreatment, int $userId, bool $auto, array $autoRenew, ?float $ratePercent = null, ?array $commission = null): array
     {
         $fixedDeposit->loadMissing(['fundingProduct', 'branch']);
         $product = $fixedDeposit->fundingProduct;
@@ -260,7 +309,20 @@ class FixedDepositController extends Controller
             autoRenew: $autoRenew,
             // Payouts keep going to the account the customer originally nominated.
             bankDetailId: $fixedDeposit->customer_bank_detail_id,
+            // Null = the product's current rate, as before; the operator can set a different one.
+            ratePercent: $ratePercent,
         );
+
+        // Joint holders and nominees stay with the deposit; commission is a fresh, manual decision per renewal.
+        foreach ($fixedDeposit->jointHolders()->get() as $j) {
+            $newFd->jointHolders()->create($j->only(['customer_id', 'relationship', 'operating_instruction']));
+        }
+        foreach ($fixedDeposit->nominees()->get() as $n) {
+            $newFd->nominees()->create($n->only(['full_name', 'relationship', 'nic_no', 'date_of_birth', 'address', 'phone', 'share_percent', 'guardian_name', 'guardian_nic_no']));
+        }
+        if ($commission) {
+            $this->saveExtras($newFd, ['commission' => $commission], $userId);
+        }
 
         // Only the enhancement portion is a real cash event — the old FD's
         // principal simply rolls forward into the new FD's principal_amount
@@ -835,6 +897,69 @@ class FixedDepositController extends Controller
         ]);
     }
 
+    private function assertExtras(array $data, int $customerId): void
+    {
+        $joint = collect($data['joint_holders'] ?? []);
+        if ($joint->contains(fn ($j) => (int) $j['customer_id'] === $customerId)) {
+            throw ValidationException::withMessages(['joint_holders' => 'The joint holder cannot be the primary customer.']);
+        }
+        if ($joint->pluck('customer_id')->unique()->count() !== $joint->count()) {
+            throw ValidationException::withMessages(['joint_holders' => 'The same customer is listed twice as a joint holder.']);
+        }
+
+        $nominees = collect($data['nominees'] ?? []);
+        if ($nominees->isNotEmpty()) {
+            $total = $nominees->sum(fn ($n) => (float) ($n['share_percent'] ?? ($nominees->count() === 1 ? 100 : 0)));
+            if (abs($total - 100) > 0.01) {
+                throw ValidationException::withMessages(['nominees' => 'Nominee shares must add up to 100%.']);
+            }
+        }
+    }
+
+    /** Stores joint holders, nominees and the manual commission for a newly created FD. */
+    private function saveExtras(FixedDeposit $fd, array $data, int $userId): void
+    {
+        foreach ($data['joint_holders'] ?? [] as $j) {
+            $fd->jointHolders()->create([
+                'customer_id' => $j['customer_id'],
+                'relationship' => $j['relationship'] ?? null,
+                'operating_instruction' => $j['operating_instruction'] ?? 'either_or_survivor',
+            ]);
+        }
+
+        $nominees = $data['nominees'] ?? [];
+        foreach ($nominees as $n) {
+            $fd->nominees()->create($n + ['share_percent' => count($nominees) === 1 ? 100 : 0]);
+        }
+
+        if (!empty($data['commission'])) {
+            $c = $data['commission'];
+            $staff = $c['recipient_type'] === 'staff' ? Staff::findOrFail($c['staff_id']) : null;
+            $fd->commissions()->create([
+                'branch_id' => $fd->branch_id,
+                'recipient_type' => $c['recipient_type'],
+                'staff_id' => $staff?->id,
+                'recipient_name' => $staff?->name ?? $c['recipient_name'],
+                'recipient_phone' => $staff?->phone ?? ($c['recipient_phone'] ?? null),
+                'commission_type' => $c['commission_type'],
+                'commission_value' => $c['commission_value'],
+                'commission_amount' => FdCommission::amountFor($c['commission_type'], (float) $c['commission_value'], (float) $fd->principal_amount),
+                'notes' => $c['notes'] ?? null,
+                'created_by' => $userId,
+            ]);
+        }
+    }
+
+    /** Sets (or changes) the account interest and maturity proceeds are paid to - for FDs created without one. */
+    public function setPayoutAccount(Request $request, FixedDeposit $fixedDeposit)
+    {
+        $data = $request->validate(['customer_bank_detail_id' => 'required|exists:customer_bank_details,id']);
+        CustomerBankDetail::assertBelongsTo((int) $data['customer_bank_detail_id'], (int) $fixedDeposit->customer_id);
+        $fixedDeposit->update(['customer_bank_detail_id' => $data['customer_bank_detail_id']]);
+
+        return $this->show($fixedDeposit->fresh());
+    }
+
     /** Value the customer chose (only allowed if the product permits a choice) or the product's fixed default. */
     private function resolveInterestMethod(?string $requested, FundingProduct $product): string
     {
@@ -849,10 +974,11 @@ class FixedDepositController extends Controller
     }
 
     /** Shared FD-row creation for both a fresh issue (store) and a renewal (renew). */
-    private function createFixedDeposit(int $branchId, int $customerId, FundingProduct $product, float $principal, int $termMonths, Carbon $startDate, int $userId, string $interestMethod, ?int $renewedFromId = null, array $autoRenew = [], ?int $bankDetailId = null): FixedDeposit
+    private function createFixedDeposit(int $branchId, int $customerId, FundingProduct $product, float $principal, int $termMonths, Carbon $startDate, int $userId, string $interestMethod, ?int $renewedFromId = null, array $autoRenew = [], ?int $bankDetailId = null, ?float $ratePercent = null): FixedDeposit
     {
         $maturityDate = $startDate->copy()->addMonthsNoOverflow($termMonths);
-        $calc = FdInterestCalculator::calculate($principal, (float) $product->annual_rate_percent, $termMonths, $interestMethod);
+        $rate = $ratePercent ?? (float) $product->annual_rate_percent;
+        $calc = FdInterestCalculator::calculate($principal, $rate, $termMonths, $interestMethod);
 
         $branch = \App\Models\Branch::find($branchId);
         $fdNumber = NumberGenerator::next('fixed_deposit', [
@@ -870,7 +996,7 @@ class FixedDepositController extends Controller
             'customer_bank_detail_id' => $bankDetailId,
             'funding_product_id' => $product->id,
             'principal_amount' => $principal,
-            'interest_rate_percent' => $product->annual_rate_percent,
+            'interest_rate_percent' => $rate,
             'interest_payment_method' => $interestMethod,
             'term_months' => $termMonths,
             'start_date' => $startDate->format('Y-m-d'),
