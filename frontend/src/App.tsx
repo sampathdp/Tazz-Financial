@@ -101,6 +101,7 @@ const StaffScreen = named(() => import('./screens/Staff'), 'StaffScreen')
 const ExpensesScreen = named(() => import('./screens/Expenses'), 'ExpensesScreen')
 const PaymentVouchersScreen = named(() => import('./screens/Expenses'), 'PaymentVouchersScreen')
 const PettyCashScreen = named(() => import('./screens/PettyCash'), 'PettyCashScreen')
+const FixedAssetsScreen = named(() => import('./screens/FixedAssets'), 'FixedAssetsScreen')
 
 const LoanPortfolioSummaryScreen = named(() => import('./screens/LoanReports'), 'LoanPortfolioSummaryScreen')
 const LoanParAgingScreen = named(() => import('./screens/LoanReports'), 'LoanParAgingScreen')
@@ -242,6 +243,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'exp/expenses': ExpensesScreen,
   'exp/vouchers': PaymentVouchersScreen,
   'exp/petty-cash': PettyCashScreen,
+  'exp/fixed-assets': FixedAssetsScreen,
   'fund/dashboard': FundingDashboardScreen,
   'fund/products': FundingProductsScreen,
   'fund/deposits': DepositsScreen,

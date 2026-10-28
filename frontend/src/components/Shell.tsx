@@ -112,6 +112,7 @@ export const NAV: NavNode[] = [
      *  paying an Expense (see ExpenseController::pay on the backend). */
     { id: 'exp/vouchers', label: 'Payment Vouchers', icon: 'doc' },
     { id: 'exp/petty-cash', label: 'Petty Cash', icon: 'coins' },
+    { id: 'exp/fixed-assets', label: 'Fixed Assets', icon: 'building' },
   ] },
 
   { section: 'Accounting', icon: 'list', items: [

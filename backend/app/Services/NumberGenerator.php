@@ -96,6 +96,8 @@ class NumberGenerator
         'savings_txn' => '{BRANCH}-SVT-{YEAR:2}-{SEQ:6}',
         'savings_collection' => '{BRANCH}-SCS-{YEAR:2}-{SEQ:5}',
         'savings_interest' => 'SIR-{YEAR:2}-{SEQ:5}',
+        // No {YEAR} — an asset keeps its tag for life.
+        'fixed_asset' => '{BRANCH}-FA-{SEQ:5}',
     ];
 
     // Modules whose {CODE} placeholder is keyed off a funding product (own

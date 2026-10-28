@@ -3285,3 +3285,66 @@ export const fdLoansApi = {
   savePolicy: (fundingProductId: number, body: Omit<FdLoanPolicy, 'id' | 'fundingProductId'>) =>
     http.put(`/fd-loan-policies/${fundingProductId}`, snakeize(body)).then((r) => camelize(r.data) as FdLoanPolicy),
 }
+
+/* ============================================================
+   Fixed Assets: categories, register, monthly depreciation, disposal
+   ============================================================ */
+export type FixedAssetStatus = 'Active' | 'FullyDepreciated' | 'Disposed'
+export interface AssetCategory {
+  id: number; name: string; assetAccountId: number; accumulatedDepreciationAccountId: number; expenseAccountId: number;
+  assetAccount?: { id: number; code: string; name: string } | null;
+  accumulatedDepreciationAccount?: { id: number; code: string; name: string } | null;
+  expenseAccount?: { id: number; code: string; name: string } | null;
+  defaultUsefulLifeMonths: number; defaultResidualPercent: string | number; status: 'Active' | 'Inactive'; assetsCount?: number;
+}
+export interface FixedAssetDisposal {
+  id: number; fixedAssetId: number; disposalDate: string; proceeds: string; bookValue: string; gainLoss: string;
+  paymentMethod?: string | null; notes?: string | null;
+}
+export interface FixedAssetDepreciationRow {
+  id: number; fixedAssetId: number; period: string; periodEnd: string; amount: string; journalEntryId?: number | null;
+  asset?: { id: number; code: string; name: string } | null;
+}
+export interface FixedAsset {
+  id: number; code: string; name: string; assetCategoryId: number; category?: { id: number; name: string } | null;
+  branchId?: number | null; branch?: { id: number; name: string; code: string } | null;
+  description?: string | null; serialNo?: string | null; location?: string | null;
+  custodianStaffId?: number | null; custodian?: { id: number; staffCode: string; name: string } | null;
+  vendorId?: number | null; vendor?: { id: number; name: string } | null; invoiceNo?: string | null;
+  purchaseDate: string; inServiceDate: string; cost: string; residualValue: string; usefulLifeMonths: number;
+  accumulatedDepreciation: string; netBookValue: string; depreciatedThrough?: string | null;
+  status: FixedAssetStatus; acquisitionType: 'Purchase' | 'Opening'; paymentMethod?: string | null;
+  depreciations?: FixedAssetDepreciationRow[]; disposal?: FixedAssetDisposal | null;
+}
+export interface FixedAssetBody {
+  name: string; assetCategoryId: number; branchId: number; description?: string; serialNo?: string; location?: string;
+  custodianStaffId?: number; vendorId?: number; invoiceNo?: string; purchaseDate: string; inServiceDate?: string;
+  cost: number | string; residualValue?: number | string; usefulLifeMonths?: number | string;
+  acquisitionType: 'Purchase' | 'Opening'; paymentMethod?: 'Cash' | 'Bank' | 'Cheque'; cashAccountId?: number; bankAccountId?: number;
+  openingAccumulatedDepreciation?: number | string; openingDepreciatedThrough?: string;
+}
+export interface DepreciationRunResult {
+  rows: { assetId: number; code: string; name: string; period: string; amount: string; accumulatedAfter: string; netBookValueAfter: string }[];
+  errors: string[]; total: string;
+}
+export const assetCategoriesApi = {
+  list: () => http.get('/asset-categories').then((r) => camelize(r.data) as AssetCategory[]),
+  create: (body: Partial<AssetCategory>) => http.post('/asset-categories', snakeize(body)).then((r) => camelize(r.data) as AssetCategory),
+  update: (id: number, body: Partial<AssetCategory>) => http.put(`/asset-categories/${id}`, snakeize(body)).then((r) => camelize(r.data) as AssetCategory),
+}
+export const fixedAssetsApi = {
+  list: (params?: { status?: string; assetCategoryId?: number; branchId?: number; search?: string }) =>
+    http.get('/fixed-assets', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as FixedAsset[]),
+  get: (id: number) => http.get(`/fixed-assets/${id}`).then((r) => camelize(r.data) as FixedAsset),
+  create: (body: FixedAssetBody) => http.post('/fixed-assets', snakeize(body)).then((r) => camelize(r.data) as FixedAsset),
+  update: (id: number, body: Partial<FixedAssetBody>) => http.put(`/fixed-assets/${id}`, snakeize(body)).then((r) => camelize(r.data) as FixedAsset),
+  remove: (id: number) => http.delete(`/fixed-assets/${id}`).then((r) => r.data),
+  dispose: (id: number, body: { disposalDate: string; proceeds: number | string; paymentMethod?: string; cashAccountId?: number; bankAccountId?: number; notes?: string }) =>
+    http.post(`/fixed-assets/${id}/dispose`, snakeize(body)).then((r) => camelize(r.data) as FixedAssetDisposal),
+  depreciationPreview: (through: string, branchId?: number) =>
+    http.post('/fixed-assets/depreciation/preview', snakeize({ through, branchId })).then((r) => camelize(r.data) as DepreciationRunResult),
+  depreciationRun: (through: string, branchId?: number) =>
+    http.post('/fixed-assets/depreciation/run', snakeize({ through, branchId })).then((r) => camelize(r.data) as DepreciationRunResult),
+  depreciations: (params?: { period?: string; fixedAssetId?: number }) =>
+    http.get('/fixed-assets/depreciations', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as FixedAssetDepreciationRow[]),
+}

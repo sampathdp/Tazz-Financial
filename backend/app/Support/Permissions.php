@@ -79,6 +79,7 @@ class Permissions
         'Expenses',
         'Payment Vouchers',
         'Petty Cash',
+        'Fixed Assets',
         'Subscriptions',
     ];
 

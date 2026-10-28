@@ -115,6 +115,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'exp/expenses': 'Expenses',
   'exp/vouchers': 'Payment Vouchers',
   'exp/petty-cash': 'Petty Cash',
+  'exp/fixed-assets': 'Fixed Assets',
   'fund/dashboard': 'Funding Reports',
   'fund/products': 'Funding Products',
   'fund/deposits': 'Deposits',

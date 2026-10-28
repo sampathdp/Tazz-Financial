@@ -44,7 +44,9 @@ use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\ManualJournalEntryController;
 use App\Http\Controllers\Api\BorrowingController;
 use App\Http\Controllers\Api\FdDepositController;
+use App\Http\Controllers\Api\AssetCategoryController;
 use App\Http\Controllers\Api\FdCommissionController;
+use App\Http\Controllers\Api\FixedAssetController;
 use App\Http\Controllers\Api\FdInterestPaymentController;
 use App\Http\Controllers\Api\FdLoanController;
 use App\Http\Controllers\Api\FixedDepositController;
@@ -709,6 +711,20 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('payment-vouchers/{paymentVoucher}', [PaymentVoucherController::class, 'destroy'])->middleware('perm:Payment Vouchers,Delete');
 
     // --- Petty Cash: Funds (imprest float per branch, custodian, ceiling) ---
+    // Fixed Assets
+    Route::get('asset-categories', [AssetCategoryController::class, 'index'])->middleware('perm:Fixed Assets,View');
+    Route::post('asset-categories', [AssetCategoryController::class, 'store'])->middleware('perm:Fixed Assets,Create');
+    Route::put('asset-categories/{assetCategory}', [AssetCategoryController::class, 'update'])->middleware('perm:Fixed Assets,Edit');
+    Route::get('fixed-assets', [FixedAssetController::class, 'index'])->middleware('perm:Fixed Assets,View');
+    Route::get('fixed-assets/depreciations', [FixedAssetController::class, 'depreciations'])->middleware('perm:Fixed Assets,View');
+    Route::post('fixed-assets/depreciation/preview', [FixedAssetController::class, 'depreciationPreview'])->middleware('perm:Fixed Assets,View');
+    Route::post('fixed-assets/depreciation/run', [FixedAssetController::class, 'depreciationRun'])->middleware(['perm:Fixed Assets,Edit', 'idempotency']);
+    Route::post('fixed-assets', [FixedAssetController::class, 'store'])->middleware(['perm:Fixed Assets,Create', 'idempotency']);
+    Route::get('fixed-assets/{fixedAsset}', [FixedAssetController::class, 'show'])->middleware('perm:Fixed Assets,View');
+    Route::put('fixed-assets/{fixedAsset}', [FixedAssetController::class, 'update'])->middleware('perm:Fixed Assets,Edit');
+    Route::post('fixed-assets/{fixedAsset}/dispose', [FixedAssetController::class, 'dispose'])->middleware(['perm:Fixed Assets,Edit', 'idempotency']);
+    Route::delete('fixed-assets/{fixedAsset}', [FixedAssetController::class, 'destroy'])->middleware('admin');
+
     Route::get('petty-cash-funds', [PettyCashFundController::class, 'index'])->middleware('perm:Petty Cash,View');
     Route::post('petty-cash-funds', [PettyCashFundController::class, 'store'])->middleware('perm:Petty Cash,Create');
     Route::put('petty-cash-funds/{pettyCashFund}', [PettyCashFundController::class, 'update'])->middleware('perm:Petty Cash,Edit');
