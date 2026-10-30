@@ -251,6 +251,8 @@ export interface AuthUser {
   roleId?: number;
   branch?: { id: number; name: string; code: string } | null;
   status?: 'Active' | 'Inactive';
+  /** True when the user has uploaded a profile picture — fetch it via profileApi.photo(). */
+  hasPhoto?: boolean;
   /** True for roles not confined to one branch (admin, head office, auditor, ...) — see Role.can_view_all_branches / BelongsToBranch. Gates the branch filter on report screens. */
   canViewAllBranches?: boolean;
   /** Flat list of "Module:Action" strings the role is allowed to perform. */
@@ -2810,6 +2812,18 @@ export const staffApi = {
 /* My profile: the signed-in user's own achievements. */
 export interface UserAchievement {
   id: number; title: string; description?: string | null; achievedOn?: string | null;
+}
+export const profileApi = {
+  /** The signed-in user's staff record, or null when none is linked. */
+  staff: () => http.get('/profile/staff').then((r) => (r.data ? (camelize(r.data) as Staff) : null)),
+  /** Auth-protected, so fetched as a blob rather than a plain <img src>. */
+  photo: () => http.get('/profile/photo', { responseType: 'blob' }).then((r) => r.data as Blob),
+  uploadPhoto: async (file: File) => {
+    const form = new FormData()
+    form.append('photo', await compressImageToWebp(file))
+    return http.post('/profile/photo', form).then((r) => r.data as { hasPhoto: boolean })
+  },
+  removePhoto: () => http.delete('/profile/photo').then((r) => r.data),
 }
 export const achievementsApi = {
   list: () => http.get('/profile/achievements').then((r) => camelize(r.data) as UserAchievement[]),

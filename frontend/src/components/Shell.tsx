@@ -6,6 +6,7 @@ import { Icon } from './Icon'
 import { NotificationBell, useNotify } from './Notify'
 import DB from '../data'
 import { auth, type AuthUser } from '../api'
+import { UserAvatar } from './UserAvatar'
 import { canAccessRoute } from '../lib/permissions'
 
 export interface NavLeaf {
@@ -342,7 +343,6 @@ export function ThemeToggle() {
 
 export function Topbar({ setOpen, go, user }: { setOpen: (fn: (o: boolean) => boolean) => void; go: (r: string) => void; user?: AuthUser | null }) {
   const displayName = user?.name || 'User'
-  const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || 'U'
   const notify = useNotify()
   // Let notification-center clicks navigate via the app router.
   useEffect(() => { notify.setRouter(go) }, [notify, go])
@@ -356,7 +356,7 @@ export function Topbar({ setOpen, go, user }: { setOpen: (fn: (o: boolean) => bo
         <ThemeToggle />
         <NotificationBell />
         <div className="row gap-2" style={{ paddingLeft: 6, borderLeft: '1px solid var(--line)', cursor: 'pointer' }} title="My profile" onClick={() => go('profile')}>
-          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--bg-3)', border: '1px solid var(--line)', display: 'grid', placeItems: 'center', fontFamily: 'Saira', fontWeight: 700, fontSize: 13, color: 'var(--ac-bright)' }}>{initials}</div>
+          <UserAvatar name={displayName} hasPhoto={user?.hasPhoto} size={34} />
           <div className="hide-sm" style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{displayName}</div>
           </div>

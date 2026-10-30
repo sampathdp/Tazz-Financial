@@ -89,6 +89,7 @@ use App\Http\Controllers\Api\SystemMaintenanceController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\StaffController;
 use App\Http\Controllers\Api\UserAchievementController;
+use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\VendorController;
 use Illuminate\Support\Facades\Route;
 
@@ -120,7 +121,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('logout', [AuthController::class, 'logout']);
 
     // --- My profile: own achievements (open to every signed-in user, scoped to the caller) ---
-    Route::get('profile/achievements', [UserAchievementController::class, 'index']);
+    Route::get('profile/staff', [ProfileController::class, 'staff']);
+    Route::get('profile/photo', [ProfileController::class, 'photo']);
+    Route::post('profile/photo', [ProfileController::class, 'storePhoto']);
+    Route::delete('profile/photo', [ProfileController::class, 'destroyPhoto']);
+    Route::get('profile/achievements',[UserAchievementController::class, 'index']);
     Route::post('profile/achievements', [UserAchievementController::class, 'store']);
     Route::put('profile/achievements/{achievement}', [UserAchievementController::class, 'update']);
     Route::delete('profile/achievements/{achievement}', [UserAchievementController::class, 'destroy']);
