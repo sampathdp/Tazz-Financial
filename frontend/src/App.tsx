@@ -46,6 +46,16 @@ const BorrowingsScreen = lazy(() => import('./screens/Borrowings').then((m) => (
 const BranchFundingScreen = lazy(() => import('./screens/BranchFunding').then((m) => ({ default: m.BranchFundingScreen })))
 const PrematureWithdrawalScreen = lazy(() => import('./screens/PrematureWithdrawal').then((m) => ({ default: m.PrematureWithdrawalScreen })))
 const FdInterestDueScreen = lazy(() => import('./screens/FdInterestDue').then((m) => ({ default: m.FdInterestDueScreen })))
+const FundingActiveFdsReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingActiveFdsReport })))
+const FundingMaturingSoonReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingMaturingSoonReport })))
+const FundingMaturedReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingMaturedReport })))
+const FundingMonthlyInterestReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingMonthlyInterestReport })))
+const FundingInterestPaymentsReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingInterestPaymentsReport })))
+const FundingDepositHistoryReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingDepositHistoryReport })))
+const FundingCustomerFundingReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingCustomerFundingReport })))
+const FundingRenewalHistoryReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingRenewalHistoryReport })))
+const FundingCapitalEnhancementsReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingCapitalEnhancementsReport })))
+const FundingWithdrawalsReport = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingWithdrawalsReport })))
 const FundingReportsScreen = lazy(() => import('./screens/FundingReports').then((m) => ({ default: m.FundingReportsScreen })))
 const SavingsProductsScreen = lazy(() => import('./screens/SavingsProducts').then((m) => ({ default: m.SavingsProductsScreen })))
 const SavingsAccountsScreen = lazy(() => import('./screens/SavingsAccounts').then((m) => ({ default: m.SavingsAccountsScreen })))
@@ -258,6 +268,16 @@ const SCREENS: Record<string, ScreenComp> = {
   'fund/premature-withdrawal': PrematureWithdrawalScreen,
   'fund/interest-due': FdInterestDueScreen,
   'fund/reports': FundingReportsScreen,
+  'rep/fund-active': FundingActiveFdsReport,
+  'rep/fund-maturing': FundingMaturingSoonReport,
+  'rep/fund-matured': FundingMaturedReport,
+  'rep/fund-monthly-interest': FundingMonthlyInterestReport,
+  'rep/fund-interest-paid': FundingInterestPaymentsReport,
+  'rep/fund-deposits': FundingDepositHistoryReport,
+  'rep/fund-customer': FundingCustomerFundingReport,
+  'rep/fund-renewals': FundingRenewalHistoryReport,
+  'rep/fund-enhancements': FundingCapitalEnhancementsReport,
+  'rep/fund-withdrawals': FundingWithdrawalsReport,
   'fund/savings-products': SavingsProductsScreen,
   'fund/savings': SavingsAccountsScreen,
   'fund/savings-collection': SavingsCollectionScreen,

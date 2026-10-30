@@ -196,8 +196,8 @@ function WithdrawalRows({ rows }: { rows: any[] }) {
     </>} />
 }
 
-export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
-  const [tab, setTab] = useState<FundingReportType>('active')
+export function FundingReportsScreen({ go: _go, user: me, fixedTab }: { go: Go; user?: AuthUser | null; fixedTab?: FundingReportType }) {
+  const [tab, setTab] = useState<FundingReportType>(fixedTab ?? 'active')
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<any>(null)
   const [err, setErr] = useState('')
@@ -266,13 +266,15 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
 
   return (
     <div>
-      <PageHead crumbs="Funding / Investment" title="Funding Reports" icon="chart"
+      <PageHead crumbs="Funding / Investment" title={fixedTab ? tabLabel : 'Funding Reports'} icon="chart"
         actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
-      <Card pad={0} style={{ marginBottom: 16 }}>
-        <div className="row gap-1 wrap" style={{ padding: 14 }}>
-          {TABS.map((t) => <Btn key={t.id} size="sm" variant="ghost" active={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</Btn>)}
-        </div>
-      </Card>
+      {!fixedTab && (
+        <Card pad={0} style={{ marginBottom: 16 }}>
+          <div className="row gap-1 wrap" style={{ padding: 14 }}>
+            {TABS.map((t) => <Btn key={t.id} size="sm" variant="ghost" active={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</Btn>)}
+          </div>
+        </Card>
+      )}
       <Card style={{ marginBottom: 16 }}><div className="row gap-3 wrap"><BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} /></div></Card>
 
       {tab === 'maturing-soon' && (
@@ -332,5 +334,18 @@ export function FundingReportsScreen({ go: _go, user: me }: { go: Go; user?: Aut
     </div>
   )
 }
+
+/* One page per report, each bound to a Reports-menu entry. */
+const page = (type: FundingReportType) => (props: { go: Go; user?: AuthUser | null }) => <FundingReportsScreen {...props} fixedTab={type} />
+export const FundingActiveFdsReport = page('active')
+export const FundingMaturingSoonReport = page('maturing-soon')
+export const FundingMaturedReport = page('matured')
+export const FundingMonthlyInterestReport = page('monthly-interest')
+export const FundingInterestPaymentsReport = page('interest-paid')
+export const FundingDepositHistoryReport = page('deposit-history')
+export const FundingCustomerFundingReport = page('customer-funding-history')
+export const FundingRenewalHistoryReport = page('renewal-history')
+export const FundingCapitalEnhancementsReport = page('capital-enhancements')
+export const FundingWithdrawalsReport = page('withdrawals')
 
 export default FundingReportsScreen

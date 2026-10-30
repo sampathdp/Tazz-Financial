@@ -23,7 +23,7 @@ class LoanPaymentController extends Controller
 
     public function index(Loan $loan)
     {
-        return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name', 'bank:id,name', 'pendingVoidRequest.requester:id,name', 'pendingAllocationRequest.requester:id,name'])->get();
+        return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name', 'bank:id,name', 'pendingVoidRequest.requester:id,name', 'pendingAllocationRequest.requester:id,name', 'pendingAllocationRequest.firstApprover:id,name'])->get();
     }
 
     /** Preview-only: the receipt number the next payment on this loan would get,

@@ -78,7 +78,6 @@ export const NAV: NavNode[] = [
     { id: 'fund/deposit-payment', label: 'Deposit Payment', icon: 'receipt' },
     { id: 'fund/premature-withdrawal', label: 'Pre-maturity Withdrawal', icon: 'flag' },
     { id: 'fund/interest-due', label: 'Interest Due', icon: 'wallet' },
-    { id: 'fund/reports', label: 'Funding Reports', icon: 'chart' },
   ] },
 
   { section: 'Finance', icon: 'wallet', items: [
@@ -154,6 +153,18 @@ export const NAV: NavNode[] = [
       { id: 'rep/inv-summary', label: 'Investor Summary', icon: 'pie' },
       { id: 'rep/inv-directory', label: 'Investor Directory', icon: 'list' },
       { id: 'rep/fd-commissions', label: 'FD Commissions', icon: 'target' },
+    ] },
+    { group: 'Funding Reports', icon: 'coins', items: [
+      { id: 'rep/fund-active', label: 'Active FDs', icon: 'coins' },
+      { id: 'rep/fund-maturing', label: 'Maturing Soon', icon: 'clock' },
+      { id: 'rep/fund-matured', label: 'Matured FDs', icon: 'check' },
+      { id: 'rep/fund-monthly-interest', label: 'Monthly Interest', icon: 'wallet' },
+      { id: 'rep/fund-interest-paid', label: 'Interest Payments', icon: 'receipt' },
+      { id: 'rep/fund-deposits', label: 'Deposit History', icon: 'list' },
+      { id: 'rep/fund-customer', label: 'Customer Funding', icon: 'users' },
+      { id: 'rep/fund-renewals', label: 'Renewal History', icon: 'swap' },
+      { id: 'rep/fund-enhancements', label: 'Capital Enhancements', icon: 'arrowUp' },
+      { id: 'rep/fund-withdrawals', label: 'Withdrawals', icon: 'upload' },
     ] },
     { group: 'Pawn Reports', icon: 'tag', items: [
       { id: 'rep/pawn', label: 'Pawn Reports', icon: 'tag', soon: true },
