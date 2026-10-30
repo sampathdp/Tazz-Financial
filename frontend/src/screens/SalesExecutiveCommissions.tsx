@@ -6,6 +6,8 @@ import {
   type AuthUser, type LoanType, type SalesExecutiveCommission, type CommissionStatus, type PaymentMethod,
   type CashAccount, type BankAccount,
 } from '../api'
+import { ExportButtons } from '../components/ExportButtons'
+import { exportFlatTableToExcel } from '../lib/export'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -96,10 +98,58 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
     } finally { setBusy(false) }
   }
 
+  const exportExcel = () => {
+    void exportFlatTableToExcel({
+      reportTitle: 'Sales Executive Commissions', meta: `Generated ${new Date().toISOString().slice(0, 10)}`,
+      columns: [
+        { label: 'Sales Executive', key: 'exec' }, { label: 'Loan Number', key: 'loan' }, { label: 'Cycle', key: 'cycle', align: 'center', format: 'number' },
+        { label: 'Customer', key: 'customer' }, { label: 'Loan Type', key: 'type' },
+        { label: 'Loan Amount', key: 'amount', align: 'right', format: 'money' },
+        { label: 'Disbursed', key: 'disbursed', align: 'center' }, { label: 'Closed', key: 'closed', align: 'center' },
+        { label: 'Commission', key: 'commission', align: 'right', format: 'money' },
+        { label: 'Installments', key: 'inst', align: 'center' }, { label: 'Commission Status', key: 'cStatus', align: 'center' },
+        { label: 'Payment Status', key: 'pStatus', align: 'center' }, { label: 'Paid On', key: 'paidAt', align: 'center' },
+      ],
+      rows: rows.map((c) => ({
+        exec: c.salesExecutiveName || '', loan: c.loanCode, cycle: c.cycleNo, customer: c.customerName || '', type: c.loanTypeName || '',
+        amount: Number(c.loanAmount || 0), disbursed: c.disbursedAt?.slice(0, 10) || '', closed: c.closedAt?.slice(0, 10) || '',
+        commission: Number(c.commissionAmount || 0), inst: `${c.paidInstallments} / ${c.requiredInstallments}`,
+        cStatus: c.commissionStatus, pStatus: c.paymentStatus, paidAt: c.paidAt?.slice(0, 10) || '',
+      })),
+      totalRow: { exec: 'Total', amount: rows.reduce((a, c) => a + Number(c.loanAmount || 0), 0), commission: rows.reduce((a, c) => a + Number(c.commissionAmount || 0), 0) },
+      emptyText: 'No commissions',
+    }, `sales-executive-commissions-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  // No PDF library / server template for this report: print the table from a clean window, user picks "Save as PDF".
+  const exportPdf = async () => {
+    const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const head = ['Sales Executive', 'Loan Number', 'Cycle', 'Customer', 'Loan Type', 'Loan Amount', 'Disbursed', 'Closed', 'Commission', 'Installments', 'Commission Status', 'Payment Status']
+    const body = rows.map((c) => [
+      c.salesExecutiveName, c.loanCode, c.cycleNo, c.customerName, c.loanTypeName, money(c.loanAmount),
+      c.disbursedAt?.slice(0, 10) || '—', c.closedAt?.slice(0, 10) || '—', money(c.commissionAmount),
+      `${c.paidInstallments} / ${c.requiredInstallments}`, c.commissionStatus, c.paymentStatus,
+    ])
+    const w = window.open('', '_blank')
+    if (!w) throw new Error('Allow pop-ups to export the PDF.')
+    w.document.write(`<!doctype html><html><head><title>Sales Executive Commissions</title><style>
+      @page{size:A4 landscape;margin:12mm}body{font:11px Arial,sans-serif;color:#111}h1{font-size:16px;margin:0 0 4px}
+      p{margin:0 0 10px;color:#666}table{width:100%;border-collapse:collapse}th{background:#1F3A5F;color:#fff;text-align:left}
+      th,td{border:1px solid #d5dce5;padding:4px 6px}tr:nth-child(even) td{background:#f8fafc}</style></head><body>
+      <h1>Sales Executive Commissions</h1><p>Generated ${new Date().toISOString().slice(0, 10)} · ${rows.length} record(s)</p>
+      <table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
+      <tbody>${body.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>
+      </body></html>`)
+    w.document.close()
+    w.focus()
+    w.print()
+  }
+
   return (
     <div>
-      <PageHead crumbs="Loan Management" title="Sales Executive Commissions" icon="target"
-        sub={`${rows.length} commission${rows.length === 1 ? '' : 's'}`} />
+      <PageHead crumbs="Reports / Loan Reports" title="Sales Executive Commissions" icon="target"
+        sub={`${rows.length} commission${rows.length === 1 ? '' : 's'}`}
+        actions={<ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
 
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
@@ -125,7 +175,7 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
         <Table
           cols={[
             { label: 'Sales Executive' }, { label: 'Loan Number' }, { label: 'Cycle', align: 'center' }, { label: 'Customer' }, { label: 'Loan Type' },
-            { label: 'Loan Amount', align: 'right' }, { label: 'Commission', align: 'right' },
+            { label: 'Loan Amount', align: 'right' }, { label: 'Disbursed' }, { label: 'Closed' }, { label: 'Commission', align: 'right' },
             { label: 'Installments', align: 'center' }, { label: 'Commission Status', align: 'center' },
             { label: 'Payment Status', align: 'center' }, { label: '', align: 'right', w: 130 },
           ]}
@@ -137,6 +187,8 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
             <Td>{c.customerName || '—'}</Td>
             <Td>{c.loanTypeName || '—'}</Td>
             <Td align="right" mono>{money(c.loanAmount)}</Td>
+            <Td>{c.disbursedAt?.slice(0, 10) || '—'}</Td>
+            <Td>{c.closedAt?.slice(0, 10) || '—'}</Td>
             <Td align="right" mono>{money(c.commissionAmount)}</Td>
             <Td align="center">{c.paidInstallments} / {c.requiredInstallments}</Td>
             <Td align="center"><Badge tone={commissionTone(c.commissionStatus)} dot>{c.commissionStatus}</Badge></Td>

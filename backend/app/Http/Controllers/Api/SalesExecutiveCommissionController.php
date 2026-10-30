@@ -21,7 +21,7 @@ class SalesExecutiveCommissionController extends Controller
 
     private const RELATIONS = [
         'staff:id,staff_code,name',
-        'facility:id,code,customer_id,principal_amount,status',
+        'facility:id,code,customer_id,principal_amount,status,disbursed_at,closed_at',
         'facility.customer:id,full_name',
         'facility.schedules:id,credit_facility_id,installment_no,status,due_date',
         'facility.schedules.allocations:id,facility_schedule_id,facility_payment_id,interest_applied',
@@ -279,6 +279,8 @@ class SalesExecutiveCommissionController extends Controller
             'staff_code' => $c->staff?->staff_code,
             'cycle_no' => $c->cycle_no,
             'loan_amount' => $loan->principal_amount,
+            'disbursed_at' => $loan->disbursed_at?->toDateString(),
+            'closed_at' => $loan->closed_at?->toDateString(),
             'commission_amount' => self::commissionAmount($c),
             'required_installments' => $c->required_installments,
             // Installments paid within THIS cycle only (capped to required_installments),

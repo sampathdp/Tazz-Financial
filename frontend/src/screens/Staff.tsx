@@ -19,6 +19,7 @@ export function StaffScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [search, setSearch] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
   const [modal, setModal] = useState(false)
   const [editing, setEditing] = useState<Staff | null>(null)
   const [form, setForm] = useState<Partial<Staff>>(blankForm())
@@ -77,17 +78,26 @@ export function StaffScreen({ user: me }: { go: Go; user?: AuthUser | null }) {
     } finally { setBusy(false) }
   }
 
+  const shown = rows.filter((r) => !branchFilter || (branchFilter === 'none' ? !r.branchId : String(r.branchId) === branchFilter))
+
   return (
     <div>
-      <PageHead crumbs="Staff" title="Staff Members" icon="users" sub={`${rows.length} ${rows.length === 1 ? 'member' : 'members'}`}
+      <PageHead crumbs="Staff" title="Staff Members" icon="users" sub={`${shown.length} ${shown.length === 1 ? 'member' : 'members'}`}
         actions={<Can user={me} module="Staff" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>Add Staff</Btn></Can>} />
       <Card style={{ marginBottom: 16 }}>
-        <Field label="Search"><Input value={search} placeholder="Staff ID, name, NIC, phone or email" onChange={(e) => setSearch(e.target.value)} style={{ maxWidth: 360 }} /></Field>
+        <div className="row gap-2" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <Field label="Search"><Input value={search} placeholder="Staff ID, name, NIC, phone or email" onChange={(e) => setSearch(e.target.value)} style={{ width: 360, maxWidth: '100%' }} /></Field>
+          <Field label="Branch"><Select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} style={{ minWidth: 200 }}>
+            <option value="">All branches</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            <option value="none">No branch</option>
+          </Select></Field>
+        </div>
       </Card>
       <Card pad={0}>
         {loading ? <LoadingBlock /> :
         <Table cols={[{ label: 'Staff ID' }, { label: 'Name' }, { label: 'NIC' }, { label: 'Phone' }, { label: 'Email' }, { label: 'Branch' }, { label: 'Login', align: 'center' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 190 }]}
-          empty="No staff found" rows={rows}
+          empty="No staff found" rows={shown}
           render={(r) => <>
             <Td mono>{r.staffCode}</Td>
             <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{r.name}{r.designation ? <div style={{ fontWeight: 400, color: 'var(--tx-2)', fontSize: 12 }}>{r.designation}</div> : null}</Td>

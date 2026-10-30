@@ -78,7 +78,8 @@ export const ROUTE_MODULE: Record<string, string> = {
   'rep/exp-vendor': 'Expense Reports',
   'loan/payments': 'Loan Payments',
   'loan/doc-tracking': 'Document Tracking',
-  'loan/commissions': 'Sales Executive Commissions',
+  'rep/loans-commissions': 'Sales Executive Commissions',
+  'rep/fd-commissions': 'Fixed Deposits',
   // 'loan/adjustments', 'ad/approvals', and 'ad/approval-types' are intentionally
   // NOT mapped here — canAccessRoute() below falls back to an admin-only check
   // for any route id absent from this map.
@@ -136,6 +137,7 @@ export const ROUTE_MODULE: Record<string, string> = {
 
 export function canAccessRoute(user: AuthUser | null | undefined, routeId: string): boolean {
   if (!user) return false
+  if (routeId === 'profile') return true // every signed-in user has a profile
   const mod = ROUTE_MODULE[routeId]
   // Unmapped route = either a module that isn't built yet ("soon" nav items,
   // shown to admins as a preview) or one deliberately kept out of the

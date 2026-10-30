@@ -590,6 +590,7 @@ export interface SalesExecutiveCommission {
    *  commission whose previous cycle has already been paid. */
   cycleNo: number;
   loanAmount: number | string; commissionAmount: number | string;
+  disbursedAt?: string | null; closedAt?: string | null;
   /** paidInstallments counts only installments paid within THIS cycle (capped at
    *  requiredInstallments) — not the loan's total paid installments. */
   requiredInstallments: number; paidInstallments: number;
@@ -1989,7 +1990,8 @@ export interface FdCommission {
   commissionStatus: 'Pending' | 'Paid'
   paidAt?: string | null; paymentAmount?: number | string | null; paymentMethod?: PaymentMethod | null; referenceNo?: string | null
   staff?: { id: number; staffCode: string; name: string } | null
-  fixedDeposit?: { id: number; fdNumber: string; principalAmount: number | string; customer?: { id: number; fullName: string; code: string } }
+  paymentNotes?: string | null
+  fixedDeposit?: { id: number; fdNumber: string; principalAmount: number | string; startDate?: string | null; maturityDate?: string | null; status?: string; closedAt?: string | null; termMonths?: number; customer?: { id: number; fullName: string; code: string } }
 }
 export interface FdJointHolderInput { customerId: number; relationship?: string; operatingInstruction?: FdOperatingInstruction }
 export interface FdNomineeInput {
@@ -2435,6 +2437,11 @@ export interface FundingDashboardSummary {
   maturingThisMonth: number; newDepositsToday: number; renewalsThisMonth: number;
   totalSavingsPortfolio: number; activeSavingsAccounts: number; dormantSavingsAccounts: number;
   savingsDepositsToday: number; savingsWithdrawalsToday: number;
+  interestDueAsOf: string; interestDueTotal: number; interestDueCount: number; interestDueOverdueCount: number;
+  interestDueItems: { id: number; fdNumber: string; customerName: string | null; installmentNo: number; dueDate: string; amount: number }[];
+  interestByMonth: { label: string; payable: number; paid: number }[];
+  maturityByMonth: { label: string; amount: number; count: number }[];
+  portfolioByProduct: { label: string; value: number }[];
 }
 
 export const fundingDashboardApi = {
@@ -2798,6 +2805,17 @@ export const staffApi = {
   options: () => http.get('/staff/options').then((r) => camelize(r.data) as StaffOption[]),
   createLogin: (id: number, body: { password: string; roleId: number; branchId?: number | null }) =>
     http.post(`/staff/${id}/create-login`, snakeize(body)).then((r) => { listCache.delete('staff'); return camelize(r.data) as Staff }),
+}
+
+/* My profile: the signed-in user's own achievements. */
+export interface UserAchievement {
+  id: number; title: string; description?: string | null; achievedOn?: string | null;
+}
+export const achievementsApi = {
+  list: () => http.get('/profile/achievements').then((r) => camelize(r.data) as UserAchievement[]),
+  create: (body: Partial<UserAchievement>) => http.post('/profile/achievements', snakeize(body)).then((r) => camelize(r.data) as UserAchievement),
+  update: (id: number, body: Partial<UserAchievement>) => http.put(`/profile/achievements/${id}`, snakeize(body)).then((r) => camelize(r.data) as UserAchievement),
+  remove: (id: number) => http.delete(`/profile/achievements/${id}`).then((r) => r.data),
 }
 
 export type ExpenseStatus = 'Pending' | 'Approved' | 'Rejected' | 'Paid'

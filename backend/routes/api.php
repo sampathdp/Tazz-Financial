@@ -88,6 +88,7 @@ use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\SystemMaintenanceController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\StaffController;
+use App\Http\Controllers\Api\UserAchievementController;
 use App\Http\Controllers\Api\VendorController;
 use Illuminate\Support\Facades\Route;
 
@@ -117,6 +118,12 @@ Route::get('company-profile/logo', [CompanyProfileController::class, 'logo']);
 Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1'])->group(function () {
     Route::get('me', [AuthController::class, 'me']);
     Route::post('logout', [AuthController::class, 'logout']);
+
+    // --- My profile: own achievements (open to every signed-in user, scoped to the caller) ---
+    Route::get('profile/achievements', [UserAchievementController::class, 'index']);
+    Route::post('profile/achievements', [UserAchievementController::class, 'store']);
+    Route::put('profile/achievements/{achievement}', [UserAchievementController::class, 'update']);
+    Route::delete('profile/achievements/{achievement}', [UserAchievementController::class, 'destroy']);
 
     Route::get('dashboard', [DashboardController::class, 'index'])->middleware('perm:Dashboard,View');
 

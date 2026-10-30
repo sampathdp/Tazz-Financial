@@ -40,7 +40,6 @@ export const NAV: NavNode[] = [
     { id: 'loan/overdue', label: 'Overdue Loans', icon: 'alert' },
     { id: 'loan/provisions', label: 'Loan Provisioning', icon: 'shield' },
     { id: 'loan/doc-tracking', label: 'Document Tracking', icon: 'tag' },
-    { id: 'loan/commissions', label: 'Sales Executive Commissions', icon: 'target' },
     /** Admin-only — installment skip / waivers. Intentionally left out of
      *  lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back
      *  to its unmapped-route rule (admin role only), not the permission system. */
@@ -136,6 +135,7 @@ export const NAV: NavNode[] = [
       { id: 'rep/loans-disbursement', label: 'Disbursement', icon: 'upload' },
       { id: 'rep/loans-closed', label: 'Closed Loans', icon: 'check' },
       { id: 'rep/loans-detail', label: 'Loan Detail Report', icon: 'list' },
+      { id: 'rep/loans-commissions', label: 'Sales Executive Commissions', icon: 'target' },
     ] },
     { group: 'Collection Reports', icon: 'receipt', items: [
       { id: 'rep/coll-daily', label: 'Daily Cash Collection', icon: 'wallet' },
@@ -152,6 +152,7 @@ export const NAV: NavNode[] = [
     { group: 'Investor Reports', icon: 'pie', items: [
       { id: 'rep/inv-summary', label: 'Investor Summary', icon: 'pie' },
       { id: 'rep/inv-directory', label: 'Investor Directory', icon: 'list' },
+      { id: 'rep/fd-commissions', label: 'FD Commissions', icon: 'target' },
     ] },
     { group: 'Pawn Reports', icon: 'tag', items: [
       { id: 'rep/pawn', label: 'Pawn Reports', icon: 'tag', soon: true },
@@ -354,7 +355,7 @@ export function Topbar({ setOpen, go, user }: { setOpen: (fn: (o: boolean) => bo
       <div className="row gap-3">
         <ThemeToggle />
         <NotificationBell />
-        <div className="row gap-2" style={{ paddingLeft: 6, borderLeft: '1px solid var(--line)' }}>
+        <div className="row gap-2" style={{ paddingLeft: 6, borderLeft: '1px solid var(--line)', cursor: 'pointer' }} title="My profile" onClick={() => go('profile')}>
           <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--bg-3)', border: '1px solid var(--line)', display: 'grid', placeItems: 'center', fontFamily: 'Saira', fontWeight: 700, fontSize: 13, color: 'var(--ac-bright)' }}>{initials}</div>
           <div className="hide-sm" style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{displayName}</div>
@@ -363,7 +364,8 @@ export function Topbar({ setOpen, go, user }: { setOpen: (fn: (o: boolean) => bo
             className="mms-icobtn"
             title="Logout"
             aria-label="Logout"
-            onClick={async () => {
+            onClick={async (e) => {
+              e.stopPropagation()
               try { await auth.logout() } catch {}
               auth.setToken(null)
               window.location.reload()

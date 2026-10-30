@@ -28,7 +28,8 @@ const DocumentTrackingScreen = lazy(() => import('./screens/DocumentTracking').t
 const BlacklistScreen = lazy(() => import('./screens/Blacklist').then((m) => ({ default: m.BlacklistScreen })))
 const LoanAdjustmentsScreen = lazy(() => import('./screens/LoanAdjustments').then((m) => ({ default: m.LoanAdjustmentsScreen })))
 const ChequeClearanceScreen = lazy(() => import('./screens/ChequeClearance').then((m) => ({ default: m.ChequeClearanceScreen })))
-const SalesExecutiveCommissionsScreen = lazy(() => import('./screens/SalesExecutiveCommissions').then((m) => ({ default: m.SalesExecutiveCommissionsScreen })))
+const FdCommissionsScreen = lazy(() => import('./screens/FdCommissions').then((m) => ({ default: m.FdCommissionsScreen })))
+const SalesExecutiveCommissionsScreen =lazy(() => import('./screens/SalesExecutiveCommissions').then((m) => ({ default: m.SalesExecutiveCommissionsScreen })))
 const SpeedDraftTypesScreen = lazy(() => import('./screens/SpeedDraftTypes').then((m) => ({ default: m.SpeedDraftTypesScreen })))
 const SpeedDraftsScreen = lazy(() => import('./screens/SpeedDrafts').then((m) => ({ default: m.SpeedDraftsScreen })))
 const SpeedDraftPaymentReceiptScreen = lazy(() => import('./screens/PaymentReceipt').then((m) => ({ default: m.SpeedDraftPaymentReceiptScreen })))
@@ -98,6 +99,7 @@ const LedgerDriftScreen = named(() => import('./screens/Accounting'), 'LedgerDri
 
 const VendorsScreen = named(() => import('./screens/Expenses'), 'VendorsScreen')
 const StaffScreen = named(() => import('./screens/Staff'), 'StaffScreen')
+const ProfileScreen = named(() => import('./screens/Profile'), 'ProfileScreen')
 const ExpensesScreen = named(() => import('./screens/Expenses'), 'ExpensesScreen')
 const PaymentVouchersScreen = named(() => import('./screens/Expenses'), 'PaymentVouchersScreen')
 const PettyCashScreen = named(() => import('./screens/PettyCash'), 'PettyCashScreen')
@@ -204,7 +206,8 @@ const SCREENS: Record<string, ScreenComp> = {
   'loan/cheques': ChequeClearanceScreen,
   'loan/adjustments': LoanAdjustmentsScreen,
   'blacklist': BlacklistScreen,
-  'loan/commissions': SalesExecutiveCommissionsScreen,
+  'rep/loans-commissions': SalesExecutiveCommissionsScreen,
+  'rep/fd-commissions': FdCommissionsScreen,
   'sd/types': SpeedDraftTypesScreen,
   'sd/drafts': SpeedDraftsScreen,
   'sd/payments': SpeedDraftPaymentReceiptScreen,
@@ -240,6 +243,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'acc/drift': LedgerDriftScreen,
   'exp/vendors': VendorsScreen,
   'exp/staff': StaffScreen,
+  'profile': ProfileScreen,
   'exp/expenses': ExpensesScreen,
   'exp/vouchers': PaymentVouchersScreen,
   'exp/petty-cash': PettyCashScreen,
@@ -287,7 +291,7 @@ const SCREENS: Record<string, ScreenComp> = {
 // Every nav entry (built screens + "soon" placeholders) gets a real route, so
 // every screen in the system has its own URL and its own browser-history
 // entry — that's what makes Back/Forward and refresh behave correctly.
-const ROUTE_IDS = Object.keys(flatNav)
+const ROUTE_IDS = [...Object.keys(flatNav), 'profile']
 
 // Screens with a list + create/edit/detail flow also get /new and /:id
 // sibling routes, so which record/form is open lives in the URL — that's

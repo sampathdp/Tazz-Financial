@@ -24,7 +24,7 @@ class FdCommissionController extends Controller
 {
     private const PAYMENT_METHODS = ['Cash', 'Bank', 'Cheque'];
 
-    private const RELATIONS = ['fixedDeposit:id,fd_number,customer_id,principal_amount,start_date,term_months,renewed_from_id', 'fixedDeposit.customer:id,full_name,code', 'staff:id,staff_code,name'];
+    private const RELATIONS = ['fixedDeposit:id,fd_number,customer_id,principal_amount,start_date,maturity_date,status,closed_at,term_months,renewed_from_id', 'fixedDeposit.customer:id,full_name,code', 'staff:id,staff_code,name'];
 
     public function index(Request $request)
     {
