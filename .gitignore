@@ -1,2 +1,10 @@
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Never commit database dumps, backups or binaries
+/*.sql
+backend/storage/backups/
+*.sql.gz
+*.dump
+backend/vendor.zip
+backend/composer.phar
