@@ -62,6 +62,10 @@ class PettyCashVoucherController extends Controller
             $spentAt = $data['spent_at'] ?? now()->toDateString();
 
             $fundLocked = PettyCashFund::lockForUpdate()->findOrFail($fund->id);
+            // The checks above used a stale read: re-check on the locked row so two vouchers cannot overspend the float.
+            if ($fundLocked->status !== 'Active' || bccomp((string) $fundLocked->current_balance, (string) $data['amount'], 2) < 0) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['amount' => "Insufficient petty cash balance - this float only holds {$fundLocked->current_balance}."]);
+            }
             $outAccount = ChartOfAccount::forPettyCashFund($fundLocked);
             $fundLocked->update(['current_balance' => bcsub((string) $fundLocked->current_balance, (string) $data['amount'], 2)]);
 
@@ -107,6 +111,9 @@ class PettyCashVoucherController extends Controller
 
         DB::transaction(function () use ($pettyCashVoucher, $data, $request) {
             $fund = PettyCashFund::lockForUpdate()->findOrFail($pettyCashVoucher->petty_cash_fund_id);
+            if (PettyCashVoucher::lockForUpdate()->findOrFail($pettyCashVoucher->id)->status === 'Voided') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['voucher' => 'This voucher is already voided.']);
+            }
             $fund->update(['current_balance' => bcadd((string) $fund->current_balance, (string) $pettyCashVoucher->amount, 2)]);
 
             if ($pettyCashVoucher->journal_entry_id) {

@@ -82,6 +82,10 @@ class SalesExecutiveCommissionController extends Controller
 
         try {
             DB::transaction(function () use ($commission, $data, $request) {
+                // Lock + re-check: two simultaneous pays must pay once and start only one next cycle.
+                if (SalesExecutiveCommission::lockForUpdate()->findOrFail($commission->id)->paid_at) {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['commission' => 'This commission has already been paid.']);
+                }
                 $amount = number_format((float) $data['payment_amount'], 2, '.', '');
                 $isCash = $data['payment_method'] === 'Cash';
 
@@ -158,6 +162,9 @@ class SalesExecutiveCommissionController extends Controller
         $amount = (float) $commission->payment_amount;
 
         DB::transaction(function () use ($commission, $amount, $request) {
+            if (!SalesExecutiveCommission::lockForUpdate()->findOrFail($commission->id)->paid_at) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['commission' => 'This commission has not been paid.']);
+            }
             $txn = \App\Models\FinanceTransaction::where('source_module', 'SalesExecutiveCommission')
                 ->where('source_id', $commission->id)->where('status', 'Completed')->latest('id')->first();
             if ($txn) {

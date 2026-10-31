@@ -24,6 +24,19 @@ use Illuminate\Validation\ValidationException;
 class FinanceRequestService
 {
     /**
+     * Locks the request row and refreshes it; refuses if another user already moved it out of the expected status.
+     * The status checks before the transaction used a stale read (e.g. a cancel racing an execute).
+     */
+    private static function lockStatus(FinanceRequest $request, array $allowed): void
+    {
+        $locked = FinanceRequest::lockForUpdate()->findOrFail($request->id);
+        if (!in_array($locked->status, $allowed, true)) {
+            throw new \App\Exceptions\FinancePostingException("This request is now {$locked->status} - another user has already acted on it.");
+        }
+        $request->setRawAttributes($locked->getAttributes(), true);
+    }
+
+    /**
      * Creates a request. Pass submit=true to route it for approval
      * immediately (the normal path — a Draft is only for a UI "save for
      * later").
@@ -104,6 +117,7 @@ class FinanceRequestService
         $route = ApprovalRouter::route($code, $request->branch_id, (float) $request->amount);
 
         return DB::transaction(function () use ($request, $type, $route, $userId) {
+            self::lockStatus($request, ['Draft']);
             $approval = ApprovalRequest::create([
                 'approval_type_id' => $type->id,
                 'subject_id' => $request->id,
@@ -144,6 +158,8 @@ class FinanceRequestService
         }
 
         return DB::transaction(function () use ($request, $approval, $userId) {
+            self::lockStatus($request, ['PendingApproval']);
+            $approval->lockPending();
             try {
                 $complete = $approval->recordApproval($userId);
             } catch (\RuntimeException $e) {
@@ -178,6 +194,7 @@ class FinanceRequestService
         }
 
         DB::transaction(function () use ($request, $approval, $userId, $reason) {
+            self::lockStatus($request, ['PendingApproval']);
             if ($approval) {
                 $approval->update([
                     'status' => 'Rejected',
@@ -206,6 +223,7 @@ class FinanceRequestService
         }
 
         DB::transaction(function () use ($request) {
+            self::lockStatus($request, FinanceRequest::CANCELLABLE);
             if ($request->approvalRequest && $request->approvalRequest->status === 'PendingApproval') {
                 $request->approvalRequest->delete();
             }
@@ -287,6 +305,7 @@ class FinanceRequestService
             : [];
 
         DB::transaction(function () use ($request, $userId, $amount, $entryDate, $movements, $glLines, $glSource, $srcType, $srcId) {
+            self::lockStatus($request, ['ReadyForPayment']);
             $request->update(['status' => 'Processing']);
 
             $txn = FinancePostingService::execute($glSource + [
@@ -352,6 +371,7 @@ class FinanceRequestService
         }
 
         DB::transaction(function () use ($request, $userId, $amount, $entryDate, $srcType, $srcId, $srcLeaf, $dType, $dId, $dLeaf) {
+            self::lockStatus($request, ['ReadyForPayment']);
             $request->update(['status' => 'Processing']);
             $txn = FinancePostingService::execute([
                 'txn_type' => $request->txnType(),
@@ -409,6 +429,7 @@ class FinanceRequestService
         $transitLeaf = ChartOfAccount::forCashTill($transit);
 
         DB::transaction(function () use ($request, $userId, $amount, $srcType, $srcId, $srcLeaf, $transit, $transitLeaf, $meta) {
+            self::lockStatus($request, ['ReadyForPayment']);
             $txn = FinancePostingService::execute([
                 'txn_type' => 'TRANSFER',
                 'amount' => $amount,
@@ -462,6 +483,7 @@ class FinanceRequestService
         [$dType, $dId, $dLeaf] = self::resolveTransferEndpoint('dest', [], $meta);
 
         DB::transaction(function () use ($request, $userId, $amount, $transit, $transitLeaf, $dType, $dId, $dLeaf) {
+            self::lockStatus($request, ['InTransit']);
             $txn = FinancePostingService::execute([
                 'txn_type' => 'TRANSFER',
                 'amount' => $amount,
@@ -509,6 +531,7 @@ class FinanceRequestService
         }
 
         DB::transaction(function () use ($request, $releaseTxn, $userId, $reason) {
+            self::lockStatus($request, ['InTransit']);
             FinancePostingService::reverse($releaseTxn, "Recalled: {$request->code} — {$reason}", $userId);
             $request->update(['status' => 'Cancelled', 'reject_reason' => $reason, 'closed_at' => now()]);
         });

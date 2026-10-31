@@ -9,7 +9,7 @@
    close the loan or become printable until a Branch Manager approves it.
    Posts to the same loans/{loan}/payments endpoint the Active Loans > Receipts
    tab uses, so history and outstanding balances stay in sync either way. */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, BankSelect, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
@@ -318,6 +318,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [payChequeDate, setPayChequeDate] = useState(todayIso())
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
+  const recordingRef = useRef(false)
   const [err, setErr] = useState('')
   // Manual allocation — cashier splits the amount across buckets instead of the
   // automatic waterfall; held PendingApproval until a top-level user approves it
@@ -469,10 +470,12 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   ]
 
   const record = async () => {
-    if (!selected) return
+    if (!selected || recordingRef.current) return
     if (!amount || Number(amount) <= 0) { setErr('Enter a payment amount.'); return }
     if (method === 'Cheque' && (!payBankId || !payChequeDate)) { setErr('Bank and Cheque Date are required for a cheque payment.'); return }
     if (allocationMode === 'manual' && Math.abs(allocTotal - Number(amount)) > 0.01) { setErr('The allocation split must add up to the payment amount.'); return }
+    // Synchronous guard: `busy` state only updates after a re-render, so a fast double-click slips past it.
+    recordingRef.current = true
     setBusy(true); setErr('')
     try {
       const balanceBefore = outstandingOf(selected)
@@ -497,7 +500,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       refresh()
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Payment failed'))
-    } finally { setBusy(false) }
+    } finally { recordingRef.current = false; setBusy(false) }
   }
 
   const submitSettlement = async () => {

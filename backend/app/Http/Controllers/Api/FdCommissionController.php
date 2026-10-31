@@ -141,6 +141,9 @@ class FdCommissionController extends Controller
 
         try {
             DB::transaction(function () use ($commission, $data, $request, $label) {
+                if (FdCommission::lockForUpdate()->findOrFail($commission->id)->paid_at) {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['commission' => 'This commission has already been paid.']);
+                }
                 $amount = number_format((float) $data['payment_amount'], 2, '.', '');
                 $isCash = $data['payment_method'] === 'Cash';
 
@@ -199,6 +202,9 @@ class FdCommissionController extends Controller
         }
 
         DB::transaction(function () use ($commission, $request) {
+            if (!FdCommission::lockForUpdate()->findOrFail($commission->id)->paid_at) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['commission' => 'This commission has not been paid.']);
+            }
             $txn = FinanceTransaction::where('source_module', 'FdCommission')
                 ->where('source_id', $commission->id)->where('status', 'Completed')->latest('id')->first();
             if ($txn) {

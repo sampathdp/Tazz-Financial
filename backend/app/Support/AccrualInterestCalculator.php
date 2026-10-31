@@ -97,7 +97,7 @@ class AccrualInterestCalculator
             // elsewhere — a manual waiver isn't tied to one specific installment
             // row, so it's consumed against the facility's own slices in
             // chronological order.
-            $waiverByFacility = DB::table('facility_waivers')
+            $waiverByFacility = DB::table('facility_waivers')->whereNull('voided_at')
                 ->whereIn('credit_facility_id', $chunk)
                 ->where('waiver_type', 'Interest')
                 ->selectRaw('credit_facility_id, SUM(amount) as total')

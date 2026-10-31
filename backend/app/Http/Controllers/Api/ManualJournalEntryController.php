@@ -124,6 +124,11 @@ class ManualJournalEntryController extends Controller
         }
 
         DB::transaction(function () use ($manualJournalEntry, $req, $request) {
+            // Lock + re-check: two approvers acting together must post the journal once.
+            $req->lockPending();
+            if (ManualJournalEntry::lockForUpdate()->findOrFail($manualJournalEntry->id)->status !== 'PendingApproval') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['entry' => 'Only a pending manual journal entry can be approved.']);
+            }
             if (!$req->first_approved_by) {
                 $req->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {
@@ -167,6 +172,10 @@ class ManualJournalEntryController extends Controller
         $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);
 
         DB::transaction(function () use ($manualJournalEntry, $data, $req, $request) {
+            // A reject racing an approve must not overwrite an entry that was already posted to the ledger.
+            if (ManualJournalEntry::lockForUpdate()->findOrFail($manualJournalEntry->id)->status !== 'PendingApproval') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['entry' => 'Only a pending manual journal entry can be rejected.']);
+            }
             $manualJournalEntry->update(['status' => 'Rejected', 'reject_reason' => $data['reject_reason'] ?? null]);
             if ($req) {
                 $req->update([

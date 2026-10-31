@@ -223,6 +223,22 @@ class PawningController extends Controller
      * outstanding balance — clearing it entirely is a redemption, not a
      * renewal (use redeem() instead).
      */
+    /**
+     * Locks the ticket row and refuses if it moved since the caller's pre-transaction read (another renewal,
+     * redemption or void). The amounts quoted to the cashier were computed from that read, so they must still hold.
+     */
+    private function lockTicket(Pawning $pawning, ?float $expectedOutstanding = null, bool $mustBeActive = true): Pawning
+    {
+        $locked = Pawning::lockForUpdate()->findOrFail($pawning->id);
+        $moved = $expectedOutstanding !== null && abs((float) $locked->outstanding_balance_cache - $expectedOutstanding) > 0.005;
+        if (($mustBeActive && $locked->status !== 'Active') || $moved) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['pawning' => 'This ticket changed while the request was being processed (another renewal, redemption or void). Reload and try again.']);
+        }
+        $pawning->setRawAttributes($locked->getAttributes(), true);
+
+        return $pawning;
+    }
+
     public function renew(Request $request, Pawning $pawning)
     {
         if ($pawning->status !== 'Active') {
@@ -249,6 +265,7 @@ class PawningController extends Controller
         }
 
         $pawning = DB::transaction(function () use ($pawning, $data, $capitalPaid, $quote, $amount, $outstanding, $asOf, $request) {
+            $this->lockTicket($pawning, $outstanding);
             $detail = $pawning->pawningDetail()->with('pawningType')->firstOrFail();
             $branch = Branch::findOrFail($pawning->branch_id);
             $method = $data['payment_method'] ?? 'Cash';
@@ -367,6 +384,11 @@ class PawningController extends Controller
         }
 
         $pawning = DB::transaction(function () use ($pawning, $data, $releaseIds, $capitalSettled, $interestSettled, $totalSettled, $pledged, $outstanding, $request) {
+            $this->lockTicket($pawning, $outstanding);
+            $stillPledged = FacilityCollateralPawnDetail::whereIn('facility_collateral_id', $releaseIds)->where('item_status', 'Pledged')->lockForUpdate()->count();
+            if ($stillPledged !== count($releaseIds)) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['facility_collateral_ids' => 'One or more selected articles are no longer pledged on this ticket.']);
+            }
             $branch = Branch::findOrFail($pawning->branch_id);
             $method = $data['payment_method'] ?? 'Cash';
 
@@ -452,6 +474,12 @@ class PawningController extends Controller
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
 
         $pawning = DB::transaction(function () use ($pawning, $payment, $data, $request) {
+            $this->lockTicket($pawning, null, false);
+            $livePayment = FacilityPayment::lockForUpdate()->findOrFail($payment->id);
+            $latestNow = $pawning->payments()->where('status', 'Active')->orderByDesc('paid_at')->orderByDesc('id')->first();
+            if ($livePayment->status !== 'Active' || !$latestNow || $latestNow->id !== $payment->id) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['payment' => 'This payment was already voided or is no longer the most recent on the ticket.']);
+            }
             $renewal = PawningRenewal::where('facility_payment_id', $payment->id)->first();
             $redemption = $renewal ? null : PawningRedemption::where('facility_payment_id', $payment->id)->first();
 
@@ -461,7 +489,7 @@ class PawningController extends Controller
                     'renewal_count' => max(0, $renewal->renewal_no - 1),
                 ]);
                 $pawning->update(['outstanding_balance_cache' => $renewal->capital_before]);
-                $renewal->delete();
+                $renewal->markVoided($request->user()->id, $data['void_reason'] ?? 'Payment voided');
             } elseif ($redemption) {
                 $releasedIds = $redemption->items()->pluck('id');
                 FacilityCollateralPawnDetail::whereIn('facility_collateral_id', $releasedIds)->update(['item_status' => 'Pledged']);
@@ -471,7 +499,7 @@ class PawningController extends Controller
                 if ($pawning->status === 'Closed') {
                     $pawning->update(['status' => 'Active', 'closed_at' => null]);
                 }
-                $redemption->delete();
+                $redemption->markVoided($request->user()->id, $data['void_reason'] ?? 'Payment voided');
             } else {
                 abort(422, 'Cannot determine what this payment settled — nothing to void.');
             }

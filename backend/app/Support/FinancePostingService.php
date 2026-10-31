@@ -223,6 +223,11 @@ class FinancePostingService
         }
 
         return DB::transaction(function () use ($txn, $reason, $userId) {
+            // Re-read under lock: two simultaneous reversals must not both pass the check above.
+            $txn->setRawAttributes(FinanceTransaction::lockForUpdate()->findOrFail($txn->id)->getAttributes(), true);
+            if ($txn->status === 'Reversed') {
+                throw new FinancePostingException('This transaction has already been reversed.');
+            }
             $inverse = [];
             foreach ([['source_account_type', 'source_account_id'], ['dest_account_type', 'dest_account_id']] as [$typeCol, $idCol]) {
                 if ($txn->$typeCol && $txn->$idCol) {

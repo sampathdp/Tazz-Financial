@@ -55,7 +55,7 @@ class VerifySchema extends Command
     /** table.column that must carry a unique index */
     private const UNIQUE = [
         'facility_payments.code', 'credit_facilities.code', 'finance_transactions.code', 'finance_transactions.idempotency_key',
-        'journal_entries.code', 'customers.code', 'fd_withdrawals.fixed_deposit_id',
+        'journal_entries.code', 'customers.code', 'fd_withdrawals.live_fd_id',
     ];
 
     public function handle(): int

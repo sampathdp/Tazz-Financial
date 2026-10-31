@@ -150,6 +150,10 @@ class FixedAssetController extends Controller
             return response()->json(['message' => 'This asset already has depreciation or a disposal posted, so it cannot be deleted. Dispose of it instead.'], 422);
         }
         DB::transaction(function () use ($request, $fixedAsset) {
+            $live = FixedAsset::lockForUpdate()->findOrFail($fixedAsset->id);
+            if ($live->status === 'Disposed' || $live->depreciations()->exists() || $live->disposal()->exists()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['asset' => 'This asset already has depreciation or a disposal posted, so it cannot be deleted.']);
+            }
             FixedAssetLedgerPoster::reverseAcquisition($fixedAsset, $request->user()->id);
             $fixedAsset->delete();
         });
@@ -186,6 +190,12 @@ class FixedAssetController extends Controller
         }
 
         $disposal = DB::transaction(function () use ($fixedAsset, $data, $request) {
+            // Lock + re-check: a second disposal (or a depreciation run) landing first must not be overwritten.
+            $live = FixedAsset::lockForUpdate()->findOrFail($fixedAsset->id);
+            if ($live->status === 'Disposed') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['asset' => 'This asset has already been disposed.']);
+            }
+            $fixedAsset->setRawAttributes($live->getAttributes(), true);
             $disposal = FixedAssetLedgerPoster::postDisposal($fixedAsset->load('category'), $data, $request->user()->id);
             $fixedAsset->update(['status' => 'Disposed']);
 

@@ -274,6 +274,7 @@ class LoanPaymentController extends Controller
         }
 
         DB::transaction(function () use ($loan, $payment, $quote, $req, $request) {
+            $req->lockPending();
             if (!$req->first_approved_by) {
                 $req->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {
@@ -365,6 +366,11 @@ class LoanPaymentController extends Controller
                 return response()->json(['message' => "The outstanding balance has changed since this cheque was recorded (now {$outstanding}). Reject it and ask the cashier to re-record the payment."], 422);
             }
             DB::transaction(function () use ($loan, $payment, $asOf) {
+                // Same lock as store(): serialise with other payments, and make sure two "Realize" clicks apply the cheque once.
+                Loan::whereKey($loan->id)->lockForUpdate()->first();
+                if (FacilityPayment::lockForUpdate()->findOrFail($payment->id)->clearance_status !== 'Pending') {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['status' => 'This payment is not a pending cheque awaiting clearance.']);
+                }
                 LoanPaymentAllocator::applyAllocation($loan, $payment, (float) $payment->amount, $asOf);
                 $payment->update(['clearance_status' => 'Realized', 'realized_at' => $asOf]);
                 LoanLedgerPoster::postChequeRealized($payment);
@@ -378,6 +384,9 @@ class LoanPaymentController extends Controller
             // allocation and reverse its "Cheque realized" journal entry.
             DB::transaction(function () use ($payment, $request) {
                 Loan::whereKey($payment->credit_facility_id)->lockForUpdate()->first();
+                if (FacilityPayment::lockForUpdate()->findOrFail($payment->id)->status === 'Voided') {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['status' => 'This payment is already voided.']);
+                }
                 $payment->update([
                     'clearance_status' => 'Bounced',
                     'status' => 'Voided',
@@ -453,6 +462,7 @@ class LoanPaymentController extends Controller
         $payment->load(['allocations.schedule', 'chargeAllocations.charge']);
 
         DB::transaction(function () use ($voidRequest, $payment, $request) {
+            $voidRequest->lockPending();
             if (!$voidRequest->first_approved_by) {
                 $voidRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {
@@ -539,6 +549,7 @@ class LoanPaymentController extends Controller
         }
 
         DB::transaction(function () use ($loan, $payment, $allocationRequest, $request) {
+            $allocationRequest->lockPending();
             if (!$allocationRequest->first_approved_by) {
                 $allocationRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {

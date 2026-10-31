@@ -116,6 +116,10 @@ class SavingsInterestController extends Controller
         }
 
         DB::transaction(function () use ($savingsInterestRun, $computed, $to, $request) {
+            // Another request may have posted this run since the check above.
+            if (SavingsInterestRun::lockForUpdate()->findOrFail($savingsInterestRun->id)->status !== 'Draft') {
+                throw ValidationException::withMessages(['run' => 'This run is not a Draft.']);
+            }
             foreach ($computed['rows'] as $row) {
                 $account = SavingsAccount::with('savingsProduct', 'branch')->find($row['account_id']);
                 $txn = SavingsAccountService::record($account, [
@@ -152,6 +156,9 @@ class SavingsInterestController extends Controller
         }
 
         DB::transaction(function () use ($savingsInterestRun, $request) {
+            if (SavingsInterestRun::lockForUpdate()->findOrFail($savingsInterestRun->id)->status !== 'Posted') {
+                throw ValidationException::withMessages(['run' => 'Only a Posted run can be voided.']);
+            }
             SavingsLedgerPoster::reverseInterestRun($savingsInterestRun, $request->user()->id);
 
             foreach ($savingsInterestRun->transactions()->where('status', 'Posted')->get() as $txn) {

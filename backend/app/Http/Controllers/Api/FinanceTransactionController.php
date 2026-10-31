@@ -11,6 +11,7 @@ use App\Models\FinanceTransaction;
 use App\Support\CurrentBranch;
 use App\Support\FinancePostingService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The immutable money-movement ledger (finance_transactions) — read-only
@@ -111,16 +112,23 @@ class FinanceTransactionController extends Controller
         if ($approvalRequest->requested_by === $request->user()->id) {
             return response()->json(['message' => 'You cannot approve your own reversal request.'], 422);
         }
+        // One transaction: the approval slot, the reversal and the request status stand or fall together. If the
+        // reversal is refused (e.g. the account would go negative) the approval is not left consumed.
         try {
-            $complete = $approvalRequest->recordApproval($request->user()->id);
+            DB::transaction(function () use ($approvalRequest, $request) {
+                $locked = ApprovalRequest::lockForUpdate()->findOrFail($approvalRequest->id);
+                if ($locked->status !== 'PendingApproval') {
+                    throw new \RuntimeException('This request is not pending approval.');
+                }
+                $complete = $locked->recordApproval($request->user()->id);
+                if ($complete) {
+                    $ftx = FinanceTransaction::findOrFail($locked->subject_id);
+                    FinancePostingService::reverse($ftx, $locked->reason ?? 'Approved reversal', $request->user()->id);
+                    $locked->update(['status' => 'Approved']);
+                }
+            });
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
-        }
-
-        if ($complete) {
-            $ftx = FinanceTransaction::findOrFail($approvalRequest->subject_id);
-            FinancePostingService::reverse($ftx, $approvalRequest->reason ?? 'Approved reversal', $request->user()->id);
-            $approvalRequest->update(['status' => 'Approved']);
         }
 
         return $approvalRequest->fresh()->load('requester:id,name', 'firstApprover:id,name');

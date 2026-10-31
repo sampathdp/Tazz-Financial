@@ -60,11 +60,13 @@ class CashAccountController extends Controller
                 return response()->json(['message' => 'This till already has transactions, so its opening balance cannot be changed. Post an adjustment instead.'], 422);
             }
         }
-        $cashAccount->update($data);
-        // Keep the ledger account's name and status in step with the till.
-        if ($cashAccount->chart_of_account_id) {
-            \App\Models\ChartOfAccount::whereKey($cashAccount->chart_of_account_id)->update(['name' => "Cash in Hand - {$cashAccount->name}", 'status' => $cashAccount->status]);
-        }
+        \Illuminate\Support\Facades\DB::transaction(function () use ($cashAccount, $data) {
+            $cashAccount->update($data);
+            // Keep the ledger account's name and status in step with the till.
+            if ($cashAccount->chart_of_account_id) {
+                \App\Models\ChartOfAccount::whereKey($cashAccount->chart_of_account_id)->update(['name' => "Cash in Hand - {$cashAccount->name}", 'status' => $cashAccount->status]);
+            }
+        });
 
         return $cashAccount->load('branch:id,name,code');
     }

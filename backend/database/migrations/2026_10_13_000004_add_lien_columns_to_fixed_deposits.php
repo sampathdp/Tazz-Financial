@@ -38,7 +38,7 @@ return new class extends Migration
         Schema::table('fd_withdrawals', function (Blueprint $table) {
             $table->dropConstrainedForeignId('settled_credit_facility_id');
         });
-        DB::statement('ALTER TABLE `fixed_deposits` DROP CHECK `chk_fd_lien`');
+        DB::statement('ALTER TABLE `fixed_deposits` DROP CONSTRAINT `chk_fd_lien`');
         Schema::table('fixed_deposits', function (Blueprint $table) {
             $table->dropIndex(['lien_amount']);
             $table->dropColumn('lien_amount');

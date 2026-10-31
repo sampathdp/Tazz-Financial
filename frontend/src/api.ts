@@ -52,6 +52,9 @@ http.interceptors.request.use((cfg) => {
     const prior = sig ? pendingKeys.get(sig) : undefined
     const key = prior && Date.now() - prior.ts < PENDING_KEY_TTL ? prior.key : genReqId()
     cfg.headers['Idempotency-Key'] = key
+    // Hold the key while the request is still in flight too, so a double-click sends the
+    // identical key and the server dedupes it. settleWriteKey() drops it on a definite answer.
+    if (sig) pendingKeys.set(sig, { key, ts: Date.now() })
   }
   return cfg
 })

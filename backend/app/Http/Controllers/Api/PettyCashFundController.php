@@ -23,10 +23,13 @@ class PettyCashFundController extends Controller
     {
         $data = $this->validated($request);
         $branch = Branch::findOrFail($data['branch_id']);
-        $code = NumberGenerator::next('petty_cash_fund', ['branch_code' => $branch->code]);
+        $fund = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $branch) {
+            $code = NumberGenerator::next('petty_cash_fund', ['branch_code' => $branch->code]);
+            $fund = PettyCashFund::create($data + ['code' => $code, 'current_balance' => 0]);
+            NumberGenerator::attach($code, $fund);
 
-        $fund = PettyCashFund::create($data + ['code' => $code, 'current_balance' => 0]);
-        NumberGenerator::attach($code, $fund);
+            return $fund;
+        });
 
         return response()->json($fund->load('branch:id,name,code', 'custodian:id,name'), 201);
     }

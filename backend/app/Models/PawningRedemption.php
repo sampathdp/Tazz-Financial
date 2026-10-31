@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class PawningRedemption extends Model
 {
+    use \App\Models\Concerns\HasVoidedRows;
+
     // No created_at/updated_at columns on this table — settled_at is the domain timestamp.
     public $timestamps = false;
 

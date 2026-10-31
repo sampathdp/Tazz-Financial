@@ -168,6 +168,7 @@ class PawningAuctionController extends Controller
         ]);
 
         $item = DB::transaction(function () use ($pawningAuctionItem, $data, $request) {
+            $this->lockLot($pawningAuctionItem, 'Listed');
             $owed = (float) $pawningAuctionItem->outstanding_capital + (float) $pawningAuctionItem->outstanding_interest;
             $surplus = max(0, round($data['hammer_price'] - $owed, 2));
 
@@ -202,15 +203,28 @@ class PawningAuctionController extends Controller
         return $item->fresh();
     }
 
+    /** Locks the lot and refuses if another request already sold, settled or unlisted it. */
+    private function lockLot(PawningAuctionItem $item, string $status, ?string $settlement = null): void
+    {
+        $locked = PawningAuctionItem::lockForUpdate()->findOrFail($item->id);
+        if ($locked->status !== $status || ($settlement !== null && $locked->settlement_status !== $settlement)) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['lot' => 'This lot was already processed by another request.']);
+        }
+        $item->setRawAttributes($locked->getAttributes(), true);
+    }
+
     /** No bidder met reserve — the article stays Pledged, eligible for a future auction round. */
     public function markUnsold(PawningAuctionItem $pawningAuctionItem)
     {
         if ($pawningAuctionItem->status !== 'Listed') {
             return response()->json(['message' => 'Only a Listed lot can be marked unsold.'], 422);
         }
-        $pawningAuctionItem->update(['status' => 'Unsold']);
+        $changed = PawningAuctionItem::whereKey($pawningAuctionItem->id)->where('status', 'Listed')->update(['status' => 'Unsold']);
+        if (!$changed) {
+            return response()->json(['message' => 'Only a Listed lot can be marked unsold.'], 422);
+        }
 
-        return $pawningAuctionItem;
+        return $pawningAuctionItem->fresh();
     }
 
     /** Pays out a Sold lot's surplus to the pledger — Dr 2110, Cr till (PawningLedgerPoster::postSurplusRefund). */
@@ -224,6 +238,7 @@ class PawningAuctionController extends Controller
         }
 
         DB::transaction(function () use ($pawningAuctionItem, $request) {
+            $this->lockLot($pawningAuctionItem, 'Sold', 'Pending');
             $pawningAuctionItem->update(['settlement_status' => 'Refunded']);
             PawningLedgerPoster::postSurplusRefund($pawningAuctionItem, $request->user()->id);
         });
@@ -242,6 +257,7 @@ class PawningAuctionController extends Controller
         }
 
         DB::transaction(function () use ($pawningAuctionItem, $request) {
+            $this->lockLot($pawningAuctionItem, 'Sold', 'Pending');
             $pawningAuctionItem->update(['settlement_status' => 'Forfeited']);
             PawningLedgerPoster::postSurplusForfeiture($pawningAuctionItem, $request->user()->id);
         });

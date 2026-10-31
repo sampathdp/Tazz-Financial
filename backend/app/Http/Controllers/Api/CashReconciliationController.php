@@ -151,14 +151,19 @@ class CashReconciliationController extends Controller
             return response()->json(['message' => 'This reconciliation has a variance — only an approver for cash reconciliation variances can sign it off.'], 403);
         }
 
-        $cashReconciliation->update([
-            'status' => 'Verified',
-            'verified_by' => $request->user()->id,
-            'verified_at' => now(),
-            'locked_at' => now(),
-        ]);
-
-        CashAccount::where('branch_id', $cashReconciliation->branch_id)->update(['last_reconciled_at' => now()]);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($cashReconciliation, $request) {
+            // Conditional claim: two simultaneous verifications sign it off once.
+            $claimed = CashReconciliation::whereKey($cashReconciliation->id)->where('status', '!=', 'Verified')->update([
+                'status' => 'Verified',
+                'verified_by' => $request->user()->id,
+                'verified_at' => now(),
+                'locked_at' => now(),
+            ]);
+            if (!$claimed) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['status' => 'This reconciliation is already verified.']);
+            }
+            CashAccount::where('branch_id', $cashReconciliation->branch_id)->update(['last_reconciled_at' => now()]);
+        });
 
         return $cashReconciliation->fresh()->load(['branch:id,name,code', 'reconciler:id,name', 'verifier:id,name']);
     }
@@ -168,7 +173,10 @@ class CashReconciliationController extends Controller
         if ($cashReconciliation->locked_at) {
             return response()->json(['message' => 'A verified reconciliation cannot be deleted.'], 422);
         }
-        $cashReconciliation->delete();
+        // Conditional delete: a reconciliation verified a moment ago is locked and must stay.
+        if (!CashReconciliation::whereKey($cashReconciliation->id)->whereNull('locked_at')->delete()) {
+            return response()->json(['message' => 'A verified reconciliation cannot be deleted.'], 422);
+        }
 
         return response()->noContent();
     }

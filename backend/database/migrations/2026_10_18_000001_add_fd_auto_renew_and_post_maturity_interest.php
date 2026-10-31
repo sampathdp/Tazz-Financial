@@ -37,7 +37,10 @@ return new class extends Migration
             $table->decimal('post_maturity_interest', 15, 2)->unsigned()->default(0)->after('post_maturity_rate_percent');
         });
 
-        DB::statement('ALTER TABLE `fd_renewals` DROP CHECK `chk_fdr_new_principal`');
+        // The constraint is missing on databases built from the schema dump, so only drop it when it exists.
+        if (DB::selectOne("SELECT 1 AS x FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'fd_renewals' AND CONSTRAINT_NAME = 'chk_fdr_new_principal' AND CONSTRAINT_TYPE = 'CHECK'")) {
+            DB::statement('ALTER TABLE `fd_renewals` DROP CONSTRAINT `chk_fdr_new_principal`');
+        }
         Schema::table('fd_renewals', function (Blueprint $table) {
             $table->decimal('interest_amount', 15, 2)->unsigned()->default(0)->after('new_principal');
             $table->decimal('capitalised_interest', 15, 2)->unsigned()->default(0)->after('interest_amount');
@@ -58,7 +61,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        DB::statement('ALTER TABLE `fd_renewals` DROP CHECK `chk_fdr_new_principal`');
+        DB::statement('ALTER TABLE `fd_renewals` DROP CONSTRAINT `chk_fdr_new_principal`');
         Schema::table('fd_renewals', function (Blueprint $table) {
             $table->dropColumn(['interest_amount', 'capitalised_interest', 'interest_payment_method', 'is_auto']);
         });

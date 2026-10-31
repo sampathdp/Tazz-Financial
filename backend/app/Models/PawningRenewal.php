@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class PawningRenewal extends Model
 {
+    use \App\Models\Concerns\HasVoidedRows;
+
     // No created_at/updated_at columns on this table — renewed_at is the domain timestamp.
     public $timestamps = false;
 

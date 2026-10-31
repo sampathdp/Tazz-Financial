@@ -104,9 +104,9 @@ class FixedAssetTest extends TestCase
         }
         $asset = $this->postJson('/api/fixed-assets', [
             'name' => 'Old Furniture', 'asset_category_id' => $this->category->id, 'branch_id' => $this->branchId,
-            'purchase_date' => now()->subMonths(14)->toDateString(), 'cost' => 60000, 'residual_value' => 0, 'useful_life_months' => 60,
+            'purchase_date' => now()->subMonthsNoOverflow(14)->toDateString(), 'cost' => 60000, 'residual_value' => 0, 'useful_life_months' => 60,
             'acquisition_type' => 'Opening', 'opening_accumulated_depreciation' => 24000,
-            'opening_depreciated_through' => now()->subMonth()->toDateString(),
+            'opening_depreciated_through' => now()->subMonthNoOverflow()->toDateString(),
         ])->assertStatus(201)->json();
 
         $this->assertSame('24000.00', $asset['accumulated_depreciation']);

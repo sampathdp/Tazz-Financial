@@ -185,9 +185,12 @@ class BranchFundingController extends Controller
     {
         $request->validate(['reason' => 'nullable|string|max:255']);
         $a = $this->find($id);
-        if ($a->status !== 'Requested') {
+        // Conditional claim: a reject racing an approve must not overwrite an agreement that was already paid out.
+        if (!BranchFundingAgreement::whereKey($a->id)->where('status', 'Requested')->update(['status' => 'Rejected'])) {
+            $a->refresh();
             throw ValidationException::withMessages(['status' => "Agreement {$a->code} is {$a->status}, not awaiting approval."]);
         }
+        $a->refresh();
         $a->update(['status' => 'Rejected', 'approved_by' => $request->user()->id, 'notes' => trim(($a->notes ? $a->notes . "\n" : '') . ($request->input('reason') ? 'Rejected: ' . $request->input('reason') : ''))]);
 
         return $a;

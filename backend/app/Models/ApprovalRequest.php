@@ -143,6 +143,20 @@ class ApprovalRequest extends Model
      * caller then executes / flips status). Throws if the user already
      * approved or every slot is taken.
      */
+    /**
+     * Locks this request's row and refreshes it; throws a 422 if it is no longer pending. Call first inside the
+     * approve/reject transaction: the status check made before it used a stale read, so two approvers (or an
+     * approver and a rejecter) acting together could both pass it.
+     */
+    public function lockPending(): void
+    {
+        $locked = static::lockForUpdate()->findOrFail($this->id);
+        if ($locked->status !== 'PendingApproval') {
+            throw \Illuminate\Validation\ValidationException::withMessages(['request' => 'This request is not pending approval - another user has already acted on it.']);
+        }
+        $this->setRawAttributes($locked->getAttributes(), true);
+    }
+
     public function recordApproval(int $userId): bool
     {
         if ($this->hasApproved($userId)) {

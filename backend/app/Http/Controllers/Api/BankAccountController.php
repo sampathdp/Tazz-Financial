@@ -45,10 +45,12 @@ class BankAccountController extends Controller
                 return response()->json(['message' => 'This bank account already has transactions, so its opening balance cannot be changed. Post an adjustment instead.'], 422);
             }
         }
-        $bankAccount->update($data);
-        if ($bankAccount->chart_of_account_id) {
-            \App\Models\ChartOfAccount::whereKey($bankAccount->chart_of_account_id)->update(['name' => "Bank - {$bankAccount->name}", 'status' => $bankAccount->status]);
-        }
+        \Illuminate\Support\Facades\DB::transaction(function () use ($bankAccount, $data) {
+            $bankAccount->update($data);
+            if ($bankAccount->chart_of_account_id) {
+                \App\Models\ChartOfAccount::whereKey($bankAccount->chart_of_account_id)->update(['name' => "Bank - {$bankAccount->name}", 'status' => $bankAccount->status]);
+            }
+        });
 
         return $bankAccount->load('branch:id,name,code');
     }

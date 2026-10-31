@@ -29,6 +29,7 @@ export function FdCommissionsScreen({ go: _go, user: me }: { go: Go; user?: Auth
   const [staffId, setStaffId] = useState<number | ''>('')
   const [status, setStatus] = useState<'Pending' | 'Paid' | ''>('')
   const [payTarget, setPayTarget] = useState<FdCommission | null>(null)
+  const [voidingId, setVoidingId] = useState<number | null>(null)
 
   useEffect(() => { staffApi.options().then(setStaff).catch(() => setStaff([])) }, [])
 
@@ -43,9 +44,11 @@ export function FdCommissionsScreen({ go: _go, user: me }: { go: Go; user?: Auth
 
   const voidPayment = async (c: FdCommission) => {
     const ok = await notify.confirm({ title: 'Void this commission payment?', msg: `Reverses ${money(c.paymentAmount ?? c.commissionAmount)} paid to ${c.recipientName} and restores the till/bank balance.`, danger: true, okText: 'Void' })
-    if (!ok) return
+    if (!ok || voidingId !== null) return
+    setVoidingId(c.id)
     try { await fdCommissionsApi.void(c.id); refresh(); notify.success('Payment voided') }
     catch (ex: any) { notify.error('Void failed', getErrorText(ex)) }
+    finally { setVoidingId(null) }
   }
 
   const recipient = (c: FdCommission) => c.recipientName || c.staff?.name || '—'
@@ -151,7 +154,7 @@ export function FdCommissionsScreen({ go: _go, user: me }: { go: Go; user?: Auth
               {c.commissionStatus === 'Paid' && (
                 <div className="row gap-2" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
                   <span className="t-2" style={{ fontSize: 12 }}>{day(c.paidAt)}</span>
-                  {me?.role === 'admin' && <Btn variant="danger" size="sm" icon="x" onClick={() => voidPayment(c)}>Void</Btn>}
+                  {me?.role === 'admin' && <Btn variant="danger" size="sm" icon="x" disabled={voidingId !== null} onClick={() => voidPayment(c)}>Void</Btn>}
                 </div>
               )}
             </Td>

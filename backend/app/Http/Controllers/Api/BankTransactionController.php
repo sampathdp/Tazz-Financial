@@ -153,6 +153,10 @@ class BankTransactionController extends Controller
         $description = "{$bankTransaction->transaction_type} - {$account->name}" . ($contraLabel ? " / {$contraLabel}" : '');
 
         DB::transaction(function () use ($bankTransaction, $account, $amount, $movements, $glLines, $description, $request, $data) {
+            // Re-check on the locked row: two simultaneous clears must move the bank balance once.
+            if (BankTransaction::lockForUpdate()->findOrFail($bankTransaction->id)->status !== 'Pending') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['status' => 'Only a pending bank transaction can be cleared.']);
+            }
             $ftx = FinancePostingService::execute([
                 'txn_type' => self::TXN_TYPE[$bankTransaction->transaction_type],
                 'amount' => $amount,
@@ -163,6 +167,8 @@ class BankTransactionController extends Controller
                 'description' => $description,
                 'gl_description' => $description,
                 'source_module' => 'BankTransaction',
+                'source_id' => $bankTransaction->id,
+                'idempotency_key' => "bank-txn-clear-{$bankTransaction->id}",
                 'executed_by' => $request->user()->id,
             ]);
             $bankTransaction->update([

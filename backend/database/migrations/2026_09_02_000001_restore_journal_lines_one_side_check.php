@@ -35,7 +35,7 @@ return new class extends Migration
     public function down(): void
     {
         if ($this->exists()) {
-            DB::statement('ALTER TABLE `journal_lines` DROP CHECK `chk_journal_lines_one_side`');
+            DB::statement('ALTER TABLE `journal_lines` DROP CONSTRAINT `chk_journal_lines_one_side`');
         }
     }
 

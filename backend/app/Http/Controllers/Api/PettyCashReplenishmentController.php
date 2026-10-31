@@ -66,6 +66,9 @@ class PettyCashReplenishmentController extends Controller
             $outAccount = $isCash ? ChartOfAccount::forCashTill($source) : ChartOfAccount::forBankAccount($source);
 
             $fundLocked = PettyCashFund::lockForUpdate()->findOrFail($fund->id);
+            if ($fundLocked->status !== 'Active' || bccomp(bcadd((string) $fundLocked->current_balance, (string) $data['amount'], 2), (string) $fundLocked->float_limit, 2) > 0) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['amount' => "This top-up would take the float above its limit of {$fundLocked->float_limit}."]);
+            }
             $inAccount = ChartOfAccount::forPettyCashFund($fundLocked);
 
             $code = NumberGenerator::next('petty_cash_replenishment', ['branch_code' => $fundLocked->branch->code]);
@@ -133,6 +136,12 @@ class PettyCashReplenishmentController extends Controller
 
         DB::transaction(function () use ($pettyCashReplenishment, $fund, $data, $request) {
             $fundLocked = PettyCashFund::lockForUpdate()->findOrFail($fund->id);
+            if (PettyCashReplenishment::lockForUpdate()->findOrFail($pettyCashReplenishment->id)->status === 'Voided') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['top_up' => 'This top-up is already voided.']);
+            }
+            if (bccomp((string) $fundLocked->current_balance, (string) $pettyCashReplenishment->amount, 2) < 0) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['top_up' => 'This top-up has already been spent from the float and cannot be voided.']);
+            }
             $fundLocked->update(['current_balance' => bcsub((string) $fundLocked->current_balance, (string) $pettyCashReplenishment->amount, 2)]);
 
             $txn = FinanceTransaction::where('source_module', 'PettyCashReplenishment')

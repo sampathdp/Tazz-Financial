@@ -257,7 +257,7 @@ class FixedDepositController extends Controller
             : $this->carriedAutoRenew($fixedDeposit);
 
         [$newFd, $enhancementDeposit] = DB::transaction(fn () => $this->performRenewal(
-            $fixedDeposit,
+            $this->lockFd($fixedDeposit),
             (int) $data['term_months'],
             $data['enhancement'] ?? null,
             $data['notes'] ?? null,
@@ -285,6 +285,8 @@ class FixedDepositController extends Controller
      */
     public function performRenewal(FixedDeposit $fixedDeposit, int $termMonths, ?array $enhancement, ?string $notes, string $interestTreatment, int $userId, bool $auto, array $autoRenew, ?float $ratePercent = null, ?array $commission = null): array
     {
+        // Also reached from fd:auto-renew, so the lock lives here: an overlap with an operator renewal must renew once.
+        $this->lockFd($fixedDeposit);
         $fixedDeposit->loadMissing(['fundingProduct', 'branch']);
         $product = $fixedDeposit->fundingProduct;
 
@@ -384,6 +386,22 @@ class FixedDepositController extends Controller
         return [$newFd, $enhancementDeposit];
     }
 
+    /**
+     * Locks the FD row and refreshes $fd from it. Call first inside a money-moving transaction: the status and
+     * principal checks made before the transaction used a stale read, so two simultaneous requests (two
+     * employees, or the auto-renew job) could both act on the same deposit.
+     */
+    private function lockFd(FixedDeposit $fd, bool $mustBeActive = true): FixedDeposit
+    {
+        $locked = FixedDeposit::lockForUpdate()->findOrFail($fd->id);
+        if ($mustBeActive && ($locked->status !== 'Active' || $locked->renewed_to_id)) {
+            throw ValidationException::withMessages(['fixed_deposit' => 'This fixed deposit is no longer active - it was renewed, closed or changed by another request. Reload and try again.']);
+        }
+        $fd->setRawAttributes($locked->getAttributes(), true);
+
+        return $fd;
+    }
+
     /** Sets or clears the customer's auto-renew instruction on a live FD. */
     public function setAutoRenew(Request $request, FixedDeposit $fixedDeposit)
     {
@@ -456,6 +474,7 @@ class FixedDepositController extends Controller
         ]);
 
         $withdrawal = DB::transaction(function () use ($fixedDeposit, $data, $request) {
+            $this->lockFd($fixedDeposit);
             $closedAt = $data['closed_at'] ?? now()->format('Y-m-d');
             $principalAmount = (float) $fixedDeposit->principal_amount;
 
@@ -566,9 +585,14 @@ class FixedDepositController extends Controller
         }
 
         DB::transaction(function () use ($fixedDeposit, $withdrawal, $request) {
+            $this->lockFd($fixedDeposit, false);
+            if ($fixedDeposit->status !== 'Closed' || !FdWithdrawal::whereKey($withdrawal->id)->lockForUpdate()->exists()) {
+                throw ValidationException::withMessages(['fixed_deposit' => 'This withdrawal was already voided or the FD is no longer closed.']);
+            }
             FdLedgerPoster::reverseWithdrawal($withdrawal, $request->user()->id);
             $fixedDeposit->update(['status' => 'Active', 'closed_at' => null]);
-            $withdrawal->delete();
+            // Kept as a voided row: the history shows the withdrawal and its correction.
+            $withdrawal->markVoided($request->user()->id, 'Withdrawal voided');
         });
 
         return $fixedDeposit->fresh()->load(self::DETAIL_RELATIONS);
@@ -666,6 +690,7 @@ class FixedDepositController extends Controller
         ]);
 
         $withdrawal = DB::transaction(function () use ($fixedDeposit, $data, $request) {
+            $this->lockFd($fixedDeposit);
             $closedAt = $data['closed_at'] ?? now()->format('Y-m-d');
             $f = $this->prematureFigures(
                 $fixedDeposit,
@@ -759,6 +784,10 @@ class FixedDepositController extends Controller
         }
 
         $partPayment = DB::transaction(function () use ($fixedDeposit, $product, $data, $withdrawAmount, $principal, $remaining, $request) {
+            $this->lockFd($fixedDeposit);
+            if (round((float) $fixedDeposit->principal_amount, 2) !== round($principal, 2)) {
+                throw ValidationException::withMessages(['amount' => 'The principal changed while this was being processed (another part payment?). Reload and try again.']);
+            }
             $paidAt = $data['paid_at'] ?? now()->format('Y-m-d');
             $heldDays = max(1, Carbon::parse($fixedDeposit->start_date)->diffInDays(Carbon::parse($paidAt)));
             $rate = (float) $product->premature_withdrawal_rate_percent;
@@ -835,7 +864,13 @@ class FixedDepositController extends Controller
             return response()->json(['message' => 'Void the more recent part payment(s) on this FD first.'], 422);
         }
 
-        DB::transaction(function () use ($fixedDeposit, $fdPartPayment) {
+        DB::transaction(function () use ($fixedDeposit, $fdPartPayment, $request) {
+            // Must still be the live, most recent part payment of an active FD (a closed or renewed FD must not get its principal restored).
+            $this->lockFd($fixedDeposit);
+            $latestNow = $fixedDeposit->partPayments()->orderByDesc('id')->lockForUpdate()->first();
+            if (!$latestNow || $latestNow->id !== $fdPartPayment->id) {
+                throw ValidationException::withMessages(['part_payment' => 'Void the more recent part payment(s) on this FD first, or this one was already voided.']);
+            }
             FdLedgerPoster::reversePartPayment($fdPartPayment);
 
             $fixedDeposit->update([
@@ -848,7 +883,7 @@ class FixedDepositController extends Controller
                 $fixedDeposit->interestPayments()->where('status', 'Pending')->update(['amount' => $fdPartPayment->monthly_interest_before]);
             }
 
-            $fdPartPayment->delete();
+            $fdPartPayment->markVoided($request->user()->id, 'Part payment voided');
         });
 
         return $fixedDeposit->fresh()->load(self::DETAIL_RELATIONS);

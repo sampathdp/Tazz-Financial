@@ -206,6 +206,11 @@ class LoanPostDatedChequeController extends Controller
             }
 
             DB::transaction(function () use ($loan, $cheque, $asOf, $data, $request) {
+                // Same lock as a normal payment, plus the cheque row: two "Realize" clicks must apply it once.
+                Loan::whereKey($loan->id)->lockForUpdate()->first();
+                if (FacilityPostDatedCheque::lockForUpdate()->findOrFail($cheque->id)->status === 'Realized') {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['status' => 'This cheque has already been realized.']);
+                }
                 $branch = Branch::find($loan->branch_id);
                 $code = NumberGenerator::next('payment', [
                     'branch_id' => $branch->id,
@@ -251,6 +256,9 @@ class LoanPostDatedChequeController extends Controller
             }
             DB::transaction(function () use ($cheque, $data, $request) {
                 Loan::whereKey($cheque->credit_facility_id)->lockForUpdate()->first();
+                if (FacilityPostDatedCheque::lockForUpdate()->findOrFail($cheque->id)->status !== 'Realized') {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['status' => 'This cheque is no longer realized - it was already bounced.']);
+                }
                 $payment = $cheque->facility_payment_id ? FacilityPayment::find($cheque->facility_payment_id) : null;
                 if ($payment && $payment->status !== 'Voided') {
                     $payment->update([
@@ -266,11 +274,18 @@ class LoanPostDatedChequeController extends Controller
                 $cheque->update(['status' => 'Bounced', 'notes' => $data['notes'] ?? $cheque->notes]);
             });
         } else {
-            $cheque->update([
-                'status' => $data['status'],
-                'handed_at' => $data['status'] === 'Handed' ? now() : $cheque->handed_at,
-                'notes' => $data['notes'] ?? $cheque->notes,
-            ]);
+            DB::transaction(function () use ($cheque, $data) {
+                // A cheque realized a moment ago must not be relabelled here: that would leave the loan paid with no way back.
+                $live = FacilityPostDatedCheque::lockForUpdate()->findOrFail($cheque->id);
+                if ($live->status === 'Realized') {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['status' => 'This cheque was just realized and applied to the loan - it can only be marked Bounced.']);
+                }
+                $cheque->update([
+                    'status' => $data['status'],
+                    'handed_at' => $data['status'] === 'Handed' ? now() : $live->handed_at,
+                    'notes' => $data['notes'] ?? $live->notes,
+                ]);
+            });
         }
 
         return $cheque->fresh()->load(['creator:id,name', 'bank:id,name']);

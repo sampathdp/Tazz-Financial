@@ -51,25 +51,29 @@ class UserController extends Controller
         $this->guardAdminAssignment($request, $data['role_id']);
         $this->guardBranchRequirement($data);
 
-        $user = User::create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'password' => Hash::make($data['password']),
-            'role_id' => $data['role_id'],
-            'branch_id' => $data['branch_id'] ?? null,
-            'status' => $data['status'] ?? 'Active',
-        ]);
-
-        // Every login belongs to a staff member: link the one with this email, else register a new one.
-        $staff = \App\Models\Staff::where('email', $user->email)->whereNull('user_id')->first();
-        if ($staff) {
-            $staff->update(['user_id' => $user->id]);
-        } else {
-            \App\Models\Staff::createWithCode([
-                'name' => $user->name, 'email' => $user->email, 'branch_id' => $user->branch_id,
-                'user_id' => $user->id, 'status' => $user->status,
+        $user = \Illuminate\Support\Facades\DB::transaction(function () use ($data) {
+            $user = User::create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => Hash::make($data['password']),
+                'role_id' => $data['role_id'],
+                'branch_id' => $data['branch_id'] ?? null,
+                'status' => $data['status'] ?? 'Active',
             ]);
-        }
+
+            // Every login belongs to a staff member: link the one with this email, else register a new one.
+            $staff = \App\Models\Staff::where('email', $user->email)->whereNull('user_id')->first();
+            if ($staff) {
+                $staff->update(['user_id' => $user->id]);
+            } else {
+                \App\Models\Staff::createWithCode([
+                    'name' => $user->name, 'email' => $user->email, 'branch_id' => $user->branch_id,
+                    'user_id' => $user->id, 'status' => $user->status,
+                ]);
+            }
+
+            return $user;
+        });
 
         return response()->json($this->present($user->load(['role', 'branch'])), 201);
     }

@@ -41,9 +41,10 @@ class ExpenseController extends Controller
             'description' => 'nullable|string|max:255',
         ]);
         $branch = Branch::findOrFail($data['branch_id']);
-        $code = NumberGenerator::next('expense', ['branch_code' => $branch->code]);
 
-        $expense = DB::transaction(function () use ($data, $code, $request) {
+        $expense = DB::transaction(function () use ($data, $branch, $request) {
+            // Number drawn inside the transaction: a failed save must not leave a used number in the log.
+            $code = NumberGenerator::next('expense', ['branch_code' => $branch->code]);
             $expense = Expense::create($data + [
                 'code' => $code,
                 'status' => 'Pending',
@@ -91,6 +92,10 @@ class ExpenseController extends Controller
         }
 
         DB::transaction(function () use ($expense, $req, $request) {
+            $req->lockPending();
+            if (Expense::lockForUpdate()->findOrFail($expense->id)->status !== 'Pending') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['expense' => 'Only a pending expense can be approved.']);
+            }
             if (!$req->first_approved_by) {
                 $req->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {
@@ -150,6 +155,9 @@ class ExpenseController extends Controller
         $data = $request->validate(['reject_reason' => 'nullable|string|max:255']);
 
         DB::transaction(function () use ($expense, $data, $req, $request) {
+            if (Expense::lockForUpdate()->findOrFail($expense->id)->status !== 'Pending') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['expense' => 'Only a pending expense can be rejected.']);
+            }
             $expense->update(['status' => 'Rejected', 'approved_by' => $request->user()->id, 'approved_at' => now()]);
             if ($req) {
                 $req->update([

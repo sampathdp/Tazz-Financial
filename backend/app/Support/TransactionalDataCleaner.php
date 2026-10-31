@@ -28,11 +28,15 @@ class TransactionalDataCleaner
         'vendors', 'banks', 'bank_accounts', 'cash_accounts', 'chart_of_accounts',
         'expense_categories', 'document_categories', 'charge_categories',
         'finance_settings',
+        // Setup and people data that were being wiped by mistake: fixed-asset categories (the seeded setup the
+        // Fixed Assets screen needs), the FD-loan policy, staff (each login is linked to a staff row) and the
+        // users' own profile data and subscriptions list.
+        'asset_categories', 'fd_loan_policies', 'staff', 'user_achievements', 'subscriptions',
         // Customers are master data too (see SystemMaintenanceController) unless asked otherwise.
-        'customers', 'customer_business_details', 'customer_employment_details', 'customer_documents',
+        'customers', 'customer_business_details', 'customer_employment_details', 'customer_documents', 'customer_bank_details',
     ];
 
-    public const CUSTOMER_TABLES = ['customers', 'customer_business_details', 'customer_employment_details', 'customer_documents'];
+    public const CUSTOMER_TABLES = ['customers', 'customer_business_details', 'customer_employment_details', 'customer_documents', 'customer_bank_details'];
 
     /** @return string[] tables that a clean would wipe */
     public static function tables(bool $includeCustomers = false): array

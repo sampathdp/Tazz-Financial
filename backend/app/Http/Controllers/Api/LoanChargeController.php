@@ -29,6 +29,10 @@ class LoanChargeController extends Controller
             return response()->json(['message' => 'A document charge must be greater than zero.'], 422);
         }
 
+        if (in_array($loan->status, ['Closed', 'Cancelled', 'Rejected'], true)) {
+            return response()->json(['message' => "A charge cannot be added to a {$loan->status} loan."], 422);
+        }
+
         // paid_amount is only ever raised by a real payment (LoanPaymentAllocator) - a charge can never be created already "paid".
         $charge = $loan->charges()->create([
             'branch_id' => $loan->branch_id,
@@ -53,29 +57,32 @@ class LoanChargeController extends Controller
             'notes' => 'nullable|string|max:255',
         ]);
 
-        $hasAllocations = $charge->allocations()->exists();
-        // paid_amount is meant to be driven only by real payment allocations
-        // (see LoanPaymentAllocator) — editable by hand only before any
-        // payment has actually been applied, so hand-editing can never
-        // desync it from the allocation history a payment already created.
-        if (array_key_exists('paid_amount', $data) && $hasAllocations) {
-            return response()->json(['message' => 'This charge already has payments applied — its paid amount can no longer be edited directly.'], 422);
-        }
-        if (array_key_exists('due_amount', $data) && $data['due_amount'] < (float) $charge->paid_amount) {
-            return response()->json(['message' => "Due amount can't be less than the amount already paid ({$charge->paid_amount})."], 422);
-        }
+        // paid_amount is driven only by real payment allocations (LoanPaymentAllocator): setting it by hand would
+        // mark a charge paid with no receipt, no cash and no ledger entry, so any value sent is ignored.
+        unset($data['paid_amount']);
 
-        $charge->update($data);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($charge, &$data) {
+            // Same lock a payment takes, so a charge is never edited while a receipt is being allocated to it.
+            Loan::whereKey($charge->credit_facility_id)->lockForUpdate()->first();
+            $charge->refresh();
+            if (array_key_exists('due_amount', $data) && $data['due_amount'] < (float) $charge->paid_amount) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['due_amount' => "Due amount can't be less than the amount already paid ({$charge->paid_amount})."]);
+            }
+            $charge->update($data);
+        });
 
         return $charge->load(['creator:id,name', 'category:id,name']);
     }
 
     public function destroy(FacilityCharge $charge)
     {
-        if ($charge->allocations()->exists()) {
-            return response()->json(['message' => 'This charge already has payments applied to it and can no longer be deleted — void the payment(s) first.'], 422);
-        }
-        $charge->delete();
+        \Illuminate\Support\Facades\DB::transaction(function () use ($charge) {
+            Loan::whereKey($charge->credit_facility_id)->lockForUpdate()->first();
+            if ($charge->allocations()->exists()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['charge' => 'This charge already has payments applied to it and can no longer be deleted — void the payment(s) first.']);
+            }
+            $charge->delete();
+        });
 
         return response()->noContent();
     }

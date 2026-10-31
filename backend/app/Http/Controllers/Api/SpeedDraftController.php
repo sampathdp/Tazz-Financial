@@ -234,6 +234,10 @@ class SpeedDraftController extends Controller
         }
 
         DB::transaction(function () use ($appRequest, $speedDraft, $request) {
+            $appRequest->lockPending();
+            if (SpeedDraft::lockForUpdate()->findOrFail($speedDraft->id)->status !== 'Pending') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['speed_draft' => 'Only a Pending Speed Draft can be approved.']);
+            }
             if (!$appRequest->first_approved_by) {
                 $appRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {
@@ -269,6 +273,10 @@ class SpeedDraftController extends Controller
         $data = $request->validate(['rejected_reason' => 'nullable|string|max:255']);
 
         DB::transaction(function () use ($appRequest, $speedDraft, $request, $data) {
+            $appRequest->lockPending();
+            if (SpeedDraft::lockForUpdate()->findOrFail($speedDraft->id)->status !== 'Pending') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['speed_draft' => 'Only a Pending Speed Draft can be rejected.']);
+            }
             $appRequest->update([
                 'status' => 'Rejected',
                 'rejected_by' => $request->user()->id,
@@ -313,6 +321,11 @@ class SpeedDraftController extends Controller
 
         $executedBy = $request->user()->id;
         DB::transaction(function () use ($speedDraft, $data, $executedBy) {
+            // Lock + re-check: two simultaneous disbursements must not both complete the draft.
+            $speedDraft->setRawAttributes(SpeedDraft::lockForUpdate()->findOrFail($speedDraft->id)->getAttributes(), true);
+            if ($block = $this->disbursementBlockReason($speedDraft)) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['speed_draft' => $block]);
+            }
             SpeedDraftDisbursementCompleter::complete($speedDraft, $data);
             SpeedDraftLedgerPoster::postDisbursement($speedDraft->fresh(), $executedBy);
         });
@@ -428,6 +441,10 @@ class SpeedDraftController extends Controller
             $speedDraft, $type, $data, $asOf, $capitalBefore, $interestDue, $interestCollected,
             $penaltyDue, $penaltyCollected, $capitalPayment, $newPrincipal, $paymentAmount, $collected, $request
         ) {
+            // Lock + re-check: the draft must still be Active, or a second renewal would double the new principal.
+            if (SpeedDraft::lockForUpdate()->findOrFail($speedDraft->id)->status !== 'Active') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['speed_draft' => 'Only an active Speed Draft can be renewed.']);
+            }
             $branch = $speedDraft->branch;
             $code = NumberGenerator::next('speed_draft', [
                 'branch_id' => $branch->id,

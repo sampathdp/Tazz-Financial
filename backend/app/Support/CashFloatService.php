@@ -99,6 +99,9 @@ class CashFloatService
         $type = ApprovalType::where('code', 'finance_float_settlement')->firstOrFail();
 
         return DB::transaction(function () use ($settlement, $type, $requestedBy) {
+            if (CashFloatSettlement::lockForUpdate()->findOrFail($settlement->id)->status !== 'Open') {
+                throw new FinancePostingException('A settlement has already been requested for this float.');
+            }
             $approval = ApprovalRequest::create([
                 'approval_type_id' => $type->id,
                 'subject_id' => $settlement->id,
@@ -138,6 +141,11 @@ class CashFloatService
         }
 
         return DB::transaction(function () use ($settlement, $countedAmount, $userId, $approval) {
+            // Lock + re-check: two approvers acting together must settle (and move the cash) once.
+            $approval->lockPending();
+            if (CashFloatSettlement::lockForUpdate()->findOrFail($settlement->id)->status !== 'SettlementRequested') {
+                throw new FinancePostingException('This float is not awaiting settlement.');
+            }
             $complete = $approval->recordApproval($userId);
             if (!$complete) {
                 return $settlement->fresh(); // needs another approver

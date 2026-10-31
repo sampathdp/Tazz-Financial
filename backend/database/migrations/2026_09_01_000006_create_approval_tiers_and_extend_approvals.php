@@ -29,7 +29,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement('ALTER TABLE `approval_types` DROP CHECK `chk_approval_types_required_approvals`');
+        DB::statement('ALTER TABLE `approval_types` DROP CONSTRAINT `chk_approval_types_required_approvals`');
         DB::statement('ALTER TABLE `approval_types` ADD CONSTRAINT `chk_approval_types_required_approvals` CHECK (`required_approvals` between 1 and 4)');
 
         Schema::table('approval_requests', function (Blueprint $t) {
@@ -70,7 +70,7 @@ return new class extends Migration
             $t->dropColumn(['third_approved_by', 'third_approved_at', 'fourth_approved_by', 'fourth_approved_at']);
         });
 
-        DB::statement('ALTER TABLE `approval_types` DROP CHECK `chk_approval_types_required_approvals`');
+        DB::statement('ALTER TABLE `approval_types` DROP CONSTRAINT `chk_approval_types_required_approvals`');
         DB::statement('ALTER TABLE `approval_types` ADD CONSTRAINT `chk_approval_types_required_approvals` CHECK (`required_approvals` in (1,2))');
     }
 };

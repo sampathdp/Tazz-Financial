@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class BorrowingTransaction extends Model
 {
+    use \App\Models\Concerns\HasVoidedRows;
+
     protected $fillable = [
         'borrowing_id', 'voucher_no', 'kind', 'amount', 'txn_date', 'payment_method',
         'cash_account_id', 'bank_account_id', 'reference_no', 'notes',

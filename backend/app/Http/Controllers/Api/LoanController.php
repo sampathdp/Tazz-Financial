@@ -356,7 +356,9 @@ class LoanController extends Controller
             $removed = $loan->collateral()->where('collateral_type', '!=', 'FixedDeposit')->whereNotIn('id', $keepIds ?: [0])->get();
             foreach ($removed as $r) {
                 foreach ($r->documents as $doc) {
-                    DocStore::delete($doc->file_path);
+                    // After commit only: deleting the file inside the transaction loses it if the save then rolls back (or retries).
+                    $path = $doc->file_path;
+                    DB::afterCommit(fn () => DocStore::delete($path));
                 }
             }
             // FixedDeposit collateral is a lien: only the FD-loan flow and loan status changes add/remove it.
@@ -432,9 +434,9 @@ class LoanController extends Controller
         // A hard delete of financial records: refused in production unless explicitly switched on
         // (LOAN_PURGE_ENABLED=true), the same guard the Maintenance data-wipe uses.
         abort_unless(
-            !app()->isProduction() || config('app.loan_purge_enabled', false),
+            !app()->isProduction(),
             403,
-            'Hard-deleting loans is disabled in production. Set LOAN_PURGE_ENABLED=true to allow it.'
+            'Hard-deleting loans is disabled in production: financial history is voided or reversed, never deleted.'
         );
 
         $ids = $this->restructureChainIds($loan->id);
@@ -628,6 +630,7 @@ class LoanController extends Controller
         }
 
         DB::transaction(function () use ($appRequest, $loan, $request) {
+            $appRequest->lockPending();
             if (!$appRequest->first_approved_by) {
                 $appRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {
@@ -668,6 +671,7 @@ class LoanController extends Controller
         $data = $request->validate(['rejected_reason' => 'required|string|max:255']);
 
         DB::transaction(function () use ($appRequest, $loan, $request, $data) {
+            $appRequest->lockPending();
             $appRequest->update([
                 'status' => 'Rejected',
                 'rejected_by' => $request->user()->id,
@@ -749,6 +753,13 @@ class LoanController extends Controller
         }
 
         DB::transaction(function () use ($cancelRequest, $loan, $request) {
+            $cancelRequest->lockPending();
+            // Lock the loan too (payment recording does) and re-check: a payment may have landed since the pre-check.
+            \App\Models\Loan::whereKey($loan->id)->lockForUpdate()->first();
+            $loan->refresh();
+            if ($loan->status === 'Active' && $loan->hasCollectionHistory()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['loan' => 'This loan now has payments recorded - use Contract Status Change instead.']);
+            }
             if (!$cancelRequest->first_approved_by) {
                 $cancelRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {
@@ -897,6 +908,11 @@ class LoanController extends Controller
 
         $executedBy = $request->user()->id;
         DB::transaction(function () use ($loan, $data, $executedBy) {
+            // Lock + re-check: two simultaneous disbursements must not both complete the loan.
+            $loan->setRawAttributes(Loan::lockForUpdate()->findOrFail($loan->id)->getAttributes(), true);
+            if ($loan->status !== 'Approved' && !$loan->disbursementIncomplete()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['loan' => 'This loan has already been disbursed or is not approved.']);
+            }
             // Finishing a disbursement that stopped halfway: put the loan back to Approved first, so it goes
             // through the normal path. The ledger posting is idempotent (one key per loan), so money never moves twice.
             if ($loan->disbursementIncomplete()) {
@@ -1045,6 +1061,9 @@ class LoanController extends Controller
         }
 
         DB::transaction(function () use ($writeOffRequest, $loan, $request) {
+            $writeOffRequest->lockPending();
+            \App\Models\Loan::whereKey($loan->id)->lockForUpdate()->first();
+            $loan->refresh();
             if (!$writeOffRequest->first_approved_by) {
                 $writeOffRequest->update(['first_approved_by' => $request->user()->id, 'first_approved_at' => now()]);
             } else {
@@ -1133,6 +1152,8 @@ class LoanController extends Controller
         if ($loan->status !== 'Active') {
             return response()->json(['message' => 'Only an active loan can be rescheduled.'], 422);
         }
+        // Everything below is quoted from this snapshot; the transaction refuses if a payment lands before it commits.
+        $paymentMark = \App\Models\FacilityPayment::withoutGlobalScopes()->where('credit_facility_id', $loan->id)->max('id');
         if ($loan->payments()->whereIn('payment_type', ['Settlement', 'ManualAllocation'])->where('approval_status', 'PendingApproval')->exists()) {
             return response()->json(['message' => 'This loan has a settlement or manual allocation still awaiting approval — resolve it first.'], 422);
         }
@@ -1223,9 +1244,14 @@ class LoanController extends Controller
         $newLoan = DB::transaction(function () use (
             $request, $loan, $oldDetail, $loanType, $data, $asOf,
             $capital, $unpaidInterest, $earnedInterest, $odCharges, $otherCharges, $otherChargesRolled,
-            $deduction, $capitalisedInterest, $interestWrittenOff, $retainedOd, $addedLines, $addedTotal, $newPrincipal
+            $deduction, $capitalisedInterest, $interestWrittenOff, $retainedOd, $addedLines, $addedTotal, $newPrincipal, $paymentMark
         ) {
             $uid = $request->user()->id;
+            Loan::whereKey($loan->id)->lockForUpdate()->first();
+            if ($loan->fresh()->status !== 'Active'
+                || \App\Models\FacilityPayment::withoutGlobalScopes()->where('credit_facility_id', $loan->id)->max('id') !== $paymentMark) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['loan' => 'This loan changed while the reschedule was being prepared (a payment was recorded or its status changed). Reload and try again.']);
+            }
 
             // -R1, then -R2 on a subsequent reschedule of the chain, ...
             $n = preg_match('/^(.*)-R(\d+)$/', $loan->code, $m) ? ((int) $m[2] + 1) : 1;
@@ -1445,6 +1471,12 @@ class LoanController extends Controller
         $frequency = $loan->loanDetail->installment_frequency;
 
         DB::transaction(function () use ($loan, $schedule, $frequency) {
+            Loan::whereKey($loan->id)->lockForUpdate()->first();
+            $liveRow = FacilitySchedule::lockForUpdate()->findOrFail($schedule->id);
+            if ($liveRow->status === 'Paid' || (float) $liveRow->paid_amount > 0) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['schedule' => 'A paid or partially paid installment cannot be skipped.']);
+            }
+            $schedule->setRawAttributes($liveRow->getAttributes(), true);
             $last = FacilitySchedule::where('credit_facility_id', $loan->id)->orderByDesc('due_date')->firstOrFail();
             $schedule->update([
                 'due_date' => LoanAmortizer::nextDueDate($last->due_date, $frequency)->format('Y-m-d'),

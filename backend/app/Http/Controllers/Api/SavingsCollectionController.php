@@ -122,6 +122,9 @@ class SavingsCollectionController extends Controller
         }
 
         DB::transaction(function () use ($savingsCollectionSheet, $request) {
+            if (SavingsCollectionSheet::lockForUpdate()->findOrFail($savingsCollectionSheet->id)->status !== 'Open') {
+                throw ValidationException::withMessages(['sheet' => 'This sheet has already been posted or cancelled.']);
+            }
             foreach ($savingsCollectionSheet->lines as $line) {
                 if (!$line->collected) {
                     continue;
@@ -156,7 +159,11 @@ class SavingsCollectionController extends Controller
         if ($savingsCollectionSheet->status !== 'Open') {
             return response()->json(['message' => 'Only an Open sheet can be cancelled.'], 422);
         }
-        $savingsCollectionSheet->update(['status' => 'Cancelled']);
+        // Conditional update: a concurrent post must win over a cancel, never be overwritten by it.
+        $changed = SavingsCollectionSheet::whereKey($savingsCollectionSheet->id)->where('status', 'Open')->update(['status' => 'Cancelled']);
+        if (!$changed) {
+            return response()->json(['message' => 'Only an Open sheet can be cancelled.'], 422);
+        }
 
         return $savingsCollectionSheet->fresh()->load(self::RELATIONS);
     }

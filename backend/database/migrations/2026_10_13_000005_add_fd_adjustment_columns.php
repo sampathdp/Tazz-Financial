@@ -31,7 +31,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        DB::statement('ALTER TABLE `fd_withdrawals` DROP CHECK `chk_fdw_adjusted`');
+        DB::statement('ALTER TABLE `fd_withdrawals` DROP CONSTRAINT `chk_fdw_adjusted`');
         Schema::table('fd_withdrawals', function (Blueprint $table) {
             $table->dropColumn('adjusted_amount');
         });

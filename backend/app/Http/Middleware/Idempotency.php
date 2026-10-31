@@ -26,6 +26,7 @@ use Symfony\Component\HttpFoundation\Response;
 class Idempotency
 {
     private const TTL_HOURS = 24;
+    private const ABANDONED_AFTER_MINUTES = 3;
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -40,6 +41,13 @@ class Idempotency
         $cutoff = now()->subHours(self::TTL_HOURS);
 
         DB::table('idempotency_keys')->where('created_at', '<', $cutoff)->delete();
+
+        // A claim whose process died (crash, killed worker) never completes; after a few minutes it is abandoned so
+        // the client's retry is not blocked with 409 for the whole 24 h.
+        DB::table('idempotency_keys')
+            ->where('idempotency_key', $key)->where('method', $method)->where('path', $path)
+            ->whereNull('completed_at')->where('locked_at', '<', now()->subMinutes(self::ABANDONED_AFTER_MINUTES))
+            ->delete();
 
         $existing = DB::table('idempotency_keys')
             ->where('idempotency_key', $key)->where('method', $method)->where('path', $path)

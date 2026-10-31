@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class FdWithdrawal extends Model
 {
+    use \App\Models\Concerns\HasVoidedRows;
+
     protected $fillable = [
         'fixed_deposit_id', 'voucher_no', 'principal_amount', 'interest_amount', 'total_amount', 'adjusted_amount', 'settled_credit_facility_id',
         'post_maturity_days', 'post_maturity_rate_percent', 'post_maturity_interest',

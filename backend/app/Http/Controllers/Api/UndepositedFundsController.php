@@ -33,19 +33,23 @@ class UndepositedFundsController extends Controller
             'description' => 'nullable|string|max:255',
         ]);
 
-        $balance = (string) $this->show()['balance'];
-        if (bccomp(number_format((float) $data['amount'], 2, '.', ''), $balance, 2) > 0) {
-            return response()->json(['message' => 'Only ' . number_format((float) $balance, 2) . ' is waiting in Undeposited Funds; you cannot deposit more than that.'], 422);
-        }
+        // One transaction with the 1030 account row locked: two simultaneous deposits cannot both pass the cap.
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($data, $request) {
+            ChartOfAccount::whereKey(ChartOfAccount::system('1030')->id)->lockForUpdate()->first();
+            $balance = (string) $this->show()['balance'];
+            if (bccomp(number_format((float) $data['amount'], 2, '.', ''), $balance, 2) > 0) {
+                return response()->json(['message' => 'Only ' . number_format((float) $balance, 2) . ' is waiting in Undeposited Funds; you cannot deposit more than that.'], 422);
+            }
 
-        $sub = Request::create('/api/bank-transactions', 'POST', [
-            'bank_account_id' => $data['bank_account_id'], 'txn_date' => $data['txn_date'], 'transaction_type' => 'Deposit',
-            'amount' => $data['amount'], 'reference_no' => $data['reference_no'] ?? null,
-            'description' => $data['description'] ?? 'Banked from Undeposited Funds',
-            'status' => 'Cleared', 'contra_kind' => 'Ledger', 'contra_chart_of_account_id' => ChartOfAccount::system('1030')->id,
-        ]);
-        $sub->setUserResolver(fn () => $request->user());
+            $sub = Request::create('/api/bank-transactions', 'POST', [
+                'bank_account_id' => $data['bank_account_id'], 'txn_date' => $data['txn_date'], 'transaction_type' => 'Deposit',
+                'amount' => $data['amount'], 'reference_no' => $data['reference_no'] ?? null,
+                'description' => $data['description'] ?? 'Banked from Undeposited Funds',
+                'status' => 'Cleared', 'contra_kind' => 'Ledger', 'contra_chart_of_account_id' => ChartOfAccount::system('1030')->id,
+            ]);
+            $sub->setUserResolver(fn () => $request->user());
 
-        return app(BankTransactionController::class)->store($sub);
+            return app(BankTransactionController::class)->store($sub);
+        });
     }
 }

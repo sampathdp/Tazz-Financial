@@ -272,10 +272,15 @@ class LoanPaymentAllocator
     }
 
     /**
-     * Applies `$amount` in standard loan-servicing order: Interest, then OD
-     * (penalty), then other charges (Document/Legal/Valuation/Other), then
-     * Principal — each bucket oldest-first across the loan's unpaid
-     * installments/charges — then closes the loan once nothing is owed.
+     * Applies `$amount` installment by installment, oldest first, fully
+     * settling each before moving to the next. Within one installment the
+     * order is: Interest, then OD (penalty), then the loan's other charges
+     * (Document/Legal/Valuation/Other, oldest first), then Principal. So
+     * with several overdue installments a partial payment clears the whole of
+     * installment 1 (including its principal) before touching installment 2's
+     * interest. (This describes what the code and the LoanLedgerTest cases do;
+     * an earlier comment here said "each bucket across all installments",
+     * which it never did.) Closes the loan once nothing is owed.
      *
      * $asOf is the date the amount is considered to have landed in the loan
      * (e.g. a cheque's realization/check-in date, not the date it was

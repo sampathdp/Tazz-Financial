@@ -71,6 +71,12 @@ class FixedAssetDepreciator
                 if ($commit) {
                     try {
                         DB::transaction(function () use ($asset, $period, $periodEnd, $amount, $userId) {
+                            // Lock + re-read: two runs (or a run and a disposal) must not post the same month twice.
+                            $live = \App\Models\FixedAsset::lockForUpdate()->findOrFail($asset->id);
+                            if ($live->status === 'Disposed' || ($live->depreciated_through && substr((string) $live->depreciated_through, 0, 10) >= $periodEnd)) {
+                                throw new \RuntimeException('already depreciated through this month or disposed by another request');
+                            }
+                            $asset->setRawAttributes($live->getAttributes(), true);
                             FixedAssetLedgerPoster::postDepreciation($asset, $period, $periodEnd, $amount, $userId);
                             $newAcc = bcadd((string) $asset->accumulated_depreciation, $amount, 2);
                             $asset->accumulated_depreciation = $newAcc;

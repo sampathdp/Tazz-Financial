@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class FdCommission extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
+
     protected $fillable = [
         'fixed_deposit_id', 'branch_id', 'recipient_type', 'staff_id', 'recipient_name', 'recipient_phone',
         'commission_type', 'commission_value', 'commission_amount', 'notes',

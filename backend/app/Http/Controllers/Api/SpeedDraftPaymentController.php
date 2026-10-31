@@ -176,7 +176,11 @@ class SpeedDraftPaymentController extends Controller
         $payment->load('allocations.schedule');
 
         DB::transaction(function () use ($payment, $data, $request) {
-            $speedDraft = SpeedDraft::findOrFail($payment->credit_facility_id);
+            // Lock the draft and the payment: two simultaneous voids must give the capital back once.
+            $speedDraft = SpeedDraft::lockForUpdate()->findOrFail($payment->credit_facility_id);
+            if (FacilityPayment::lockForUpdate()->findOrFail($payment->id)->status === 'Voided') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['status' => 'This payment is already voided.']);
+            }
             $capitalReversed = 0.0;
 
             foreach ($payment->allocations as $alloc) {

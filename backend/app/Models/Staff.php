@@ -6,6 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class Staff extends Model
 {
+    use \App\Models\Concerns\BelongsToBranch;
+
+    /** HR/head-office staff with no branch stay visible to every branch (they can be commission recipients anywhere). */
+    public static $sharedWhenNoBranch = true;
+
     protected $table = 'staff';
 
     protected $fillable = ['name', 'nic_no', 'phone', 'email', 'designation', 'branch_id', 'user_id', 'status'];

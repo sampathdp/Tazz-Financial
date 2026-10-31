@@ -397,6 +397,11 @@ class BorrowingController extends Controller
         }
 
         DB::transaction(function () use ($borrowingTransaction, $borrowing) {
+            // Same lock as recordTransaction(); re-check that this is still the live, latest transaction.
+            $borrowing->setRawAttributes(Borrowing::lockForUpdate()->findOrFail($borrowing->id)->getAttributes(), true);
+            if ($borrowing->transactions()->max('id') !== $borrowingTransaction->id) {
+                throw ValidationException::withMessages(['transaction' => 'This transaction was already voided or is no longer the most recent one.']);
+            }
             BorrowingLedgerPoster::reverseTransaction($borrowingTransaction);
 
             $borrowing->update([
@@ -405,7 +410,7 @@ class BorrowingController extends Controller
                 'accrued_interest_unpaid' => bcadd((string) $borrowing->accrued_interest_unpaid, (string) $borrowingTransaction->accrued_interest_cleared, 2),
                 'status' => $borrowing->status === 'Settled' ? 'Active' : $borrowing->status,
             ]);
-            $borrowingTransaction->delete();
+            $borrowingTransaction->markVoided(auth()->id(), 'Transaction voided');
         });
 
         return response()->json($this->fresh($borrowing->refresh()));
@@ -413,7 +418,7 @@ class BorrowingController extends Controller
 
     public function destroy(Borrowing $borrowing)
     {
-        if ($borrowing->transactions()->exists()) {
+        if ($borrowing->transactions()->withVoided()->exists()) {
             return response()->json(['message' => 'Void or remove this borrowing\'s transactions before deleting it.'], 422);
         }
 

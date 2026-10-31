@@ -288,6 +288,14 @@ class SavingsAccountController extends Controller
         }
 
         $result = DB::transaction(function () use ($savingsAccount, $data, $amount, $fee, $request) {
+            // Re-check the minimum balance on the locked row: the guard above used a stale balance, so two
+            // simultaneous withdrawals could both pass it and overdraw the account.
+            $locked = SavingsAccount::lockForUpdate()->findOrFail($savingsAccount->id);
+            if ($amount + $fee > (float) $locked->current_balance - (float) $locked->min_balance + 1e-6) {
+                throw ValidationException::withMessages([
+                    'amount' => 'This withdrawal (plus any fee) would take the account below its minimum balance of ' . number_format((float) $locked->min_balance, 2) . '.',
+                ]);
+            }
             $txn = SavingsAccountService::record($savingsAccount, [
                 'type' => 'Withdrawal', 'direction' => 'Out', 'amount' => $amount, 'txn_date' => $data['txn_date'],
                 'payment_method' => $data['payment_method'], 'bank_account_id' => $data['bank_account_id'] ?? null, 'reference_no' => $data['reference_no'] ?? null,

@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class FdPartPayment extends Model
 {
+    use \App\Models\Concerns\HasVoidedRows;
+
     protected $fillable = [
         'fixed_deposit_id', 'voucher_no', 'principal_amount', 'rate_percent', 'held_days',
         'interest_entitlement', 'interest_paid', 'clawback_amount', 'net_amount_paid',

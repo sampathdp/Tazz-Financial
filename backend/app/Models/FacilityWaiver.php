@@ -6,10 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 
 class FacilityWaiver extends Model
 {
+    use \App\Models\Concerns\HasVoidedRows;
+
     public $timestamps = false;
 
     protected $fillable = [
-        'credit_facility_id', 'waiver_type', 'amount', 'reason', 'approved_by', 'waived_at', 'created_by',
+        'credit_facility_id', 'waiver_type', 'amount', 'reason', 'approved_by', 'waived_at', 'created_by', 'journal_entry_id', 'posted_amount',
     ];
 
     protected $casts = [

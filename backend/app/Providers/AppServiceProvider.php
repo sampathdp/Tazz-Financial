@@ -12,7 +12,10 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register()
     {
-        //
+        // Every DB::transaction() retries on a deadlock (see the class docblock).
+        \Illuminate\Database\Connection::resolverFor('mysql', function ($connection, $database, $prefix, $config) {
+            return new \App\Support\DeadlockRetryingMySqlConnection($connection, $database, $prefix, $config);
+        });
     }
 
     public function boot()
