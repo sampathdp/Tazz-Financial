@@ -94,7 +94,7 @@ export function FdCommissionsScreen({ go: _go, user: me }: { go: Go; user?: Auth
       p{margin:0 0 10px;color:#666}table{width:100%;border-collapse:collapse}th{background:#1F3A5F;color:#fff;text-align:left}
       th,td{border:1px solid #d5dce5;padding:4px 6px}tr:nth-child(even) td{background:#f8fafc}</style></head><body>
       <h1>FD Commissions</h1><p>Generated ${today()} · ${rows.length} record(s)</p>
-      <table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
+      <table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
       <tbody>${body.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>
       </body></html>`)
     w.document.close()

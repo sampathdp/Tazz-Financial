@@ -16,6 +16,9 @@ class AuthController extends Controller
 {
     private const MAX_ATTEMPTS = 5;
     private const DECAY_SECONDS = 60;
+    // Per-account cap regardless of source IP, so rotating IPs can't bypass the email+IP lockout.
+    private const MAX_ACCOUNT_ATTEMPTS = 10;
+    private const ACCOUNT_DECAY_SECONDS = 900;
 
     public function login(Request $request)
     {
@@ -26,8 +29,16 @@ class AuthController extends Controller
 
         $key = $this->throttleKey($request, $data['email']);
 
-        if (RateLimiter::tooManyAttempts($key, self::MAX_ATTEMPTS)) {
-            $seconds = RateLimiter::availableIn($key);
+        $accountKey = 'login-account|'.Str::lower($data['email']);
+
+        $ipLocked = RateLimiter::tooManyAttempts($key, self::MAX_ATTEMPTS);
+        $accountLocked = RateLimiter::tooManyAttempts($accountKey, self::MAX_ACCOUNT_ATTEMPTS);
+
+        if ($ipLocked || $accountLocked) {
+            $seconds = max(
+                $ipLocked ? RateLimiter::availableIn($key) : 0,
+                $accountLocked ? RateLimiter::availableIn($accountKey) : 0
+            );
 
             Log::channel('security')->warning('login_throttled', [
                 'email' => $data['email'],
@@ -44,6 +55,7 @@ class AuthController extends Controller
 
         if (!$user || !Hash::check($data['password'], $user->password)) {
             RateLimiter::hit($key, self::DECAY_SECONDS);
+            RateLimiter::hit($accountKey, self::ACCOUNT_DECAY_SECONDS);
 
             Log::channel('security')->warning('login_failed', [
                 'email' => $data['email'],
@@ -69,6 +81,7 @@ class AuthController extends Controller
         }
 
         RateLimiter::clear($key);
+        RateLimiter::clear($accountKey);
 
         $token = $user->createToken('mms-web')->plainTextToken;
 

@@ -128,6 +128,11 @@ class FinanceTransactionController extends Controller
                 }
             });
         } catch (\RuntimeException $e) {
+            // PDOException/QueryException extend RuntimeException — never echo SQL text to the client.
+            if ($e instanceof \PDOException) {
+                throw $e;
+            }
+
             return response()->json(['message' => $e->getMessage()], 422);
         }
 

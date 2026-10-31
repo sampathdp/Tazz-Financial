@@ -31,3 +31,16 @@ Date 2026-11-01. **No application tests were run and no live requests were sent 
 1. Run the existing suite against a cloned test DB (`php artisan db:clone-for-tests`, then `php artisan test`) and record the baseline before any change.
 2. Add regression tests listed in `AUTHENTICATION_AUTHORIZATION_AUDIT.md` as each fix lands.
 3. Live checks from outside: `curl -I` on API and SPA for headers; request `/.env`, `/storage/...`, `/api/.env`, backup paths; verify 401/403 without token.
+
+## Update: Phase 0.4 / Phase 1 (2026-11-01)
+
+| Change | Verification | Result |
+|---|---|---|
+| Dumps/binaries untracked, `OPS_TOKEN` example blanked, `.gitignore` extended | `git ls-files` | Done locally, **not pushed**; history still contains the dumps until rewritten |
+| `FinanceTransactionController`: no SQL text returned (rethrow `PDOException`) | `php -l` only | Syntax OK; behaviour **not tested** |
+| Login: per-email lockout (10 failures / 15 min regardless of IP) | `php -l`; new test `LoginAccountLockoutTest` | **Test written, not run** |
+| `X-XSS-Protection` set to `0` | `php -l` | Syntax OK; header **not checked live** |
+| `FdCommissions.tsx` escapes print headers | `npm run build` | Build passes |
+| `npm audit fix` (follow-redirects) | `npm audit` | 3 → 2 findings; `vite` (high) and `esbuild` (moderate) remain, need a major upgrade |
+
+**Test suite blocked:** the local `tazz` database has `users.id` without `AUTO_INCREMENT` (confirmed via `information_schema`), so `db:clone-for-tests` copies a schema where inserts fail with `1364 Field 'id' doesn't have a default value`. Every DB-backed test errors, so no baseline exists. `LIVE_SCHEMA_REPAIR.sql` in the repo root may address this. If the same defect exists on the live server, it is an integrity problem in itself (**requires manual verification**).

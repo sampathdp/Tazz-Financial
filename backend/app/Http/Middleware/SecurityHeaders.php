@@ -18,7 +18,7 @@ class SecurityHeaders
             'X-Frame-Options' => 'DENY',
             'Referrer-Policy' => 'strict-origin-when-cross-origin',
             'Permissions-Policy' => 'geolocation=(), microphone=(), camera=(), payment=()',
-            'X-XSS-Protection' => '1; mode=block',
+            'X-XSS-Protection' => '0', // legacy auditor is itself exploitable; rely on CSP
         ];
 
         // HSTS only for HTTPS connections
