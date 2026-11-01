@@ -6,6 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class FdInterestPayment extends Model
 {
+    use Concerns\ScopedThroughParent;
+
+    /** Visible only through a parent the caller's branch can see. */
+    protected static array $branchParents = ['fixed_deposit_id' => FixedDeposit::class];
+
     protected $fillable = [
         'fixed_deposit_id', 'installment_no', 'voucher_no', 'due_date', 'amount',
         'status', 'paid_amount', 'paid_at', 'payment_method', 'reference_no', 'bank_account_id', 'paid_by',

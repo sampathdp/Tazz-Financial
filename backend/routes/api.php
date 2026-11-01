@@ -240,71 +240,65 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('loans/{loan}', [LoanController::class, 'destroy'])->middleware('perm:Loan Applications,Delete');
     // approve/reject gated inline by ApprovalType::isAuthorized('loan_application', ...) — see LoanController —
     // not the module permission grid, so who may approve an application is admin-manageable data, same as loan_cancel below.
-    Route::post('loans/{loan}/approve', [LoanController::class, 'approve']);
+    Route::post('loans/{loan}/approve', [LoanController::class, 'approve'])->middleware('idempotency:required');
     Route::post('loans/{loan}/reject', [LoanController::class, 'reject']);
-    Route::post('loans/{loan}/cancel-request', [LoanController::class, 'cancelRequest'])->middleware(['perm:Loan Applications,Delete', 'idempotency']);
+    Route::post('loans/{loan}/cancel-request', [LoanController::class, 'cancelRequest'])->middleware(['perm:Loan Applications,Delete', 'idempotency:required']);
     // approve/reject gated inline by ApprovalType::isAuthorized('loan_cancel', ...) — see LoanController — not
     // the module permission grid, so who may approve is admin-manageable data, not a hardcoded permission module.
-    Route::post('loan-cancel-requests/{cancelRequest}/approve', [LoanController::class, 'approveCancelRequest'])->middleware('idempotency');
-    Route::post('loan-cancel-requests/{cancelRequest}/reject', [LoanController::class, 'rejectCancelRequest'])->middleware('idempotency');
+    Route::post('loan-cancel-requests/{cancelRequest}/approve', [LoanController::class, 'approveCancelRequest'])->middleware('idempotency:required');
+    Route::post('loan-cancel-requests/{cancelRequest}/reject', [LoanController::class, 'rejectCancelRequest'])->middleware('idempotency:required');
 
     // --- Loan Management: Active Loans ---
     // Direct disburse (Finance / admin): finishes the loan and releases the money in one call.
     Route::get('loans-disbursement', [LoanController::class, 'awaitingDisbursement'])->middleware('perm:Loan Disbursement,View');
     Route::get('loans-disbursement/{loan}', [LoanController::class, 'show'])->middleware('perm:Loan Disbursement,View');
-    Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware(['perm:Loan Disbursement,Approve', 'idempotency']);
+    Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware(['perm:Loan Disbursement,Approve', 'idempotency:required']);
     // Request disburse (loan officer): raises a LoanDisbursement finance request; Finance
     // approves + executes it, then a listener finishes the loan (see the Finance module plan, D2).
-    Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware(['perm:Loan Disbursement,Create', 'idempotency']);
+    Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware(['perm:Loan Disbursement,Create', 'idempotency:required']);
     // Write-off is maker-checker (shared approval_requests table, code 'loan_write_off'),
     // same pattern as loan_cancel below. Submitting needs the module permission; who may
     // approve/reject is admin-manageable data via ApprovalType::isAuthorized('loan_write_off').
-    Route::post('loans/{loan}/write-off-request', [LoanController::class, 'writeOffRequest'])->middleware(['perm:Active Loans,Delete', 'idempotency']);
-    Route::post('loan-write-off-requests/{writeOffRequest}/approve', [LoanController::class, 'approveWriteOffRequest'])->middleware('idempotency');
-    Route::post('loan-write-off-requests/{writeOffRequest}/reject', [LoanController::class, 'rejectWriteOffRequest'])->middleware('idempotency');
+    Route::post('loans/{loan}/write-off-request', [LoanController::class, 'writeOffRequest'])->middleware(['perm:Active Loans,Delete', 'idempotency:required']);
+    Route::post('loan-write-off-requests/{writeOffRequest}/approve', [LoanController::class, 'approveWriteOffRequest'])->middleware('idempotency:required');
+    Route::post('loan-write-off-requests/{writeOffRequest}/reject', [LoanController::class, 'rejectWriteOffRequest'])->middleware('idempotency:required');
     // Loan reschedule (restructure) — closes the loan as 'Restructured' and creates a
     // new linked loan. Admin-only, no approval workflow, same as the other Loan Adjustments actions.
-    Route::post('loans/{loan}/reschedule', [LoanController::class, 'reschedule'])->middleware('admin');
-    // TEMPORARY (admin-only) — hard-purges a loan and its whole restructure chain
-    // from the database: schedule, payments, charges, collateral, documents, GL
-    // journal entries + lines and cashbook receipts (the cash balance is
-    // corrected). One-off live-data cleanup for test / mis-keyed loans; remove
-    // this route + LoanController::purge() once the cleanup is done.
-    Route::delete('loans/{loan}/purge', [LoanController::class, 'purge'])->middleware('admin');
+    Route::post('loans/{loan}/reschedule', [LoanController::class, 'reschedule'])->middleware('admin')->middleware('idempotency:required');
 
     // --- Loan Management: Impairment / NPL Provisioning ---
     // Flat path (not loans/provisions) so it can never collide with loans/{loan} below.
     Route::get('loans-provisions', [LoanProvisionController::class, 'index'])->middleware('perm:Loan Provisioning,View');
-    Route::post('loans/{loan}/post-provision', [LoanProvisionController::class, 'post'])->middleware('perm:Loan Provisioning,Edit');
+    Route::post('loans/{loan}/post-provision', [LoanProvisionController::class, 'post'])->middleware('perm:Loan Provisioning,Edit')->middleware('idempotency:required');
     Route::get('loans/{loan}/provisions', [LoanProvisionController::class, 'history'])->middleware('perm:Loan Provisioning,View');
-    Route::post('loans/{loan}/close', [LoanController::class, 'close'])->middleware('perm:Active Loans,Edit');
+    Route::post('loans/{loan}/close', [LoanController::class, 'close'])->middleware('perm:Active Loans,Edit')->middleware('idempotency:required');
     Route::patch('loans/{loan}/status-flags', [LoanController::class, 'updateStatusFlags'])->middleware('perm:Active Loans,Edit');
     Route::patch('loans/{loan}/officers', [LoanController::class, 'updateOfficers'])->middleware('perm:Active Loans,Edit');
     // Admin-only — see the frontend's "Loan Adjustments" screen (installment skip / cheque clearance / waivers).
-    Route::post('loans/{loan}/schedules/{schedule}/skip', [LoanController::class, 'skipInstallment'])->middleware('admin');
+    Route::post('loans/{loan}/schedules/{schedule}/skip', [LoanController::class, 'skipInstallment'])->middleware('admin')->middleware('idempotency:required');
     // Bulk installment skip, by loan type — skips the matching due-date installment
     // for every active loan of that type in one go (e.g. a public holiday).
     Route::get('loan-types/{loanType}/skip-dates', [LoanController::class, 'skipDates'])->middleware('admin');
-    Route::post('loan-types/{loanType}/schedules/bulk-skip', [LoanController::class, 'bulkSkipInstallments'])->middleware('admin');
+    Route::post('loan-types/{loanType}/schedules/bulk-skip', [LoanController::class, 'bulkSkipInstallments'])->middleware('admin')->middleware('idempotency:required');
 
     // --- Loan Management: Loan Payments ---
     Route::get('loans/{loan}/payments', [LoanPaymentController::class, 'index'])->middleware('perm:Loan Payments,View');
     Route::get('loans/{loan}/next-receipt-no', [LoanPaymentController::class, 'nextReceiptNo'])->middleware('perm:Loan Payments,Create');
     Route::get('loans/{loan}/outstanding-by-bucket', [LoanPaymentController::class, 'outstandingByBucket'])->middleware('perm:Loan Payments,Create');
-    Route::post('loans/{loan}/payments', [LoanPaymentController::class, 'store'])->middleware(['perm:Loan Payments,Create', 'idempotency']);
-    Route::post('loan-payments/{payment}/void-request', [LoanPaymentController::class, 'voidRequest'])->middleware(['perm:Loan Payments,Delete', 'idempotency']);
+    Route::post('loans/{loan}/payments', [LoanPaymentController::class, 'store'])->middleware(['perm:Loan Payments,Create', 'idempotency:required']);
+    Route::post('loan-payments/{payment}/void-request', [LoanPaymentController::class, 'voidRequest'])->middleware(['perm:Loan Payments,Delete', 'idempotency:required']);
     // approve/reject gated inline by ApprovalType::isAuthorized('payment_void', ...) — see LoanPaymentController.
-    Route::post('loan-payment-void-requests/{voidRequest}/approve', [LoanPaymentController::class, 'approveVoidRequest'])->middleware('idempotency');
+    Route::post('loan-payment-void-requests/{voidRequest}/approve', [LoanPaymentController::class, 'approveVoidRequest'])->middleware('idempotency:required');
     Route::post('loan-payment-void-requests/{voidRequest}/reject', [LoanPaymentController::class, 'rejectVoidRequest']);
     // approve/reject gated inline by ApprovalType::isAuthorized('payment_manual_allocation', ...) — see LoanPaymentController.
-    Route::post('loan-payment-allocation-requests/{allocationRequest}/approve', [LoanPaymentController::class, 'approveAllocationRequest'])->middleware('idempotency');
+    Route::post('loan-payment-allocation-requests/{allocationRequest}/approve', [LoanPaymentController::class, 'approveAllocationRequest'])->middleware('idempotency:required');
     Route::post('loan-payment-allocation-requests/{allocationRequest}/reject', [LoanPaymentController::class, 'rejectAllocationRequest']);
     // approve/reject gated inline by ApprovalType::isAuthorized('payment_settlement', ...) — see LoanPaymentController —
     // not the module permission grid, same maker-checker pattern as payment_void above.
-    Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement'])->middleware('idempotency');
-    Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement'])->middleware('idempotency');
+    Route::post('loan-payments/{payment}/approve-settlement', [LoanPaymentController::class, 'approveSettlement'])->middleware('idempotency:required');
+    Route::post('loan-payments/{payment}/reject-settlement', [LoanPaymentController::class, 'rejectSettlement'])->middleware('idempotency:required');
     // Admin-only — realizing/bouncing a cheque is a Loan Adjustments action, not a regular Loan Payments one.
-    Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('admin');
+    Route::patch('loan-payments/{payment}/clear-cheque', [LoanPaymentController::class, 'clearCheque'])->middleware('admin')->middleware('idempotency:required');
 
     Route::get('collection-reports/{type}', [CollectionReportController::class, 'show'])->middleware('perm:Collection Reports,View');
     Route::get('collection-reports/{type}/pdf', [CollectionReportController::class, 'exportPdf'])->middleware('perm:Collection Reports,View');
@@ -312,12 +306,12 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Loan Management: Sales Executive Commissions ---
     Route::get('sales-executive-commissions', [SalesExecutiveCommissionController::class, 'index'])->middleware('perm:Sales Executive Commissions,View');
     // Admin-only, like other one-shot financial-payout actions (clear-cheque, waivers) — bypasses the permission grid entirely.
-    Route::post('sales-executive-commissions/{commission}/pay', [SalesExecutiveCommissionController::class, 'pay'])->middleware(['admin', 'idempotency']);
-    Route::post('sales-executive-commissions/{commission}/void', [SalesExecutiveCommissionController::class, 'void'])->middleware('admin');
+    Route::post('sales-executive-commissions/{commission}/pay', [SalesExecutiveCommissionController::class, 'pay'])->middleware(['admin', 'idempotency:required']);
+    Route::post('sales-executive-commissions/{commission}/void', [SalesExecutiveCommissionController::class, 'void'])->middleware('admin')->middleware('idempotency:required');
 
     // --- Loan Management: Charges (Document/Legal/Valuation/Other due-type breakdown) ---
     Route::get('loans/{loan}/charges', [LoanChargeController::class, 'index'])->middleware('perm:Active Loans,View');
-    Route::post('loans/{loan}/charges', [LoanChargeController::class, 'store'])->middleware('perm:Active Loans,Create');
+    Route::post('loans/{loan}/charges', [LoanChargeController::class, 'store'])->middleware('perm:Active Loans,Create')->middleware('idempotency:required');
     Route::put('loan-charges/{charge}', [LoanChargeController::class, 'update'])->middleware('perm:Active Loans,Edit');
     Route::delete('loan-charges/{charge}', [LoanChargeController::class, 'destroy'])->middleware('perm:Active Loans,Delete');
 
@@ -351,7 +345,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // Viewing stays permission-based (the loan detail page shows them read-only);
     // recording/removing a waiver is a Loan Adjustments action (admin-only).
     Route::get('loans/{loan}/waivers', [LoanWaiverController::class, 'index'])->middleware('perm:Active Loans,View');
-    Route::post('loans/{loan}/waivers', [LoanWaiverController::class, 'store'])->middleware(['admin', 'idempotency']);
+    Route::post('loans/{loan}/waivers', [LoanWaiverController::class, 'store'])->middleware(['admin', 'idempotency:required']);
     Route::delete('loan-waivers/{waiver}', [LoanWaiverController::class, 'destroy'])->middleware('admin');
 
     // --- Speed Drafts: Types ---
@@ -368,14 +362,14 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'show'])->middleware('perm:Speed Drafts,View');
     Route::post('speed-drafts', [SpeedDraftController::class, 'store'])->middleware('perm:Speed Drafts,Create');
     Route::put('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'update'])->middleware('admin');
-    Route::delete('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'destroy'])->middleware('perm:Speed Drafts,Delete');
+    Route::delete('speed-drafts/{speedDraft}', [SpeedDraftController::class, 'destroy'])->middleware('perm:Speed Drafts,Delete')->middleware('idempotency:required');
     // approve/reject gated inline by ApprovalType::isAuthorized('speed_draft_application', ...) — see SpeedDraftController —
     // not the module permission grid, so who may approve is admin-manageable data, same as loan_application above.
-    Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve']);
+    Route::post('speed-drafts/{speedDraft}/approve', [SpeedDraftController::class, 'approve'])->middleware('idempotency:required');
     Route::post('speed-drafts/{speedDraft}/reject', [SpeedDraftController::class, 'reject']);
-    Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware(['perm:Speed Drafts,Approve', 'idempotency']);
-    Route::post('speed-drafts/{speedDraft}/request-disbursement', [SpeedDraftController::class, 'requestDisbursement'])->middleware(['perm:Speed Drafts,Create', 'idempotency']);
-    Route::post('speed-drafts/{speedDraft}/renew', [SpeedDraftController::class, 'renew'])->middleware(['perm:Speed Draft Payments,Create', 'idempotency']);
+    Route::post('speed-drafts/{speedDraft}/disburse', [SpeedDraftController::class, 'disburse'])->middleware(['perm:Speed Drafts,Approve', 'idempotency:required']);
+    Route::post('speed-drafts/{speedDraft}/request-disbursement', [SpeedDraftController::class, 'requestDisbursement'])->middleware(['perm:Speed Drafts,Create', 'idempotency:required']);
+    Route::post('speed-drafts/{speedDraft}/renew', [SpeedDraftController::class, 'renew'])->middleware(['perm:Speed Draft Payments,Create', 'idempotency:required']);
 
     // --- Speed Drafts: Collateral (Gold Pawning / Lease asset records) ---
     Route::get('speed-drafts/{speedDraft}/collateral', [SpeedDraftCollateralController::class, 'index'])->middleware('perm:Speed Drafts,View');
@@ -391,8 +385,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Speed Drafts: Payments (interest / capital-reduction / full settlement) ---
     Route::get('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'index'])->middleware('perm:Speed Draft Payments,View');
     Route::get('speed-drafts/{speedDraft}/next-receipt-no', [SpeedDraftPaymentController::class, 'nextReceiptNo'])->middleware('perm:Speed Draft Payments,Create');
-    Route::post('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'store'])->middleware(['perm:Speed Draft Payments,Create', 'idempotency']);
-    Route::delete('speed-draft-payments/{payment}', [SpeedDraftPaymentController::class, 'destroy'])->middleware(['perm:Speed Draft Payments,Delete', 'idempotency']);
+    Route::post('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'store'])->middleware(['perm:Speed Draft Payments,Create', 'idempotency:required']);
+    Route::delete('speed-draft-payments/{payment}', [SpeedDraftPaymentController::class, 'destroy'])->middleware(['perm:Speed Draft Payments,Delete', 'idempotency:required']);
 
     // --- Pawning: Types (schemes — rates, LTV, grace/auction-notice days) ---
     Route::get('pawning-types', [PawningTypeController::class, 'index'])->middleware('perm:Pawning Types,View');
@@ -417,11 +411,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // Flat path (not pawnings/overdue) so it can never collide with the pawnings/{pawning} route below.
     Route::get('pawnings-overdue', [PawningController::class, 'overdue'])->middleware('perm:Pawnings,View');
     Route::get('pawnings/{pawning}', [PawningController::class, 'show'])->middleware('perm:Pawnings,View');
-    Route::put('pawnings/{pawning}', [PawningController::class, 'adminUpdate'])->middleware('admin');
-    Route::post('pawnings', [PawningController::class, 'store'])->middleware('perm:Pawnings,Create');
-    Route::post('pawnings/{pawning}/renew', [PawningController::class, 'renew'])->middleware(['perm:Pawning Payments,Create', 'idempotency']);
-    Route::post('pawnings/{pawning}/redeem', [PawningController::class, 'redeem'])->middleware(['perm:Pawning Payments,Create', 'idempotency']);
-    Route::post('pawning-payments/{payment}/void', [PawningController::class, 'voidPayment'])->middleware(['perm:Pawning Payments,Delete', 'idempotency']);
+    Route::put('pawnings/{pawning}', [PawningController::class, 'adminUpdate'])->middleware('admin')->middleware('idempotency:required');
+    Route::post('pawnings', [PawningController::class, 'store'])->middleware('perm:Pawnings,Create')->middleware('idempotency:required');
+    Route::post('pawnings/{pawning}/renew', [PawningController::class, 'renew'])->middleware(['perm:Pawning Payments,Create', 'idempotency:required']);
+    Route::post('pawnings/{pawning}/redeem', [PawningController::class, 'redeem'])->middleware(['perm:Pawning Payments,Create', 'idempotency:required']);
+    Route::post('pawning-payments/{payment}/void', [PawningController::class, 'voidPayment'])->middleware(['perm:Pawning Payments,Delete', 'idempotency:required']);
 
     // --- Pawning: Auctions (default handling) ---
     Route::get('pawning-auctions', [PawningAuctionController::class, 'index'])->middleware('perm:Pawning Auctions,View');
@@ -429,11 +423,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('pawning-auctions/{pawningAuction}', [PawningAuctionController::class, 'show'])->middleware('perm:Pawning Auctions,View');
     Route::post('pawning-auctions', [PawningAuctionController::class, 'store'])->middleware('perm:Pawning Auctions,Create');
     Route::post('pawning-auctions/{pawningAuction}/items', [PawningAuctionController::class, 'addItems'])->middleware('perm:Pawning Auctions,Edit');
-    Route::post('pawning-auctions/{pawningAuction}/complete', [PawningAuctionController::class, 'complete'])->middleware('perm:Pawning Auctions,Edit');
-    Route::post('pawning-auction-items/{pawningAuctionItem}/sale', [PawningAuctionController::class, 'recordSale'])->middleware(['perm:Pawning Auctions,Edit', 'idempotency']);
-    Route::post('pawning-auction-items/{pawningAuctionItem}/unsold', [PawningAuctionController::class, 'markUnsold'])->middleware(['perm:Pawning Auctions,Edit', 'idempotency']);
-    Route::post('pawning-auction-items/{pawningAuctionItem}/settle-surplus', [PawningAuctionController::class, 'settleSurplus'])->middleware(['perm:Pawning Auctions,Edit', 'idempotency']);
-    Route::post('pawning-auction-items/{pawningAuctionItem}/forfeit-surplus', [PawningAuctionController::class, 'forfeitSurplus'])->middleware(['perm:Pawning Auctions,Edit', 'idempotency']);
+    Route::post('pawning-auctions/{pawningAuction}/complete', [PawningAuctionController::class, 'complete'])->middleware('perm:Pawning Auctions,Edit')->middleware('idempotency:required');
+    Route::post('pawning-auction-items/{pawningAuctionItem}/sale', [PawningAuctionController::class, 'recordSale'])->middleware(['perm:Pawning Auctions,Edit', 'idempotency:required']);
+    Route::post('pawning-auction-items/{pawningAuctionItem}/unsold', [PawningAuctionController::class, 'markUnsold'])->middleware(['perm:Pawning Auctions,Edit', 'idempotency:required']);
+    Route::post('pawning-auction-items/{pawningAuctionItem}/settle-surplus', [PawningAuctionController::class, 'settleSurplus'])->middleware(['perm:Pawning Auctions,Edit', 'idempotency:required']);
+    Route::post('pawning-auction-items/{pawningAuctionItem}/forfeit-surplus', [PawningAuctionController::class, 'forfeitSurplus'])->middleware(['perm:Pawning Auctions,Edit', 'idempotency:required']);
 
     // --- Bank Management: Bank Accounts ---
     Route::get('bank-accounts', [BankAccountController::class, 'index'])->middleware('perm:Bank Accounts,View');
@@ -443,11 +437,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Bank Management: Bank Transactions (immutable ledger entries — void by deleting, never edited) ---
     Route::get('bank-transactions', [BankTransactionController::class, 'index'])->middleware('perm:Bank Transactions,View');
-    Route::post('bank-transactions', [BankTransactionController::class, 'store'])->middleware(['perm:Bank Transactions,Create', 'idempotency']);
+    Route::post('bank-transactions', [BankTransactionController::class, 'store'])->middleware(['perm:Bank Transactions,Create', 'idempotency:required']);
     Route::get('undeposited-funds', [UndepositedFundsController::class, 'show'])->middleware('perm:Bank Transactions,View');
-    Route::post('undeposited-funds/deposit', [UndepositedFundsController::class, 'deposit'])->middleware(['perm:Bank Transactions,Create', 'idempotency']);
-    Route::post('bank-transactions/{bankTransaction}/clear', [BankTransactionController::class, 'clear'])->middleware(['perm:Bank Transactions,Edit', 'idempotency']);
-    Route::delete('bank-transactions/{bankTransaction}', [BankTransactionController::class, 'destroy'])->middleware('perm:Bank Transactions,Delete');
+    Route::post('undeposited-funds/deposit', [UndepositedFundsController::class, 'deposit'])->middleware(['perm:Bank Transactions,Create', 'idempotency:required']);
+    Route::post('bank-transactions/{bankTransaction}/clear', [BankTransactionController::class, 'clear'])->middleware(['perm:Bank Transactions,Edit', 'idempotency:required']);
+    Route::delete('bank-transactions/{bankTransaction}', [BankTransactionController::class, 'destroy'])->middleware('perm:Bank Transactions,Delete')->middleware('idempotency:required');
 
     // --- Bank Management: Bank Reconciliation ---
     Route::get('bank-reconciliations', [BankReconciliationController::class, 'index'])->middleware('perm:Bank Reconciliation,View');
@@ -462,8 +456,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('cash-accounts/{cashAccount}', [CashAccountController::class, 'destroy'])->middleware('perm:Cashbook,Delete');
 
     Route::get('cashbook-entries', [CashbookEntryController::class, 'index'])->middleware('perm:Cashbook,View');
-    Route::post('cashbook-entries', [CashbookEntryController::class, 'store'])->middleware(['perm:Cashbook,Create', 'idempotency']);
-    Route::delete('cashbook-entries/{cashbookEntry}', [CashbookEntryController::class, 'destroy'])->middleware('perm:Cashbook,Delete');
+    Route::post('cashbook-entries', [CashbookEntryController::class, 'store'])->middleware(['perm:Cashbook,Create', 'idempotency:required']);
+    Route::delete('cashbook-entries/{cashbookEntry}', [CashbookEntryController::class, 'destroy'])->middleware('perm:Cashbook,Delete')->middleware('idempotency:required');
 
     // Cash Transfers retired in Phase 9 — superseded by Finance > Transfers
     // (finance_requests + FinancePostingService). The cash_transfers table and
@@ -472,8 +466,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Cashbook Management: Cash Reconciliation (branch-level daily cash-in-hand entry) ---
     Route::get('cash-reconciliations', [CashReconciliationController::class, 'index'])->middleware('perm:Cash Reconciliation,View');
     Route::get('cash-reconciliations/summary', [CashReconciliationController::class, 'summary'])->middleware('perm:Cash Reconciliation,View');
-    Route::post('cash-reconciliations', [CashReconciliationController::class, 'store'])->middleware('perm:Cash Reconciliation,Create');
-    Route::post('cash-reconciliations/{cashReconciliation}/verify', [CashReconciliationController::class, 'verify'])->middleware('perm:Cash Reconciliation,Edit');
+    Route::post('cash-reconciliations', [CashReconciliationController::class, 'store'])->middleware('perm:Cash Reconciliation,Create')->middleware('idempotency:required');
+    Route::post('cash-reconciliations/{cashReconciliation}/verify', [CashReconciliationController::class, 'verify'])->middleware('perm:Cash Reconciliation,Edit')->middleware('idempotency:required');
     Route::delete('cash-reconciliations/{cashReconciliation}', [CashReconciliationController::class, 'destroy'])->middleware('perm:Cash Reconciliation,Delete');
 
     // --- Finance: Dashboard (cash control at a glance) ---
@@ -483,8 +477,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('finance-transactions', [FinanceTransactionController::class, 'index'])->middleware('perm:Cash Transactions,View');
     Route::get('finance-transactions/{financeTransaction}', [FinanceTransactionController::class, 'show'])->middleware('perm:Cash Transactions,View');
     // Reverse — direct if the reversal_requires_approval setting is off, else raises a finance_reversal approval.
-    Route::post('finance-transactions/{financeTransaction}/reverse-request', [FinanceTransactionController::class, 'reverseRequest'])->middleware(['perm:Cash Transactions,Delete', 'idempotency']);
-    Route::post('finance-transaction-reverse-requests/{approvalRequest}/approve', [FinanceTransactionController::class, 'approveReverse']);
+    Route::post('finance-transactions/{financeTransaction}/reverse-request', [FinanceTransactionController::class, 'reverseRequest'])->middleware(['perm:Cash Transactions,Delete', 'idempotency:required']);
+    Route::post('finance-transaction-reverse-requests/{approvalRequest}/approve', [FinanceTransactionController::class, 'approveReverse'])->middleware('idempotency:required');
     Route::post('finance-transaction-reverse-requests/{approvalRequest}/reject', [FinanceTransactionController::class, 'rejectReverse']);
 
     // --- Finance: Audit Log ---
@@ -503,10 +497,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Finance: Cash Floats (a float is a cash_accounts row, type CashierFloat) ---
     Route::get('cash-floats', [CashFloatController::class, 'index'])->middleware('perm:Cash Floats,View');
     Route::get('cash-float-settlements', [CashFloatController::class, 'settlements'])->middleware('perm:Cash Floats,View');
-    Route::post('cash-floats/issue', [CashFloatController::class, 'issue'])->middleware('perm:Cash Floats,Create');
+    Route::post('cash-floats/issue', [CashFloatController::class, 'issue'])->middleware('perm:Cash Floats,Create')->middleware('idempotency:required');
     Route::post('cash-floats/{cashAccount}/request-settlement', [CashFloatController::class, 'requestSettlement'])->middleware('perm:Cash Floats,Edit');
     // settle gated inline by ApprovalType::isAuthorized('finance_float_settlement') — same maker-checker pattern.
-    Route::post('cash-float-settlements/{cashFloatSettlement}/settle', [CashFloatController::class, 'settle'])->middleware(['perm:Cash Floats,Edit', 'idempotency']);
+    Route::post('cash-float-settlements/{cashFloatSettlement}/settle', [CashFloatController::class, 'settle'])->middleware(['perm:Cash Floats,Edit', 'idempotency:required']);
 
     // --- Finance: Requests (the single outbound-payment / transfer queue) ---
     // Create / submit / cancel are requester actions; approve / reject are
@@ -518,12 +512,12 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('finance-requests', [FinanceRequestController::class, 'store'])->middleware('perm:Finance Requests,Create');
     Route::post('finance-requests/{financeRequest}/submit', [FinanceRequestController::class, 'submit'])->middleware('perm:Finance Requests,Create');
     Route::post('finance-requests/{financeRequest}/cancel', [FinanceRequestController::class, 'cancel'])->middleware('perm:Finance Requests,Create');
-    Route::post('finance-requests/{financeRequest}/approve', [FinanceRequestController::class, 'approve']);
+    Route::post('finance-requests/{financeRequest}/approve', [FinanceRequestController::class, 'approve'])->middleware('idempotency:required');
     Route::post('finance-requests/{financeRequest}/reject', [FinanceRequestController::class, 'reject']);
-    Route::post('finance-requests/{financeRequest}/execute', [FinanceRequestController::class, 'execute'])->middleware('perm:Finance Requests,Edit');
+    Route::post('finance-requests/{financeRequest}/execute', [FinanceRequestController::class, 'execute'])->middleware('perm:Finance Requests,Edit')->middleware('idempotency:required');
     // Cross-branch transfer: release (send) -> receive (confirm) -> or recall.
-    Route::post('finance-requests/{financeRequest}/release', [FinanceRequestController::class, 'release'])->middleware(['perm:Finance Transfers,Edit', 'idempotency']);
-    Route::post('finance-requests/{financeRequest}/receive', [FinanceRequestController::class, 'receive'])->middleware(['perm:Finance Transfers,Edit', 'idempotency']);
+    Route::post('finance-requests/{financeRequest}/release', [FinanceRequestController::class, 'release'])->middleware(['perm:Finance Transfers,Edit', 'idempotency:required']);
+    Route::post('finance-requests/{financeRequest}/receive', [FinanceRequestController::class, 'receive'])->middleware(['perm:Finance Transfers,Edit', 'idempotency:required']);
     Route::post('finance-requests/{financeRequest}/recall', [FinanceRequestController::class, 'recall'])->middleware('perm:Finance Transfers,Edit');
 
     // --- Masters: Expense Categories — a dedicated table, used by the
@@ -562,69 +556,69 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('fd-deposits', [FdDepositController::class, 'index'])->middleware('perm:Deposits,View');
     Route::get('fd-deposits/next-number', [FdDepositController::class, 'nextDepositNo'])->middleware('perm:Deposits,Create');
     Route::get('fd-deposits/{fdDeposit}', [FdDepositController::class, 'show'])->middleware('perm:Deposits,View');
-    Route::post('fd-deposits', [FdDepositController::class, 'store'])->middleware(['perm:Deposits,Create', 'idempotency']);
-    Route::delete('fd-deposits/{fdDeposit}', [FdDepositController::class, 'destroy'])->middleware('perm:Deposits,Delete');
+    Route::post('fd-deposits', [FdDepositController::class, 'store'])->middleware(['perm:Deposits,Create', 'idempotency:required']);
+    Route::delete('fd-deposits/{fdDeposit}', [FdDepositController::class, 'destroy'])->middleware('perm:Deposits,Delete')->middleware('idempotency:required');
 
     // --- Funding Management: Fixed Deposits ---
     // --- Loan against FD ---
     // Flat paths so they never collide with fixed-deposits/{fixedDeposit} or loans/{loan}.
     Route::get('fd-loans/eligible-fds', [FdLoanController::class, 'eligibleFds'])->middleware('perm:Loan Applications,Create');
     Route::get('fd-loans/quote/{fixedDeposit}', [FdLoanController::class, 'quote'])->middleware('perm:Loan Applications,Create');
-    Route::post('fd-loans', [FdLoanController::class, 'store'])->middleware('perm:Loan Applications,Create');
-    Route::post('loans/{loan}/settle-from-fd', [FdLoanController::class, 'settle'])->middleware(['perm:Active Loans,Approve', 'idempotency']);
+    Route::post('fd-loans', [FdLoanController::class, 'store'])->middleware('perm:Loan Applications,Create')->middleware('idempotency:required');
+    Route::post('loans/{loan}/settle-from-fd', [FdLoanController::class, 'settle'])->middleware(['perm:Active Loans,Approve', 'idempotency:required']);
     Route::get('fd-loan-policies', [FdLoanController::class, 'policies'])->middleware('perm:Funding Products,View');
     Route::put('fd-loan-policies/{fundingProduct}', [FdLoanController::class, 'savePolicy'])->middleware('perm:Funding Products,Edit');
 
     Route::get('fixed-deposits', [FixedDepositController::class, 'index'])->middleware('perm:Fixed Deposits,View');
     Route::get('fixed-deposits/{fixedDeposit}', [FixedDepositController::class, 'show'])->middleware('perm:Fixed Deposits,View');
-    Route::put('fixed-deposits/{fixedDeposit}', [FixedDepositController::class, 'adminUpdate'])->middleware('admin');
-    Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->middleware('perm:Fixed Deposits,Create');
-    Route::post('fixed-deposits/{fixedDeposit}/renew', [FixedDepositController::class, 'renew'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
-    Route::post('fixed-deposits/{fixedDeposit}/withdraw', [FixedDepositController::class, 'withdraw'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
+    Route::put('fixed-deposits/{fixedDeposit}', [FixedDepositController::class, 'adminUpdate'])->middleware('admin')->middleware('idempotency:required');
+    Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->middleware('perm:Fixed Deposits,Create')->middleware('idempotency:required');
+    Route::post('fixed-deposits/{fixedDeposit}/renew', [FixedDepositController::class, 'renew'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency:required']);
+    Route::post('fixed-deposits/{fixedDeposit}/withdraw', [FixedDepositController::class, 'withdraw'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency:required']);
     Route::get('fixed-deposits/{fixedDeposit}/withdrawal-preview', [FixedDepositController::class, 'withdrawalPreview'])->middleware('perm:Fixed Deposits,View');
     Route::put('fixed-deposits/{fixedDeposit}/payout-account', [FixedDepositController::class, 'setPayoutAccount'])->middleware('perm:Fixed Deposits,Edit');
     Route::get('fd-commissions', [FdCommissionController::class, 'index'])->middleware('perm:Fixed Deposits,View');
-    Route::post('fixed-deposits/{fixedDeposit}/commissions', [FdCommissionController::class, 'store'])->middleware('perm:Fixed Deposits,Edit');
+    Route::post('fixed-deposits/{fixedDeposit}/commissions', [FdCommissionController::class, 'store'])->middleware('perm:Fixed Deposits,Edit')->middleware('idempotency:required');
     Route::put('fd-commissions/{commission}', [FdCommissionController::class, 'update'])->middleware('perm:Fixed Deposits,Edit');
     Route::delete('fd-commissions/{commission}', [FdCommissionController::class, 'destroy'])->middleware('perm:Fixed Deposits,Edit');
-    Route::post('fd-commissions/{commission}/pay', [FdCommissionController::class, 'pay'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
-    Route::post('fd-commissions/{commission}/void', [FdCommissionController::class, 'void'])->middleware('admin');
+    Route::post('fd-commissions/{commission}/pay', [FdCommissionController::class, 'pay'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency:required']);
+    Route::post('fd-commissions/{commission}/void', [FdCommissionController::class, 'void'])->middleware('admin')->middleware('idempotency:required');
     Route::put('fixed-deposits/{fixedDeposit}/auto-renew', [FixedDepositController::class, 'setAutoRenew'])->middleware('perm:Fixed Deposits,Edit');
-    Route::post('fixed-deposits/{fixedDeposit}/void-withdrawal', [FixedDepositController::class, 'voidWithdrawal'])->middleware(['perm:Fixed Deposits,Delete', 'idempotency']);
+    Route::post('fixed-deposits/{fixedDeposit}/void-withdrawal', [FixedDepositController::class, 'voidWithdrawal'])->middleware(['perm:Fixed Deposits,Delete', 'idempotency:required']);
     Route::get('fixed-deposits/{fixedDeposit}/premature-preview', [FixedDepositController::class, 'prematurePreview'])->middleware('perm:Fixed Deposits,View');
-    Route::post('fixed-deposits/{fixedDeposit}/premature-withdraw', [FixedDepositController::class, 'prematureWithdraw'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
-    Route::post('fixed-deposits/{fixedDeposit}/part-payment', [FixedDepositController::class, 'partPayment'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
-    Route::post('fd-part-payments/{fdPartPayment}/void', [FixedDepositController::class, 'voidPartPayment'])->middleware(['perm:Fixed Deposits,Delete', 'idempotency']);
+    Route::post('fixed-deposits/{fixedDeposit}/premature-withdraw', [FixedDepositController::class, 'prematureWithdraw'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency:required']);
+    Route::post('fixed-deposits/{fixedDeposit}/part-payment', [FixedDepositController::class, 'partPayment'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency:required']);
+    Route::post('fd-part-payments/{fdPartPayment}/void', [FixedDepositController::class, 'voidPartPayment'])->middleware(['perm:Fixed Deposits,Delete', 'idempotency:required']);
 
     // --- Funding Management: Monthly Interest Payments ---
     Route::get('fd-interest-payments/due', [FdInterestPaymentController::class, 'due'])->middleware('perm:Fixed Deposits,View');
     Route::get('fixed-deposits/{fixedDeposit}/interest-payments', [FdInterestPaymentController::class, 'index'])->middleware('perm:Fixed Deposits,View');
-    Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency']);
+    Route::post('fd-interest-payments/{fdInterestPayment}/pay', [FdInterestPaymentController::class, 'pay'])->middleware(['perm:Fixed Deposits,Edit', 'idempotency:required']);
     Route::get('fd-interest-payments/{fdInterestPayment}/voucher', [FdInterestPaymentController::class, 'voucher'])->middleware('perm:Fixed Deposits,View');
-    Route::post('fd-interest-payments/{fdInterestPayment}/void', [FdInterestPaymentController::class, 'void'])->middleware('perm:Fixed Deposits,Delete');
+    Route::post('fd-interest-payments/{fdInterestPayment}/void', [FdInterestPaymentController::class, 'void'])->middleware('perm:Fixed Deposits,Delete')->middleware('idempotency:required');
 
     // --- Funding Management: Borrowings (money the company itself borrows) ---
     Route::get('borrowings', [BorrowingController::class, 'index'])->middleware('perm:Borrowings,View');
     Route::get('borrowings/next-number', [BorrowingController::class, 'nextNumber'])->middleware('perm:Borrowings,Create');
     Route::get('borrowings/lookups', [BorrowingController::class, 'lookups'])->middleware('perm:Borrowings,View');
     Route::get('borrowings/{borrowing}', [BorrowingController::class, 'show'])->middleware('perm:Borrowings,View');
-    Route::put('borrowings/{borrowing}', [BorrowingController::class, 'adminUpdate'])->middleware('admin');
-    Route::post('borrowings', [BorrowingController::class, 'store'])->middleware(['perm:Borrowings,Create', 'idempotency']);
-    Route::post('borrowings/{borrowing}/renew', [BorrowingController::class, 'renew'])->middleware('perm:Borrowings,Edit');
-    Route::post('borrowings/{borrowing}/transactions', [BorrowingController::class, 'addTransaction'])->middleware(['perm:Borrowings,Edit', 'idempotency']);
-    Route::post('borrowing-transactions/{borrowingTransaction}/void', [BorrowingController::class, 'voidTransaction'])->middleware(['perm:Borrowings,Delete', 'idempotency']);
-    Route::delete('borrowings/{borrowing}', [BorrowingController::class, 'destroy'])->middleware('perm:Borrowings,Delete');
+    Route::put('borrowings/{borrowing}', [BorrowingController::class, 'adminUpdate'])->middleware('admin')->middleware('idempotency:required');
+    Route::post('borrowings', [BorrowingController::class, 'store'])->middleware(['perm:Borrowings,Create', 'idempotency:required']);
+    Route::post('borrowings/{borrowing}/renew', [BorrowingController::class, 'renew'])->middleware('perm:Borrowings,Edit')->middleware('idempotency:required');
+    Route::post('borrowings/{borrowing}/transactions', [BorrowingController::class, 'addTransaction'])->middleware(['perm:Borrowings,Edit', 'idempotency:required']);
+    Route::post('borrowing-transactions/{borrowingTransaction}/void', [BorrowingController::class, 'voidTransaction'])->middleware(['perm:Borrowings,Delete', 'idempotency:required']);
+    Route::delete('borrowings/{borrowing}', [BorrowingController::class, 'destroy'])->middleware('perm:Borrowings,Delete')->middleware('idempotency:required');
 
     // Branch-to-branch funding through Head Office
     Route::get('branch-funding', [\App\Http\Controllers\Api\BranchFundingController::class, 'index'])->middleware('perm:Branch Funding,View');
     Route::get('branch-funding/lookups', [\App\Http\Controllers\Api\BranchFundingController::class, 'lookups'])->middleware('perm:Branch Funding,View');
     Route::get('branch-funding/{id}', [\App\Http\Controllers\Api\BranchFundingController::class, 'show'])->middleware('perm:Branch Funding,View');
-    Route::put('branch-funding/{id}', [\App\Http\Controllers\Api\BranchFundingController::class, 'adminUpdate'])->middleware('admin');
-    Route::post('branch-funding', [\App\Http\Controllers\Api\BranchFundingController::class, 'store'])->middleware('perm:Branch Funding,Create');
-    Route::post('branch-funding/{id}/approve', [\App\Http\Controllers\Api\BranchFundingController::class, 'approve'])->middleware('perm:Branch Funding,Approve');
-    Route::post('branch-funding/{id}/reject', [\App\Http\Controllers\Api\BranchFundingController::class, 'reject'])->middleware('perm:Branch Funding,Approve');
-    Route::post('branch-funding/{id}/accrue', [\App\Http\Controllers\Api\BranchFundingController::class, 'accrue'])->middleware('perm:Branch Funding,Edit');
-    Route::post('branch-funding/{id}/repay', [\App\Http\Controllers\Api\BranchFundingController::class, 'repay'])->middleware(['perm:Branch Funding,Edit', 'idempotency']);
+    Route::put('branch-funding/{id}', [\App\Http\Controllers\Api\BranchFundingController::class, 'adminUpdate'])->middleware('admin')->middleware('idempotency:required');
+    Route::post('branch-funding', [\App\Http\Controllers\Api\BranchFundingController::class, 'store'])->middleware('perm:Branch Funding,Create')->middleware('idempotency:required');
+    Route::post('branch-funding/{id}/approve', [\App\Http\Controllers\Api\BranchFundingController::class, 'approve'])->middleware('perm:Branch Funding,Approve')->middleware('idempotency:required');
+    Route::post('branch-funding/{id}/reject', [\App\Http\Controllers\Api\BranchFundingController::class, 'reject'])->middleware('perm:Branch Funding,Approve')->middleware('idempotency:required');
+    Route::post('branch-funding/{id}/accrue', [\App\Http\Controllers\Api\BranchFundingController::class, 'accrue'])->middleware('perm:Branch Funding,Edit')->middleware('idempotency:required');
+    Route::post('branch-funding/{id}/repay', [\App\Http\Controllers\Api\BranchFundingController::class, 'repay'])->middleware(['perm:Branch Funding,Edit', 'idempotency:required']);
 
     // --- Daily Savings: Products ---
     Route::get('savings-products', [SavingsProductController::class, 'index'])->middleware('perm:Savings Products,View');
@@ -636,33 +630,33 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('savings-accounts', [SavingsAccountController::class, 'index'])->middleware('perm:Savings Accounts,View');
     Route::get('savings-accounts/next-number', [SavingsAccountController::class, 'nextNumber'])->middleware('perm:Savings Accounts,Create');
     Route::get('savings-accounts/{savingsAccount}', [SavingsAccountController::class, 'show'])->middleware('perm:Savings Accounts,View');
-    Route::put('savings-accounts/{savingsAccount}', [SavingsAccountController::class, 'adminUpdate'])->middleware('admin');
+    Route::put('savings-accounts/{savingsAccount}', [SavingsAccountController::class, 'adminUpdate'])->middleware('admin')->middleware('idempotency:required');
     Route::get('savings-accounts/{savingsAccount}/statement', [SavingsAccountController::class, 'statement'])->middleware('perm:Savings Accounts,View');
-    Route::post('savings-accounts', [SavingsAccountController::class, 'store'])->middleware(['perm:Savings Accounts,Create', 'idempotency']);
-    Route::post('savings-accounts/{savingsAccount}/deposit', [SavingsAccountController::class, 'deposit'])->middleware(['perm:Savings Accounts,Edit', 'idempotency']);
-    Route::post('savings-accounts/{savingsAccount}/withdraw', [SavingsAccountController::class, 'withdraw'])->middleware(['perm:Savings Accounts,Edit', 'idempotency']);
-    Route::post('savings-accounts/{savingsAccount}/close', [SavingsAccountController::class, 'close'])->middleware(['perm:Savings Accounts,Edit', 'idempotency']);
+    Route::post('savings-accounts', [SavingsAccountController::class, 'store'])->middleware(['perm:Savings Accounts,Create', 'idempotency:required']);
+    Route::post('savings-accounts/{savingsAccount}/deposit', [SavingsAccountController::class, 'deposit'])->middleware(['perm:Savings Accounts,Edit', 'idempotency:required']);
+    Route::post('savings-accounts/{savingsAccount}/withdraw', [SavingsAccountController::class, 'withdraw'])->middleware(['perm:Savings Accounts,Edit', 'idempotency:required']);
+    Route::post('savings-accounts/{savingsAccount}/close', [SavingsAccountController::class, 'close'])->middleware(['perm:Savings Accounts,Edit', 'idempotency:required']);
     Route::patch('savings-accounts/{savingsAccount}/status', [SavingsAccountController::class, 'setStatus'])->middleware('perm:Savings Accounts,Edit');
     // Void the latest posted transaction — gated inline by ApprovalType::isAuthorized('savings_txn_void').
-    Route::post('savings-transactions/{savingsTransaction}/void', [SavingsAccountController::class, 'voidTransaction'])->middleware(['perm:Savings Accounts,Delete', 'idempotency']);
+    Route::post('savings-transactions/{savingsTransaction}/void', [SavingsAccountController::class, 'voidTransaction'])->middleware(['perm:Savings Accounts,Delete', 'idempotency:required']);
 
     // --- Daily Savings: Field Collection Sheets ---
     Route::get('savings-collection-sheets', [SavingsCollectionController::class, 'index'])->middleware('perm:Savings Collection,View');
     Route::get('savings-collection-sheets/{savingsCollectionSheet}', [SavingsCollectionController::class, 'show'])->middleware('perm:Savings Collection,View');
-    Route::post('savings-collection-sheets', [SavingsCollectionController::class, 'store'])->middleware('perm:Savings Collection,Create');
+    Route::post('savings-collection-sheets', [SavingsCollectionController::class, 'store'])->middleware('perm:Savings Collection,Create')->middleware('idempotency:required');
     Route::put('savings-collection-sheets/{savingsCollectionSheet}', [SavingsCollectionController::class, 'update'])->middleware('perm:Savings Collection,Edit');
-    Route::post('savings-collection-sheets/{savingsCollectionSheet}/post', [SavingsCollectionController::class, 'post'])->middleware(['perm:Savings Collection,Edit', 'idempotency']);
-    Route::post('savings-collection-sheets/{savingsCollectionSheet}/cancel', [SavingsCollectionController::class, 'cancel'])->middleware('perm:Savings Collection,Delete');
+    Route::post('savings-collection-sheets/{savingsCollectionSheet}/post', [SavingsCollectionController::class, 'post'])->middleware(['perm:Savings Collection,Edit', 'idempotency:required']);
+    Route::post('savings-collection-sheets/{savingsCollectionSheet}/cancel', [SavingsCollectionController::class, 'cancel'])->middleware('perm:Savings Collection,Delete')->middleware('idempotency:required');
 
     // --- Daily Savings: Batch Interest Runs ---
     Route::get('savings-interest-runs', [SavingsInterestController::class, 'index'])->middleware('perm:Savings Interest,View');
     Route::get('savings-interest-preview', [SavingsInterestController::class, 'preview'])->middleware('perm:Savings Interest,View');
     Route::get('savings-interest-runs/{savingsInterestRun}', [SavingsInterestController::class, 'show'])->middleware('perm:Savings Interest,View');
-    Route::post('savings-interest-runs', [SavingsInterestController::class, 'store'])->middleware('perm:Savings Interest,Create');
-    Route::delete('savings-interest-runs/{savingsInterestRun}', [SavingsInterestController::class, 'destroy'])->middleware('perm:Savings Interest,Create');
+    Route::post('savings-interest-runs', [SavingsInterestController::class, 'store'])->middleware('perm:Savings Interest,Create')->middleware('idempotency:required');
+    Route::delete('savings-interest-runs/{savingsInterestRun}', [SavingsInterestController::class, 'destroy'])->middleware('perm:Savings Interest,Create')->middleware('idempotency:required');
     // post / void gated inline by ApprovalType::isAuthorized('savings_interest_run').
-    Route::post('savings-interest-runs/{savingsInterestRun}/post', [SavingsInterestController::class, 'post'])->middleware(['perm:Savings Interest,Edit', 'idempotency']);
-    Route::post('savings-interest-runs/{savingsInterestRun}/void', [SavingsInterestController::class, 'voidRun'])->middleware(['perm:Savings Interest,Delete', 'idempotency']);
+    Route::post('savings-interest-runs/{savingsInterestRun}/post', [SavingsInterestController::class, 'post'])->middleware(['perm:Savings Interest,Edit', 'idempotency:required']);
+    Route::post('savings-interest-runs/{savingsInterestRun}/void', [SavingsInterestController::class, 'voidRun'])->middleware(['perm:Savings Interest,Delete', 'idempotency:required']);
 
     // --- Daily Savings: Reports ---
     Route::get('savings-reports/{type}', [SavingsReportController::class, 'show'])->middleware('perm:Savings Reports,View');
@@ -695,10 +689,10 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Accounting: Manual Journal Entries (maker-checker, posts via LedgerPoster on approval) ---
     Route::get('manual-journal-entries', [ManualJournalEntryController::class, 'index'])->middleware('perm:Manual Journal Entries,View');
     Route::get('manual-journal-entries/account-options', [ManualJournalEntryController::class, 'accountOptions'])->middleware('perm:Manual Journal Entries,View');
-    Route::post('manual-journal-entries', [ManualJournalEntryController::class, 'store'])->middleware(['perm:Manual Journal Entries,Create', 'idempotency']);
+    Route::post('manual-journal-entries', [ManualJournalEntryController::class, 'store'])->middleware(['perm:Manual Journal Entries,Create', 'idempotency:required']);
     // approve/reject gated inline by ApprovalType::isAuthorized('manual_journal_entry') — same pattern as expense_approval.
-    Route::put('manual-journal-entries/{manualJournalEntry}/approve', [ManualJournalEntryController::class, 'approve'])->middleware('idempotency');
-    Route::put('manual-journal-entries/{manualJournalEntry}/reject', [ManualJournalEntryController::class, 'reject'])->middleware('idempotency');
+    Route::put('manual-journal-entries/{manualJournalEntry}/approve', [ManualJournalEntryController::class, 'approve'])->middleware('idempotency:required');
+    Route::put('manual-journal-entries/{manualJournalEntry}/reject', [ManualJournalEntryController::class, 'reject'])->middleware('idempotency:required');
 
     // --- Expense Management: Vendors ---
     Route::get('vendors', [VendorController::class, 'index'])->middleware('perm:Vendors,View');
@@ -708,19 +702,19 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Expense Management: Expenses (request -> approve/reject -> pay) ---
     Route::get('expenses', [ExpenseController::class, 'index'])->middleware('perm:Expenses,View');
-    Route::post('expenses', [ExpenseController::class, 'store'])->middleware(['perm:Expenses,Create', 'idempotency']);
+    Route::post('expenses', [ExpenseController::class, 'store'])->middleware(['perm:Expenses,Create', 'idempotency:required']);
     // approve/reject gated inline by ApprovalType::isAuthorized('expense_approval', ...) — see ExpenseController —
     // not the module permission grid, same maker-checker pattern as loan_cancel.
-    Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve']);
+    Route::put('expenses/{expense}/approve', [ExpenseController::class, 'approve'])->middleware('idempotency:required');
     Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject']);
     // Direct pay (Finance / admin): moves the money + records the voucher.
-    Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware(['perm:Expenses,Edit', 'idempotency']);
+    Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware(['perm:Expenses,Edit', 'idempotency:required']);
     // Request pay (requester / manager): raises an ExpensePayment finance request; Finance executes it.
-    Route::post('expenses/{expense}/request-payment', [ExpenseController::class, 'requestPayment'])->middleware(['perm:Expenses,Create', 'idempotency']);
+    Route::post('expenses/{expense}/request-payment', [ExpenseController::class, 'requestPayment'])->middleware(['perm:Expenses,Create', 'idempotency:required']);
 
     // --- Expense Management: Payment Vouchers (auto-created by ExpenseController::pay — view/void only, see PaymentVoucherController) ---
     Route::get('payment-vouchers', [PaymentVoucherController::class, 'index'])->middleware('perm:Payment Vouchers,View');
-    Route::delete('payment-vouchers/{paymentVoucher}', [PaymentVoucherController::class, 'destroy'])->middleware('perm:Payment Vouchers,Delete');
+    Route::delete('payment-vouchers/{paymentVoucher}', [PaymentVoucherController::class, 'destroy'])->middleware('perm:Payment Vouchers,Delete')->middleware('idempotency:required');
 
     // --- Petty Cash: Funds (imprest float per branch, custodian, ceiling) ---
     // Fixed Assets
@@ -730,11 +724,11 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('fixed-assets', [FixedAssetController::class, 'index'])->middleware('perm:Fixed Assets,View');
     Route::get('fixed-assets/depreciations', [FixedAssetController::class, 'depreciations'])->middleware('perm:Fixed Assets,View');
     Route::post('fixed-assets/depreciation/preview', [FixedAssetController::class, 'depreciationPreview'])->middleware('perm:Fixed Assets,View');
-    Route::post('fixed-assets/depreciation/run', [FixedAssetController::class, 'depreciationRun'])->middleware(['perm:Fixed Assets,Edit', 'idempotency']);
-    Route::post('fixed-assets', [FixedAssetController::class, 'store'])->middleware(['perm:Fixed Assets,Create', 'idempotency']);
+    Route::post('fixed-assets/depreciation/run', [FixedAssetController::class, 'depreciationRun'])->middleware(['perm:Fixed Assets,Edit', 'idempotency:required']);
+    Route::post('fixed-assets', [FixedAssetController::class, 'store'])->middleware(['perm:Fixed Assets,Create', 'idempotency:required']);
     Route::get('fixed-assets/{fixedAsset}', [FixedAssetController::class, 'show'])->middleware('perm:Fixed Assets,View');
     Route::put('fixed-assets/{fixedAsset}', [FixedAssetController::class, 'update'])->middleware('perm:Fixed Assets,Edit');
-    Route::post('fixed-assets/{fixedAsset}/dispose', [FixedAssetController::class, 'dispose'])->middleware(['perm:Fixed Assets,Edit', 'idempotency']);
+    Route::post('fixed-assets/{fixedAsset}/dispose', [FixedAssetController::class, 'dispose'])->middleware(['perm:Fixed Assets,Edit', 'idempotency:required']);
     Route::delete('fixed-assets/{fixedAsset}', [FixedAssetController::class, 'destroy'])->middleware('admin');
 
     Route::get('petty-cash-funds', [PettyCashFundController::class, 'index'])->middleware('perm:Petty Cash,View');
@@ -744,13 +738,13 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Petty Cash: Replenishments (top the float back up from a cash/bank account) ---
     Route::get('petty-cash-replenishments', [PettyCashReplenishmentController::class, 'index'])->middleware('perm:Petty Cash,View');
-    Route::post('petty-cash-replenishments', [PettyCashReplenishmentController::class, 'store'])->middleware(['perm:Petty Cash,Create', 'idempotency']);
-    Route::delete('petty-cash-replenishments/{pettyCashReplenishment}', [PettyCashReplenishmentController::class, 'destroy'])->middleware(['perm:Petty Cash,Delete', 'idempotency']);
+    Route::post('petty-cash-replenishments', [PettyCashReplenishmentController::class, 'store'])->middleware(['perm:Petty Cash,Create', 'idempotency:required']);
+    Route::delete('petty-cash-replenishments/{pettyCashReplenishment}', [PettyCashReplenishmentController::class, 'destroy'])->middleware(['perm:Petty Cash,Delete', 'idempotency:required']);
 
     // --- Petty Cash: Vouchers (small receipt-level spend against the float) ---
     Route::get('petty-cash-vouchers', [PettyCashVoucherController::class, 'index'])->middleware('perm:Petty Cash,View');
-    Route::post('petty-cash-vouchers', [PettyCashVoucherController::class, 'store'])->middleware(['perm:Petty Cash,Create', 'idempotency']);
-    Route::delete('petty-cash-vouchers/{pettyCashVoucher}', [PettyCashVoucherController::class, 'destroy'])->middleware(['perm:Petty Cash,Delete', 'idempotency']);
+    Route::post('petty-cash-vouchers', [PettyCashVoucherController::class, 'store'])->middleware(['perm:Petty Cash,Create', 'idempotency:required']);
+    Route::delete('petty-cash-vouchers/{pettyCashVoucher}', [PettyCashVoucherController::class, 'destroy'])->middleware(['perm:Petty Cash,Delete', 'idempotency:required']);
 
     // --- Subscriptions & Document Expiry: domains, hosting, licenses, legal
     // documents with an expiry date + reminder lead time. due-soon feeds the
@@ -764,5 +758,5 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- System Maintenance: "start fresh" — wipe all transactional data + its
     // uploaded files, keep every master/config table + customers. Admin-only,
     // password + typed-phrase gated, blocked in production unless DB_CLEAN_ENABLED. ---
-    Route::post('system/clean-transactions', [SystemMaintenanceController::class, 'cleanTransactions'])->middleware('admin');
+    Route::post('system/clean-transactions', [SystemMaintenanceController::class, 'cleanTransactions'])->middleware('admin')->middleware('idempotency:required');
 });

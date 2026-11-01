@@ -6,6 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class PettyCashReplenishment extends Model
 {
+    use Concerns\ScopedThroughParent;
+
+    /** Visible only through a parent the caller's branch can see. */
+    protected static array $branchParents = ['petty_cash_fund_id' => PettyCashFund::class];
+
     protected $fillable = [
         'code', 'petty_cash_fund_id', 'amount', 'funding_method', 'cash_account_id', 'bank_account_id',
         'paid_at', 'paid_by', 'status', 'void_reason', 'voided_by', 'voided_at', 'journal_entry_id',

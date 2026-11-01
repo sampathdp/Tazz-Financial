@@ -33,6 +33,11 @@ return [
     |
     */
 
+    // Optional DDL-capable account used only by the deploy-time migrate endpoint (public/opcache-reset.php), so the
+    // runtime DB_USERNAME can be limited to SELECT/INSERT/UPDATE/DELETE. See docs/security/DB_RUNTIME_USER.md.
+    'migrate_username' => env('DB_MIGRATE_USERNAME'),
+    'migrate_password' => env('DB_MIGRATE_PASSWORD'),
+
     'connections' => [
 
         'sqlite' => [

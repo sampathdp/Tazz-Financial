@@ -13,7 +13,8 @@ use Symfony\Component\HttpFoundation\Response;
  * When a request carries an `Idempotency-Key` header, the first response for
  * (key, method, path) is stored and replayed for every retry — so a client
  * that resubmits after a timeout can never make the handler post a second
- * time. Without the header the middleware is a no-op (behaviour unchanged).
+ * time. Without the header the middleware is a no-op, unless the route uses `idempotency:required` and
+ * REQUIRE_IDEMPOTENCY_KEY is on (then 428).
  *
  * - unseen key            -> claim it, run the handler, store the response
  * - key seen, completed   -> replay the stored status + body
@@ -28,10 +29,20 @@ class Idempotency
     private const TTL_HOURS = 24;
     private const ABANDONED_AFTER_MINUTES = 3;
 
-    public function handle(Request $request, Closure $next): Response
+    /**
+     * @param string $mode 'required' makes the header mandatory on money-posting routes when
+     *                     REQUIRE_IDEMPOTENCY_KEY is on (off by default so a rollout can be staged).
+     */
+    public function handle(Request $request, Closure $next, string $mode = ''): Response
     {
         $key = trim((string) $request->header('Idempotency-Key', ''));
-        if ($key === '' || ! in_array($request->method(), ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+        $isWrite = in_array($request->method(), ['POST', 'PUT', 'PATCH', 'DELETE'], true);
+        if ($key === '' && $isWrite && $mode === 'required' && config('app.require_idempotency_key')) {
+            return response()->json([
+                'message' => 'This action moves money and needs an Idempotency-Key header so a retry cannot post twice.',
+            ], 428);
+        }
+        if ($key === '' || ! $isWrite) {
             return $next($request);
         }
 

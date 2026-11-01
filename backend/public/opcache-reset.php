@@ -158,6 +158,16 @@ if (in_array(($_GET['action'] ?? ''), ['migrate', 'migrate-status'], true)) {
         $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
         $kernel->bootstrap();
 
+        // Schema changes need DDL rights the day-to-day app user should not have. When a separate migration
+        // account is configured (DB_MIGRATE_USERNAME / DB_MIGRATE_PASSWORD), use it for this request only.
+        if (config('database.migrate_username')) {
+            config([
+                'database.connections.mysql.username' => config('database.migrate_username'),
+                'database.connections.mysql.password' => config('database.migrate_password'),
+            ]);
+            Illuminate\Support\Facades\DB::purge('mysql');
+        }
+
         // Always report status first — applied vs pending — for both actions.
         $statusOutput = new Symfony\Component\Console\Output\BufferedOutput();
         $kernel->call('migrate:status', [], $statusOutput);

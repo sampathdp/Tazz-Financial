@@ -19,6 +19,19 @@
     </FilesMatch>
 </IfModule>
 
+# --- Security headers ---
+# Content-Security-Policy is in REPORT-ONLY mode first: nothing is blocked, violations only show in the browser
+# console (DevTools > Console). Browse every screen (login, loans, customers + documents/previews, exports,
+# profile photo, reports), fix or allow anything reported, then rename the header to Content-Security-Policy
+# to enforce. API origin below must match VITE_API_URL. style-src needs 'unsafe-inline' because React sets
+# inline style attributes; script-src has none, so injected scripts are blocked once enforced.
+<IfModule mod_headers.c>
+    Header set Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://tazz-investment.salonflow.cloud; connect-src 'self' https://tazz-investment.salonflow.cloud; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    Header set X-Content-Type-Options "nosniff"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set X-Frame-Options "DENY"
+</IfModule>
+
 # SPA routing: serve index.html for any path that isn't a real file/dir.
 <IfModule mod_rewrite.c>
     RewriteEngine On

@@ -6,6 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class BankReconciliation extends Model
 {
+    use Concerns\ScopedThroughParent;
+
+    /** Visible only through a parent the caller's branch can see. */
+    protected static array $branchParents = ['bank_account_id' => BankAccount::class];
+
     protected $fillable = [
         'bank_account_id', 'statement_date', 'statement_balance', 'book_balance',
         'difference', 'status', 'notes', 'reconciled_by', 'reconciled_at',

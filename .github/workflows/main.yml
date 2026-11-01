@@ -27,6 +27,11 @@ jobs:
       # mode, which auto-loads frontend/.env.production from the repo. That
       # file is the single source of truth for VITE_API_URL; change it there,
       # not here, so there's only one place to update if the domain changes.
+      - name: Audit frontend dependencies (high and above)
+        working-directory: frontend
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
       - name: Build frontend
         working-directory: frontend
         run: npm run build
@@ -73,11 +78,18 @@ jobs:
           extensions: mbstring, bcmath, pdo, pdo_mysql, tokenizer, xml, ctype, json, fileinfo, openssl, zip
           tools: composer:2.6.6
 
-      - name: Install composer dependencies (fresh resolve for PHP 7.4 + stable)
+      # Install exactly what composer.lock pins (config.platform.php = 7.4.33 keeps it resolvable on this PHP),
+      # so production runs the versions the test suite ran against, not a fresh unreviewed resolve.
+      - name: Install composer dependencies (from composer.lock)
         working-directory: backend
-        run: |
-          rm -f composer.lock
-          composer update --no-dev --optimize-autoloader --prefer-dist --prefer-stable --no-interaction --no-audit
+        run: composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-audit
+
+      # Informational for now: Laravel 8 has open advisories, so a blocking gate would stop every deploy until the
+      # framework upgrade lands. Flip continue-on-error to false once `composer audit --locked` is clean.
+      - name: Audit locked PHP dependencies
+        working-directory: backend
+        continue-on-error: true
+        run: composer audit --locked
 
       - name: Clear any cached config (paths would be wrong on server)
         working-directory: backend

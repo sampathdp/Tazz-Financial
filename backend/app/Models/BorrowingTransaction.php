@@ -6,6 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class BorrowingTransaction extends Model
 {
+    use Concerns\ScopedThroughParent;
+
+    /** Visible only through a parent the caller's branch can see. */
+    protected static array $branchParents = ['borrowing_id' => Borrowing::class];
+
     use \App\Models\Concerns\HasVoidedRows;
 
     protected $fillable = [

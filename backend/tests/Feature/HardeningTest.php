@@ -135,16 +135,4 @@ class HardeningTest extends TestCase
             $this->assertSame('0.00', (string) $till->fresh()->current_balance, 'the till must not be driven negative');
         }
     }
-
-    public function test_hard_deleting_a_loan_is_blocked_in_production_unless_enabled(): void
-    {
-        $this->actingAs($this->admin(), 'sanctum');
-        $loanId = DB::table('credit_facilities')->value('id');
-        if (!$loanId) {
-            $this->markTestSkipped('No loan to purge.');
-        }
-        $this->app['env'] = 'production';
-        config(['app.loan_purge_enabled' => false]);
-        $this->assertSame(403, $this->deleteJson("/api/loans/{$loanId}/purge")->status());
-    }
 }

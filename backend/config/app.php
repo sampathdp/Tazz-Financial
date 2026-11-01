@@ -39,8 +39,10 @@ return [
     |
     */
 
+    // Money-posting routes refuse a write without an Idempotency-Key header (428) when true. Off by default.
+    'require_idempotency_key' => env('REQUIRE_IDEMPOTENCY_KEY', false),
+
     'db_clean_enabled' => env('DB_CLEAN_ENABLED', false),
-    'loan_purge_enabled' => env('LOAN_PURGE_ENABLED', false),
 
     /*
     |--------------------------------------------------------------------------

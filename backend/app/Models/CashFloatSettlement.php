@@ -10,6 +10,11 @@ use Illuminate\Database\Eloquent\Model;
  */
 class CashFloatSettlement extends Model
 {
+    use Concerns\ScopedThroughParent;
+
+    /** Visible only through a parent the caller's branch can see. */
+    protected static array $branchParents = ['cash_account_id' => CashAccount::class];
+
     protected $fillable = [
         'cash_account_id', 'home_cash_account_id', 'custodian_id',
         'issued_total', 'expected_amount', 'counted_amount', 'variance', 'shortage', 'excess', 'returned_total',

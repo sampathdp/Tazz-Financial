@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Role;
+use App\Support\Permissions;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -49,6 +50,8 @@ class UserController extends Controller
         $data = $this->validated($request);
 
         $this->guardAdminAssignment($request, $data['role_id']);
+        $this->guardRoleAssignable($request, $data['role_id']);
+        $this->guardBranchAssignable($request, $data['branch_id'] ?? null);
         $this->guardBranchRequirement($data);
 
         $user = \Illuminate\Support\Facades\DB::transaction(function () use ($data) {
@@ -82,8 +85,14 @@ class UserController extends Controller
     {
         $data = $this->validated($request, $user);
 
+        $this->guardManageable($request, $user);
+        if (array_key_exists('branch_id', $data)) {
+            $this->guardBranchAssignable($request, $data['branch_id']);
+        }
         if (array_key_exists('role_id', $data)) {
+            $this->guardRoleAssignable($request, $data['role_id']);
             $this->guardAdminAssignment($request, $data['role_id']);
+            $this->guardSelfRoleChange($request, $user, $data['role_id']);
             $this->guardLastAdminDemotion($user, $data['role_id']);
             $user->role_id = $data['role_id'];
         }
@@ -111,6 +120,7 @@ class UserController extends Controller
         if ($request->user()->id === $user->id) {
             return response()->json(['message' => 'You cannot delete your own account.'], 422);
         }
+        $this->guardManageable($request, $user);
         $this->guardLastAdmin($user, 'delete');
         $user->tokens()->delete();
         $user->delete();
@@ -130,6 +140,71 @@ class UserController extends Controller
             'branch_id' => 'nullable|integer|exists:branches,id',
             'status' => ['nullable', Rule::in(['Active', 'Inactive'])],
         ]);
+    }
+
+    /**
+     * A non-admin may only manage ordinary users of their own branch (and its centers): never an administrator,
+     * a user whose role sees every branch, or a user of another branch. Without this a branch manager with
+     * User Management,Edit could reset an administrator's password and take over the system.
+     */
+    private function guardManageable(Request $request, User $target): void
+    {
+        $actor = $request->user();
+        if (!$actor || $actor->isAdmin() || $actor->id === $target->id) {
+            return;
+        }
+        $target->loadMissing('role');
+        $reachable = $actor->role && $actor->role->can_view_all_branches
+            || ($actor->branch_id && $target->branch_id && in_array((int) $target->branch_id, \App\Support\CurrentBranch::withCenters((int) $actor->branch_id), true));
+        $stronger = $target->isAdmin() || ($target->role && $target->role->can_view_all_branches && !($actor->role && $actor->role->can_view_all_branches));
+        abort_if($stronger || !$reachable, 403, 'You can only manage ordinary users of your own branch.');
+    }
+
+    /** A non-admin may only hand out a role whose permissions they all hold themselves, and not an all-branches role they lack. */
+    private function guardRoleAssignable(Request $request, int $roleId): void
+    {
+        $actor = $request->user();
+        if (!$actor || $actor->isAdmin()) {
+            return;
+        }
+        $role = Role::find($roleId);
+        if (!$role || ($actor->role_id === $role->id)) {
+            return;
+        }
+        abort_if($role->can_view_all_branches && !($actor->role && $actor->role->can_view_all_branches), 403, 'You cannot assign a role that sees every branch.');
+        $held = Permissions::forUser($actor);
+        foreach (Permissions::gridForRole($role) as $module => $actions) {
+            foreach ($actions as $action => $enabled) {
+                abort_if($enabled && !in_array("{$module}:{$action}", $held, true), 403, 'You cannot assign a role with permissions you do not hold.');
+            }
+        }
+    }
+
+    /** A branch-confined user can only place people in their own branch or its centers. */
+    private function guardBranchAssignable(Request $request, $branchId): void
+    {
+        $actor = $request->user();
+        if (!$actor || $actor->isAdmin() || ($actor->role && $actor->role->can_view_all_branches) || $branchId === null) {
+            return;
+        }
+        abort_unless($actor->branch_id && in_array((int) $branchId, \App\Support\CurrentBranch::withCenters((int) $actor->branch_id), true), 403, 'You can only assign users to your own branch.');
+    }
+
+    /** A non-admin cannot re-role themselves into a role that holds permissions they lack. */
+    private function guardSelfRoleChange(Request $request, User $user, int $roleId): void
+    {
+        $actor = $request->user();
+        if ($actor?->isAdmin() || $actor?->id !== $user->id || $roleId === $user->role_id) {
+            return;
+        }
+        $role = Role::find($roleId);
+        $held = Permissions::forUser($actor);
+        $grid = $role ? Permissions::gridForRole($role) : [];
+        foreach ($grid as $module => $actions) {
+            foreach ($actions as $action => $enabled) {
+                abort_if($enabled && !in_array("{$module}:{$action}", $held, true), 403, 'You cannot move yourself to a role with permissions you do not hold.');
+            }
+        }
     }
 
     /** Only an existing admin may hand out the admin role. */

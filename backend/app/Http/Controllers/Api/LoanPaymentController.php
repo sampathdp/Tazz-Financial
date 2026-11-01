@@ -305,7 +305,7 @@ class LoanPaymentController extends Controller
             return response()->json(['message' => 'This payment is not a pending settlement request.'], 422);
         }
         $req = $payment->pendingSettlementRequest;
-        if ($req && !ApprovalType::isAuthorized($request->user(), 'payment_settlement')) {
+        if (!ApprovalType::isAuthorized($request->user(), 'payment_settlement')) {
             return response()->json(['message' => 'You are not an approver for loan payment settlements.'], 403);
         }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);

@@ -6,6 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class FacilityCollateral extends Model
 {
+    use Concerns\ScopedThroughParent;
+
+    /** Visible only through a parent the caller's branch can see. */
+    protected static array $branchParents = ['credit_facility_id' => Loan::class];
+
     protected $table = 'facility_collateral';
 
     protected $fillable = ['credit_facility_id', 'collateral_type', 'collateral_category', 'description', 'estimated_value'];
