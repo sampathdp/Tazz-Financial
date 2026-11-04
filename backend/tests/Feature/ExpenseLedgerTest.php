@@ -271,6 +271,40 @@ class ExpenseLedgerTest extends TestCase
         $this->assertBc('50000.00', bcsub($this->glBalance($c2300), $before2300, 2), 'accrual not double-posted');
     }
 
+    public function test_refundable_expense_is_an_asset_until_refunded_then_forfeit_is_expensed(): void
+    {
+        $c5010 = $this->acct('5010');
+        $c1410 = $this->acct('1410');
+        $b5010 = $this->glBalance($c5010);
+        $b1410 = $this->glBalance($c1410);
+
+        $expense = Expense::create([
+            'code' => 'EX' . Str::random(8), 'branch_id' => $this->branchId,
+            'expense_category_id' => $this->categoryId, 'amount' => '100000.00',
+            'expense_date' => now()->toDateString(), 'description' => 'rent advance',
+            'status' => 'Approved', 'requested_by' => $this->admin->id,
+            'approved_by' => $this->admin->id, 'approved_at' => now(),
+            'is_refundable' => true, 'refund_status' => 'Outstanding', 'expected_refund_date' => now()->addYear()->toDateString(),
+        ]);
+        \App\Http\Controllers\Api\ExpenseController::postAccrual($expense, $this->admin->id);
+        $this->assertBc('100000.00', bcsub($this->glBalance($c1410), $b1410, 2), 'deposit held as asset');
+        $this->assertBc('0.00', bcsub($this->glBalance($c5010), $b5010, 2), 'not an expense yet');
+
+        $this->postJson("/api/expenses/{$expense->id}/pay", ['payment_method' => 'Cash', 'cash_account_id' => $this->till->id])->assertStatus(201);
+
+        // Cannot refund more than outstanding.
+        $this->postJson("/api/expenses/{$expense->id}/refund", ['amount' => 100000.01, 'payment_method' => 'Cash', 'cash_account_id' => $this->till->id])->assertStatus(422);
+
+        $before = (string) $this->till->fresh()->current_balance;
+        $this->postJson("/api/expenses/{$expense->id}/refund", ['amount' => 90000, 'close' => true, 'payment_method' => 'Cash', 'cash_account_id' => $this->till->id])->assertStatus(201);
+
+        $this->assertBc('90000.00', bcsub((string) $this->till->fresh()->current_balance, $before, 2), 'cash returned to till');
+        $this->assertBc('0.00', bcsub($this->glBalance($c1410), $b1410, 2), 'deposit cleared');
+        $this->assertBc('10000.00', bcsub($this->glBalance($c5010), $b5010, 2), 'forfeited part expensed');
+        $this->assertSame('Settled', $expense->fresh()->refund_status);
+        $this->postJson("/api/expenses/{$expense->id}/refund", ['amount' => 1, 'payment_method' => 'Cash', 'cash_account_id' => $this->till->id])->assertStatus(422);
+    }
+
     // =============================================================
     // EXP-07 — no tax / withholding split (F-13, deferred as a feature).
     // Pins the current gross-only behaviour so a future WHT feature shows up

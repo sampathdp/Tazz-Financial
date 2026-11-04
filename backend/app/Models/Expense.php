@@ -10,12 +10,17 @@ class Expense extends Model
     protected $fillable = [
         'code', 'branch_id', 'expense_category_id', 'vendor_id', 'staff_id', 'amount', 'expense_date',
         'description', 'status', 'requested_by', 'approved_by', 'approved_at',
+        'is_refundable', 'expected_refund_date', 'refunded_amount', 'forfeited_amount', 'refund_status',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
         'expense_date' => 'date',
         'approved_at' => 'datetime',
+        'is_refundable' => 'boolean',
+        'expected_refund_date' => 'date',
+        'refunded_amount' => 'decimal:2',
+        'forfeited_amount' => 'decimal:2',
     ];
 
     public const STATUSES = ['Pending', 'Approved', 'Rejected', 'Paid'];
@@ -48,6 +53,11 @@ class Expense extends Model
     public function approver()
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function refunds()
+    {
+        return $this->hasMany(ExpenseRefund::class)->orderBy('refunded_at')->orderBy('id');
     }
 
     public function voucher()

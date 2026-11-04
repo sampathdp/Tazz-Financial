@@ -2860,11 +2860,18 @@ export interface Expense {
   pendingApprovalRequest?: LoanPaymentVoidRequest | null;
   /** The ExpensePayment finance request in flight, if someone requested payment (see expensesApi.requestPayment()). */
   pendingPaymentRequest?: FinanceRequest | null;
+  /** Refundable advance / deposit (e.g. rent advance) — returned by the vendor later. */
+  isRefundable?: boolean; expectedRefundDate?: string | null;
+  refundedAmount?: string | number; forfeitedAmount?: string | number;
+  refundStatus?: 'Outstanding' | 'PartiallyRefunded' | 'Settled' | null;
+  refunds?: { id: number; amount: string | number; forfeitedAmount: string | number; paymentMethod?: string | null; reference?: string | null; refundedAt: string; receiver?: { id: number; name: string } | null }[];
 }
 export const expensesApi = {
+  refund: (id: number, body: { amount: number | string; close?: boolean; paymentMethod?: 'Cash' | 'Bank'; cashAccountId?: number; bankAccountId?: number; refundedAt?: string; reference?: string; notes?: string }) =>
+    http.post(`/expenses/${id}/refund`, snakeize(body)),
   list: (params?: { status?: ExpenseStatus; branchId?: number }) =>
     http.get('/expenses', { params: snakeize(params || {}) }).then((r) => camelize(r.data) as Expense[]),
-  create: (body: { branchId: number; expenseCategoryId: number; vendorId?: number; staffId?: number; amount: number | string; expenseDate: string; description?: string }) =>
+  create: (body: { branchId: number; expenseCategoryId: number; vendorId?: number; staffId?: number; amount: number | string; expenseDate: string; description?: string; isRefundable?: boolean; expectedRefundDate?: string }) =>
     http.post('/expenses', snakeize(body)).then((r) => camelize(r.data) as Expense),
   approve: (id: number) => http.put(`/expenses/${id}/approve`).then((r) => camelize(r.data) as Expense),
   reject: (id: number, rejectReason?: string) => http.put(`/expenses/${id}/reject`, snakeize({ rejectReason })).then((r) => camelize(r.data) as Expense),

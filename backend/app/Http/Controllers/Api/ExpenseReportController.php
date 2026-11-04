@@ -108,17 +108,19 @@ class ExpenseReportController extends Controller
             ->whereBetween('expense_date', [$from->toDateString(), $to->toDateString()]))
             ->get();
 
+        // A refundable deposit is only a cost to the extent it is forfeited.
+        $cost = fn ($e) => $e->is_refundable ? (float) $e->forfeited_amount : (float) $e->amount;
         $approvedOrPaid = $expenses->whereIn('status', ['Approved', 'Paid']);
         $pending = $expenses->where('status', 'Pending');
 
         return [
             'from' => $from->toDateString(), 'to' => $to->toDateString(),
-            'totalAmount' => round((float) $approvedOrPaid->sum('amount'), 2),
-            'paidAmount' => round((float) $expenses->where('status', 'Paid')->sum('amount'), 2),
+            'totalAmount' => round((float) $approvedOrPaid->sum($cost), 2),
+            'paidAmount' => round((float) $expenses->where('status', 'Paid')->sum($cost), 2),
             'pendingApprovalCount' => $pending->count(),
             'pendingApprovalAmount' => round((float) $pending->sum('amount'), 2),
             'byCategory' => $approvedOrPaid->groupBy(fn ($e) => $e->category?->name ?? 'Uncategorized')
-                ->map(fn ($g, $name) => ['name' => $name, 'amount' => round((float) $g->sum('amount'), 2)])
+                ->map(fn ($g, $name) => ['name' => $name, 'amount' => round((float) $g->sum($cost), 2)])
                 ->sortByDesc('amount')->values(),
         ];
     }

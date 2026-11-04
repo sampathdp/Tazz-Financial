@@ -709,6 +709,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::put('expenses/{expense}/reject', [ExpenseController::class, 'reject']);
     // Direct pay (Finance / admin): moves the money + records the voucher.
     Route::post('expenses/{expense}/pay', [ExpenseController::class, 'pay'])->middleware(['perm:Expenses,Edit', 'idempotency:required']);
+    Route::post('expenses/{expense}/refund', [ExpenseController::class, 'refund'])->middleware(['perm:Expenses,Edit', 'idempotency:required']);
     // Request pay (requester / manager): raises an ExpensePayment finance request; Finance executes it.
     Route::post('expenses/{expense}/request-payment', [ExpenseController::class, 'requestPayment'])->middleware(['perm:Expenses,Create', 'idempotency:required']);
 

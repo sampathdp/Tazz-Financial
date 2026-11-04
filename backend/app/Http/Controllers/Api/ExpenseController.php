@@ -18,7 +18,7 @@ class ExpenseController extends Controller
 {
     public function index(Request $request)
     {
-        return Expense::with(['branch:id,name,code', 'category:id,name,chart_of_account_id', 'vendor:id,name', 'staff:id,staff_code,name', 'requester:id,name', 'approver:id,name', 'voucher',
+        return Expense::with(['branch:id,name,code', 'category:id,name,chart_of_account_id', 'vendor:id,name', 'staff:id,staff_code,name', 'requester:id,name', 'approver:id,name', 'voucher', 'refunds.receiver:id,name',
             'pendingApprovalRequest:id,subject_id,status,required_approvals,requested_by,first_approved_by',
             'pendingApprovalRequest.requester:id,name', 'pendingApprovalRequest.firstApprover:id,name',
             'pendingPaymentRequest:id,code,source_id,status,amount,requested_by',
@@ -39,7 +39,15 @@ class ExpenseController extends Controller
             'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'expense_date' => 'required|date',
             'description' => 'nullable|string|max:255',
+            'is_refundable' => 'nullable|boolean',
+            'expected_refund_date' => 'nullable|date|after_or_equal:expense_date|required_if:is_refundable,true,1',
         ]);
+        $data['is_refundable'] = (bool) ($data['is_refundable'] ?? false);
+        if ($data['is_refundable']) {
+            $data['refund_status'] = 'Outstanding';
+        } else {
+            $data['expected_refund_date'] = null;
+        }
         $branch = Branch::findOrFail($data['branch_id']);
 
         $expense = DB::transaction(function () use ($data, $branch, $request) {
@@ -131,8 +139,12 @@ class ExpenseController extends Controller
             ->where('description', 'like', 'Expense accrued%')->exists()) {
             return;
         }
+        // A refundable advance/deposit is an asset until returned or forfeited, not a cost.
+        $debitAccountId = $expense->is_refundable
+            ? \App\Models\ChartOfAccount::system('1410')->id
+            : $category->chart_of_account_id;
         \App\Support\LedgerPoster::post([
-            ['account_id' => $category->chart_of_account_id, 'debit' => (string) $expense->amount, 'credit' => 0, 'description' => $expense->description],
+            ['account_id' => $debitAccountId, 'debit' => (string) $expense->amount, 'credit' => 0, 'description' => $expense->description],
             ['account_id' => \App\Models\ChartOfAccount::system('2300')->id, 'debit' => 0, 'credit' => (string) $expense->amount],
         ], ($expense->expense_date ?? now())->toDateString(), [
             'source_type' => 'Expense',
@@ -141,6 +153,115 @@ class ExpenseController extends Controller
             'branch_id' => $expense->branch_id,
             'posted_by' => $userId,
         ]);
+    }
+
+    /**
+     * Records money coming back from the vendor for a paid refundable expense
+     * (Dr till/bank / Cr 1410). With close=true the unreturned remainder is
+     * forfeited to the category's expense account and the deposit is settled.
+     */
+    public function refund(Request $request, Expense $expense)
+    {
+        $data = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0', new \App\Rules\Money],
+            'close' => 'nullable|boolean',
+            'payment_method' => 'nullable|in:Cash,Bank',
+            'cash_account_id' => 'required_if:payment_method,Cash|nullable|exists:cash_accounts,id',
+            'bank_account_id' => 'required_if:payment_method,Bank|nullable|exists:bank_accounts,id',
+            'refunded_at' => 'nullable|date',
+            'reference' => 'nullable|string|max:60',
+            'notes' => 'nullable|string|max:255',
+        ]);
+        $amount = number_format((float) $data['amount'], 2, '.', '');
+        $close = (bool) ($data['close'] ?? false);
+        $hasMoney = bccomp($amount, '0', 2) > 0;
+        if (!$hasMoney && !$close) {
+            return response()->json(['message' => 'Enter the refund amount received, or close the deposit as forfeited.'], 422);
+        }
+        if ($hasMoney && empty($data['payment_method'])) {
+            return response()->json(['message' => 'Choose whether the refund was received in cash or into a bank account.'], 422);
+        }
+        $userId = $request->user()->id;
+        $date = isset($data['refunded_at']) ? \Illuminate\Support\Carbon::parse($data['refunded_at'])->toDateString() : now()->toDateString();
+
+        $refund = DB::transaction(function () use ($expense, $data, $amount, $hasMoney, $close, $userId, $date) {
+            $expense = Expense::lockForUpdate()->findOrFail($expense->id);
+            if (!$expense->is_refundable || $expense->status !== 'Paid') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['expense' => 'Only a paid refundable expense can be refunded.']);
+            }
+            if ($expense->refund_status === 'Settled') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['expense' => 'This deposit is already settled.']);
+            }
+            $outstanding = bcsub(bcsub((string) $expense->amount, (string) $expense->refunded_amount, 2), (string) $expense->forfeited_amount, 2);
+            if (bccomp($amount, $outstanding, 2) > 0) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['amount' => "Refund cannot exceed the outstanding deposit of {$outstanding}."]);
+            }
+            $forfeit = $close ? bcsub($outstanding, $amount, 2) : '0.00';
+            $method = $hasMoney ? $data['payment_method'] : null;
+            $nextNo = $expense->refunds()->count() + 1;
+            $txn = null;
+
+            if ($hasMoney) {
+                if ($method === 'Cash') {
+                    $till = \App\Models\CashAccount::findOrFail($data['cash_account_id']);
+                    [$srcType, $srcId, $leaf] = ['cash', (int) $till->id, \App\Models\ChartOfAccount::forCashTill($till)];
+                } else {
+                    $bank = \App\Models\BankAccount::findOrFail($data['bank_account_id']);
+                    [$srcType, $srcId, $leaf] = ['bank', (int) $bank->id, \App\Models\ChartOfAccount::forBankAccount($bank)];
+                }
+                $txn = \App\Support\FinancePostingService::execute([
+                    'txn_type' => 'CASH_IN',
+                    'amount' => $amount,
+                    'entry_date' => $date,
+                    'branch_id' => $expense->branch_id,
+                    'movements' => [['account_type' => $srcType, 'account_id' => $srcId, 'delta' => '+' . $amount]],
+                    'gl_lines' => [
+                        ['account_id' => $leaf->id, 'debit' => $amount, 'credit' => 0],
+                        ['account_id' => \App\Models\ChartOfAccount::system('1410')->id, 'debit' => 0, 'credit' => $amount, 'description' => $expense->description],
+                    ],
+                    'gl_source_type' => 'Expense',
+                    'gl_source_id' => $expense->id,
+                    'gl_description' => "Expense refund {$expense->code} #{$nextNo}",
+                    'description' => "Expense refund {$expense->code} #{$nextNo}",
+                    'source_module' => 'Expense',
+                    'source_id' => $expense->id,
+                    'idempotency_key' => "expense-refund-{$expense->id}-{$nextNo}",
+                    'executed_by' => $userId,
+                ]);
+            }
+            if (bccomp($forfeit, '0', 2) > 0) {
+                \App\Support\LedgerPoster::post([
+                    ['account_id' => $expense->category->chart_of_account_id, 'debit' => $forfeit, 'credit' => 0, 'description' => $expense->description],
+                    ['account_id' => \App\Models\ChartOfAccount::system('1410')->id, 'debit' => 0, 'credit' => $forfeit],
+                ], $date, [
+                    'source_type' => 'Expense', 'source_id' => $expense->id,
+                    'description' => "Expense deposit forfeited {$expense->code} #{$nextNo}",
+                    'branch_id' => $expense->branch_id, 'posted_by' => $userId,
+                ]);
+            }
+
+            $newRefunded = bcadd((string) $expense->refunded_amount, $amount, 2);
+            $newForfeited = bcadd((string) $expense->forfeited_amount, $forfeit, 2);
+            $left = bcsub(bcsub((string) $expense->amount, $newRefunded, 2), $newForfeited, 2);
+            $expense->update([
+                'refunded_amount' => $newRefunded,
+                'forfeited_amount' => $newForfeited,
+                'refund_status' => bccomp($left, '0', 2) === 0 ? 'Settled' : 'PartiallyRefunded',
+            ]);
+
+            return \App\Models\ExpenseRefund::create([
+                'expense_id' => $expense->id, 'branch_id' => $expense->branch_id,
+                'amount' => $amount, 'forfeited_amount' => $forfeit,
+                'payment_method' => $method,
+                'cash_account_id' => $method === 'Cash' ? $data['cash_account_id'] : null,
+                'bank_account_id' => $method === 'Bank' ? $data['bank_account_id'] : null,
+                'reference' => $data['reference'] ?? null, 'notes' => $data['notes'] ?? null,
+                'refunded_at' => $date, 'received_by' => $userId,
+                'finance_transaction_id' => $txn?->id, 'journal_entry_id' => $txn?->journal_entry_id,
+            ]);
+        });
+
+        return response()->json($refund->load('expense'), 201);
     }
 
     public function reject(Request $request, Expense $expense)

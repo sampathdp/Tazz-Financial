@@ -113,14 +113,16 @@ export function VendorsScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
 interface CreateForm {
   branchId: number | ''; expenseCategoryId: number | ''; vendorId: number | ''; staffId: number | '';
   amount: number | string; expenseDate: string; description: string; backDated: boolean
+  isRefundable: boolean; expectedRefundDate: string
 }
 const blankCreateForm = (): CreateForm => ({
-  branchId: '', expenseCategoryId: '', vendorId: '', staffId: '', amount: '', expenseDate: new Date().toISOString().slice(0, 10), description: '', backDated: false,
+  branchId: '', expenseCategoryId: '', vendorId: '', staffId: '', amount: '', expenseDate: new Date().toISOString().slice(0, 10), description: '', backDated: false, isRefundable: false, expectedRefundDate: '',
 })
 
 interface PayForm {
   paymentMethod: PaymentMethod; cashAccountId: number | ''; bankAccountId: number | ''; chequeNo: string; paidAt: string; backDated: boolean
 }
+interface RefundForm { amount: string; close: boolean; paymentMethod: 'Cash' | 'Bank'; cashAccountId: number | ''; bankAccountId: number | ''; refundedAt: string; reference: string }
 const todayIso = () => new Date().toISOString().slice(0, 10)
 const blankPayForm = (): PayForm => ({ paymentMethod: 'Cash', cashAccountId: '', bankAccountId: '', chequeNo: '', paidAt: todayIso(), backDated: false })
 
@@ -141,6 +143,8 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
   const [createForm, setCreateForm] = useState<CreateForm>(blankCreateForm())
   const [payTarget, setPayTarget] = useState<Expense | null>(null)
   const [payForm, setPayForm] = useState<PayForm>(blankPayForm())
+  const [refundTarget, setRefundTarget] = useState<Expense | null>(null)
+  const [refundForm, setRefundForm] = useState<RefundForm>({ amount: '', close: false, paymentMethod: 'Cash', cashAccountId: '', bankAccountId: '', refundedAt: todayIso(), reference: '' })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -166,6 +170,8 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
     if (!createForm.branchId) { setErr('Branch is required.'); return }
     if (!createForm.expenseCategoryId) { setErr('Expense category is required.'); return }
     if (!createForm.amount || Number(createForm.amount) <= 0) { setErr('Amount must be greater than zero.'); return }
+    if (createForm.isRefundable && !createForm.expectedRefundDate) { setErr('Expected refund date is required for a refundable expense.'); return }
+    if (createForm.isRefundable && !createForm.vendorId) { setErr('Pick the vendor who will refund this advance.'); return }
     setBusy(true); setErr('')
     try {
       await expensesApi.create({
@@ -173,6 +179,7 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
         vendorId: createForm.vendorId ? Number(createForm.vendorId) : undefined,
         staffId: createForm.staffId ? Number(createForm.staffId) : undefined,
         amount: createForm.amount, expenseDate: createForm.expenseDate, description: createForm.description || undefined,
+        isRefundable: createForm.isRefundable, expectedRefundDate: createForm.isRefundable ? createForm.expectedRefundDate : undefined,
       })
       closeCreate(); refresh()
       notify.success('Expense recorded', 'Awaiting approval')
@@ -200,6 +207,27 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
     && me?.id !== e.pendingApprovalRequest?.firstApprover?.id
   const approvalsLeft = (e: Expense) =>
     e.pendingApprovalRequest ? e.pendingApprovalRequest.requiredApprovals - (e.pendingApprovalRequest.firstApprover ? 1 : 0) : 0
+
+  const outstandingOf = (e: Expense) => Number(e.amount) - Number(e.refundedAmount || 0) - Number(e.forfeitedAmount || 0)
+  const openRefund = (e: Expense) => {
+    setRefundTarget(e); setErr('')
+    setRefundForm({ amount: outstandingOf(e).toFixed(2), close: false, paymentMethod: 'Cash', cashAccountId: cashAccounts.find((a) => a.branchId === e.branchId && a.status !== 'Inactive')?.id ?? '', bankAccountId: '', refundedAt: todayIso(), reference: '' })
+  }
+  const saveRefund = async () => {
+    if (!refundTarget) return
+    const amt = Number(refundForm.amount || 0)
+    if (amt <= 0 && !refundForm.close) { setErr('Enter the refund amount, or tick "Close deposit" to forfeit the balance.'); return }
+    if (amt > 0 && refundForm.paymentMethod === 'Cash' && !refundForm.cashAccountId) { setErr('Pick the till the refund was received into.'); return }
+    if (amt > 0 && refundForm.paymentMethod === 'Bank' && !refundForm.bankAccountId) { setErr('Pick the bank account the refund was received into.'); return }
+    setBusy(true); setErr('')
+    try {
+      await expensesApi.refund(refundTarget.id, {
+        amount: amt, close: refundForm.close, refundedAt: refundForm.refundedAt, reference: refundForm.reference || undefined,
+        ...(amt > 0 ? { paymentMethod: refundForm.paymentMethod, cashAccountId: refundForm.paymentMethod === 'Cash' ? Number(refundForm.cashAccountId) : undefined, bankAccountId: refundForm.paymentMethod === 'Bank' ? Number(refundForm.bankAccountId) : undefined } : {}),
+      })
+      notify.success('Refund recorded', refundTarget.code); setRefundTarget(null); refresh()
+    } catch (ex: any) { setErr(getErrorText(ex, 'Refund failed')) } finally { setBusy(false) }
+  }
 
   const [payMode, setPayMode] = useState<'direct' | 'request'>('direct')
   const openPay = (e: Expense, mode: 'direct' | 'request') => { setPayTarget(e); setPayMode(mode); setPayForm({ ...blankPayForm(), cashAccountId: cashAccounts.find((a) => a.branchId === e.branchId && a.purpose === 'Expenses' && a.status !== 'Inactive')?.id ?? '' }); setErr('') }
@@ -251,12 +279,12 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
       <Card pad={0}>
         {loading ? <LoadingBlock /> :
         <Table
-          cols={[{ label: 'Code' }, { label: 'Branch' }, { label: 'Category' }, { label: 'Payee' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 200 }]}
+          cols={[{ label: 'Code' }, { label: 'Branch' }, { label: 'Category' }, { label: 'Payee' }, { label: 'Date' }, { label: 'Amount', align: 'right' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 260 }]}
           empty="No expenses recorded yet" rows={rows}
           render={(e) => <>
             <Td mono>{e.code}</Td>
             <Td>{e.branch?.name || '—'}</Td>
-            <Td>{e.category?.name || '—'}</Td>
+            <Td>{e.category?.name || '—'}{e.isRefundable && <div><Badge tone={e.refundStatus === 'Settled' ? 'green' : 'amber'}>Refundable{e.refundStatus ? ` · ${e.refundStatus.replace(/([A-Z])/g, ' $1').trim()}` : ''}</Badge></div>}</Td>
             <Td>{e.staff ? `${e.staff.name} (${e.staff.staffCode})` : (e.vendor?.name || '—')}</Td>
             <Td>{dateOnly(e.expenseDate)}</Td>
             <Td align="right" mono>{money(e.amount)}</Td>
@@ -282,6 +310,8 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
                   <Btn variant="primary" size="sm" icon="wallet" onClick={() => openPay(e, 'direct')}>Pay Now</Btn>
                 </Can>
               </div>}
+              {e.status === 'Paid' && e.isRefundable && <div className="t-2" style={{ fontSize: 11, marginBottom: 4 }}>Refunded {money(e.refundedAmount)} · Forfeited {money(e.forfeitedAmount)} · Due back {money(outstandingOf(e))}{e.expectedRefundDate ? ` by ${dateOnly(e.expectedRefundDate)}` : ''}</div>}
+              {e.status === 'Paid' && e.isRefundable && e.refundStatus !== 'Settled' && <Can user={me} module="Expenses" action="Edit"><Btn variant="primary" size="sm" icon="wallet" onClick={() => openRefund(e)}>Record Refund</Btn></Can>}
               {e.status === 'Paid' && e.voucher && <span className="t-2" style={{ fontSize: 12 }}>{e.voucher.paymentMethod} — {dateOnly(e.voucher.paidAt)}</span>}
             </Td>
           </>} />}
@@ -321,7 +351,31 @@ export function ExpensesScreen({ user: me }: { go: Go; user?: AuthUser | null })
               <span className="t-2" style={{ fontSize: 11.5 }}>Back Dated Entry</span>
             </label>
           </Field>
+          <Field label="Expense Type"><Select value={createForm.isRefundable ? 'refundable' : 'non'} onChange={(e) => setCreateForm((s) => ({ ...s, isRefundable: e.target.value === 'refundable' }))}>
+            <option value="non">Non-refundable (cost)</option><option value="refundable">Refundable (advance / deposit)</option>
+          </Select></Field>
+          {createForm.isRefundable && <Field label="Expected Refund Date"><DateInput value={createForm.expectedRefundDate} onChange={(iso) => setCreateForm((s) => ({ ...s, expectedRefundDate: iso }))} /></Field>}
+          {createForm.isRefundable && <p className="t-2" style={{ gridColumn: '1 / -1', fontSize: 11.5, margin: 0 }}>Held as an asset (Refundable Deposits &amp; Advances) until the vendor returns it, not counted as an expense. Any part not returned is expensed when you close the deposit.</p>}
           <Field label="Description" full><Input value={createForm.description} onChange={(e) => setCreateForm((s) => ({ ...s, description: e.target.value }))} /></Field>
+        </div>
+      </Modal>
+
+      <Modal open={!!refundTarget} onClose={() => { setRefundTarget(null); setErr('') }} width={520} title="Record Refund"
+        sub={refundTarget ? `${refundTarget.code} — due back ${money(outstandingOf(refundTarget))}` : undefined}
+        footer={<><Btn variant="plain" onClick={() => { setRefundTarget(null); setErr('') }}>Cancel</Btn><Btn variant="primary" icon="check" onClick={saveRefund} disabled={busy}>{busy ? 'Saving…' : 'Save Refund'}</Btn></>}>
+        <ErrorBanner error={err} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Field label="Refund Received"><Input type="number" step="0.01" value={refundForm.amount} onChange={(e) => setRefundForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
+          <Field label="Received On"><DateInput value={refundForm.refundedAt} onChange={(iso) => setRefundForm((s) => ({ ...s, refundedAt: iso }))} /></Field>
+          <Field label="Received Into"><Select value={refundForm.paymentMethod} onChange={(e) => setRefundForm((s) => ({ ...s, paymentMethod: e.target.value as 'Cash' | 'Bank' }))}><option value="Cash">Cash till</option><option value="Bank">Bank account</option></Select></Field>
+          {refundForm.paymentMethod === 'Cash'
+            ? <Field label="Cash Till"><Select value={refundForm.cashAccountId} onChange={(e) => setRefundForm((s) => ({ ...s, cashAccountId: Number(e.target.value) || '' }))}><option value="">Select till…</option>{cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+            : <Field label="Bank Account"><Select value={refundForm.bankAccountId} onChange={(e) => setRefundForm((s) => ({ ...s, bankAccountId: Number(e.target.value) || '' }))}><option value="">Select account…</option>{bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bank?.name || ''}</option>)}</Select></Field>}
+          <Field label="Reference (optional)" full><Input value={refundForm.reference} onChange={(e) => setRefundForm((s) => ({ ...s, reference: e.target.value }))} /></Field>
+          <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', gridColumn: '1 / -1' }}>
+            <input type="checkbox" checked={refundForm.close} onChange={(e) => setRefundForm((s) => ({ ...s, close: e.target.checked }))} />
+            <span className="t-2" style={{ fontSize: 11.5 }}>Close deposit: any balance not returned is forfeited and booked as an expense</span>
+          </label>
         </div>
       </Modal>
 

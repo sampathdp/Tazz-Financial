@@ -39,6 +39,10 @@ class PaymentVoucherController extends Controller
             return response()->json(['message' => 'This voucher is already voided.'], 422);
         }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
+        if ($paymentVoucher->expense_id && \App\Models\Expense::where('id', $paymentVoucher->expense_id)->where('is_refundable', true)
+            ->where(fn ($q) => $q->where('refunded_amount', '>', 0)->orWhere('forfeited_amount', '>', 0))->exists()) {
+            return response()->json(['message' => 'This deposit already has refunds recorded against it and cannot be voided.'], 422);
+        }
 
         DB::transaction(function () use ($paymentVoucher, $data, $request) {
             if ($paymentVoucher->finance_transaction_id && $paymentVoucher->financeTransaction?->status === 'Completed') {
