@@ -82,7 +82,7 @@ jobs:
       # so production runs the versions the test suite ran against, not a fresh unreviewed resolve.
       - name: Install composer dependencies (from composer.lock)
         working-directory: backend
-        run: composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-audit
+        run: composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction
 
       # Informational for now: Laravel 8 has open advisories, so a blocking gate would stop every deploy until the
       # framework upgrade lands. Flip continue-on-error to false once `composer audit --locked` is clean.

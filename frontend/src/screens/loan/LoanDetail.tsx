@@ -1023,14 +1023,21 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
 
   const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!docCategoryId) { notify.error('Please select a document category'); e.target.value = ''; return }
-    const file = e.target.files?.[0]
+    const files = Array.from(e.target.files || [])
     e.target.value = ''
-    if (!file) return
+    if (!files.length) return
     setUploading(true)
     // api layer downscales + re-encodes raster images to WebP before upload (see compressImageToWebp).
-    try { await loanDocumentsApi.upload(loan.id, file, docCategoryId); refresh(); notify.success('Image uploaded') }
-    catch (ex: any) { notify.error('Upload failed', getErrorText(ex)) }
-    finally { setUploading(false) }
+    let ok = 0
+    const failed: string[] = []
+    for (const file of files) {
+      try { await loanDocumentsApi.upload(loan.id, file, docCategoryId); ok++ }
+      catch (ex: any) { failed.push(`${file.name}: ${getErrorText(ex)}`) }
+    }
+    refresh()
+    if (ok) notify.success(ok === 1 ? 'Image uploaded' : `${ok} images uploaded`)
+    if (failed.length) notify.error(`${failed.length} upload(s) failed`, failed.join('\n'))
+    setUploading(false)
   }
   const view = async (d: LoanDocument) => {
     try { preview.open(await loanDocumentsApi.download(loan.id, d.id), d.filePath, d.category?.name || 'Document') }
@@ -1052,7 +1059,7 @@ function ImagesPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
             <option value="" disabled>Select category...</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
-          <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" onChange={pick} style={{ display: 'none' }} />
+          <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" multiple onChange={pick} style={{ display: 'none' }} />
           <Btn variant="solid" icon="upload" size="sm" onClick={() => fileInput.current?.click()} disabled={uploading || !docCategoryId}>{uploading ? 'Uploading…' : 'Upload'}</Btn>
         </div>
       </Can>
