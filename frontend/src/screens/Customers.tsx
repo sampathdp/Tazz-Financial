@@ -9,7 +9,7 @@ import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, cust
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
-import { downloadBlob } from '../lib/export'
+import { downloadBlob, exportFlatTableToExcel } from '../lib/export'
 import { LoanDetail } from './loan/LoanDetail'
 import type { Go } from './types'
 
@@ -32,6 +32,15 @@ const DOC_TYPE_OPTIONS: { value: CustomerDocType; label: string }[] = [
 ]
 const statusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'amber', Blacklisted: 'red' }
 const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.']
+
+type CustomerTypeFilter = '' | 'Loan' | 'FD' | 'Guarantor'
+/** Types a customer holds, derived server-side — one customer can be several at once. */
+const customerTypes = (c: Customer): string[] => [
+  ...(c.isLoanCustomer ? ['Loan'] : []),
+  ...(c.isFdCustomer ? ['FD'] : []),
+  ...(c.isGuarantorCustomer ? ['Guarantor'] : []),
+]
+const typeTone: Record<string, 'green' | 'blue' | 'amber'> = { Loan: 'green', FD: 'amber', Guarantor: 'blue' }
 
 const blankForm = (): Partial<Customer> => ({ status: 'Active' })
 
@@ -651,6 +660,11 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [branches, setBranches] = useState<Branch[]>([])
   const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<CustomerTypeFilter>('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
+  const [exporting, setExporting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -675,9 +689,17 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
   const onAltPhoneChange = (v: string) => { set('altPhone', v as any); setFormErrors((s) => ({ ...s, altPhone: validatePhone(v) })) }
   const onEmailChange = (v: string) => { set('email', v as any); setFormErrors((s) => ({ ...s, email: validateEmail(v) })) }
 
+  const listFilters = () => ({
+    search: debouncedSearch || undefined,
+    customerType: typeFilter || undefined,
+    from: fromDate || undefined,
+    to: toDate || undefined,
+    branchId: branchFilter ? Number(branchFilter) : undefined,
+  })
+
   const refresh = () => {
     setLoading(true)
-    customersApi.browse({ search: debouncedSearch || undefined, page })
+    customersApi.browse({ ...listFilters(), page })
       .then((r) => { setRows(r.data); setLastPage(r.lastPage); setTotal(r.total) })
       .catch(() => { setRows([]); setLastPage(1); setTotal(0) })
       .finally(() => setLoading(false))
@@ -697,13 +719,13 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
 
   // A search change always jumps back to page 1 — staying on page 5 of a
   // now-different, shorter result set would just show an empty page.
-  useEffect(() => { setPage(1) }, [debouncedSearch])
+  useEffect(() => { setPage(1) }, [debouncedSearch, typeFilter, fromDate, toDate, branchFilter])
 
   useEffect(() => {
     if (mode !== 'list') return
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page, mode])
+  }, [debouncedSearch, page, mode, typeFilter, fromDate, toDate, branchFilter])
 
   // Which customer/sub-view is open lives in the URL — see the effect below —
   // so a hard refresh on a view/edit/loan URL reopens the same screen instead
@@ -769,6 +791,39 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
+  }
+
+  /** Excel of every customer matching the current filters (all pages), with a Customer Type column. */
+  const exportExcel = async () => {
+    setExporting(true)
+    try {
+      const all: Customer[] = []
+      for (let p = 1; ; p++) {
+        const r = await customersApi.browse({ ...listFilters(), page: p, perPage: 500 })
+        all.push(...r.data)
+        if (p >= r.lastPage) break
+      }
+      const rangeTxt = fromDate || toDate ? `${fromDate || '…'} to ${toDate || '…'}` : 'All dates'
+      const count = (t: string) => all.filter((c) => customerTypes(c).includes(t)).length
+      await exportFlatTableToExcel({
+        reportTitle: 'Customer Report',
+        subtitle: `Created: ${rangeTxt} · Type: ${typeFilter || 'All'} · Branch: ${branches.find((b) => String(b.id) === branchFilter)?.name || 'All'}`,
+        meta: `Total ${all.length} · Loan ${count('Loan')} · FD ${count('FD')} · Guarantor ${count('Guarantor')}`,
+        columns: [
+          { label: 'Code', key: 'code', align: 'left' }, { label: 'Customer', key: 'name', align: 'left', width: 30 },
+          { label: 'Customer Type', key: 'type', align: 'left' }, { label: 'NIC / ID', key: 'nic', align: 'left' },
+          { label: 'Phone', key: 'phone', align: 'left' }, { label: 'Branch', key: 'branch', align: 'left' },
+          { label: 'Status', key: 'status', align: 'left' }, { label: 'Created Date', key: 'created', align: 'left' },
+        ],
+        rows: all.map((c) => ({
+          code: c.code, name: c.fullName, type: customerTypes(c).join(', ') || 'Customer only',
+          nic: c.nicNo || c.passportNo || c.drivingLicenseNo || '', phone: c.phone || '', branch: c.branch?.name || '',
+          status: c.status || 'Active', created: dateOnly(c.createdAt) === '—' ? '' : dateOnly(c.createdAt),
+        })),
+        sheetName: 'Customers',
+      }, `customers-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } catch (ex: any) { notify.error('Export failed', getErrorText(ex)) }
+    finally { setExporting(false) }
   }
 
   const remove = async (c: Customer) => {
@@ -945,16 +1000,31 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx-2)' }}><Icon n="search" s={15} /></span>
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, NIC, phone, branch…" style={{ paddingLeft: 32 }} />
           </div>
-          {search.trim() && <span className="t-2" style={{ fontSize: 12 }}>{total} match{total === 1 ? '' : 'es'}</span>}
+          {(search.trim() || typeFilter || fromDate || toDate || branchFilter) && <span className="t-2" style={{ fontSize: 12 }}>{total} match{total === 1 ? '' : 'es'}</span>}
+        </div>
+        <div className="row gap-2 wrap" style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', alignItems: 'flex-end' }}>
+          <Field label="Customer Type"><Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as CustomerTypeFilter)} style={{ minWidth: 150 }}>
+            <option value="">All</option><option value="Loan">Loan</option><option value="FD">FD</option><option value="Guarantor">Guarantor</option>
+          </Select></Field>
+          <Field label="Created From"><Input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} /></Field>
+          <Field label="Created To"><Input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} /></Field>
+          <Field label="Branch"><Select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} style={{ minWidth: 150 }}>
+            <option value="">All</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </Select></Field>
+          {(typeFilter || fromDate || toDate || branchFilter) && <Btn variant="ghost" size="sm" onClick={() => { setTypeFilter(''); setFromDate(''); setToDate(''); setBranchFilter('') }}>Clear</Btn>}
+          <div style={{ marginLeft: 'auto' }}><Btn variant="solid" icon="download" size="sm" onClick={exportExcel} disabled={exporting}>{exporting ? 'Preparing…' : 'Export Excel'}</Btn></div>
         </div>
         {loading ? <LoadingBlock /> : <>
-        <Table cols={[{ label: 'Customer' }, { label: 'NIC / ID' }, { label: 'Phone' }, { label: 'Branch' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
+        <Table cols={[{ label: 'Customer' }, { label: 'NIC / ID' }, { label: 'Customer Type' }, { label: 'Phone' }, { label: 'Branch' }, { label: 'Status', align: 'center' }, { label: '', align: 'right', w: 100 }]}
           rows={rows}
           empty={search.trim() ? 'No customers match your search' : 'No records'}
           onRow={openView}
           render={(c) => <>
-            <Td c="var(--tx-0)"><div className="row gap-2" style={{ alignItems: 'center' }}><span style={{ fontWeight: 600 }}>{c.fullName}</span>{c.isGuarantor && <Badge tone="blue">Guarantor</Badge>}</div><div className="t-2" style={{ fontSize: 11.5 }}>{c.code}</div></Td>
+            <Td c="var(--tx-0)"><div className="row gap-2" style={{ alignItems: 'center' }}><span style={{ fontWeight: 600 }}>{c.fullName}</span></div><div className="t-2" style={{ fontSize: 11.5 }}>{c.code}</div></Td>
             <Td mono style={{ fontSize: 12 }}>{c.nicNo || c.passportNo || c.drivingLicenseNo || '—'}</Td>
+            <Td>{customerTypes(c).length
+              ? <div className="row gap-1 wrap">{customerTypes(c).map((t) => <Badge key={t} tone={typeTone[t]}>{t}</Badge>)}</div>
+              : '—'}</Td>
             <Td>{c.phone || '—'}</Td>
             <Td>{c.branch?.name || '—'}</Td>
             <Td align="center"><Badge tone={statusTone[c.status || 'Active']} dot>{c.status || 'Active'}</Badge></Td>

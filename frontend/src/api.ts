@@ -232,6 +232,9 @@ export interface Customer {
   businessDetail?: CustomerBusinessDetail | null;
   monthlyIncome?: number | string | null;
   status?: 'Active' | 'Blacklisted' | 'Inactive';
+  /** Derived on the browse list: holds a Loan / a Fixed Deposit or FD deposit / is flagged or used as a guarantor. */
+  isLoanCustomer?: boolean; isFdCustomer?: boolean; isGuarantorCustomer?: boolean;
+  createdAt?: string;
   /** Required when status is Blacklisted; a blacklisted customer cannot be given any facility in any branch. */
   blacklistReason?: string | null; blacklistNote?: string | null; blacklistedAt?: string | null;
   /** Label, not a restriction — any customer can still be picked as a loan guarantor regardless. */
@@ -842,7 +845,7 @@ export const customersApi = {
   /** Server-paginated + searched — powers the Customers browse screen so it
    *  never has to fetch the whole customer base. list() above is untouched
    *  and still used everywhere a picker needs the full list for local search. */
-  browse: (params: { search?: string; page: number; perPage?: number }) =>
+  browse: (params: { search?: string; customerType?: 'Loan' | 'FD' | 'Guarantor'; from?: string; to?: string; branchId?: number; page: number; perPage?: number }) =>
     http.get('/customers', { params: snakeize(params) }).then((r) => camelize(r.data) as Paginated<Customer>),
   /** Profile photo — auth-protected, so fetched as a blob rather than a plain <img src>. */
   photo: (id: number) => http.get(`/customers/${id}/photo`, { responseType: 'blob' }).then((r) => r.data as Blob),
@@ -2032,7 +2035,7 @@ export interface FixedDeposit {
 }
 
 export const fdCommissionsApi = {
-  list: (params: { status?: 'Pending' | 'Paid'; recipientType?: FdCommissionRecipient; fixedDepositId?: number } = {}) =>
+  list: (params: { status?: 'Pending' | 'Paid'; recipientType?: FdCommissionRecipient; fixedDepositId?: number; fromDate?: string; toDate?: string; termMonths?: number } = {}) =>
     http.get('/fd-commissions', { params: snakeize(params) }).then((r) => camelize(r.data) as FdCommission[]),
   /** Adds a commission to an existing FD. */
   create: (fixedDepositId: number, body: FdCommissionInput) =>

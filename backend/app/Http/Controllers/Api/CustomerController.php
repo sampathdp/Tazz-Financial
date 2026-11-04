@@ -38,6 +38,34 @@ class CustomerController extends Controller
             return $query->orderByDesc('id')->get();
         }
 
+        // Customer type is derived, not stored: a customer is a Loan borrower if they
+        // hold a Loan facility, an FD customer if they hold a Fixed Deposit / FD deposit,
+        // and a Guarantor if flagged as one or standing guarantor on any facility.
+        // One customer can be several at once.
+        $isLoan = 'EXISTS (SELECT 1 FROM credit_facilities cf WHERE cf.customer_id = customers.id AND cf.facility_type = \'Loan\' AND cf.deleted_at IS NULL)';
+        $isFd = '(EXISTS (SELECT 1 FROM fixed_deposits fd WHERE fd.customer_id = customers.id) OR EXISTS (SELECT 1 FROM fd_deposits fdd WHERE fdd.customer_id = customers.id))';
+        $isGuarantor = '(customers.is_guarantor = 1 OR EXISTS (SELECT 1 FROM facility_guarantors fg WHERE fg.guarantor_customer_id = customers.id))';
+
+        $query->select('customers.*')
+            ->selectRaw("{$isLoan} AS is_loan_customer")
+            ->selectRaw("{$isFd} AS is_fd_customer")
+            ->selectRaw("{$isGuarantor} AS is_guarantor_customer");
+
+        if ($request->filled('customer_type')) {
+            $map = ['Loan' => $isLoan, 'FD' => $isFd, 'Guarantor' => $isGuarantor];
+            abort_unless(isset($map[$request->customer_type]), 422, 'Invalid customer type.');
+            $query->whereRaw($map[$request->customer_type]);
+        }
+        if ($request->filled('from')) {
+            $query->whereDate('customers.created_at', '>=', $request->from);
+        }
+        if ($request->filled('to')) {
+            $query->whereDate('customers.created_at', '<=', $request->to);
+        }
+        if ($request->filled('branch_id')) {
+            $query->where('customers.branch_id', (int) $request->branch_id);
+        }
+
         if ($request->filled('search')) {
             $term = $request->search;
             $query->where(function ($q) use ($term) {

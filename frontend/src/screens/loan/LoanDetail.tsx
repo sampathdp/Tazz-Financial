@@ -703,8 +703,8 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
       </Card>
 
       <Card>
-        <div className="eyebrow" style={{ marginBottom: 12 }}>Cancelled Receipts</div>
-        {voided.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No cancelled receipts.</div> :
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Cancelled / Returned Receipts</div>
+        {voided.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No cancelled or returned receipts.</div> :
           <div className="col gap-2">
             {voided.map((p) => (
               <div key={p.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', opacity: 0.7 }}>
@@ -713,7 +713,10 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
                   <span style={{ fontSize: 12.5, fontWeight: 600, textDecoration: 'line-through' }}>{p.code}</span>
                   <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(p.paidAt)} · voided {dateOnly(p.voidedAt)} by {p.voider?.name}{p.voidReason ? ` · ${p.voidReason}` : ''}</span>
                 </div>
-                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(p.amount)}</span>
+                  <Badge tone="red" dot>{p.clearanceStatus === 'Bounced' ? 'Cheque Returned' : 'Cancelled'}</Badge>
+                </div>
               </div>
             ))}
           </div>}
@@ -864,9 +867,9 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
 
 /* ---------- Ledger Card (computed, client-side) ---------- */
 function LedgerCard({ loan }: { loan: Loan }) {
-  type Row = { date: string; particulars: string; debit: number; credit: number; typeOrder: number }
+  type Row = { date: string; particulars: string; debit: number; credit: number; typeOrder: number; tone?: 'bad' | 'warn' }
   const rows: Row[] = []
-  
+
   // 1. Charges (Debits)
   // Only the due side is logged here — a charge's paid_amount always comes from
   // a real LoanPayment (see LoanPaymentAllocator::applyAllocation), which is
@@ -889,7 +892,19 @@ function LedgerCard({ loan }: { loan: Loan }) {
   
   // 4. Payments (Credits)
   for (const p of loan.payments || []) {
-    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval' || (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending')) continue
+    if (p.approvalStatus === 'PendingApproval') continue
+    if (p.status === 'Voided') {
+      // Show the receipt and its reversal so a bounced/cancelled payment is
+      // visible here (nets to zero) instead of silently missing.
+      const bounced = p.clearanceStatus === 'Bounced'
+      rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4, tone: 'bad' })
+      rows.push({ date: p.voidedAt || p.paidAt, particulars: `${bounced ? 'Cheque RETURNED' : 'Receipt CANCELLED'} — ${p.code}${p.receiptNo ? ` #${p.receiptNo}` : ''}${p.voidReason && !bounced ? ` — ${p.voidReason}` : ''}`, debit: num(p.amount), credit: 0, typeOrder: 5, tone: 'bad' })
+      continue
+    }
+    if (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending') {
+      rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (Cheque${p.receiptNo ? ` #${p.receiptNo}` : ''}) — pending clearance, ${money(p.amount)} not applied`, debit: 0, credit: 0, typeOrder: 4, tone: 'warn' })
+      continue
+    }
     rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4 })
   }
 
@@ -908,7 +923,7 @@ function LedgerCard({ loan }: { loan: Loan }) {
         rows={withBalance} empty="No ledger entries yet"
         render={(r) => <>
           <Td>{dateOnly(r.date)}</Td>
-          <Td>{r.particulars}</Td>
+          <Td><span style={r.tone ? { color: r.tone === 'bad' ? 'var(--bad)' : 'var(--warn)' } : undefined}>{r.particulars}</span></Td>
           <Td mono align="right">{r.debit ? money(r.debit) : '—'}</Td>
           <Td mono align="right">{r.credit ? money(r.credit) : '—'}</Td>
           <Td mono align="right">{money(r.balance)}</Td>

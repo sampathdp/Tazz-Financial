@@ -42,6 +42,17 @@ class FdCommissionController extends Controller
             $q->where('fixed_deposit_id', $request->input('fixed_deposit_id'));
         }
 
+        // Date range applies to the FD placement (start) date.
+        if ($request->filled('from_date')) {
+            $q->whereHas('fixedDeposit', fn ($f) => $f->whereDate('start_date', '>=', $request->input('from_date')));
+        }
+        if ($request->filled('to_date')) {
+            $q->whereHas('fixedDeposit', fn ($f) => $f->whereDate('start_date', '<=', $request->input('to_date')));
+        }
+        if ($request->filled('term_months')) {
+            $q->whereHas('fixedDeposit', fn ($f) => $f->where('term_months', (int) $request->input('term_months')));
+        }
+
         return $q->get();
     }
 

@@ -44,6 +44,7 @@ const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = { Pa
 
 /** Payment History row status — mirrors LoanDetail's ReceiptsPanel classification. */
 function PaymentStatusBadge({ p }: { p: LoanPayment }) {
+  if (p.status === 'Voided' && p.clearanceStatus === 'Bounced') return <Badge tone="red" dot>Cheque Returned</Badge>
   if (p.status === 'Voided') return <Badge tone="red" dot>Voided</Badge>
   if (p.pendingVoidRequest) return <Badge tone="amber" dot>Cancel Pending</Badge>
   if (p.pendingAllocationRequest) return <Badge tone="amber" dot>Allocation Pending Approval</Badge>
@@ -255,7 +256,7 @@ function LoanDetailsPanel({ loan }: { loan: Loan }) {
 
 /* ---------- Ledger Card (computed, client-side) — mirrors LoanDetail's LedgerCard. ---------- */
 function LedgerCard({ loan }: { loan: Loan }) {
-  type Row = { date: string; particulars: string; debit: number; credit: number; typeOrder: number }
+  type Row = { date: string; particulars: string; debit: number; credit: number; typeOrder: number; tone?: 'bad' | 'warn' }
   const rows: Row[] = []
 
   // Only the due side is logged here — a charge's paid_amount always comes from a
@@ -266,7 +267,18 @@ function LedgerCard({ loan }: { loan: Loan }) {
   for (const s of loan.schedules || []) rows.push({ date: s.dueDate, particulars: `Installment #${s.installmentNo} due`, debit: num(s.totalDue), credit: 0, typeOrder: 2 })
   for (const w of loan.waivers || []) rows.push({ date: w.waivedAt, particulars: `${w.waiverType} waived${w.reason ? ` — ${w.reason}` : ''}`, debit: 0, credit: num(w.amount), typeOrder: 3 })
   for (const p of loan.payments || []) {
-    if (p.status === 'Voided' || p.approvalStatus === 'PendingApproval' || (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending')) continue
+    if (p.approvalStatus === 'PendingApproval') continue
+    if (p.status === 'Voided') {
+      // Receipt + its reversal: a bounced/cancelled payment stays visible (nets to zero).
+      const bounced = p.clearanceStatus === 'Bounced'
+      rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4, tone: 'bad' })
+      rows.push({ date: p.voidedAt || p.paidAt, particulars: `${bounced ? 'Cheque RETURNED' : 'Receipt CANCELLED'} — ${p.code}${p.receiptNo ? ` #${p.receiptNo}` : ''}${p.voidReason && !bounced ? ` — ${p.voidReason}` : ''}`, debit: num(p.amount), credit: 0, typeOrder: 5, tone: 'bad' })
+      continue
+    }
+    if (p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending') {
+      rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (Cheque${p.receiptNo ? ` #${p.receiptNo}` : ''}) — pending clearance, ${money(p.amount)} not applied`, debit: 0, credit: 0, typeOrder: 4, tone: 'warn' })
+      continue
+    }
     rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4 })
   }
 
@@ -285,7 +297,7 @@ function LedgerCard({ loan }: { loan: Loan }) {
         rows={withBalance} empty="No ledger entries yet"
         render={(r) => <>
           <Td>{dateOnly(r.date)}</Td>
-          <Td>{r.particulars}</Td>
+          <Td><span style={r.tone ? { color: r.tone === 'bad' ? 'var(--bad)' : 'var(--warn)' } : undefined}>{r.particulars}</span></Td>
           <Td mono align="right">{r.debit ? money(r.debit) : '—'}</Td>
           <Td mono align="right">{r.credit ? money(r.credit) : '—'}</Td>
           <Td mono align="right">{money(r.balance)}</Td>
