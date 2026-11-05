@@ -6,6 +6,7 @@
    Valuation/Other charges are permission-gated on the backend (Active Loans),
    not admin-only, but this is the only place a charge can actually be added. */
 import { useEffect, useMemo, useState } from 'react'
+import { isAdminRole } from '../lib/permissions'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td , LoadingBlock } from '../components/ui'
 import {
   loansApi, loanSchedulesApi, loanWaiversApi, loanChargesApi, loanTypesApi, chargeCategoriesApi,
@@ -722,7 +723,7 @@ export function LoanAdjustmentsScreen({ go, user: me }: { go: Go; user?: AuthUse
 
   // Belt-and-suspenders — the route itself is only reachable by admins (see
   // lib/permissions.ts canAccessRoute()), but a stale session shouldn't render this.
-  if (me?.role !== 'admin') {
+  if (!isAdminRole(me?.role)) {
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)' }}>Admin privileges required.</div>
   }
 

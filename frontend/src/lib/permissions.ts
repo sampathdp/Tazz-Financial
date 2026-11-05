@@ -7,7 +7,9 @@ import type { AuthUser } from '../api'
 export type Action = 'View' | 'Create' | 'Edit' | 'Delete' | 'Approve' | 'Export'
 
 /** Admin-only features (e.g. editing a facility) — mirrors the backend `admin` middleware. */
-export const isAdmin = (user: AuthUser | null | undefined): boolean => user?.role === 'admin'
+/** True for the built-in 'admin' and 'super_admin' system roles. */
+export const isAdminRole = (slug?: string | null): boolean => slug === 'admin' || slug === 'super_admin'
+export const isAdmin = (user: AuthUser | null | undefined): boolean => isAdminRole(user?.role)
 
 export function userCan(user: AuthUser | null | undefined, module: string, action: Action = 'View'): boolean {
   if (!user) return false
@@ -155,6 +157,6 @@ export function canAccessRoute(user: AuthUser | null | undefined, routeId: strin
   // role/user overrides (e.g. 'loan/adjustments'). Either way: admins can
   // reach it, everyone else is denied and never sees it in the sidebar
   // (see Shell.tsx's visibleNav).
-  if (!mod) return user.role === 'admin'
+  if (!mod) return isAdminRole(user.role)
   return userCan(user, mod, 'View')
 }

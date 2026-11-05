@@ -25,6 +25,11 @@ class Role extends Model
 
     public function isAdmin(): bool
     {
-        return $this->is_system && $this->slug === 'admin';
+        return $this->is_system && in_array($this->slug, ['admin', 'super_admin'], true);
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->is_system && $this->slug === 'super_admin';
     }
 }

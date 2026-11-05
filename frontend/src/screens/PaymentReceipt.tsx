@@ -17,7 +17,7 @@ import {
   type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser, type PaymentAllocationSplit,
   type SpeedDraft, type SpeedDraftPayment, type SpeedDraftSchedule, type SpeedDraftPaymentType,
 } from '../api'
-import { Can, canApprove } from '../lib/permissions'
+import { Can, canApprove, isAdminRole } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { useBranchFilter } from '../components/BranchFilter'
 import { getErrorText } from '../lib/apiError'
@@ -32,7 +32,7 @@ const outstandingOf = (loan: Loan) => {
   return Math.max(0, num(loan.summary?.arrears?.amountToBeCollected ?? loan.outstandingBalanceCache))
 }
 const balanceOf = (r: LoanSchedule) => Math.max(0, num(r.totalDue) - num(r.paidAmount))
-const isCashier = (me?: AuthUser | null) => me?.role === 'cashier' || me?.role === 'admin'
+const isCashier = (me?: AuthUser | null) => me?.role === 'cashier' || isAdminRole(me?.role)
 
 const METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
   { value: 'Cash', label: 'Cash' },

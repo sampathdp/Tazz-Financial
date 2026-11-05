@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Badge, Btn, Modal, Table, Td } from './ui'
-import { customerLoansApi, type Customer, type Loan } from '../api'
+import { customerLoansApi, customerBankDetailsApi, type Customer, type CustomerBankDetail, type Loan } from '../api'
 import { CreditReportPanel } from '../screens/Customers'
 
 const custStatusTone: Record<string, 'green' | 'red' | 'amber'> = { Active: 'green', Inactive: 'amber', Blacklisted: 'red' }
@@ -23,6 +23,11 @@ export function CustomerDetailCard({ c }: { c: Customer }) {
       .then((d) => { setActiveOwn(d.borrower.filter((l) => l.status === 'Active')); setActiveGuaranteed(d.guarantor.filter((l) => l.status === 'Active')) })
       .catch(() => { setActiveOwn([]); setActiveGuaranteed([]) })
       .finally(() => setLoansLoading(false))
+  }, [c.id])
+
+  const [bankDetails, setBankDetails] = useState<CustomerBankDetail[]>([])
+  useEffect(() => {
+    customerBankDetailsApi.list(c.id).then(setBankDetails).catch(() => setBankDetails([]))
   }, [c.id])
 
   const outstandingOf = (l: Loan) => Number(l.totalDueSum ?? 0) - Number(l.paidSum ?? 0)
@@ -53,6 +58,22 @@ export function CustomerDetailCard({ c }: { c: Customer }) {
         <div><span className="t-2">Monthly Income: </span>{c.monthlyIncome ? Number(c.monthlyIncome).toLocaleString() : '—'}</div>
         <div><span className="t-2">Email: </span>{c.email || '—'}</div>
         {c.address && <div style={{ gridColumn: '1/-1' }}><span className="t-2">Address: </span>{c.address}</div>}
+      </div>
+
+      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+        <div className="t-2" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>Bank Details</div>
+        {bankDetails.length === 0 ? (
+          <div className="t-2" style={{ fontSize: 12 }}>No bank accounts on file.</div>
+        ) : (
+          <div className="col gap-1">
+            {bankDetails.map((b) => (
+              <div key={b.id} className="row between" style={{ fontSize: 12 }}>
+                <span><b>{b.bank?.name || '—'}</b>{b.bankBranch ? ` · ${b.bankBranch}` : ''} · <span className="t-2">{b.accountHolder}</span></span>
+                <span style={{ fontFamily: 'JetBrains Mono' }}>{b.accountNumberMasked}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>

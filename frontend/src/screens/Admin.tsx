@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { api, company as companyApi, permissionsApi, branchesApi, rolesApi, type PermissionMatrix, type Branch, type Role, type AuthUser } from '../api'
-import { Can, userCan } from '../lib/permissions'
+import { Can, userCan, isAdminRole } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -151,7 +151,7 @@ function PermGridEditor({ grid, actions, modules, onToggle, onBulkRow, readOnly 
 
 export function RolesScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
-  const isAdmin = me?.role === 'admin'
+  const isAdmin = isAdminRole(me?.role)
   const canEditGrid = userCan(me, 'Role Management', 'Edit')
 
   const [roles, setRoles] = useState<Role[]>([])
@@ -434,7 +434,7 @@ export function PermScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | nu
 
   const key = userId != null ? String(userId) : ''
   const selectedUser = matrix?.users.find((u) => u.id === userId) || null
-  const isAdminUser = selectedUser?.role === 'admin'
+  const isAdminUser = isAdminRole(selectedUser?.role)
   const baseGrid = matrix?.matrix[key] || {}
   const baseOverrides = matrix?.overrides[key] || {}
   const userPending = pending[key] || {}
@@ -514,7 +514,7 @@ export function PermScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | nu
             }}
             style={{ minWidth: 260, maxWidth: 360 }}
           >
-            {matrix.users.map((u) => <option key={u.id} value={u.id}>{u.name} — {u.email}{u.role === 'admin' ? ' (Admin)' : ''}</option>)}
+            {matrix.users.map((u) => <option key={u.id} value={u.id}>{u.name} — {u.email}{isAdminRole(u.role) ? ' (Admin)' : ''}</option>)}
           </Select>
           {selectedUser && !isAdminUser && <span className="t-2" style={{ fontSize: 12 }}>Role: {selectedUser.roleName}</span>}
           {dirty && <Badge tone="amber" dot>Unsaved changes</Badge>}

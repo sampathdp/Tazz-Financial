@@ -1,5 +1,6 @@
 /* Tazz Investment & Credit — Fixed Deposit Commissions report */
 import { useEffect, useState } from 'react'
+import { isAdminRole } from '../lib/permissions'
 import { Card, PageHead, Btn, Badge, Field, Select, Input, Table, Td, LoadingBlock } from '../components/ui'
 import {
   staffApi, fdCommissionsApi,
@@ -181,7 +182,7 @@ export function FdCommissionsScreen({ go: _go, user: me }: { go: Go; user?: Auth
               {c.commissionStatus === 'Paid' && (
                 <div className="row gap-2" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
                   <span className="t-2" style={{ fontSize: 12 }}>{day(c.paidAt)}</span>
-                  {me?.role === 'admin' && <Btn variant="danger" size="sm" icon="x" disabled={voidingId !== null} onClick={() => voidPayment(c)}>Void</Btn>}
+                  {isAdminRole(me?.role) && <Btn variant="danger" size="sm" icon="x" disabled={voidingId !== null} onClick={() => voidPayment(c)}>Void</Btn>}
                 </div>
               )}
             </Td>

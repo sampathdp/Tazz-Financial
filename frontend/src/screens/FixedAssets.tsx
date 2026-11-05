@@ -8,7 +8,7 @@ import {
   type Branch, type CashAccount, type BankAccount, type Vendor, type StaffOption, type ChartOfAccount,
   type FixedAsset, type FixedAssetBody, type FixedAssetStatus, type AssetCategory, type DepreciationRunResult, type FixedAssetDepreciationRow,
 } from '../api'
-import { Can } from '../lib/permissions'
+import { Can, isAdminRole } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { ScreenProps } from './types'
@@ -45,7 +45,7 @@ const blankDispose = (): DisposeForm => ({ disposalDate: todayIso(), proceeds: '
 
 export function FixedAssetsScreen({ user: me }: ScreenProps) {
   const notify = useNotify()
-  const isAdmin = me?.role === 'admin'
+  const isAdmin = isAdminRole(me?.role)
   const [tab, setTab] = useState<Tab>('register')
 
   const [assets, setAssets] = useState<FixedAsset[]>([])

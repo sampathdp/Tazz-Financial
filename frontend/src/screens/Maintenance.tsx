@@ -5,6 +5,7 @@
    sequences) and the files uploaded against them, while keeping all
    master/config data and the customer register. Irreversible. */
 import { useState } from 'react'
+import { isAdminRole } from '../lib/permissions'
 import { Card, PageHead, Btn, Field, Input, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { systemApi, CLEAN_CONFIRM_PHRASE, type CleanResult } from '../api'
@@ -39,7 +40,7 @@ const WIPED = [
 
 export function MaintenanceScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
   const notify = useNotify()
-  const isAdmin = me?.role === 'admin'
+  const isAdmin = isAdminRole(me?.role)
   const [phrase, setPhrase] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)

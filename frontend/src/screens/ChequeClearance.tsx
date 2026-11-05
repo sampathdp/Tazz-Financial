@@ -5,6 +5,7 @@
    lib/permissions.ts's ROUTE_MODULE so canAccessRoute() falls back to its
    unmapped-route rule (admin role only), same as Loan Adjustments. */
 import { useEffect, useMemo, useState } from 'react'
+import { isAdminRole } from '../lib/permissions'
 import { Card, PageHead, Btn, Badge, Field, Select, Table, Td, DateInput, Modal , LoadingBlock } from '../components/ui'
 import {
   loanPostDatedChequesApi, loanPaymentsApi,
@@ -151,7 +152,7 @@ export function ChequeClearanceScreen({ user: me }: { go: Go; user?: AuthUser | 
 
   // Belt-and-suspenders — the route itself is only reachable by admins (see
   // lib/permissions.ts canAccessRoute()), but a stale session shouldn't render this.
-  if (me?.role !== 'admin') {
+  if (!isAdminRole(me?.role)) {
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--bad)' }}>Admin privileges required.</div>
   }
 

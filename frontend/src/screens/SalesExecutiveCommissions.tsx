@@ -1,5 +1,6 @@
 /* Tazz Investment & Credit — Sales Executive Commissions */
 import { useEffect, useState } from 'react'
+import { isAdminRole } from '../lib/permissions'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Modal, Table, Td, ErrorBanner , LoadingBlock } from '../components/ui'
 import {
   api, loanTypesApi, salesExecutiveCommissionsApi, cashAccountsApi, bankAccountsApi,
@@ -194,13 +195,13 @@ export function SalesExecutiveCommissionsScreen({ go: _go, user: me }: { go: Go;
             <Td align="center"><Badge tone={commissionTone(c.commissionStatus)} dot>{c.commissionStatus}</Badge></Td>
             <Td align="center"><Badge tone={paymentTone(c.paymentStatus)} dot>{c.paymentStatus}</Badge></Td>
             <Td align="right">
-              {c.commissionStatus === 'Eligible' && me?.role === 'admin' && (
+              {c.commissionStatus === 'Eligible' && isAdminRole(me?.role) && (
                 <Btn variant="primary" size="sm" icon="check" onClick={() => openPay(c)}>Pay Commission</Btn>
               )}
               {c.commissionStatus === 'Paid' && (
                 <div className="row gap-2" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
                   <span className="t-2" style={{ fontSize: 12 }}>{c.paidAt?.slice(0, 10)}</span>
-                  {me?.role === 'admin' && <Btn variant="danger" size="sm" icon="x" onClick={() => voidPayment(c)}>Void</Btn>}
+                  {isAdminRole(me?.role) && <Btn variant="danger" size="sm" icon="x" onClick={() => voidPayment(c)}>Void</Btn>}
                 </div>
               )}
             </Td>

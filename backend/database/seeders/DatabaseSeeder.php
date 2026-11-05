@@ -19,6 +19,12 @@ class DatabaseSeeder extends Seeder
     {
         $branch = $this->seedHeadOffice();
         $adminRole = $this->seedAdminRole();
+        Role::updateOrCreate(['slug' => 'super_admin'], [
+            'name' => 'Super Admin',
+            'description' => 'Full, implicit access to every module. Cannot be edited or deleted.',
+            'is_system' => true,
+            'can_view_all_branches' => true,
+        ]);
         $this->seedExampleRoles();
         $admin = $this->seedAdminUser($adminRole, $branch);
         $this->seedSampleStaffUsers($branch);
