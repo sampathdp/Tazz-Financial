@@ -35,10 +35,11 @@ const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Re
 
 type CustomerTypeFilter = '' | 'Loan' | 'FD' | 'Guarantor'
 /** Types a customer holds, derived server-side — one customer can be several at once. */
+const flag = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true'
 const customerTypes = (c: Customer): string[] => [
-  ...(c.isLoanCustomer ? ['Loan'] : []),
-  ...(c.isFdCustomer ? ['FD'] : []),
-  ...(c.isGuarantorCustomer ? ['Guarantor'] : []),
+  ...(flag(c.isLoanCustomer) ? ['Loan'] : []),
+  ...(flag(c.isFdCustomer) ? ['FD'] : []),
+  ...(flag(c.isGuarantorCustomer) ? ['Guarantor'] : []),
 ]
 const typeTone: Record<string, 'green' | 'blue' | 'amber'> = { Loan: 'green', FD: 'amber', Guarantor: 'blue' }
 

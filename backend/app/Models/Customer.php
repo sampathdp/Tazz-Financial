@@ -22,6 +22,9 @@ class Customer extends Model
         'dob' => 'date',
         'monthly_income' => 'decimal:2',
         'is_guarantor' => 'boolean',
+        'is_loan_customer' => 'boolean',
+        'is_fd_customer' => 'boolean',
+        'is_guarantor_customer' => 'boolean',
         'blacklisted_at' => 'datetime',
     ];
 
