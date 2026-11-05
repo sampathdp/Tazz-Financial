@@ -35,6 +35,7 @@ class RouteAccessMatrixTest extends TestCase
         // (approver eligibility, no self-approval) instead of by a static permission.
         'DELETE api/profile/achievements/{achievement}',
         'DELETE api/profile/photo',
+        'GET api/customers/{customer}/bank-details',
         'GET api/me',
         'GET api/profile/achievements',
         'GET api/profile/photo',
@@ -42,6 +43,9 @@ class RouteAccessMatrixTest extends TestCase
         'GET api/staff/options',
         'GET api/users/active',
         'GET api/users/marketing-executives',
+        'PUT api/customers/{customer}/bank-details/{bankDetail}',
+        'PUT api/loans/{loan}/payout-account',
+        'POST api/customers/{customer}/bank-details',
         'POST api/finance-requests/{financeRequest}/approve',
         'POST api/finance-requests/{financeRequest}/reject',
         'POST api/finance-transaction-reverse-requests/{approvalRequest}/approve',

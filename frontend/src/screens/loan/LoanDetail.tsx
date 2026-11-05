@@ -18,6 +18,7 @@ import {
 import { Can, canApprove, isAdmin } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
 import { CustomerDetailCard } from '../../components/CustomerDetailCard'
+import { CustomerBankDetailPicker } from '../../components/CustomerBankDetailPicker'
 import { getErrorText } from '../../lib/apiError'
 import type { Go } from '../types'
 
@@ -1162,6 +1163,8 @@ export function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?:
   const [method, setMethod] = useState<'Bank' | 'Cheque'>('Bank')
   const [bankAccountId, setBankAccountId] = useState<number | ''>('')
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  // The customer account the money is sent to - can be added / corrected right here.
+  const [payoutId, setPayoutId] = useState<number | undefined>(loan.customerBankDetailId ?? undefined)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -1194,13 +1197,18 @@ export function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?:
     if (!firstDate) { setErr('Pick the first installment date.'); return false }
     if (chargeBlocking) { setErr('Settle the document charge before disbursing this loan.'); return false }
     if (!bankAccountId) { setErr('Pick which bank account this loan is paid out of.'); return false }
+    if (!payoutId) { setErr("Select or add the customer's payment bank account."); return false }
     return true
+  }
+  const savePayout = async () => {
+    if (payoutId && payoutId !== loan.customerBankDetailId) await loansApi.setPayoutAccount(loan.id, payoutId)
   }
 
   const disburse = async () => {
     if (!validateForm()) return
     setBusy(true); setErr('')
     try {
+      await savePayout()
       await loansApi.disburse(loan.id, disburseBody())
       notify.success('Loan disbursed', loan.code)
       onChanged()
@@ -1213,6 +1221,7 @@ export function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?:
     if (!validateForm()) return
     setBusy(true); setErr('')
     try {
+      await savePayout()
       await loansApi.requestDisbursement(loan.id, disburseBody())
       notify.success('Disbursement requested', 'Sent to Finance for approval and payment')
       onChanged()
@@ -1308,6 +1317,13 @@ export function DisburseForm({ loan, me, onChanged, notify }: { loan: Loan; me?:
           {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.accountNumber}</option>)}
         </Select></Field>
       </div>
+      {!pendingDisb && (
+        <div style={{ marginBottom: 16 }}>
+          <Field label="Customer Payment Bank Account (add or update if needed)">
+            <CustomerBankDetailPicker customerId={loan.customerId} value={payoutId} onChange={setPayoutId} />
+          </Field>
+        </div>
+      )}
       <div className="t-2" style={{ fontSize: 12, marginBottom: 16 }}>
         {loan.termMonths} months · {loan.loanDetail?.installmentFrequency} · {loan.loanDetail?.interestMethod === 'reducing_balance' ? 'Reducing balance' : 'Flat'} interest at {loan.interestRatePercent}%
         {num(loan.loanDetail?.downPayment) > 0 && <> · Down payment {money(loan.loanDetail?.downPayment)} already settled — schedule covers the remaining {money(financedAmount)}</>}

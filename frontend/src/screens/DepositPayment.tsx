@@ -17,6 +17,7 @@ import {
   type FdPaymentMethod, type AuthUser,
 } from '../api'
 import { InterestVoucherPage } from './FdInterestVoucher'
+import { CustomerBankDetailPicker } from '../components/CustomerBankDetailPicker'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -263,10 +264,11 @@ export function PartPaymentModal({ fd, open, onClose, onPaid }: { fd: FixedDepos
   const [notes, setNotes] = useState('')
   const [paidAt, setPaidAt] = useState(todayIso())
   const [backDated, setBackDated] = useState(false)
+  const [payoutId, setPayoutId] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (open) { setAmount(''); setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setNotes(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
+  useEffect(() => { if (open) { setPayoutId(fd?.customerBankDetailId ?? undefined); setAmount(''); setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setNotes(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
   if (!fd) return null
 
   const rate = fd.fundingProduct?.prematureWithdrawalRatePercent
@@ -275,8 +277,10 @@ export function PartPaymentModal({ fd, open, onClose, onPaid }: { fd: FixedDepos
   const save = async () => {
     if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
     if (!amount || Number(amount) <= 0) { setErr('Enter an amount to withdraw.'); return }
+    if (!payoutId) { setErr("Select or add the customer's payout bank account."); return }
     setBusy(true); setErr('')
     try {
+      if (payoutId !== fd.customerBankDetailId) await fixedDepositsApi.setPayoutAccount(fd.id, payoutId)
       const result = await fixedDepositsApi.partPayment(fd.id, { amount, paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, notes: notes || undefined, paidAt })
       onPaid(result, result.fixedDeposit)
       notify.success('Part payment recorded', fd.fdNumber)
@@ -316,6 +320,9 @@ export function PartPaymentModal({ fd, open, onClose, onPaid }: { fd: FixedDepos
               </label>
             </Field>
             <Field label="Reference No"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
+            <Field label="Customer payout bank account (add or update if needed)" full>
+              <CustomerBankDetailPicker customerId={fd.customerId} value={payoutId} onChange={setPayoutId} />
+            </Field>
           </div>
           <Field label="Notes" full><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
 

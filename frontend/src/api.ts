@@ -881,6 +881,9 @@ export const customerBankDetailsApi = {
   list: (customerId: number) => http.get(`/customers/${customerId}/bank-details`).then((r) => camelize(r.data) as CustomerBankDetail[]),
   create: (customerId: number, body: { bankId: number; accountHolder: string; bankBranch?: string; accountNumber: string }) =>
     http.post(`/customers/${customerId}/bank-details`, snakeize(body)).then((r) => camelize(r.data) as CustomerBankDetail),
+  /** accountNumber is optional on edit - leave it out to keep the stored number. */
+  update: (customerId: number, id: number, body: { bankId: number; accountHolder: string; bankBranch?: string; accountNumber?: string }) =>
+    http.put(`/customers/${customerId}/bank-details/${id}`, snakeize(body)).then((r) => camelize(r.data) as CustomerBankDetail),
   remove: (customerId: number, id: number) => http.delete(`/customers/${customerId}/bank-details/${id}`),
 }
 
@@ -1383,6 +1386,8 @@ export const loansApi = {
    *  'Restructured' and returns the new linked loan (code {original}-R1, -R2 …). */
   reschedule: (id: number, body: RescheduleInput) =>
     http.post(`/loans/${id}/reschedule`, snakeize(body)).then((r) => camelize(r.data) as Loan),
+  setPayoutAccount: (id: number, customerBankDetailId: number) =>
+    http.put(`/loans/${id}/payout-account`, snakeize({ customerBankDetailId })).then((r) => camelize(r.data) as Loan),
   disburse: (id: number, body: { disbursedAmount?: number | string; disbursedAt?: string; firstInstallmentDate: string; disbursementMethod: 'Cash' | 'Bank' | 'Cheque'; disbursementBankAccountId?: number | null; cashAccountId?: number }) =>
     http.post(`/loans/${id}/disburse`, snakeize(body)).then((r) => camelize(r.data) as Loan),
   /** Loan-officer path: raises a LoanDisbursement finance request instead of disbursing directly. Finance approves + executes it. */

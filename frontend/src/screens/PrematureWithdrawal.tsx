@@ -15,6 +15,7 @@ import {
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
+import { CustomerBankDetailPicker } from '../components/CustomerBankDetailPicker'
 import { PartPaymentModal, PrintView, type PrintDoc } from './DepositPayment'
 import type { Go } from './types'
 
@@ -39,11 +40,13 @@ function FullClosureModal({ fd, open, onClose, onClosed }: { fd: FixedDeposit | 
   const [backDated, setBackDated] = useState(false)
   const [rateInput, setRateInput] = useState('')
   const [preview, setPreview] = useState<FdPrematurePreview | null>(null)
+  const [payoutId, setPayoutId] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     if (open) {
+      setPayoutId(fd?.customerBankDetailId ?? undefined)
       setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setNotes(''); setClosedAt(todayIso()); setBackDated(false); setErr('')
       const r = fd?.fundingProduct?.prematureWithdrawalRatePercent
       setRateInput(r != null ? String(Number(r)) : '')
@@ -63,8 +66,10 @@ function FullClosureModal({ fd, open, onClose, onClosed }: { fd: FixedDeposit | 
 
   const save = async () => {
     if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
+    if (!payoutId) { setErr("Select or add the customer's payout bank account."); return }
     setBusy(true); setErr('')
     try {
+      if (payoutId !== fd.customerBankDetailId) await fixedDepositsApi.setPayoutAccount(fd.id, payoutId)
       const result = await fixedDepositsApi.prematureWithdraw(fd.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, notes: notes || undefined, closedAt, prematureRatePercent: rateInput.trim() === '' ? undefined : rateInput })
       onClosed(result)
       notify.success('Fixed Deposit closed early', fd.fdNumber)
@@ -99,6 +104,9 @@ function FullClosureModal({ fd, open, onClose, onClosed }: { fd: FixedDeposit | 
             {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select></Field>
           {method !== 'Cash' && <Field label="Paid from — company bank account"><BankAccountSelect value={bankAccountId} onChange={setBankAccountId} /></Field>}
+          <Field label="Customer payout bank account (add or update if needed)" full>
+            <CustomerBankDetailPicker customerId={fd.customerId} value={payoutId} onChange={setPayoutId} />
+          </Field>
           <Field label="Closing Date">
             <DateInput value={closedAt} disabled={!backDated} onChange={setClosedAt} />
             <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', marginTop: 6 }}>

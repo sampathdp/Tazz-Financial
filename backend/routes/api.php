@@ -207,8 +207,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('customers/{customer}/photo', [CustomerPhotoController::class, 'destroy'])->middleware('perm:Customer Management,Edit');
 
     // --- Customer Documents ---
-    Route::get('customers/{customer}/bank-details', [CustomerBankDetailController::class, 'index'])->middleware('perm:Customer Management,View');
-    Route::post('customers/{customer}/bank-details', [CustomerBankDetailController::class, 'store'])->middleware('perm:Customer Management,Create');
+    Route::get('customers/{customer}/bank-details', [CustomerBankDetailController::class, 'index']);
+    Route::post('customers/{customer}/bank-details', [CustomerBankDetailController::class, 'store']);
+    Route::put('customers/{customer}/bank-details/{bankDetail}', [CustomerBankDetailController::class, 'update']);
     Route::delete('customers/{customer}/bank-details/{bankDetail}', [CustomerBankDetailController::class, 'destroy'])->middleware('perm:Customer Management,Delete');
     Route::get('customers/{customer}/documents/{document}/file', [CustomerDocumentController::class, 'show'])->middleware('perm:Customer Management,View');
     Route::post('customers/{customer}/documents', [CustomerDocumentController::class, 'store'])->middleware('perm:Customer Management,Create');
@@ -255,6 +256,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::post('loans/{loan}/disburse', [LoanController::class, 'disburse'])->middleware(['perm:Loan Disbursement,Approve', 'idempotency:required']);
     // Request disburse (loan officer): raises a LoanDisbursement finance request; Finance
     // approves + executes it, then a listener finishes the loan (see the Finance module plan, D2).
+    Route::put('loans/{loan}/payout-account', [LoanController::class, 'setPayoutAccount']);
     Route::post('loans/{loan}/request-disbursement', [LoanController::class, 'requestDisbursement'])->middleware(['perm:Loan Disbursement,Create', 'idempotency:required']);
     // Write-off is maker-checker (shared approval_requests table, code 'loan_write_off'),
     // same pattern as loan_cancel below. Submitting needs the module permission; who may

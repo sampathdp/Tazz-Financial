@@ -9,8 +9,8 @@ import { getErrorText } from '../lib/apiError'
 const label = (d: CustomerBankDetail) =>
   `${d.bank?.name || 'Bank'}${d.bankBranch ? ` · ${d.bankBranch}` : ''} — ${d.accountNumberMasked} (${d.accountHolder})`
 
-function AddModal({ customerId, open, onClose, onAdded }: {
-  customerId: number; open: boolean; onClose: () => void; onAdded: (d: CustomerBankDetail) => void
+function AddModal({ customerId, open, existing, onClose, onAdded }: {
+  customerId: number; open: boolean; existing?: CustomerBankDetail; onClose: () => void; onAdded: (d: CustomerBankDetail) => void
 }) {
   const [banks, setBanks] = useState<Bank[]>([])
   const [bankId, setBankId] = useState<number | undefined>()
@@ -22,27 +22,30 @@ function AddModal({ customerId, open, onClose, onAdded }: {
 
   useEffect(() => {
     if (!open) return
-    setBankId(undefined); setHolder(''); setBranch(''); setAccountNo(''); setErr('')
+    setBankId(existing?.bankId); setHolder(existing?.accountHolder || ''); setBranch(existing?.bankBranch || ''); setAccountNo(''); setErr('')
     banksApi.list().then((r) => setBanks(r.filter((b) => (b.status || 'Active') === 'Active'))).catch(() => setBanks([]))
-  }, [open])
+  }, [open, existing])
 
   const save = async () => {
     if (!bankId) { setErr('Select the bank.'); return }
     if (!holder.trim()) { setErr('Enter the account holder name.'); return }
-    if (!accountNo.trim()) { setErr('Enter the account number.'); return }
+    if (!existing && !accountNo.trim()) { setErr('Enter the account number.'); return }
     setBusy(true); setErr('')
     try {
-      onAdded(await customerBankDetailsApi.create(customerId, { bankId, accountHolder: holder.trim(), bankBranch: branch.trim() || undefined, accountNumber: accountNo.trim() }))
+      const body = { bankId, accountHolder: holder.trim(), bankBranch: branch.trim() || undefined, accountNumber: accountNo.trim() || undefined }
+      onAdded(existing
+        ? await customerBankDetailsApi.update(customerId, existing.id, body)
+        : await customerBankDetailsApi.create(customerId, body))
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Could not save the bank account.'))
     } finally { setBusy(false) }
   }
 
   return (
-    <Modal open={open} onClose={onClose} width={460} title="Add Customer Bank Account" sub="Stored encrypted. Used to send loan and FD payments."
+    <Modal open={open} onClose={onClose} width={460} title={existing ? 'Update Customer Bank Account' : 'Add Customer Bank Account'} sub="Stored encrypted. Used to send loan and FD payments."
       footer={<>
         <Btn variant="plain" onClick={onClose}>Cancel</Btn>
-        <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : 'Save Account'}</Btn>
+        <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : existing ? 'Update Account' : 'Save Account'}</Btn>
       </>}>
       <ErrorBanner error={err} style={{ marginBottom: 14 }} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -51,7 +54,7 @@ function AddModal({ customerId, open, onClose, onAdded }: {
           {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </Select></Field>
         <Field label="Bank Branch"><Input value={branch} onChange={(e) => setBranch(e.target.value)} /></Field>
-        <Field label="Account Number"><Input value={accountNo} onChange={(e) => setAccountNo(e.target.value)} autoComplete="off" /></Field>
+        <Field label="Account Number"><Input value={accountNo} onChange={(e) => setAccountNo(e.target.value)} autoComplete="off" placeholder={existing ? `Leave blank to keep ${existing.accountNumberMasked}` : ''} /></Field>
         <Field label="Account Holder Name" full><Input value={holder} onChange={(e) => setHolder(e.target.value)} /></Field>
       </div>
     </Modal>
@@ -65,6 +68,8 @@ export function CustomerBankDetailPicker({ customerId, value, onChange }: {
 }) {
   const [rows, setRows] = useState<CustomerBankDetail[]>([])
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const selected = rows.find((d) => d.id === value)
 
   useEffect(() => {
     setRows([])
@@ -86,10 +91,13 @@ export function CustomerBankDetailPicker({ customerId, value, onChange }: {
             {rows.map((d) => <option key={d.id} value={d.id}>{label(d)}</option>)}
           </Select>
         </div>
+        {selected && <Btn variant="ghost" icon="edit" onClick={() => setEditing(true)}>Update</Btn>}
         <Btn variant="solid" icon="plus" disabled={!customerId} onClick={() => setAdding(true)}>Add Account</Btn>
       </div>
       {customerId && <AddModal customerId={customerId} open={adding} onClose={() => setAdding(false)}
         onAdded={(d) => { setRows((r) => [...r, d]); onChange(d.id); setAdding(false) }} />}
+      {customerId && selected && <AddModal customerId={customerId} open={editing} existing={selected} onClose={() => setEditing(false)}
+        onAdded={(d) => { setRows((r) => r.map((x) => (x.id === d.id ? d : x))); setEditing(false) }} />}
     </>
   )
 }

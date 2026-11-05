@@ -8,10 +8,11 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, Table, Td, Modal, ErrorBanner, LoadingBlock , BankAccountSelect } from '../components/ui'
 import {
-  fdInterestPaymentsApi, company,
+  fdInterestPaymentsApi, fixedDepositsApi, company,
   type FdInterestPayment, type FdInterestDue, type FdInterestDueBucket, type FdInterestDueItem, type FdPaymentMethod, type AuthUser,
 } from '../api'
 import { InterestVoucherPage } from './FdInterestVoucher'
+import { CustomerBankDetailPicker } from '../components/CustomerBankDetailPicker'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -37,16 +38,19 @@ function PayInterestModal({ item, open, onClose, onPaid }: {
   const [refNo, setRefNo] = useState('')
   const [paidAt, setPaidAt] = useState(todayIso())
   const [backDated, setBackDated] = useState(false)
+  const [payoutId, setPayoutId] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (open) { setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
+  useEffect(() => { if (open) { setPayoutId(item?.fixedDeposit.bankDetail?.id); setMethod('Cash'); setBankAccountId(undefined); setRefNo(''); setPaidAt(todayIso()); setBackDated(false); setErr('') } }, [open])
   if (!item) return null
 
   const save = async () => {
     if (method !== 'Cash' && !bankAccountId) { setErr('Choose the company bank account this payment is made from.'); return }
+    if (!payoutId) { setErr("Select or add the customer's payout bank account."); return }
     setBusy(true); setErr('')
     try {
+      if (payoutId !== item.fixedDeposit.bankDetail?.id) await fixedDepositsApi.setPayoutAccount(item.fixedDeposit.id, payoutId)
       const result = await fdInterestPaymentsApi.pay(item.id, { paymentMethod: method, bankAccountId: method !== 'Cash' ? bankAccountId : undefined, referenceNo: refNo || undefined, paidAt })
       onPaid(result)
       notify.success('Interest payment recorded')
@@ -81,6 +85,9 @@ function PayInterestModal({ item, open, onClose, onPaid }: {
           </label>
         </Field>
         <Field label="Reference No" full><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
+        <Field label="Customer payout bank account (add or update if needed)" full>
+          <CustomerBankDetailPicker customerId={item.fixedDeposit.customerId} value={payoutId} onChange={setPayoutId} />
+        </Field>
       </div>
     </Modal>
   )

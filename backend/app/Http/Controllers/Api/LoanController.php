@@ -692,6 +692,30 @@ class LoanController extends Controller
         return null;
     }
 
+    /** Sets (or changes) the customer bank account the loan is paid to - allowed until the money has gone out. */
+    public function setPayoutAccount(Request $request, Loan $loan)
+    {
+        $user = $request->user();
+        abort_unless(
+            \App\Support\Permissions::userCan($user, 'Loan Disbursement', 'Create')
+            || \App\Support\Permissions::userCan($user, 'Loan Disbursement', 'Approve')
+            || \App\Support\Permissions::userCan($user, 'Loan Applications', 'Edit'),
+            403,
+            "You don't have permission to change the loan's payout account."
+        );
+        if ($loan->status !== 'Approved' && !$loan->disbursementIncomplete()) {
+            return response()->json(['message' => 'The payout account can only be changed before the loan is disbursed.'], 422);
+        }
+        if ($loan->pendingDisbursementRequest()->exists()) {
+            return response()->json(['message' => 'A disbursement request is already with Finance for this loan.'], 422);
+        }
+        $data = $request->validate(['customer_bank_detail_id' => 'required|exists:customer_bank_details,id']);
+        \App\Models\CustomerBankDetail::assertBelongsTo((int) $data['customer_bank_detail_id'], (int) $loan->customer_id);
+        $loan->update(['customer_bank_detail_id' => $data['customer_bank_detail_id']]);
+
+        return $loan->load(self::DETAIL_RELATIONS);
+    }
+
     /**
      * The direct disburse path (Finance / admin, perm Active Loans,Approve):
      * finishes the loan side and releases the money in one call. Loan officers
