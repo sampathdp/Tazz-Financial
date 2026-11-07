@@ -84,6 +84,7 @@ class SpeedDraftLedgerPoster
         $interest = (string) $payment->allocations()->sum('interest_applied');
         $penalty = (string) $payment->allocations()->sum('penalty_applied');
         $capital = (string) $payment->allocations()->sum('principal_applied');
+        $charges = (string) $payment->chargeAllocations()->sum('amount_applied');
 
         $credits = [];
         if (bccomp($interest, '0.00', 2) > 0) {
@@ -95,10 +96,15 @@ class SpeedDraftLedgerPoster
         if (bccomp($capital, '0.00', 2) > 0) {
             $credits[] = ['account_id' => ChartOfAccount::system('1110')->id, 'credit' => $capital];
         }
+        if (bccomp($charges, '0.00', 2) > 0) {
+            // Same income account loans use for other charges (4910, falling back to 4020).
+            $chargeAccount = ChartOfAccount::where('code', '4910')->value('id') ?? ChartOfAccount::system('4020')->id;
+            $credits[] = ['account_id' => (int) $chargeAccount, 'credit' => $charges];
+        }
         if (!$credits) {
             return;
         }
-        $amount = bcadd(bcadd($interest, $penalty, 2), $capital, 2);
+        $amount = bcadd(bcadd(bcadd($interest, $penalty, 2), $capital, 2), $charges, 2);
 
         if ($payment->payment_method !== 'Cash') {
             $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();

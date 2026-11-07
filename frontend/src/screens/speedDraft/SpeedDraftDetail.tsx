@@ -25,12 +25,14 @@ const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const CATEGORY_LABEL: Record<string, string> = { Loan: 'Loan', Mortgage: 'Mortgage', GoldPawning: 'Gold Pawning', Lease: 'Lease' }
-const PAYMENT_TYPE_LABEL: Record<string, string> = { Interest: 'Interest', CapitalReduction: 'Capital Reduction', Settlement: 'Full Settlement' }
+const PAYMENT_TYPE_LABEL: Record<string, string> = { Interest: 'Interest', CapitalReduction: 'Capital Reduction', Settlement: 'Full Settlement', Charges: 'Charges' }
 
 const SECTIONS = [
   { id: 'overview', label: 'Overview', icon: 'chart' },
   { id: 'schedule', label: 'Schedule', icon: 'calendar' },
   { id: 'payments', label: 'Payment History', icon: 'receipt' },
+  { id: 'charges', label: 'Charges', icon: 'tag' },
+  { id: 'waivers', label: 'Waivers', icon: 'refund' },
   { id: 'collateral', label: 'Collateral', icon: 'tag' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
@@ -47,6 +49,7 @@ export function SpeedDraftDetail({ speedDraft, me, onChanged, go, onWithdrawn }:
   const payments = (speedDraft.payments || []).slice().sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
   const interestPayments = payments.filter((p) => p.paymentType === 'Interest' || p.paymentType === 'Settlement')
   const capitalPayments = payments.filter((p) => p.paymentType === 'CapitalReduction' || p.paymentType === 'Settlement')
+  const chargePayments = payments.filter((p) => p.paymentType === 'Charges')
 
   return (
     <div>
@@ -86,10 +89,69 @@ export function SpeedDraftDetail({ speedDraft, me, onChanged, go, onWithdrawn }:
             <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Capital Reductions</div>
             <PaymentTable rows={capitalPayments} empty="No capital reduction payments recorded yet." />
           </Card>
+          <Card pad={0}>
+            <div className="eyebrow" style={{ padding: '14px 16px 0' }}>Charge Payments</div>
+            <PaymentTable rows={chargePayments} empty="No charge payments recorded yet." />
+          </Card>
         </div>
       )}
+      {section === 'charges' && <ChargesPanel speedDraft={speedDraft} />}
+      {section === 'waivers' && <WaiversPanel speedDraft={speedDraft} />}
       {showCollateral && section === 'collateral' && <CollateralPanel speedDraft={speedDraft} me={me} onChanged={onChanged} />}
     </div>
+  )
+}
+
+/* ---------- Charges (Document / Visit / Legal ...) — read-only; added on Loan Adjustments, collected on Payment Receipt ---------- */
+function ChargesPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
+  const charges = d.charges || []
+  return (
+    <Card>
+      <div className="row between" style={{ marginBottom: 12 }}>
+        <div className="eyebrow">Charges</div>
+        <span className="t-2" style={{ fontSize: 11.5 }}>Add on Loan Adjustments; collect on the Payment Receipt screen ("Pay Charges").</span>
+      </div>
+      {charges.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No charges recorded.</div> :
+        <div className="col gap-2">
+          {charges.map((c) => (
+            <div key={c.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
+              <div>
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{c.category?.name || `Category #${c.chargeCategoryId}`}</span>
+                <span className="t-2" style={{ fontSize: 12 }}> — {c.notes || 'no notes'} · {dateOnly(c.chargedAt)}{c.creator?.name ? ` · by ${c.creator.name}` : ''}</span>
+              </div>
+              <div className="row gap-2" style={{ alignItems: 'center' }}>
+                <span className="t-2" style={{ fontSize: 12 }}>Due {money(c.dueAmount)} · Paid {money(c.paidAmount)} · Balance</span>
+                <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(num(c.dueAmount) - num(c.paidAmount))}</span>
+              </div>
+            </div>
+          ))}
+        </div>}
+    </Card>
+  )
+}
+
+/* ---------- Waivers — read-only; recorded on Loan Adjustments (admin) ---------- */
+function WaiversPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
+  const waivers = d.waivers || []
+  return (
+    <Card>
+      <div className="row between" style={{ marginBottom: 12 }}>
+        <div className="eyebrow">Waivers</div>
+        <span className="t-2" style={{ fontSize: 11.5 }}>Recorded on the Loan Adjustments screen (admin only).</span>
+      </div>
+      {waivers.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No waivers recorded.</div> :
+        <div className="col gap-2">
+          {waivers.map((w) => (
+            <div key={w.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
+              <div>
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{w.waiverType}</span>
+                <span className="t-2" style={{ fontSize: 12 }}> — {w.reason || 'no reason given'} · {dateOnly(w.waivedAt)}{w.approver?.name ? ` · approved by ${w.approver.name}` : ''}</span>
+              </div>
+              <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(w.amount)}</span>
+            </div>
+          ))}
+        </div>}
+    </Card>
   )
 }
 
@@ -139,7 +201,9 @@ function OverviewPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
             ['Customer', d.customer?.fullName],
             ['Type', `${typeName} (${cat})`],
             ['Rate', rate],
+            ['Interest Method', d.speedDraftDetail?.interestMethod === 'flat' ? 'Flat (on original capital)' : 'Reducing balance (on outstanding capital)'],
             ['Period', `${d.termMonths} months`],
+            num(d.speedDraftDetail?.documentChargeAmount) > 0 && ['Document Charge', money(d.speedDraftDetail?.documentChargeAmount)],
             !!d.speedDraftDetail?.vehicleNo && ['Vehicle No', d.speedDraftDetail.vehicleNo],
           ]) },
           { title: 'Dates', rows: [
@@ -157,6 +221,8 @@ function OverviewPanel({ speedDraft: d }: { speedDraft: SpeedDraft }) {
             ['Interest Paid', money(s.totalInterestPaid)],
             ['Outstanding Interest', money(s.outstandingInterest)],
             s.penaltyDue > 0 && ['Penalty Due', money(s.penaltyDue)],
+            num(s.outstandingCharges) > 0 && ['Outstanding Charges', money(s.outstandingCharges)],
+            num(s.totalInterestWaived) > 0 && ['Interest Waived', money(s.totalInterestWaived)],
             ['Amount to Settle Today', money(s.amountToSettleToday)],
             ['Next Due', s.nextDueDate ? `${dateOnly(s.nextDueDate)} — ${money(s.nextDueAmount)}` : '—'],
             s.overdueInstallments > 0 && ['Overdue Installments', `${s.overdueInstallments} (${s.daysOverdue}d)`],

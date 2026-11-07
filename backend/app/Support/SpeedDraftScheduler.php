@@ -23,12 +23,13 @@ class SpeedDraftScheduler
     {
         $n = $draft->term_months;
         $capital = (float) $draft->outstanding_balance_cache;
+        $base = self::interestBase($draft);
 
         $prevDate = Carbon::parse($draft->start_date);
         $rows = [];
         for ($i = 1; $i <= $n; $i++) {
             $date = $prevDate->copy()->addMonthNoOverflow();
-            $interest = round($capital * (self::periodRate($draft, $prevDate->diffInDays($date)) / 100), 2);
+            $interest = round($base * (self::periodRate($draft, $prevDate->diffInDays($date)) / 100), 2);
             $capitalDue = $i === $n ? $capital : 0.0;
             $rows[] = [
                 'credit_facility_id' => $draft->id,
@@ -59,6 +60,7 @@ class SpeedDraftScheduler
     public static function recalculateOpenRows(SpeedDraft $draft): void
     {
         $capital = (float) $draft->outstanding_balance_cache;
+        $base = self::interestBase($draft);
         $rows = $draft->schedules()->get();
         $lastInstallmentNo = (int) $rows->max('installment_no');
 
@@ -67,7 +69,7 @@ class SpeedDraftScheduler
             $dueDate = Carbon::parse($row->due_date);
             $days = $prevDate->diffInDays($dueDate);
             if ($row->status === 'Pending') {
-                $interest = round($capital * (self::periodRate($draft, $days) / 100), 2);
+                $interest = round($base * (self::periodRate($draft, $days) / 100), 2);
                 $capitalDue = $row->installment_no === $lastInstallmentNo ? $capital : 0.0;
                 $row->update([
                     'interest_due' => $interest,
@@ -77,6 +79,15 @@ class SpeedDraftScheduler
             }
             $prevDate = $dueDate;
         }
+    }
+
+    /** The amount interest is priced on: the capital still outstanding (reducing balance — falls after
+     *  capital payments) or, for a flat draft, always the original capital. */
+    private static function interestBase(SpeedDraft $draft): float
+    {
+        $flat = ($draft->speedDraftDetail?->interest_method ?? 'reducing_balance') === 'flat';
+
+        return $flat ? (float) $draft->principal_amount : (float) $draft->outstanding_balance_cache;
     }
 
     /** Rate applied for one installment period spanning $days days. Monthly/annual

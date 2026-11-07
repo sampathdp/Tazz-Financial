@@ -107,6 +107,17 @@ class SpeedDraft extends Model
         return $this->hasMany(FacilityPayment::class, 'credit_facility_id')->orderByDesc('paid_at');
     }
 
+    /** Other charges (Document / Visit / Legal ...) — the shared facility_charges table, same as loans. */
+    public function charges()
+    {
+        return $this->hasMany(FacilityCharge::class, 'credit_facility_id');
+    }
+
+    public function waivers()
+    {
+        return $this->hasMany(FacilityWaiver::class, 'credit_facility_id')->orderByDesc('waived_at');
+    }
+
     /** Shared approval_requests table, scoped to this draft's 'speed_draft_application'
      *  rows via subject_id — mirrors Loan::applicationApprovalRequests()/pendingApplicationRequest().
      *  One per draft, created at store() time, resolved by approve()/reject(). */

@@ -25,9 +25,12 @@ class SpeedDraftSummary
         $graceDays = (int) ($type?->grace_period_days ?? 5);
         $chargeRate = (float) ($type?->default_charge_rate_percent ?? 0);
 
+        $waived = SpeedDraftWaivers::byRow($draft, $today);
         $totalInterestDue = round((float) $schedules->sum('interest_due'), 2);
         $totalInterestPaid = round((float) $schedules->sum('paid_amount'), 2);
-        $outstandingInterest = max(0, round($totalInterestDue - $totalInterestPaid, 2));
+        $totalInterestWaived = round((float) array_sum($waived['interest']), 2);
+        $outstandingInterest = max(0, round($totalInterestDue - $totalInterestPaid - $totalInterestWaived, 2));
+        $outstandingCharges = SpeedDraftPaymentAllocator::outstandingCharges($draft);
 
         $outstandingCapital = (float) $draft->outstanding_balance_cache;
         $totalCapitalPaid = round((float) $draft->principal_amount - $outstandingCapital, 2);
@@ -38,7 +41,7 @@ class SpeedDraftSummary
         // Net off penalty already collected on each row (see FacilityPaymentAllocation.penalty_applied) —
         // penaltyDueForRow() alone is the gross theoretical figure, same distinction Loan's paidPenalty draws.
         $penaltyDue = round((float) $overdueRows->sum(
-            fn ($s) => max(0, self::penaltyDueForRow($s, $graceDays, $chargeRate, $today) - (float) $s->activeAllocations->sum('penalty_applied'))
+            fn ($s) => max(0, self::penaltyDueForRow($s, $graceDays, $chargeRate, $today) - (float) $s->activeAllocations->sum('penalty_applied') - (float) ($waived['penalty'][$s->id] ?? 0))
         ), 2);
 
         $nextDue = $schedules->where('status', '!=', 'Paid')->sortBy('due_date')->first();
@@ -49,11 +52,13 @@ class SpeedDraftSummary
             'totalCapitalPaid' => $totalCapitalPaid,
             'totalInterestDue' => $totalInterestDue,
             'totalInterestPaid' => $totalInterestPaid,
+            'totalInterestWaived' => $totalInterestWaived,
             'outstandingInterest' => $outstandingInterest,
             'penaltyDue' => $penaltyDue,
-            'amountToSettleToday' => round($outstandingInterest + $penaltyDue + $outstandingCapital, 2),
+            'outstandingCharges' => $outstandingCharges,
+            'amountToSettleToday' => round($outstandingInterest + $penaltyDue + $outstandingCharges + $outstandingCapital, 2),
             'nextDueDate' => $nextDue?->due_date,
-            'nextDueAmount' => $nextDue ? max(0, round((float) $nextDue->interest_due - (float) $nextDue->activeAllocations->sum('interest_applied'), 2)) : null,
+            'nextDueAmount' => $nextDue ? max(0, round((float) $nextDue->interest_due - (float) $nextDue->activeAllocations->sum('interest_applied') - (float) ($waived['interest'][$nextDue->id] ?? 0), 2)) : null,
             'daysOverdue' => $daysOverdue,
             'overdueInstallments' => $overdueRows->count(),
             'totalInstallments' => $schedules->count(),

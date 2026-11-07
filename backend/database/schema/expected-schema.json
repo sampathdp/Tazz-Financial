@@ -8133,7 +8133,7 @@
                     "collation": null
                 },
                 "payment_type": {
-                    "type": "enum('Regular','Interest','CapitalReduction','Settlement','ManualAllocation')",
+                    "type": "enum('Regular','Interest','CapitalReduction','Settlement','ManualAllocation','Charges')",
                     "nullable": true,
                     "default": "Regular",
                     "default_is_expr": false,
@@ -19238,6 +19238,24 @@
                     "auto": false,
                     "generated": false,
                     "collation": "utf8mb4_unicode_ci"
+                },
+                "interest_method": {
+                    "type": "enum('reducing_balance','flat')",
+                    "nullable": false,
+                    "default": "reducing_balance",
+                    "default_is_expr": false,
+                    "auto": false,
+                    "generated": false,
+                    "collation": "utf8mb4_unicode_ci"
+                },
+                "document_charge_amount": {
+                    "type": "decimal(15,2)",
+                    "nullable": true,
+                    "default": null,
+                    "default_is_expr": false,
+                    "auto": false,
+                    "generated": false,
+                    "collation": null
                 },
                 "disbursement_method": {
                     "type": "enum('Cash','Bank','Cheque')",

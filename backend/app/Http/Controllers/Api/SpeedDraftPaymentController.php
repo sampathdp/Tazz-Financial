@@ -19,7 +19,7 @@ use Illuminate\Validation\Rule;
 class SpeedDraftPaymentController extends Controller
 {
     /** Short code used in the receipt number's {TYPE} segment — see NumberGenerator's 'speed_draft_payment' format. */
-    private const TYPE_CODES = ['Interest' => 'INT', 'CapitalReduction' => 'CAP', 'Settlement' => 'SET'];
+    private const TYPE_CODES = ['Interest' => 'INT', 'CapitalReduction' => 'CAP', 'Settlement' => 'SET', 'Charges' => 'CHG'];
 
     public function index(SpeedDraft $speedDraft)
     {
@@ -29,7 +29,7 @@ class SpeedDraftPaymentController extends Controller
     /** Preview-only: the receipt number the next payment on this draft would get — see NumberGenerator::peek(). */
     public function nextReceiptNo(Request $request, SpeedDraft $speedDraft)
     {
-        $data = $request->validate(['payment_type' => ['nullable', Rule::in(['Interest', 'CapitalReduction', 'Settlement'])]]);
+        $data = $request->validate(['payment_type' => ['nullable', Rule::in(['Interest', 'CapitalReduction', 'Settlement', 'Charges'])]]);
         $branch = Branch::find($speedDraft->branch_id);
         $type = $data['payment_type'] ?? 'Interest';
         $code = NumberGenerator::peek('speed_draft_payment', [
@@ -42,12 +42,14 @@ class SpeedDraftPaymentController extends Controller
 
     public function store(Request $request, SpeedDraft $speedDraft)
     {
-        if ($speedDraft->status !== 'Active') {
-            return response()->json(['message' => 'Payments can only be recorded against an active Speed Draft.'], 422);
+        // Charges (e.g. the document charge) can also be collected on an Approved draft, ahead of disbursement.
+        $isChargePayment = $request->input('payment_type') === 'Charges';
+        if (!($speedDraft->status === 'Active' || ($isChargePayment && $speedDraft->status === 'Approved'))) {
+            return response()->json(['message' => 'Payments can only be recorded against an active Speed Draft (charges also against an approved one).'], 422);
         }
         $data = $request->validate([
             'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
-            'payment_type' => ['required', Rule::in(['Interest', 'CapitalReduction', 'Settlement'])],
+            'payment_type' => ['required', Rule::in(['Interest', 'CapitalReduction', 'Settlement', 'Charges'])],
             'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
             'paid_at' => 'nullable|date',
             'receipt_no' => 'nullable|string|max:32',
@@ -108,6 +110,7 @@ class SpeedDraftPaymentController extends Controller
                 'Interest' => SpeedDraftPaymentAllocator::applyInterestPayment($speedDraft, $payment, (float) $data['amount'], $asOf),
                 'CapitalReduction' => SpeedDraftPaymentAllocator::applyCapitalReduction($speedDraft, $payment, (float) $data['amount'], $asOf),
                 'Settlement' => SpeedDraftPaymentAllocator::applySettlement($speedDraft, $payment, $asOf),
+                'Charges' => SpeedDraftPaymentAllocator::applyChargePayment($speedDraft, $payment, (float) $data['amount']),
             };
 
             // Books the interest / penalty / capital split of this cash payment
@@ -130,6 +133,17 @@ class SpeedDraftPaymentController extends Controller
             }
             if ($amount > $outstanding + 0.005) {
                 return ['error' => "Amount exceeds the outstanding interest and penalty ({$outstanding})."];
+            }
+
+            return ['amount' => $amount];
+        }
+        if ($type === 'Charges') {
+            $outstanding = SpeedDraftPaymentAllocator::outstandingCharges($speedDraft);
+            if ($outstanding <= 0) {
+                return ['error' => 'There are no outstanding charges on this Speed Draft.'];
+            }
+            if ($amount > $outstanding + 0.005) {
+                return ['error' => "Amount exceeds the outstanding charges ({$outstanding})."];
             }
 
             return ['amount' => $amount];
@@ -173,7 +187,7 @@ class SpeedDraftPaymentController extends Controller
             return response()->json(['message' => 'This payment was part of a Speed Draft renewal and cannot be voided on its own — reversing a renewal isn\'t supported yet.'], 422);
         }
         $data = $request->validate(['void_reason' => 'nullable|string|max:255']);
-        $payment->load('allocations.schedule');
+        $payment->load('allocations.schedule', 'chargeAllocations.charge');
 
         DB::transaction(function () use ($payment, $data, $request) {
             // Lock the draft and the payment: two simultaneous voids must give the capital back once.
@@ -198,10 +212,18 @@ class SpeedDraftPaymentController extends Controller
                 }
             }
 
+            foreach ($payment->chargeAllocations as $ca) {
+                if ($ca->charge) {
+                    $ca->charge->update(['paid_amount' => max(0, round((float) $ca->charge->paid_amount - (float) $ca->amount_applied, 2))]);
+                }
+            }
+
             if ($capitalReversed > 0) {
                 $speedDraft->update(['outstanding_balance_cache' => round((float) $speedDraft->outstanding_balance_cache + $capitalReversed, 2)]);
                 SpeedDraftScheduler::recalculateOpenRows($speedDraft->fresh());
             }
+
+            \App\Support\SpeedDraftWaivers::syncRowStatuses($speedDraft->fresh());
 
             // A void reopens a draft that had auto-closed on full payoff — same
             // convention as LoanPaymentController::destroy().

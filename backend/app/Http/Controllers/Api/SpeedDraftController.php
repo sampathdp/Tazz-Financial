@@ -19,6 +19,7 @@ use App\Support\SpeedDraftLedgerPoster;
 use App\Support\SpeedDraftPaymentAllocator;
 use App\Support\SpeedDraftScheduler;
 use App\Support\SpeedDraftSummary;
+use App\Support\SpeedDraftWaivers;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,7 @@ class SpeedDraftController extends Controller
         'speedDraftDetail.speedDraftType', 'insurance', 'applier:id,name', 'approver:id,name', 'creator:id,name',
         'collateral.jewelryDetail', 'collateral.vehicleDetail', 'collateral.documents',
         'schedules.allocations', 'schedules.activeAllocations', 'payments.receiver:id,name', 'payments.voider:id,name',
+        'charges.category:id,name', 'charges.creator:id,name', 'waivers.approver:id,name', 'waivers.creator:id,name',
         'pendingApplicationRequest.requester:id,name',
         'pendingDisbursementRequest:id,code,source_id,status,amount,requested_by',
         'pendingDisbursementRequest.requester:id,name',
@@ -96,12 +98,13 @@ class SpeedDraftController extends Controller
                 if ($overdueRows->isEmpty()) {
                     return null;
                 }
+                $waived = SpeedDraftWaivers::byRow($draft, $today);
                 $oldest = $overdueRows->min('due_date');
                 $overdueInterest = round((float) $overdueRows->sum(
-                    fn ($s) => max(0, (float) $s->interest_due - (float) $s->activeAllocations->sum('interest_applied'))
+                    fn ($s) => max(0, (float) $s->interest_due - (float) $s->activeAllocations->sum('interest_applied') - (float) ($waived['interest'][$s->id] ?? 0))
                 ), 2);
                 $penaltyDue = round((float) $overdueRows->sum(
-                    fn ($s) => max(0, SpeedDraftSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $today) - (float) $s->activeAllocations->sum('penalty_applied'))
+                    fn ($s) => max(0, SpeedDraftSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $today) - (float) $s->activeAllocations->sum('penalty_applied') - (float) ($waived['penalty'][$s->id] ?? 0))
                 ), 2);
                 $draft->setAttribute('oldestOverdueDate', $oldest);
                 $draft->setAttribute('daysOverdue', (int) $today->diffInDays($oldest));
@@ -147,6 +150,7 @@ class SpeedDraftController extends Controller
             ]));
             NumberGenerator::attach($code, $draft);
             $draft->speedDraftDetail()->create($detailData);
+            $this->syncDocumentCharge($draft, $detailData['document_charge_amount'] ?? null, $request->user()->id);
             if ($insurance) {
                 $draft->insurance()->create($insurance);
             }
@@ -177,9 +181,11 @@ class SpeedDraftController extends Controller
         }
         [$facilityData, $detailData, $collateral, $insurance] = $this->validated($request, $speedDraft);
 
-        DB::transaction(function () use ($speedDraft, $facilityData, $detailData, $collateral, $insurance) {
+        $userId = $request->user()->id;
+        DB::transaction(function () use ($speedDraft, $facilityData, $detailData, $collateral, $insurance, $userId) {
             $speedDraft->update(array_merge($facilityData, ['outstanding_balance_cache' => $facilityData['principal_amount']]));
             $speedDraft->speedDraftDetail()->update($detailData);
+            $this->syncDocumentCharge($speedDraft, $detailData['document_charge_amount'] ?? null, $userId);
             $this->syncInsuranceDetail($speedDraft, $insurance);
             if ($collateral !== null) {
                 // Cascades to any attached facility_collateral_documents too — editing
@@ -304,8 +310,48 @@ class SpeedDraftController extends Controller
         if ($speedDraft->pendingDisbursementRequest()->exists()) {
             return 'A disbursement request for this Speed Draft is already awaiting finance approval or payment.';
         }
+        // Same rule as loans: the document charge is collected before the money goes out.
+        $waived = SpeedDraftWaivers::byCharge($speedDraft);
+        $documentCharges = $speedDraft->charges()->whereHas('category', fn ($q) => $q->where('name', 'Document'))->get();
+        if ($documentCharges->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount - (float) ($waived[$c->id] ?? 0))) > 0) {
+            return 'Settle the document charge before disbursing this Speed Draft.';
+        }
 
         return null;
+    }
+
+    /**
+     * Keeps the single "Document" charge in step with the amount keyed on the application:
+     * created when an amount is entered, adjusted while nothing has been paid on it, removed
+     * when the amount is cleared. Once money has been collected it is left alone.
+     */
+    private function syncDocumentCharge(SpeedDraft $speedDraft, $amount, int $userId): void
+    {
+        $category = \App\Models\ChargeCategory::where('name', 'Document')->first();
+        if (!$category) {
+            return;
+        }
+        $charge = $speedDraft->charges()->where('charge_category_id', $category->id)->first();
+        $amount = $amount === null || $amount === '' ? 0.0 : (float) $amount;
+        if (!$charge) {
+            if ($amount > 0) {
+                $speedDraft->charges()->create([
+                    'branch_id' => $speedDraft->branch_id,
+                    'charge_category_id' => $category->id,
+                    'due_amount' => $amount,
+                    'paid_amount' => 0,
+                    'charged_at' => now(),
+                    'notes' => 'Document charge keyed on the application',
+                    'created_by' => $userId,
+                ]);
+            }
+
+            return;
+        }
+        if ((float) $charge->paid_amount > 0) {
+            return;
+        }
+        $amount > 0 ? $charge->update(['due_amount' => $amount]) : $charge->delete();
     }
 
     /** Direct disburse (Finance / admin, perm Speed Drafts,Approve): finishes the draft and releases the money in one call. */
@@ -479,6 +525,7 @@ class SpeedDraftController extends Controller
                 'payment_frequency' => $speedDraft->speedDraftDetail?->payment_frequency,
                 'disbursement_method' => $speedDraft->speedDraftDetail?->disbursement_method,
                 'vehicle_no' => $speedDraft->speedDraftDetail?->vehicle_no,
+                'interest_method' => $speedDraft->speedDraftDetail?->interest_method ?? 'reducing_balance',
             ]);
             FacilitySchedule::insert(SpeedDraftScheduler::generate($newDraft->fresh()));
 
@@ -590,6 +637,8 @@ class SpeedDraftController extends Controller
             'rate_period' => ['nullable', Rule::in(['monthly', 'annual', 'daily'])],
             'term_months' => $termRules,
             'payment_frequency' => 'nullable|string|max:16',
+            'interest_method' => ['nullable', Rule::in(['reducing_balance', 'flat'])],
+            'document_charge_amount' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
             'vehicle_no' => 'nullable|string|max:20',
             'insurance' => 'nullable|array',
             'insurance.insurance_company' => 'nullable|string|max:150',
@@ -635,6 +684,9 @@ class SpeedDraftController extends Controller
             'speed_draft_type_id' => $validated['speed_draft_type_id'],
             'vehicle_no' => $type?->category === 'Lease' ? $validated['vehicle_no'] : null,
             'payment_frequency' => $validated['payment_frequency'] ?? 'monthly',
+            'interest_method' => $validated['interest_method'] ?? 'reducing_balance',
+            'document_charge_amount' => isset($validated['document_charge_amount']) && $validated['document_charge_amount'] !== ''
+                ? $validated['document_charge_amount'] : null,
         ];
 
         // Only meaningful for Lease/Mortgage — see the facility_insurance_details

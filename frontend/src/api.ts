@@ -1639,7 +1639,9 @@ export const customerLoansApi = {
 
 export type SpeedDraftCategory = 'Loan' | 'Mortgage' | 'GoldPawning' | 'Lease'
 export type SpeedDraftStatus = 'Pending' | 'Approved' | 'Rejected' | 'Active' | 'Closed'
-export type SpeedDraftPaymentType = 'Interest' | 'CapitalReduction' | 'Settlement'
+export type SpeedDraftPaymentType = 'Interest' | 'CapitalReduction' | 'Settlement' | 'Charges'
+/** reducing_balance: interest on the capital still outstanding; flat: always on the original capital. */
+export type SpeedDraftInterestMethod = 'reducing_balance' | 'flat'
 export type SpeedDraftScheduleStatus = 'Pending' | 'Paid' | 'Partial'
 
 export interface SpeedDraftType {
@@ -1721,7 +1723,9 @@ export interface SpeedDraftPayment {
 
 export interface SpeedDraftSummary {
   principalAmount: number; outstandingCapital: number; totalCapitalPaid: number;
-  totalInterestDue: number; totalInterestPaid: number; outstandingInterest: number;
+  totalInterestDue: number; totalInterestPaid: number; totalInterestWaived?: number; outstandingInterest: number;
+  /** Unpaid other charges, net of Charge waivers. */
+  outstandingCharges?: number;
   /** Live-estimated penalty on overdue installments — see SpeedDraftType.defaultChargeRatePercent. Never persisted, recalculated fresh. */
   penaltyDue: number;
   /** Full outstanding interest + penalty + full outstanding capital — what a "Settle Full Balance" action would collect today. */
@@ -1753,6 +1757,9 @@ export interface SpeedDraftFacilityDetail {
   /** Registration number of the leased vehicle — required when speedDraftType.category === 'Lease'. */
   vehicleNo?: string | null;
   paymentFrequency?: string | null;
+  interestMethod?: SpeedDraftInterestMethod;
+  /** Document charge keyed on the application (becomes a Document charge that must be paid before disbursement). */
+  documentChargeAmount?: number | string | null;
   /** Set once disbursed — see speedDraftsApi.disburse(). */
   disbursementMethod?: 'Cash' | 'Bank' | 'Cheque' | null;
 }
@@ -1795,6 +1802,8 @@ export interface SpeedDraft {
    *  populated; read the same data from speedDraftDetail above instead. */
   speedDraftTypeId?: number;
   paymentFrequency?: string;
+  interestMethod?: SpeedDraftInterestMethod;
+  documentChargeAmount?: number | string | null;
   /** Required when the selected speed draft type's category is 'Lease'. Write-flat/read-nested, same rule as the fields above. */
   vehicleNo?: string | null;
 
@@ -1805,6 +1814,9 @@ export interface SpeedDraft {
   collateral?: SpeedDraftCollateralInput[];
   schedules?: SpeedDraftSchedule[];
   payments?: SpeedDraftPayment[];
+  /** Other charges (Document / Visit / Legal ...) and waivers - same shapes as on a loan. */
+  charges?: LoanCharge[];
+  waivers?: LoanWaiver[];
   summary?: SpeedDraftSummary;
   createdAt?: string;
 }
@@ -1865,6 +1877,21 @@ export const speedDraftCollateralDocumentsApi = {
     http.delete(`/speed-draft-collateral/${collateralId}/documents/${documentId}`).then((r) => r.data),
   download: (collateralId: number, documentId: number) =>
     http.get(`/speed-draft-collateral/${collateralId}/documents/${documentId}/file`, { responseType: 'blob' }).then((r) => r.data as Blob),
+}
+
+export const speedDraftChargesApi = {
+  list: (speedDraftId: number) => http.get(`/speed-drafts/${speedDraftId}/charges`).then((r) => camelize(r.data) as LoanCharge[]),
+  create: (speedDraftId: number, body: { chargeCategoryId: number; dueAmount: number | string; chargedAt?: string; notes?: string }) =>
+    http.post(`/speed-drafts/${speedDraftId}/charges`, snakeize(body)).then((r) => camelize(r.data) as LoanCharge),
+  update: (chargeId: number, body: Partial<LoanCharge>) => http.put(`/speed-draft-charges/${chargeId}`, snakeize(body)).then((r) => camelize(r.data) as LoanCharge),
+  remove: (chargeId: number) => http.delete(`/speed-draft-charges/${chargeId}`).then((r) => r.data),
+}
+
+export const speedDraftWaiversApi = {
+  list: (speedDraftId: number) => http.get(`/speed-drafts/${speedDraftId}/waivers`).then((r) => camelize(r.data) as LoanWaiver[]),
+  create: (speedDraftId: number, body: { waiverType: WaiverType; amount: number | string; reason?: string; waivedAt?: string }) =>
+    http.post(`/speed-drafts/${speedDraftId}/waivers`, snakeize(body)).then((r) => camelize(r.data) as LoanWaiver),
+  remove: (waiverId: number) => http.delete(`/speed-draft-waivers/${waiverId}`).then((r) => r.data),
 }
 
 export const speedDraftPaymentsApi = {

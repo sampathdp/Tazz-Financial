@@ -10,6 +10,7 @@ import { isAdminRole } from '../lib/permissions'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td , LoadingBlock } from '../components/ui'
 import {
   loansApi, loanSchedulesApi, loanWaiversApi, loanChargesApi, loanTypesApi, chargeCategoriesApi,
+  speedDraftsApi, speedDraftWaiversApi, speedDraftChargesApi,
   loanPaymentsApi, financeCalculatorApi,
   type Loan, type LoanSchedule, type LoanWaiver, type WaiverType, type LoanCharge, type ChargeCategory,
   type AuthUser, type LoanType, type SkipDateOption,
@@ -225,6 +226,8 @@ function SkipByLoanType({ notify }: { notify: ReturnType<typeof useNotify> }) {
 
 /* ================================ Waivers ================================ */
 function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
+  // Loans and Speed Drafts share the same waiver flow; only the API behind it differs.
+  const [kind, setKind] = useState<'Loan' | 'SpeedDraft'>('Loan')
   const [loans, setLoans] = useState<Loan[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Loan | null>(null)
@@ -232,20 +235,27 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   const [form, setForm] = useState<{ waiverType: WaiverType; amount: string; reason: string }>({ waiverType: 'Interest', amount: '', reason: '' })
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => { loansApi.list().then(setLoans).catch(() => setLoans([])).finally(() => setLoading(false)) }, [])
+  const fetchOne = (id: number): Promise<Loan> => (kind === 'Loan' ? loansApi.get(id) : speedDraftsApi.get(id)) as unknown as Promise<Loan>
+  useEffect(() => {
+    setLoading(true)
+    const req = kind === 'Loan' ? loansApi.list() : speedDraftsApi.list({ status: 'Active' })
+    ;(req as unknown as Promise<Loan[]>).then(setLoans).catch(() => setLoans([])).finally(() => setLoading(false))
+  }, [kind])
+  const switchKind = (k: 'Loan' | 'SpeedDraft') => { setKind(k); setSelected(null); setLoans([]) }
 
   const pickLoan = async (_n: string, opt?: Loan) => {
     if (!opt) { setSelected(null); return }
     setLoadingLoan(true)
-    try { setSelected(await loansApi.get(opt.id)) } catch { setSelected(opt) } finally { setLoadingLoan(false) }
+    try { setSelected(await fetchOne(opt.id)) } catch { setSelected(opt) } finally { setLoadingLoan(false) }
   }
-  const reload = async () => { if (selected) setSelected(await loansApi.get(selected.id)) }
+  const reload = async () => { if (selected) setSelected(await fetchOne(selected.id)) }
 
   const add = async () => {
     if (!selected || !form.amount) return
     setBusy(true)
     try {
-      await loanWaiversApi.create(selected.id, { waiverType: form.waiverType, amount: form.amount, reason: form.reason || undefined })
+      const api = kind === 'Loan' ? loanWaiversApi : speedDraftWaiversApi
+      await api.create(selected.id, { waiverType: form.waiverType, amount: form.amount, reason: form.reason || undefined })
       setForm({ waiverType: 'Interest', amount: '', reason: '' }); notify.success('Waiver recorded'); await reload()
     } catch (ex: any) {
       notify.error('Add failed', getErrorText(ex))
@@ -254,17 +264,28 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   const remove = async (w: LoanWaiver) => {
     const ok = await notify.confirm({ title: 'Delete this waiver?', danger: true, okText: 'Delete' })
     if (!ok) return
-    try { await loanWaiversApi.remove(w.id); notify.success('Waiver deleted'); await reload() }
+    try { await (kind === 'Loan' ? loanWaiversApi : speedDraftWaiversApi).remove(w.id); notify.success('Waiver deleted'); await reload() }
     catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   const waivers = selected?.waivers || []
-  const arrears = selected?.summary?.arrears
+  // A speed draft has no arrears block: show its own summary figures in the same card.
+  const sdSummary = kind === 'SpeedDraft' ? ((selected as any)?.summary as import('../api').SpeedDraftSummary | undefined) : undefined
+  const arrears = kind === 'Loan' ? selected?.summary?.arrears : sdSummary ? {
+    futureCapital: sdSummary.outstandingCapital, totalInterestRemaining: sdSummary.outstandingInterest,
+    defaultCharges: sdSummary.penaltyDue, otherChargeArrears: sdSummary.outstandingCharges ?? 0,
+    amountToBeCollected: sdSummary.amountToSettleToday, totalWaived: sdSummary.totalInterestWaived ?? 0,
+  } : undefined
 
   return (
     <div>
       <Card style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>Find Loan</div>
+        <div className="row gap-2" style={{ marginBottom: 10, alignItems: 'center' }}>
+          <div className="eyebrow">Find {kind === 'Loan' ? 'Loan' : 'Speed Draft'}</div>
+          <Select value={kind} onChange={(e) => switchKind(e.target.value as 'Loan' | 'SpeedDraft')} style={{ maxWidth: 160 }}>
+            <option value="Loan">Loan</option><option value="SpeedDraft">Speed Draft</option>
+          </Select>
+        </div>
         <SearchSelect
           value={selected ? `${selected.code} — ${selected.customer?.fullName}` : ''}
           onChange={(_n, opt) => pickLoan(_n, opt)}
@@ -338,6 +359,8 @@ function WaiversSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
 
 /* ================================ Charges ================================= */
 function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
+  // Loans and Speed Drafts share the same charge flow; only the API behind it differs.
+  const [kind, setKind] = useState<'Loan' | 'SpeedDraft'>('Loan')
   const [loans, setLoans] = useState<Loan[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Loan | null>(null)
@@ -353,18 +376,24 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
   const [charges, setCharges] = useState<LoanCharge[]>([])
   const [chargesLoading, setChargesLoading] = useState(false)
 
-  useEffect(() => { loansApi.list().then(setLoans).catch(() => setLoans([])).finally(() => setLoading(false)) }, [])
+  const chargesApi = kind === 'Loan' ? loanChargesApi : speedDraftChargesApi
+  useEffect(() => {
+    setLoading(true)
+    const req = kind === 'Loan' ? loansApi.list() : speedDraftsApi.list({ status: 'Active' })
+    ;(req as unknown as Promise<Loan[]>).then(setLoans).catch(() => setLoans([])).finally(() => setLoading(false))
+  }, [kind])
+  const switchKind = (k: 'Loan' | 'SpeedDraft') => { setKind(k); setSelected(null); setCharges([]); setLoans([]) }
   useEffect(() => { chargeCategoriesApi.list().then((res) => setCategories(res.filter(c => c.status === 'Active'))) }, [])
 
   const loadCharges = (loanId: number) => {
     setChargesLoading(true)
-    loanChargesApi.list(loanId).then(setCharges).catch(() => setCharges([])).finally(() => setChargesLoading(false))
+    chargesApi.list(loanId).then(setCharges).catch(() => setCharges([])).finally(() => setChargesLoading(false))
   }
 
   const pickLoan = async (_n: string, opt?: Loan) => {
     if (!opt) { setSelected(null); setCharges([]); return }
     setLoadingLoan(true)
-    try { setSelected(await loansApi.get(opt.id)) } catch { setSelected(opt) } finally { setLoadingLoan(false) }
+    try { setSelected((kind === 'Loan' ? await loansApi.get(opt.id) : await speedDraftsApi.get(opt.id)) as unknown as Loan) } catch { setSelected(opt) } finally { setLoadingLoan(false) }
     loadCharges(opt.id)
   }
 
@@ -372,7 +401,7 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
     if (!selected || !form.dueAmount || !form.chargeCategoryId) return
     setBusy(true)
     try {
-      await loanChargesApi.create(selected.id, {
+      await chargesApi.create(selected.id, {
         chargeCategoryId: form.chargeCategoryId as number, dueAmount: form.dueAmount,
         chargedAt: form.chargedAt || undefined, notes: form.notes || undefined,
       })
@@ -387,26 +416,31 @@ function ChargesSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
     const categoryName = c.category?.name || 'unknown'
     const ok = await notify.confirm({ title: `Delete this ${categoryName.toLowerCase()} charge?`, danger: true, okText: 'Delete' })
     if (!ok || !selected) return
-    try { await loanChargesApi.remove(c.id); notify.success('Charge deleted'); loadCharges(selected.id) }
+    try { await chargesApi.remove(c.id); notify.success('Charge deleted'); loadCharges(selected.id) }
     catch (ex: any) { notify.error('Delete failed', getErrorText(ex)) }
   }
 
   return (
     <div>
       <Card style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>Find Loan</div>
+        <div className="row gap-2" style={{ marginBottom: 10, alignItems: 'center' }}>
+          <div className="eyebrow">Find {kind === 'Loan' ? 'Loan' : 'Speed Draft'}</div>
+          <Select value={kind} onChange={(e) => switchKind(e.target.value as 'Loan' | 'SpeedDraft')} style={{ maxWidth: 160 }}>
+            <option value="Loan">Loan</option><option value="SpeedDraft">Speed Draft</option>
+          </Select>
+        </div>
         <SearchSelect
           value={selected ? `${selected.code} — ${selected.customer?.fullName}` : ''}
           onChange={(_n, opt) => pickLoan(_n, opt)}
           options={loans}
           getLabel={(l: Loan) => `${l.code} — ${l.customer?.fullName}`}
           getSub={(l: Loan) => [l.customer?.nicNo, l.customer?.phone].filter(Boolean).join(' · ')}
-          placeholder={loading ? 'Loading loans…' : 'Search by NIC, Loan ID, or customer name…'}
+          placeholder={loading ? 'Loading…' : 'Search by NIC, code, or customer name…'}
           disabled={loading}
         />
       </Card>
 
-      {loadingLoan && <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-2)' }}>Loading loan…</div>}
+      {loadingLoan && <div style={{ padding: 30, textAlign: 'center', color: 'var(--tx-2)' }}>Loading…</div>}
 
       {selected && !loadingLoan && (
         <Card>

@@ -1171,7 +1171,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
    but lives in this file so the two screens share the receipt-shell layout and
    search-box pattern instead of duplicating that boilerplate. */
 const SD_METHOD_OPTIONS = METHOD_OPTIONS
-const SD_PAYMENT_TYPE_LABEL: Record<SpeedDraftPaymentType, string> = { Interest: 'Interest', CapitalReduction: 'Capital Reduction', Settlement: 'Full Settlement' }
+const SD_PAYMENT_TYPE_LABEL: Record<SpeedDraftPaymentType, string> = { Interest: 'Interest', CapitalReduction: 'Capital Reduction', Settlement: 'Full Settlement', Charges: 'Charges' }
 const sdScheduleTone: Record<string, 'green' | 'amber' | 'neutral'> = { Paid: 'green', Partial: 'amber', Pending: 'neutral' }
 const SD_CATEGORY_LABEL: Record<string, string> = { Loan: 'Loan', Mortgage: 'Mortgage', GoldPawning: 'Gold Pawning', Lease: 'Lease' }
 
@@ -1329,7 +1329,8 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
 
   const refresh = () => {
     setLoading(true)
-    speedDraftsApi.list({ status: 'Active' }).then(setDrafts).catch(() => setDrafts([])).finally(() => setLoading(false))
+    Promise.all([speedDraftsApi.list({ status: 'Active' }), speedDraftsApi.list({ status: 'Approved' })])
+      .then(([active, approved]) => setDrafts([...active, ...approved])).catch(() => setDrafts([])).finally(() => setLoading(false))
   }
   useEffect(() => {
     refresh()
@@ -1482,9 +1483,10 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
               <div className="eyebrow">Speed Draft Summary</div>
               <Can user={me} module="Speed Draft Payments" action="Create">
                 <div className="row gap-2">
-                  {summary.outstandingInterest > 0 && <Btn variant="primary" size="sm" icon="check" onClick={() => openPay('Interest')}>Pay Interest</Btn>}
-                  {summary.outstandingCapital > 0 && summary.outstandingInterest <= 0 && <Btn variant="solid" size="sm" icon="coins" onClick={() => openPay('CapitalReduction')}>Make Capital Payment</Btn>}
-                  {summary.amountToSettleToday > 0 && <Btn variant="solid" size="sm" icon="flag" onClick={() => setSettleOpen(true)}>Settle Full Balance</Btn>}
+                  {(summary.outstandingCharges ?? 0) > 0 && <Btn variant="primary" size="sm" icon="receipt" onClick={() => openPay('Charges')}>Pay Charges</Btn>}
+                  {selected.status === 'Active' && summary.outstandingInterest > 0 && <Btn variant="primary" size="sm" icon="check" onClick={() => openPay('Interest')}>Pay Interest</Btn>}
+                  {selected.status === 'Active' && summary.outstandingCapital > 0 && summary.outstandingInterest <= 0 && <Btn variant="solid" size="sm" icon="coins" onClick={() => openPay('CapitalReduction')}>Make Capital Payment</Btn>}
+                  {selected.status === 'Active' && summary.amountToSettleToday > 0 && <Btn variant="solid" size="sm" icon="flag" onClick={() => setSettleOpen(true)}>Settle Full Balance</Btn>}
                 </div>
               </Can>
             </div>
@@ -1495,6 +1497,7 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
               <div><span className="t-2">Product: </span><b>{selected.speedDraftDetail?.speedDraftType?.name || '—'}</b></div>
               <div><span className="t-2">Outstanding Capital: </span><b style={{ fontFamily: 'JetBrains Mono', color: summary.outstandingCapital > 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(summary.outstandingCapital)}</b></div>
               <div><span className="t-2">Outstanding Interest: </span><b style={{ fontFamily: 'JetBrains Mono', color: summary.outstandingInterest > 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(summary.outstandingInterest)}</b></div>
+              {(summary.outstandingCharges ?? 0) > 0 && <div><span className="t-2">Outstanding Charges: </span><b style={{ fontFamily: 'JetBrains Mono', color: 'var(--bad)' }}>{money(summary.outstandingCharges)}</b></div>}
               <div><span className="t-2">Next Due: </span><b>{summary.nextDueDate ? `${dateOnly(summary.nextDueDate)} — ${money(summary.nextDueAmount)}` : '—'}</b></div>
               <div><span className="t-2">Amount to Settle Today: </span><b style={{ fontFamily: 'JetBrains Mono' }}>{money(summary.amountToSettleToday)}</b></div>
             </div>
@@ -1558,8 +1561,8 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
         </div>
       )}
 
-      <Modal open={payOpen} onClose={resetPayForm} title={payType === 'Interest' ? 'Pay Interest' : 'Make Capital Payment'}
-        sub={selected ? (payType === 'Interest' ? `${selected.code} — applied to the oldest unpaid interest installment(s) first.` : `${selected.code} — reduces outstanding capital and re-prices future interest.`) : undefined}
+      <Modal open={payOpen} onClose={resetPayForm} title={payType === 'Interest' ? 'Pay Interest' : payType === 'Charges' ? 'Pay Charges' : 'Make Capital Payment'}
+        sub={selected ? (payType === 'Interest' ? `${selected.code} — applied to the oldest unpaid interest installment(s) first.` : payType === 'Charges' ? `${selected.code} — applied to the oldest unpaid charge(s) first (document, visit, legal …).` : `${selected.code} — reduces outstanding capital and re-prices future interest.`) : undefined}
         footer={<>
           <Btn variant="solid" onClick={resetPayForm}>Cancel</Btn>
           <Btn variant="primary" icon="check" onClick={record} disabled={busy}>{busy ? 'Recording…' : 'Record Payment & Print Receipt'}</Btn>
@@ -1567,11 +1570,11 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
         <div className="col gap-3">
           <ErrorBanner error={err} style={{ marginBottom: 0 }} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px 16px', fontSize: 12.5, paddingBottom: 12, borderBottom: '1px solid var(--line)' }}>
-            <div><span className="t-2">{payType === 'Interest' ? 'Outstanding Interest' : 'Outstanding Capital'}</span><br />
-              <b style={{ fontFamily: 'JetBrains Mono', color: 'var(--bad)' }}>{money(payType === 'Interest' ? summary?.outstandingInterest : summary?.outstandingCapital)}</b></div>
+            <div><span className="t-2">{payType === 'Interest' ? 'Outstanding Interest' : payType === 'Charges' ? 'Outstanding Charges' : 'Outstanding Capital'}</span><br />
+              <b style={{ fontFamily: 'JetBrains Mono', color: 'var(--bad)' }}>{money(payType === 'Interest' ? summary?.outstandingInterest : payType === 'Charges' ? summary?.outstandingCharges : summary?.outstandingCapital)}</b></div>
           </div>
           <Field label="Amount"><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
-            placeholder={`Up to ${money(payType === 'Interest' ? summary?.outstandingInterest : summary?.outstandingCapital)}`} /></Field>
+            placeholder={`Up to ${money(payType === 'Interest' ? summary?.outstandingInterest : payType === 'Charges' ? summary?.outstandingCharges : summary?.outstandingCapital)}`} /></Field>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
             <Field label="Payment Method"><Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
               {SD_METHOD_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}

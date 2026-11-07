@@ -82,7 +82,9 @@ use App\Http\Controllers\Api\PawningTypeController;
 use App\Http\Controllers\Api\SpeedDraftCollateralController;
 use App\Http\Controllers\Api\SpeedDraftCollateralDocumentController;
 use App\Http\Controllers\Api\SpeedDraftController;
+use App\Http\Controllers\Api\SpeedDraftChargeController;
 use App\Http\Controllers\Api\SpeedDraftPaymentController;
+use App\Http\Controllers\Api\SpeedDraftWaiverController;
 use App\Http\Controllers\Api\SpeedDraftTypeController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\SystemMaintenanceController;
@@ -387,6 +389,15 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::delete('speed-draft-collateral/{collateral}/documents/{document}', [SpeedDraftCollateralDocumentController::class, 'destroy'])->middleware('perm:Speed Drafts,Edit');
 
     // --- Speed Drafts: Payments (interest / capital-reduction / full settlement) ---
+    // Other charges + waivers on a Speed Draft (parity with loans). Charge edit/delete reuse LoanChargeController (keyed on the
+    // charge row); waivers are admin-only, like loan waivers.
+    Route::get('speed-drafts/{speedDraft}/charges', [SpeedDraftChargeController::class, 'index'])->middleware('perm:Speed Drafts,View');
+    Route::post('speed-drafts/{speedDraft}/charges', [SpeedDraftChargeController::class, 'store'])->middleware('perm:Speed Drafts,Create')->middleware('idempotency:required');
+    Route::put('speed-draft-charges/{charge}', [LoanChargeController::class, 'update'])->middleware('perm:Speed Drafts,Edit');
+    Route::delete('speed-draft-charges/{charge}', [LoanChargeController::class, 'destroy'])->middleware('perm:Speed Drafts,Delete');
+    Route::get('speed-drafts/{speedDraft}/waivers', [SpeedDraftWaiverController::class, 'index'])->middleware('perm:Speed Drafts,View');
+    Route::post('speed-drafts/{speedDraft}/waivers', [SpeedDraftWaiverController::class, 'store'])->middleware(['admin', 'idempotency:required']);
+    Route::delete('speed-draft-waivers/{waiver}', [SpeedDraftWaiverController::class, 'destroy'])->middleware('admin');
     Route::get('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'index'])->middleware('perm:Speed Draft Payments,View');
     Route::get('speed-drafts/{speedDraft}/next-receipt-no', [SpeedDraftPaymentController::class, 'nextReceiptNo'])->middleware('perm:Speed Draft Payments,Create');
     Route::post('speed-drafts/{speedDraft}/payments', [SpeedDraftPaymentController::class, 'store'])->middleware(['perm:Speed Draft Payments,Create', 'idempotency:required']);

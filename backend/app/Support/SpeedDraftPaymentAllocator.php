@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\FacilityChargeAllocation;
 use App\Models\FacilityPayment;
 use App\Models\FacilityPaymentAllocation;
 use App\Models\SpeedDraft;
@@ -34,8 +35,19 @@ class SpeedDraftPaymentAllocator
      */
     public static function outstandingInterest(SpeedDraft $draft): float
     {
+        $waived = SpeedDraftWaivers::byRow($draft)['interest'];
+
         return round((float) $draft->schedules()->where('status', '!=', 'Paid')->with('activeAllocations')->get()
-            ->sum(fn ($s) => (float) $s->interest_due - (float) $s->activeAllocations->sum('interest_applied')), 2);
+            ->sum(fn ($s) => max(0, (float) $s->interest_due - (float) $s->activeAllocations->sum('interest_applied') - (float) ($waived[$s->id] ?? 0))), 2);
+    }
+
+    /** Unpaid other charges (Document / Visit / Legal ...), net of Charge waivers. */
+    public static function outstandingCharges(SpeedDraft $draft): float
+    {
+        $waived = SpeedDraftWaivers::byCharge($draft);
+
+        return round((float) $draft->charges()->get()
+            ->sum(fn ($c) => max(0, (float) $c->due_amount - (float) $c->paid_amount - (float) ($waived[$c->id] ?? 0))), 2);
     }
 
     /**
@@ -50,20 +62,49 @@ class SpeedDraftPaymentAllocator
         $graceDays = (int) ($type?->grace_period_days ?? 5);
         $chargeRate = (float) ($type?->default_charge_rate_percent ?? 0);
 
+        $waived = SpeedDraftWaivers::byRow($draft, $asOf)['penalty'];
+
         return round((float) $draft->schedules()->with('activeAllocations')->get()
             ->filter(fn ($s) => SpeedDraftSummary::isOverdue($s, $graceDays, $asOf))
-            ->sum(function ($s) use ($graceDays, $chargeRate, $asOf) {
+            ->sum(function ($s) use ($graceDays, $chargeRate, $asOf, $waived) {
                 $due = SpeedDraftSummary::penaltyDueForRow($s, $graceDays, $chargeRate, $asOf);
                 $paid = (float) $s->activeAllocations->sum('penalty_applied');
 
-                return max(0, $due - $paid);
+                return max(0, $due - $paid - (float) ($waived[$s->id] ?? 0));
             }), 2);
     }
 
-    /** Everything owed to fully close this draft today: all unpaid interest + penalty + outstanding capital. */
+    /** Everything owed to fully close this draft today: all unpaid interest + penalty + other charges + outstanding capital. */
     public static function outstandingBalance(SpeedDraft $draft, ?Carbon $asOf = null): float
     {
-        return round(self::outstandingInterest($draft) + self::outstandingPenalty($draft, $asOf) + (float) $draft->outstanding_balance_cache, 2);
+        return round(self::outstandingInterest($draft) + self::outstandingPenalty($draft, $asOf) + self::outstandingCharges($draft) + (float) $draft->outstanding_balance_cache, 2);
+    }
+
+    /**
+     * Pays outstanding other charges oldest-first, up to $amount (the caller validates it against
+     * outstandingCharges()). Writes a FacilityChargeAllocation per charge and raises its paid_amount.
+     */
+    public static function applyChargePayment(SpeedDraft $draft, FacilityPayment $payment, float $amount): void
+    {
+        $remaining = $amount;
+        $waived = SpeedDraftWaivers::byCharge($draft);
+        foreach ($draft->charges()->orderBy('charged_at')->orderBy('id')->get() as $charge) {
+            if ($remaining <= 0) {
+                break;
+            }
+            $due = round(max(0, (float) $charge->due_amount - (float) $charge->paid_amount - (float) ($waived[$charge->id] ?? 0)), 2);
+            if ($due <= 0) {
+                continue;
+            }
+            $pay = round(min($remaining, $due), 2);
+            FacilityChargeAllocation::create([
+                'facility_payment_id' => $payment->id,
+                'facility_charge_id' => $charge->id,
+                'amount_applied' => $pay,
+            ]);
+            $charge->update(['paid_amount' => round((float) $charge->paid_amount + $pay, 2)]);
+            $remaining = round($remaining - $pay, 2);
+        }
     }
 
     /**
@@ -83,6 +124,7 @@ class SpeedDraftPaymentAllocator
         $type = $draft->speedDraftDetail?->speedDraftType;
         $graceDays = (int) ($type?->grace_period_days ?? 5);
         $chargeRate = (float) ($type?->default_charge_rate_percent ?? 0);
+        $waivedBy = SpeedDraftWaivers::byRow($draft, $asOf);
         $overdueRows = $draft->schedules()->with('activeAllocations')->orderBy('installment_no')->get()
             ->filter(fn ($s) => SpeedDraftSummary::isOverdue($s, $graceDays, $asOf));
 
@@ -90,7 +132,7 @@ class SpeedDraftPaymentAllocator
             if ($remaining <= 0) {
                 break;
             }
-            $due = SpeedDraftSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf) - (float) $row->activeAllocations->sum('penalty_applied');
+            $due = SpeedDraftSummary::penaltyDueForRow($row, $graceDays, $chargeRate, $asOf) - (float) $row->activeAllocations->sum('penalty_applied') - (float) ($waivedBy['penalty'][$row->id] ?? 0);
             $due = round(max(0, $due), 2);
             if ($due <= 0) {
                 continue;
@@ -109,7 +151,7 @@ class SpeedDraftPaymentAllocator
             if ($remaining <= 0) {
                 break;
             }
-            $due = max(0, round((float) $row->interest_due - (float) $row->activeAllocations->sum('interest_applied'), 2));
+            $due = max(0, round((float) $row->interest_due - (float) $row->activeAllocations->sum('interest_applied') - (float) ($waivedBy['interest'][$row->id] ?? 0), 2));
             if ($due <= 0) {
                 continue;
             }
@@ -120,14 +162,11 @@ class SpeedDraftPaymentAllocator
                 'interest_applied' => $pay,
                 'principal_applied' => 0,
             ]);
-            $newPaid = round((float) $row->paid_amount + $pay, 2);
-            $row->update([
-                'paid_amount' => $newPaid,
-                'status' => $newPaid >= (float) $row->interest_due ? 'Paid' : 'Partial',
-                'paid_at' => $newPaid >= (float) $row->interest_due ? $asOf : $row->paid_at,
-            ]);
+            $row->update(['paid_amount' => round((float) $row->paid_amount + $pay, 2)]);
             $remaining = round($remaining - $pay, 2);
         }
+        // Pending / Partial / Paid counts what was waived as well as what was paid.
+        SpeedDraftWaivers::syncRowStatuses($draft, $asOf);
     }
 
     /** Reduces outstanding_balance_cache by $amount (the caller validates $amount against it), re-prices future interest, and closes the draft if nothing is left owed. */
@@ -144,7 +183,7 @@ class SpeedDraftPaymentAllocator
         $fresh = $draft->fresh();
         SpeedDraftScheduler::recalculateOpenRows($fresh);
 
-        if ((float) $fresh->outstanding_balance_cache <= 0 && self::outstandingInterest($fresh) <= 0 && self::outstandingPenalty($fresh, $asOf) <= 0) {
+        if ((float) $fresh->outstanding_balance_cache <= 0 && self::outstandingInterest($fresh) <= 0 && self::outstandingPenalty($fresh, $asOf) <= 0 && self::outstandingCharges($fresh) <= 0) {
             $fresh->update(['status' => 'Closed', 'closed_at' => $asOf ?? now()]);
         }
     }
@@ -152,6 +191,10 @@ class SpeedDraftPaymentAllocator
     /** Pays off penalty, then every unpaid interest installment, then the full remaining capital — closes the draft. $amount must equal outstandingBalance(). */
     public static function applySettlement(SpeedDraft $draft, FacilityPayment $payment, ?Carbon $asOf = null): void
     {
+        $charges = self::outstandingCharges($draft);
+        if ($charges > 0) {
+            self::applyChargePayment($draft, $payment, $charges);
+        }
         $interestAndPenalty = round(self::outstandingInterest($draft) + self::outstandingPenalty($draft, $asOf), 2);
         if ($interestAndPenalty > 0) {
             self::applyInterestPayment($draft, $payment, $interestAndPenalty, $asOf);

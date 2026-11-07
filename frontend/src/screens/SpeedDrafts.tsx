@@ -31,12 +31,14 @@ interface FormState {
   principalAmount?: number | string
   interestRatePercent?: number | string
   ratePeriod?: 'monthly' | 'annual' | 'daily'
+  interestMethod?: 'reducing_balance' | 'flat'
+  documentChargeAmount?: number | string
   termMonths?: number
   vehicleNo?: string
   insurance?: Partial<FacilityInsuranceDetail>
   collateral: SpeedDraftCollateralInput[]
 }
-const blankForm = (): FormState => ({ ratePeriod: 'monthly', collateral: [] })
+const blankForm = (): FormState => ({ ratePeriod: 'monthly', interestMethod: 'reducing_balance', collateral: [] })
 const blankInsurance = (): Partial<FacilityInsuranceDetail> => ({})
 const ROUTE_BASE = '/sd/drafts'
 
@@ -124,6 +126,8 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
           customerId: full.customerId, speedDraftTypeId: full.speedDraftDetail?.speedDraftTypeId,
           principalAmount: full.principalAmount, interestRatePercent: full.interestRatePercent,
           ratePeriod: full.ratePeriod || 'monthly', termMonths: full.termMonths,
+          interestMethod: full.speedDraftDetail?.interestMethod || 'reducing_balance',
+          documentChargeAmount: full.speedDraftDetail?.documentChargeAmount ?? '',
           vehicleNo: full.speedDraftDetail?.vehicleNo || '', insurance: full.insurance || blankInsurance(),
           collateral: full.collateral || [],
         })
@@ -177,6 +181,8 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
       principalAmount: form.principalAmount,
       interestRatePercent: form.interestRatePercent,
       ratePeriod: form.ratePeriod,
+      interestMethod: form.interestMethod || 'reducing_balance',
+      documentChargeAmount: form.documentChargeAmount === '' || form.documentChargeAmount == null ? null : form.documentChargeAmount,
       termMonths: form.termMonths,
       vehicleNo: selectedType?.category === 'Lease' ? (form.vehicleNo || null) : null,
       insurance: needsInsurance ? form.insurance : undefined,
@@ -235,6 +241,11 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
               <Field label="Rate Period"><Select value={form.ratePeriod || 'monthly'} onChange={(e) => setForm((s) => ({ ...s, ratePeriod: e.target.value as any }))}>
                 <option value="monthly">Monthly</option><option value="annual">Annual</option><option value="daily">Daily</option>
               </Select></Field>
+              <Field label="Interest Method"><Select value={form.interestMethod || 'reducing_balance'} onChange={(e) => setForm((s) => ({ ...s, interestMethod: e.target.value as 'reducing_balance' | 'flat' }))}>
+                <option value="reducing_balance">Reducing balance</option><option value="flat">Flat</option>
+              </Select></Field>
+              <Field label="Document Charge"><Input type="number" min="0" value={form.documentChargeAmount ?? ''} onChange={(e) => setForm((s) => ({ ...s, documentChargeAmount: e.target.value }))}
+                placeholder="Optional - must be paid before disbursement" /></Field>
               <Field label="Period (Months)"><Input type="number" value={form.termMonths ?? ''} onChange={(e) => setForm((s) => ({ ...s, termMonths: Number(e.target.value) }))}
                 placeholder={selectedType ? `${selectedType.minPeriodMonths ?? 1}–${selectedType.maxPeriodMonths ?? ''}` : undefined} /></Field>
               {selectedType?.category === 'Lease' && (
@@ -242,7 +253,9 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
               )}
             </div>
             <div className="t-2" style={{ fontSize: 11.5 }}>
-              Interest is due monthly on the outstanding capital only — the full capital falls due at maturity, and can also be reduced early at any time via a capital payment.
+              Interest is due monthly and the full capital falls due at maturity (capital can also be reduced early via a capital payment).
+              {' '}<b>Reducing balance</b>: interest is charged on the capital still outstanding, so it falls after a capital payment.
+              {' '}<b>Flat</b>: interest is always charged on the original capital. Both give the same figures until capital is paid early.
             </div>
 
             {needsInsurance && (
