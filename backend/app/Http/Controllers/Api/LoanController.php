@@ -36,7 +36,7 @@ class LoanController extends Controller
     private const COLLATERAL_TYPES = ['Vehicle', 'Jewelry', 'Property', 'Other'];
 
     /** Matches frontend ActiveLoans.tsx's LIVE_STATUSES — the statuses shown on the Active Loans browse screen. */
-    private const LIVE_STATUSES = ['Approved', 'Active', 'Closed', 'WrittenOff', 'Restructured'];
+    private const LIVE_STATUSES = ['Approved', 'Active', 'Lapsed', 'Closed', 'WrittenOff', 'Restructured'];
 
     private const SUMMARY_RELATIONS = [
         'customer:id,full_name,code,nic_no,phone',
@@ -809,8 +809,8 @@ class LoanController extends Controller
      *  or null when it's clear to proceed. */
     private function writeOffBlockReason(Loan $loan): ?string
     {
-        if ($loan->status !== 'Active') {
-            return 'Only an active loan can be written off.';
+        if (!in_array($loan->status, ['Active', 'Lapsed'], true)) {
+            return 'Only an active or lapsed loan can be written off.';
         }
         // NPL loans must be fully provisioned before write-off — see
         // LoanProvisioning and LoanLedgerPoster::postWriteOff(), which
@@ -975,8 +975,8 @@ class LoanController extends Controller
      */
     public function reschedule(Request $request, Loan $loan)
     {
-        if ($loan->status !== 'Active') {
-            return response()->json(['message' => 'Only an active loan can be rescheduled.'], 422);
+        if (!in_array($loan->status, ['Active', 'Lapsed'], true)) {
+            return response()->json(['message' => 'Only an active or lapsed loan can be rescheduled.'], 422);
         }
         // Everything below is quoted from this snapshot; the transaction refuses if a payment lands before it commits.
         $paymentMark = \App\Models\FacilityPayment::withoutGlobalScopes()->where('credit_facility_id', $loan->id)->max('id');
@@ -1074,7 +1074,7 @@ class LoanController extends Controller
         ) {
             $uid = $request->user()->id;
             Loan::whereKey($loan->id)->lockForUpdate()->first();
-            if ($loan->fresh()->status !== 'Active'
+            if (!in_array($loan->fresh()->status, ['Active', 'Lapsed'], true)
                 || \App\Models\FacilityPayment::withoutGlobalScopes()->where('credit_facility_id', $loan->id)->max('id') !== $paymentMark) {
                 throw \Illuminate\Validation\ValidationException::withMessages(['loan' => 'This loan changed while the reschedule was being prepared (a payment was recorded or its status changed). Reload and try again.']);
             }
@@ -1260,8 +1260,8 @@ class LoanController extends Controller
      */
     public function close(Request $request, Loan $loan)
     {
-        if ($loan->status !== 'Active') {
-            return response()->json(['message' => 'Only an active loan can be closed.'], 422);
+        if (!in_array($loan->status, ['Active', 'Lapsed'], true)) {
+            return response()->json(['message' => 'Only an active or lapsed loan can be closed.'], 422);
         }
         $loan->load(['schedules.allocations.payment:id,status,approval_status', 'charges', 'waivers']);
         $balance = collect(LoanSummary::build($loan)['dueBreakdown'])->sum('balance');

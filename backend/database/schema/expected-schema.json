@@ -4986,7 +4986,7 @@
                     "collation": null
                 },
                 "status": {
-                    "type": "enum('Pending','Approved','Rejected','Cancelled','Active','Closed','Restructured','WrittenOff')",
+                    "type": "enum('Pending','Approved','Rejected','Cancelled','Active','Lapsed','Closed','Restructured','WrittenOff')",
                     "nullable": true,
                     "default": "Pending",
                     "default_is_expr": false,
@@ -5879,6 +5879,15 @@
                     "auto": false,
                     "generated": false,
                     "collation": null
+                },
+                "registered_as": {
+                    "type": "enum('Customer','Guarantor','Co-Borrower','Joint Applicant','Introducer')",
+                    "nullable": false,
+                    "default": "Customer",
+                    "default_is_expr": false,
+                    "auto": false,
+                    "generated": false,
+                    "collation": "utf8mb4_unicode_ci"
                 },
                 "notes": {
                     "type": "text",

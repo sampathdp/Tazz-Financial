@@ -225,7 +225,7 @@ class LoanSummary
             }
         };
 
-        $loans = Loan::where('status', 'Active')
+        $loans = Loan::whereIn('status', ['Active', 'Lapsed'])
             ->whereHas('schedules', $scheduleFilter)
             ->when($loanTypeId, fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $loanTypeId)))
             ->when($loanOfficerId, fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_officer_id', $loanOfficerId)))

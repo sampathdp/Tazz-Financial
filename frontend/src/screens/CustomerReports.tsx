@@ -169,7 +169,8 @@ export function CustomerActivityScreen({ go: _go, user: me }: { go: Go; user?: A
                 <Td align="right" mono>{c.fdCount}</Td>
                 <Td align="right" mono>{money(c.totalDeposited)}</Td>
                 <Td>{dateOnly(c.joinedAt)}</Td>
-              </>} />
+              </>}
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td align="right" mono>{rows.reduce((a: number, c: any) => a + Number(c.loanCount || 0), 0)}</Td><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalBorrowed || 0), 0))}</Td><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalOutstanding || 0), 0))}</Td><Td /><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalDeposited || 0), 0))}</Td><Td /></tr>} />
           </Card>
         </>
       )}
@@ -228,7 +229,8 @@ export function CustomerBlacklistedScreen({ go: _go, user: me }: { go: Go; user?
               <Td>{dateOnly(c.blacklistedAt)}</Td>
               <Td>{c.blacklistedBy || '—'}</Td>
               <Td align="right" mono>{money(c.totalOutstanding)}</Td>
-            </>} />
+            </>}
+            footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td /><Td /><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalOutstanding || 0), 0))}</Td></tr>} />
         </Card>
       )}
     </div>

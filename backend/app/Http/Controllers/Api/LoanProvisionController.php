@@ -26,7 +26,7 @@ class LoanProvisionController extends Controller
     /** Every Active loan currently NPL, or with a required/posted provision mismatch (i.e. something to post or recover) — everything else needs no attention on this screen. */
     public function index()
     {
-        $loans = Loan::where('status', 'Active')
+        $loans = Loan::whereIn('status', ['Active', 'Lapsed'])
             ->where(function ($q) {
                 $q->where('npl_flag', true)
                     ->orWhereColumn('provision_required_amount', '!=', 'provision_posted_amount');

@@ -29,7 +29,7 @@ const VEHICLE_TYPES = ['Car', 'Motorbike', 'Three-Wheeler', 'Van', 'Lorry', 'Bus
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
-  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
+  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Lapsed: 'amber', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
 const TITLE_OPTIONS: CustomerTitle[] = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Rev.']
 const blankQuickAdd = () => ({ title: '' as CustomerTitle | '', surname: '', initials: '', nameDenotedByInitials: '', branchId: undefined as number | undefined, nicNo: '', phone: '' })
@@ -639,7 +639,7 @@ export function LoanApplicationsScreen({ go, user: me }: { go: Go; user?: AuthUs
         actions={<Can user={me} module="Loan Applications" action="Create"><Btn variant="primary" icon="plus" onClick={openCreate}>New Application</Btn></Can>} />
 
       <div className="row gap-2 wrap" style={{ marginBottom: 14 }}>
-        {(['All', 'Pending', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Closed', 'WrittenOff', 'Restructured'] as const).map((s) => (
+        {(['All', 'Pending', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Lapsed', 'Closed', 'WrittenOff', 'Restructured'] as const).map((s) => (
           <Btn key={s} size="sm" variant={statusFilter === s ? 'primary' : 'solid'} onClick={() => setStatusFilter(s)}>
             {s} {counts[s] ? <span style={{ opacity: 0.7 }}>({counts[s]})</span> : ''}
           </Btn>

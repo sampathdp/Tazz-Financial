@@ -48,6 +48,7 @@ export const NAV: NavNode[] = [
   ] },
 
   { section: 'Speed Drafts', icon: 'coins', items: [
+    { id: 'sd/calculator', label: 'Speed Draft Calculator', icon: 'calc' },
     { id: 'sd/types', label: 'Speed Draft Types', icon: 'layers' },
     { id: 'sd/drafts', label: 'Speed Drafts', icon: 'coins' },
     { id: 'sd/payments', label: 'Speed Draft Payments', icon: 'receipt' },
@@ -141,6 +142,7 @@ export const NAV: NavNode[] = [
       { id: 'rep/coll-daily', label: 'Daily Cash Collection', icon: 'wallet' },
       { id: 'rep/coll-summary', label: 'Collection Summary', icon: 'chart' },
       { id: 'rep/coll-officers', label: 'Officer Performance', icon: 'users' },
+      { id: 'rep/coll-due', label: 'Weekly / Monthly Due', icon: 'list' },
       { id: 'rep/coll-trend', label: 'Collection Trend', icon: 'arrowUp' },
     ] },
     { group: 'Customer Reports', icon: 'users', items: [

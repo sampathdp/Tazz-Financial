@@ -10,6 +10,7 @@
    Posts to the same loans/{loan}/payments endpoint the Active Loans > Receipts
    tab uses, so history and outstanding balances stay in sync either way. */
 import { useEffect, useRef, useState } from 'react'
+import { PaymentBreakdown } from '../components/PaymentBreakdown'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, BankSelect, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
@@ -282,6 +283,13 @@ function LedgerCard({ loan }: { loan: Loan }) {
     rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4 })
   }
 
+  // Post-dated cheques returned before they ever cleared have no payment behind them, so nothing
+  // was credited — listed for information only (0 debit / 0 credit).
+  for (const c of loan.postDatedCheques || []) {
+    if (c.status !== 'Bounced' || (c as any).facilityPaymentId) continue
+    rows.push({ date: ((c as any).updatedAt as string) || c.chequeDate, particulars: `Cheque RETURNED — #${c.chequeNo}${c.bank?.name ? ` (${c.bank.name})` : ''} — ${money(c.amount)} not applied`, debit: 0, credit: 0, typeOrder: 5, tone: 'bad' })
+  }
+
   rows.sort((a, b) => {
     const dCmp = a.date.substring(0, 10).localeCompare(b.date.substring(0, 10))
     if (dCmp !== 0) return dCmp
@@ -420,7 +428,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   // Rental + other-charge + default (OD) arrears on installments already past their
   // due date, net of waivers and overpayment — see LoanSummary::$balancePrePayment.
   const arrearsAmountOf = (loan: Loan) => (loan.summary?.arrears ? num(loan.summary.arrears.balancePrePayment) : null)
-  const payable = loans.filter((l) => l.status === 'Active')
+  const payable = loans.filter((l) => l.status === 'Active' || l.status === 'Lapsed')
   const disbursedDate = (l: Loan) => (l.disbursedAt ? l.disbursedAt.slice(0, 10) : '')
   const pendingPayment = payable.filter((l) => num(l.totalDueSum) - num(l.paidSum) > 0)
   const listQ = listSearch.trim().toLowerCase()
@@ -699,6 +707,9 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             <div className="no-print" style={{ background: 'var(--warn-dim)', color: 'var(--warn)', border: '1px solid var(--warn)', padding: '8px 12px', borderRadius: 'var(--r-s)', fontSize: 12.5, marginBottom: 16 }}>
               This cheque is held pending clearance and has not been applied to the balance. Realize or reject it on the Cheque Management screen once it clears (or bounces) at the bank.
             </div>
+          )}
+          {!pendingClearance && payment.approvalStatus !== 'PendingApproval' && (
+            <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--line)' }}><PaymentBreakdown paymentId={payment.id} /></div>
           )}
           <div className="col gap-2" style={{ fontSize: 13, marginBottom: 20 }}>
             <div className="row between"><span className="t-2">Balance Before</span><span style={{ fontFamily: 'JetBrains Mono' }}>{money(balanceBefore)}</span></div>
@@ -1106,6 +1117,9 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
               <div className="row between" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}><span className="t-2">Received By</span><b>{p.receiver?.name || '—'}</b></div>
               {p.paymentType === 'Settlement' && <div className="row between"><span className="t-2">Approval Status</span><b>{p.approvalStatus || '—'}</b></div>}
               {p.paymentType === 'Settlement' && p.approver?.name && <div className="row between"><span className="t-2">Approved By</span><b>{p.approver.name}{p.approvedAt ? ` · ${dateOnly(p.approvedAt)}` : ''}</b></div>}
+              {p.approvalStatus !== 'PendingApproval' && !pendingClearance && (
+                <div style={{ marginTop: 8, paddingTop: 10, borderTop: '1px solid var(--line)' }}><PaymentBreakdown paymentId={p.id} /></div>
+              )}
               {p.status === 'Voided' && (
                 <div className="col gap-1" style={{ marginTop: 8, padding: '8px 12px', background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
                   <div>Voided {dateOnly(p.voidedAt)} by {p.voider?.name || '—'}</div>

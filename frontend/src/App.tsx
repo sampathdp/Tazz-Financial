@@ -18,6 +18,7 @@ const DashScreen = lazy(() => import('./screens/Dashboard'))
 const CustomersScreen = lazy(() => import('./screens/Customers').then((m) => ({ default: m.CustomersScreen })))
 const LoanTypesScreen = lazy(() => import('./screens/LoanTypes').then((m) => ({ default: m.LoanTypesScreen })))
 const LoanCalculatorScreen = lazy(() => import('./screens/LoanCalculator').then((m) => ({ default: m.LoanCalculatorScreen })))
+const SpeedDraftCalculatorScreen = lazy(() => import('./screens/SpeedDraftCalculator').then((m) => ({ default: m.SpeedDraftCalculatorScreen })))
 const LoanApplicationsScreen = lazy(() => import('./screens/LoanApplications').then((m) => ({ default: m.LoanApplicationsScreen })))
 const LoanDisbursementPageScreen = lazy(() => import('./screens/LoanDisbursement').then((m) => ({ default: m.LoanDisbursementScreen })))
 const ActiveLoansScreen = lazy(() => import('./screens/ActiveLoans').then((m) => ({ default: m.ActiveLoansScreen })))
@@ -125,6 +126,7 @@ const LoanDetailReportScreen = named(() => import('./screens/LoanReports'), 'Loa
 const CollectionDailyCashScreen = named(() => import('./screens/CollectionReports'), 'CollectionDailyCashScreen')
 const CollectionSummaryScreen = named(() => import('./screens/CollectionReports'), 'CollectionSummaryScreen')
 const CollectionOfficerPerformanceScreen = named(() => import('./screens/CollectionReports'), 'CollectionOfficerPerformanceScreen')
+const CollectionDueScreen = named(() => import('./screens/CollectionReports'), 'CollectionDueScreen')
 const CollectionTrendScreen = named(() => import('./screens/CollectionReports'), 'CollectionTrendScreen')
 
 const CustomerSummaryScreen = named(() => import('./screens/CustomerReports'), 'CustomerSummaryScreen')
@@ -218,6 +220,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'blacklist': BlacklistScreen,
   'rep/loans-commissions': SalesExecutiveCommissionsScreen,
   'rep/fd-commissions': FdCommissionsScreen,
+  'sd/calculator': SpeedDraftCalculatorScreen,
   'sd/types': SpeedDraftTypesScreen,
   'sd/drafts': SpeedDraftsScreen,
   'sd/payments': SpeedDraftPaymentReceiptScreen,
@@ -292,6 +295,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'rep/coll-daily': CollectionDailyCashScreen,
   'rep/coll-summary': CollectionSummaryScreen,
   'rep/coll-officers': CollectionOfficerPerformanceScreen,
+  'rep/coll-due': CollectionDueScreen,
   'rep/coll-trend': CollectionTrendScreen,
   'rep/cust-summary': CustomerSummaryScreen,
   'rep/cust-activity': CustomerActivityScreen,

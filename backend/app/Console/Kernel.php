@@ -16,6 +16,7 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule)
     {
         // $schedule->command('inspire')->hourly();
+        $schedule->command('loans:mark-lapsed')->dailyAt('00:50')->withoutOverlapping();
         $schedule->command('loans:recompute-provisioning')->dailyAt('01:00')->withoutOverlapping();
         // Re-assert cash/bank cache == GL every morning; logs + a
         // finance_audit_event on any drift (see CheckLedgerDrift).

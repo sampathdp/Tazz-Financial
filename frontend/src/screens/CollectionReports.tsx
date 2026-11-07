@@ -380,3 +380,87 @@ export function CollectionTrendScreen({ go: _go, user: me }: { go: Go; user?: Au
     </div>
   )
 }
+
+/* ---------------------------- Weekly / Monthly Due ---------------------------- */
+
+export function CollectionDueScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
+  const [date, setDate] = useState(today())
+  const [period, setPeriod] = useState<'week' | 'month'>('week')
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const { branches, branchId, setBranchId } = useBranchFilter(me)
+
+  useEffect(() => {
+    setLoading(true); setErr('')
+    collectionReportsApi.get('due-schedule', { date: date || undefined, period, branchId })
+      .then(setData).catch((ex) => setErr(getErrorText(ex, 'Failed to load report'))).finally(() => setLoading(false))
+  }, [date, period, branchId])
+
+  const rows: any[] = data?.rows || []
+  const sum = (k: string) => rows.reduce((a, r) => a + Number(r[k] || 0), 0)
+  const win = data?.[period]
+  const label = period === 'week' ? 'Weekly' : 'Monthly'
+
+  const exportExcel = () => {
+    if (!data) return
+    void exportFlatTableToExcel({
+      reportTitle: `${label} Due Report`, meta: `Period: ${win.from} to ${win.to}`,
+      columns: [
+        { label: 'Loan', key: 'loanCode' }, { label: 'Customer', key: 'customer' }, { label: 'Phone', key: 'phone' },
+        { label: 'Installments', key: 'installments', align: 'right', format: 'number' }, { label: 'First Due', key: 'firstDue' },
+        { label: 'Due', key: 'dueAmount', align: 'right', format: 'money' }, { label: 'Paid', key: 'paidAmount', align: 'right', format: 'money' },
+        { label: 'Balance Due', key: 'balanceDue', align: 'right', format: 'money' },
+      ],
+      rows,
+      totalRow: { customer: 'Total', installments: sum('installments'), dueAmount: sum('dueAmount'), paidAmount: sum('paidAmount'), balanceDue: sum('balanceDue') },
+      emptyText: 'Nothing due in this period',
+    }, `${period}ly-due-${today()}.xlsx`)
+  }
+  const exportPdf = async () => downloadBlob(await collectionReportsApi.pdf('due-schedule', { date: date || undefined, period, branchId }), `${period}ly-due-${today()}.pdf`)
+
+  return (
+    <div>
+      <PageHead crumbs="Loan Management / Collection Reports" title="Weekly / Monthly Due" icon="list"
+        actions={data && <ExportButtons onExcel={exportExcel} onPdf={exportPdf} />} />
+      <Card style={{ marginBottom: 16 }}>
+        <div className="row gap-3 wrap">
+          <Field label="Any date in the week / month"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+          <Field label="List">
+            <Select value={period} onChange={(e) => setPeriod(e.target.value as 'week' | 'month')}>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </Select>
+          </Field>
+          <BranchFilter user={me} branches={branches} branchId={branchId} onChange={setBranchId} />
+        </div>
+      </Card>
+      {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
+        <>
+          <TileGrid>
+            <Tile icon="wallet" label={`Weekly Due (${data.week.from} to ${data.week.to})`} value={money(data.week.balanceDue)} tone="amber" />
+            <Tile icon="wallet" label={`Monthly Due (${data.month.from} to ${data.month.to})`} value={money(data.month.balanceDue)} tone="red" />
+            <Tile icon="coins" label="Week: Scheduled / Paid" value={`${money(data.week.dueAmount)} / ${money(data.week.paidAmount)}`} />
+            <Tile icon="coins" label="Month: Scheduled / Paid" value={`${money(data.month.dueAmount)} / ${money(data.month.paidAmount)}`} />
+          </TileGrid>
+          <Card pad={0}>
+            <div className="eyebrow" style={{ padding: '14px 16px' }}>{label} due by loan: {win.loanCount} loan(s), {win.installmentCount} installment(s)</div>
+            <Table cols={[
+              { label: 'Loan' }, { label: 'Customer' }, { label: 'Phone' }, { label: 'Installments', align: 'right' as const }, { label: 'First Due' },
+              { label: 'Due', align: 'right' as const }, { label: 'Paid', align: 'right' as const }, { label: 'Balance Due', align: 'right' as const },
+            ]} rows={rows} empty="Nothing due in this period"
+              render={(r: any) => <>
+                <Td mono>{r.loanCode}</Td><Td>{r.customer}</Td><Td mono>{r.phone || '-'}</Td>
+                <Td align="right" mono>{r.installments}</Td><Td>{r.firstDue}</Td>
+                <Td align="right" mono>{money(r.dueAmount)}</Td><Td align="right" mono>{money(r.paidAmount)}</Td><Td align="right" mono>{money(r.balanceDue)}</Td>
+              </>}
+              footer={rows.length > 0 ? <tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}>
+                <Td>Total</Td><Td /><Td /><Td align="right" mono>{sum('installments')}</Td><Td />
+                <Td align="right" mono>{money(sum('dueAmount'))}</Td><Td align="right" mono>{money(sum('paidAmount'))}</Td><Td align="right" mono>{money(sum('balanceDue'))}</Td>
+              </tr> : undefined} />
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}

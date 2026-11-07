@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\DB;
  */
 class CollectionReportController extends Controller
 {
-    private const TYPES = ['daily-cash', 'collection-summary', 'officer-performance', 'trend'];
+    private const TYPES = ['daily-cash', 'collection-summary', 'officer-performance', 'trend', 'due-schedule'];
 
     public function show(Request $request, string $type)
     {
@@ -32,6 +32,7 @@ class CollectionReportController extends Controller
             'collection-summary' => $this->collectionSummary($request),
             'officer-performance' => $this->officerPerformance($request),
             'trend' => $this->trend($request),
+            'due-schedule' => $this->dueSchedule($request),
         };
     }
 
@@ -46,6 +47,7 @@ class CollectionReportController extends Controller
             'collection-summary' => $this->collectionSummaryPdf($request),
             'officer-performance' => $this->officerPerformancePdf($request),
             'trend' => $this->trendPdf($request),
+            'due-schedule' => $this->dueSchedulePdf($request),
         };
 
         return ReportExport::pdf($title, $sections, null, $meta)->download(ReportExport::filename($type));
@@ -330,6 +332,69 @@ class CollectionReportController extends Controller
     }
 
     /** @return array{0: Carbon, 1: Carbon} */
+    /** Installments falling due in a date window: unpaid balance = total_due - paid_amount per schedule row, Active/Lapsed loans only. */
+    private function dueWindow(Carbon $from, Carbon $to, bool $withRows): array
+    {
+        $q = DB::table('facility_schedules as fs')
+            ->join('credit_facilities as cf', 'cf.id', '=', 'fs.credit_facility_id')
+            ->join('customers as c', 'c.id', '=', 'cf.customer_id')
+            ->where('cf.facility_type', 'Loan')
+            ->whereIn('cf.status', ['Active', 'Lapsed'])
+            ->whereBetween('fs.due_date', [$from->toDateString(), $to->toDateString()]);
+        $q = CurrentBranch::applyScope($q, 'cf.branch_id');
+
+        $totals = (clone $q)->selectRaw('coalesce(sum(fs.total_due),0) as due, coalesce(sum(least(fs.paid_amount, fs.total_due)),0) as paid, count(*) as installments, count(distinct cf.id) as loans')->first();
+        $due = round((float) $totals->due, 2);
+        $paid = round((float) $totals->paid, 2);
+        $out = [
+            'from' => $from->toDateString(), 'to' => $to->toDateString(),
+            'dueAmount' => $due, 'paidAmount' => $paid, 'balanceDue' => round($due - $paid, 2),
+            'installmentCount' => (int) $totals->installments, 'loanCount' => (int) $totals->loans,
+        ];
+        if ($withRows) {
+            $out['rows'] = $q->groupBy('cf.id', 'cf.code', 'c.full_name', 'c.phone')
+                ->orderBy('cf.code')
+                ->selectRaw('cf.code as loan_code, c.full_name as customer, c.phone as phone, count(*) as installments, min(fs.due_date) as first_due, sum(fs.total_due) as due, sum(least(fs.paid_amount, fs.total_due)) as paid')
+                ->get()->map(fn ($r) => [
+                    'loanCode' => $r->loan_code, 'customer' => $r->customer, 'phone' => $r->phone, 'installments' => (int) $r->installments,
+                    'firstDue' => substr((string) $r->first_due, 0, 10), 'dueAmount' => round((float) $r->due, 2),
+                    'paidAmount' => round((float) $r->paid, 2), 'balanceDue' => round((float) $r->due - (float) $r->paid, 2),
+                ])->values()->all();
+        }
+
+        return $out;
+    }
+
+    /** Weekly (Mon-Sun) and monthly due for the week/month containing `date` (default today); `rows` lists loans for `period` (week|month). */
+    private function dueSchedule(Request $request): array
+    {
+        $ref = $request->filled('date') ? Carbon::parse($request->date) : now();
+        $period = $request->input('period') === 'month' ? 'month' : 'week';
+        $week = $this->dueWindow($ref->copy()->startOfWeek(), $ref->copy()->endOfWeek(), $period === 'week');
+        $month = $this->dueWindow($ref->copy()->startOfMonth(), $ref->copy()->endOfMonth(), $period === 'month');
+        $rows = $period === 'week' ? $week['rows'] : $month['rows'];
+        unset($week['rows'], $month['rows']);
+
+        return ['date' => $ref->toDateString(), 'period' => $period, 'week' => $week, 'month' => $month, 'rows' => $rows];
+    }
+
+    private function dueSchedulePdf(Request $request): array
+    {
+        $d = $this->dueSchedule($request);
+        $label = $d['period'] === 'month' ? 'Monthly' : 'Weekly';
+        $win = $d[$d['period']];
+        $columns = [
+            ['key' => 'loanCode', 'label' => 'Loan'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'phone', 'label' => 'Phone'],
+            ['key' => 'installments', 'label' => 'Installments', 'align' => 'right', 'format' => 'number'], ['key' => 'firstDue', 'label' => 'First Due'],
+            ['key' => 'dueAmount', 'label' => 'Due', 'align' => 'right', 'format' => 'money'], ['key' => 'paidAmount', 'label' => 'Paid', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'balanceDue', 'label' => 'Balance Due', 'align' => 'right', 'format' => 'money'],
+        ];
+        $rows = collect($d['rows']);
+        $totalRow = ['customer' => 'Total', 'installments' => $rows->sum('installments'), 'dueAmount' => $rows->sum('dueAmount'), 'paidAmount' => $rows->sum('paidAmount'), 'balanceDue' => $rows->sum('balanceDue')];
+
+        return ["{$label} Due Report", [['columns' => $columns, 'rows' => $d['rows'], 'totalRow' => $totalRow, 'emptyText' => 'Nothing due in this period']], "Period: {$win['from']} to {$win['to']}"];
+    }
+
     private function periodBounds(Request $request): array
     {
         $from = $request->filled('from') ? Carbon::parse($request->from)->startOfDay() : now()->startOfMonth();

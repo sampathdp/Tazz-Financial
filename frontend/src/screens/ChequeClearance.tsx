@@ -22,7 +22,9 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 const chequeTone: Record<ChequeStatus, 'green' | 'red' | 'amber' | 'neutral' | 'blue'> = {
   Pending: 'neutral', Handed: 'blue', Realized: 'green', Bounced: 'red', Returned: 'amber',
 }
-const CHEQUE_STATUSES: ChequeStatus[] = ['Pending', 'Handed', 'Realized', 'Bounced', 'Returned']
+// 'Bounced' is shown to users as "Returned" (stored value unchanged); the separate legacy 'Returned' status is never set by this workflow, so it's left out of the filter.
+const CHEQUE_STATUSES: ChequeStatus[] = ['Pending', 'Handed', 'Realized', 'Bounced']
+const statusLabel = (s: ChequeStatus) => (s === 'Bounced' ? 'Returned' : s)
 /** Cheques still awaiting a bank outcome — the only ones that can be realized or rejected. */
 const isOpenCheque = (c: LoanPostDatedCheque) => c.status === 'Pending' || c.status === 'Handed'
 /** A cheque can only be presented at the bank on or after its own date. */
@@ -57,7 +59,7 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
     try {
       if (c.source === 'Payment') await loanPaymentsApi.clearCheque(c.id, next, realizedAt)
       else await loanPostDatedChequesApi.updateStatus(c.id, next, undefined, realizedAt)
-      notify.success(next === 'Realized' ? 'Cheque realized' : 'Cheque rejected')
+      notify.success(next === 'Realized' ? 'Cheque realized' : 'Cheque returned')
       refresh()
     } catch (ex: any) {
       notify.error('Update failed', getErrorText(ex))
@@ -86,7 +88,7 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
         <div className="row gap-3 wrap" style={{ alignItems: 'flex-end' }}>
           <Field label="Status"><Select value={status} onChange={(e) => setStatus(e.target.value as ChequeStatus | '')} style={{ minWidth: 160 }}>
             <option value="">All statuses</option>
-            {CHEQUE_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {CHEQUE_STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
           </Select></Field>
           <Field label="From"><DateInput value={fromDate} onChange={(iso) => { setFromDate(iso); if (iso) setDueTodayOnly(false) }} /></Field>
           <Field label="To"><DateInput value={toDate} onChange={(iso) => { setToDate(iso); if (iso) setDueTodayOnly(false) }} /></Field>
@@ -116,12 +118,12 @@ function ChequeSection({ notify }: { notify: ReturnType<typeof useNotify> }) {
                 {clearedOnOtherDate && <div className="t-2" style={{ fontSize: 10.5 }}>cleared {dateOnly(c.realizedAt)}</div>}
               </Td>
               <Td align="right" mono>{money(c.amount)}</Td>
-              <Td align="center"><div className="row gap-2" style={{ justifyContent: 'center' }}><Badge tone={chequeTone[c.status]} dot>{c.status}</Badge>{c.source === 'Payment' && <span className="t-2" style={{ fontSize: 10.5 }}>(payment)</span>}</div></Td>
+              <Td align="center"><div className="row gap-2" style={{ justifyContent: 'center' }}><Badge tone={chequeTone[c.status]} dot>{statusLabel(c.status)}</Badge>{c.source === 'Payment' && <span className="t-2" style={{ fontSize: 10.5 }}>(payment)</span>}</div></Td>
               <Td align="right">
                 {isOpenCheque(c) && (isDueCheque(c, today) ? (
                   <div className="row gap-1" style={{ justifyContent: 'flex-end' }}>
                     <Btn size="sm" variant="ok" icon="check" disabled={busyId === c.id} onClick={() => openRealize(c)}>Realize</Btn>
-                    <Btn size="sm" variant="danger" icon="x" disabled={busyId === c.id} onClick={() => act(c, 'Bounced')}>Reject</Btn>
+                    <Btn size="sm" variant="danger" icon="x" disabled={busyId === c.id} onClick={() => act(c, 'Bounced')}>Return</Btn>
                   </div>
                 ) : <span className="t-2" style={{ fontSize: 11.5 }}>Not due yet</span>)}
               </Td>
@@ -158,7 +160,7 @@ export function ChequeClearanceScreen({ user: me }: { go: Go; user?: AuthUser | 
 
   return (
     <div>
-      <PageHead crumbs="Loan Management" title="Cheque Clearance" icon="cheque" sub="Realize or reject post-dated and payment cheques across all loans — admin only." />
+      <PageHead crumbs="Loan Management" title="Cheque Clearance" icon="cheque" sub="Realize or return post-dated and payment cheques across all loans — admin only." />
       <ChequeSection notify={notify} />
     </div>
   )

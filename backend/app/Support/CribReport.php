@@ -22,7 +22,7 @@ class CribReport
     /** Trailing months the payment-profile grid covers. */
     public const GRID_MONTHS = 12;
 
-    private const OPEN_STATUSES = ['Active'];
+    private const OPEN_STATUSES = ['Active', 'Lapsed'];
     private const CLOSED_STATUSES = ['Closed', 'Restructured', 'WrittenOff', 'Rejected', 'Cancelled'];
 
     public function __construct(private readonly Customer $customer)
@@ -44,7 +44,7 @@ class CribReport
         $facilities = DB::table('credit_facilities')
             ->where('customer_id', $this->customer->id)
             ->whereNull('deleted_at')
-            ->where(fn ($q) => $q->whereNotNull('disbursed_at')->orWhere('status', 'Active'))
+            ->where(fn ($q) => $q->whereNotNull('disbursed_at')->orWhereIn('status', ['Active', 'Lapsed']))
             ->orderByDesc('id')
             ->get();
 

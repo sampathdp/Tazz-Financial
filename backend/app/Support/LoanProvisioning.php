@@ -55,7 +55,7 @@ class LoanProvisioning
     /** Refreshes the cache columns only — no journal entry. Called by the daily command and by the payment-allocator hook. A no-longer-Active loan (closed/written off) is zeroed rather than evaluated, since it no longer has a meaningful "overdue" concept. */
     public static function refreshCache(Loan $loan): void
     {
-        if ($loan->status !== 'Active') {
+        if (!in_array($loan->status, ['Active', 'Lapsed'], true)) {
             $loan->update([
                 'npl_flag' => false,
                 'provision_required_pct' => 0,

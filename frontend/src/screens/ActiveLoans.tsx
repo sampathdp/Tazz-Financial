@@ -11,9 +11,9 @@ import type { Go } from './types'
 
 const ROUTE_BASE = '/loan/active'
 
-const LIVE_STATUSES: LoanStatus[] = ['Approved', 'Active', 'Closed', 'WrittenOff', 'Restructured']
+const LIVE_STATUSES: LoanStatus[] = ['Approved', 'Active', 'Lapsed', 'Closed', 'WrittenOff', 'Restructured']
 const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
-  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
+  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Lapsed: 'amber', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
 const num = (v: unknown) => Number(v ?? 0)
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })

@@ -223,7 +223,7 @@ const num = (v: unknown) => Number(v ?? 0)
 const money = (v: unknown) => num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : '—')
 const loanStatusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
-  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
+  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Lapsed: 'amber', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
 
 /** Read-only profile — Personal Details, Occupation, Documents, and the customer's loans.
@@ -933,10 +933,16 @@ export function CustomersScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
               <FieldError msg={formErrors.email} />
             </Field>
             <Field label="Address" full><textarea value={form.address || ''} onChange={(e) => set('address', e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
-            <label className="row gap-2" style={{ alignItems: 'center', cursor: 'pointer', gridColumn: '1/-1' }}>
-              <input type="checkbox" checked={!!form.isGuarantor} onChange={(e) => set('isGuarantor', e.target.checked)} />
-              <span style={{ fontSize: 13 }}>Register as Guarantor <span className="t-2">— a label only; any customer can still be picked as a loan guarantor</span></span>
-            </label>
+            <Field label="Register As" full>
+              <Select value={form.registeredAs || 'Customer'} onChange={(e) => set('registeredAs', e.target.value as any)}>
+                <option value="Customer">Customer</option>
+                <option value="Guarantor">Guarantor</option>
+                <option value="Co-Borrower">Co-Borrower (loan)</option>
+                <option value="Joint Applicant">Joint Applicant (FD)</option>
+                <option value="Introducer">Introducer</option>
+              </Select>
+              <div className="t-2" style={{ fontSize: 12, marginTop: 4 }}>A label only; any customer can still be picked in any role on a loan or FD.</div>
+            </Field>
           </div>
         </Card>
 

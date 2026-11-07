@@ -201,7 +201,8 @@ export function LoanParAgingScreen({ go: _go, user: me }: { go: Go; user?: AuthU
               rows={data.buckets || []} empty="No data"
               render={(b: any) => <>
                 <Td>{b.label}</Td><Td align="right" mono>{b.count}</Td><Td align="right" mono>{money(b.amount)}</Td><Td align="right" mono>{pct(b.pct)}</Td>
-              </>} />
+              </>}
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td align="right" mono>{(data.buckets || []).reduce((a: number, b: any) => a + Number(b.count || 0), 0)}</Td><Td align="right" mono>{money((data.buckets || []).reduce((a: number, b: any) => a + Number(b.amount || 0), 0))}</Td><Td /></tr>} />
           </Card>
         </>
       )}
@@ -318,7 +319,8 @@ export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
                 <Td align="right" mono>{l.overdueInstallments}</Td>
                 <Td align="right" mono>{money(l.overdueAmount)}</Td>
                 <Td align="right" mono>{money(l.penaltyDue)}</Td>
-              </>} />
+              </>}
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td align="right" mono>{totalInstallments}</Td><Td align="right" mono>{money(totalOverdue)}</Td><Td align="right" mono>{money(totalPenalty)}</Td></tr>} />
           </Card>
         </>
       )}
@@ -425,7 +427,8 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
                 <Td>{l.bankDetail ? `${l.bankDetail.bank?.name || ''}${l.bankDetail.bankBranch ? ` · ${l.bankDetail.bankBranch}` : ''}` : '—'}</Td>
                 <Td>{l.bankDetail?.accountHolder || '—'}</Td>
                 <Td mono>{l.bankDetail?.accountNumber || '—'}</Td>
-              </>} />
+              </>}
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td align="right" mono>{money(total)}</Td><Td /><Td /><Td /><Td /><Td /></tr>} />
           </Card>
         </>
       )}
@@ -519,7 +522,8 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
                 <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
                 <Td align="right" mono>{money(l.principalAmount)}</Td>
                 <Td>{dateOnly(l.closedAt)}</Td>
-              </>} />
+              </>}
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td align="right" mono>{money(total)}</Td><Td /></tr>} />
           </Card>
         </>
       )}
@@ -529,7 +533,7 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
 
 /* ---------------------------- Loan Detail Report ---------------------------- */
 
-const LOAN_STATUSES: LoanStatus[] = ['Pending', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Closed', 'WrittenOff', 'Restructured']
+const LOAN_STATUSES: LoanStatus[] = ['Pending', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Lapsed', 'Closed', 'WrittenOff', 'Restructured']
 const DATE_FIELDS: { value: string; label: string }[] = [
   { value: 'createdAt', label: 'Created Date' },
   { value: 'applicationDate', label: 'Application Date' },
@@ -731,10 +735,11 @@ export function LoanDetailReportScreen({ go: _go, user: me }: { go: Go; user?: A
                 <Td>{l.loanOfficer || '—'}</Td>
                 <Td align="right" mono>{money(l.principal)}</Td>
                 <Td align="right" mono>{money(l.outstandingBalance)}</Td>
-                <Td align="center"><Badge tone={l.status === 'Active' ? 'green' : l.status === 'Closed' ? 'neutral' : l.daysOverdue > 0 ? 'red' : 'neutral'} dot>{l.status}</Badge></Td>
+                <Td align="center"><Badge tone={l.status === 'Active' ? 'green' : l.status === 'Lapsed' ? 'amber' : l.status === 'Closed' ? 'neutral' : l.daysOverdue > 0 ? 'red' : 'neutral'} dot>{l.status}</Badge></Td>
                 <Td align="right" mono>{l.daysOverdue > 0 ? l.daysOverdue : '—'}</Td>
                 <Td>{dateOnly(l.disbursedAt)}</Td>
-              </>} />
+              </>}
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td /><Td align="right" mono>{money(totalPrincipal)}</Td><Td align="right" mono>{money(totalOutstanding)}</Td><Td /><Td /><Td /></tr>} />
           </Card>
         </>
       )}

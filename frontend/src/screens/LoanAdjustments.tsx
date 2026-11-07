@@ -50,7 +50,7 @@ function SkipByLoan({ notify }: { notify: ReturnType<typeof useNotify> }) {
   const [skipBusy, setSkipBusy] = useState<number | null>(null)
 
   useEffect(() => {
-    loansApi.list().then((all) => setLoans(all.filter((l) => l.status === 'Active'))).catch(() => setLoans([])).finally(() => setLoading(false))
+    loansApi.list().then((all) => setLoans(all.filter((l) => l.status === 'Active' || l.status === 'Lapsed'))).catch(() => setLoans([])).finally(() => setLoading(false))
   }, [])
 
   const pickLoan = async (_n: string, opt?: Loan) => {
@@ -472,7 +472,7 @@ function RescheduleSection({ notify, go }: { notify: ReturnType<typeof useNotify
   const [preview, setPreview] = useState<FinanceCalcResult | null>(null)
 
   useEffect(() => {
-    loansApi.list().then((all) => setLoans(all.filter((l) => l.status === 'Active'))).catch(() => setLoans([])).finally(() => setLoading(false))
+    loansApi.list().then((all) => setLoans(all.filter((l) => l.status === 'Active' || l.status === 'Lapsed'))).catch(() => setLoans([])).finally(() => setLoading(false))
     chargeCategoriesApi.list().then((res) => setCategories(res.filter((c) => c.status === 'Active'))).catch(() => setCategories([]))
   }, [])
 

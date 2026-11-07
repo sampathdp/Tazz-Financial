@@ -260,7 +260,7 @@ class LoanReportController extends Controller
         $byLoanType = fn ($q) => $q->when($loanTypeId, fn ($q2) => $q2->whereHas('loanDetail', fn ($q3) => $q3->where('loan_type_id', $loanTypeId)));
 
         $counts = $byLoanType(Loan::query())->selectRaw('status, count(*) as c')->groupBy('status')->pluck('c', 'status');
-        $active = $byLoanType(Loan::where('status', 'Active'));
+        $active = $byLoanType(Loan::whereIn('status', ['Active', 'Lapsed']));
         $totalOutstanding = (clone $active)->sum('outstanding_balance_cache');
         $activeCount = (clone $active)->count();
 
@@ -314,7 +314,7 @@ class LoanReportController extends Controller
         // Loan models with their relations.
         $oldestDueDate = DB::table('facility_schedules')
             ->join('credit_facilities', 'credit_facilities.id', '=', 'facility_schedules.credit_facility_id')
-            ->where('credit_facilities.status', 'Active')
+            ->whereIn('credit_facilities.status', ['Active', 'Lapsed'])
             ->where('facility_schedules.due_date', '<', $today)
             ->where('facility_schedules.status', '!=', 'Paid')
             ->when($loanTypeId, function ($q) use ($loanTypeId) {
@@ -334,7 +334,7 @@ class LoanReportController extends Controller
         ];
 
         $totalPortfolio = 0.0;
-        Loan::where('status', 'Active')->select('id', 'outstanding_balance_cache')
+        Loan::whereIn('status', ['Active', 'Lapsed'])->select('id', 'outstanding_balance_cache')
             ->chunk(500, function ($loans) use (&$buckets, &$totalPortfolio, $oldestDueDate, $today) {
                 foreach ($loans as $loan) {
                     $balance = (float) $loan->outstanding_balance_cache;

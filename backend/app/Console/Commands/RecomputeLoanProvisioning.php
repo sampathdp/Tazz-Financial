@@ -23,7 +23,7 @@ class RecomputeLoanProvisioning extends Command
     public function handle(): int
     {
         $count = 0;
-        Loan::where('status', 'Active')
+        Loan::whereIn('status', ['Active', 'Lapsed'])
             ->chunkById(100, function ($loans) use (&$count) {
                 foreach ($loans as $loan) {
                     LoanProvisioning::refreshCache($loan);

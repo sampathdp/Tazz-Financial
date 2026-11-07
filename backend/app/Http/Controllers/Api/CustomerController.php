@@ -235,9 +235,15 @@ class CustomerController extends Controller
             'monthly_income' => 'nullable|numeric|min:0',
             // Blacklisting is admin-only and lives on its own page (BlacklistController).
             'status' => ['nullable', Rule::in(['Active', 'Inactive'])],
-            'is_guarantor' => 'boolean',
+            'registered_as' => ['nullable', Rule::in(Customer::REGISTERED_AS)],
             'notes' => 'nullable|string',
         ]);
+
+        // is_guarantor stays as a derived mirror of registered_as for existing queries.
+        if (array_key_exists('registered_as', $data)) {
+            $data['registered_as'] ??= 'Customer';
+            $data['is_guarantor'] = $data['registered_as'] === 'Guarantor';
+        }
 
         // A blacklisted customer's status can only be changed from the Blacklist page.
         if ($customer?->status === 'Blacklisted') {

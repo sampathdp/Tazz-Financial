@@ -227,6 +227,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Leasing / Loan Calculator: standalone quote, never persists ---
     Route::post('finance-calculator/calculate', [FinanceCalculatorController::class, 'calculate'])->middleware('perm:Loan Calculator,View');
+    Route::post('finance-calculator/speed-draft', [FinanceCalculatorController::class, 'speedDraft'])->middleware('perm:Speed Drafts,View');
 
     // --- Loan Management: Loan Applications ---
     Route::get('loans', [LoanController::class, 'index'])->middleware('perm:Loan Applications,View');
@@ -285,6 +286,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Loan Management: Loan Payments ---
     Route::get('loans/{loan}/payments', [LoanPaymentController::class, 'index'])->middleware('perm:Loan Payments,View');
+    Route::get('loan-payments/{payment}/breakdown', [LoanPaymentController::class, 'breakdown'])->middleware('perm:Loan Payments,View');
     Route::get('loans/{loan}/next-receipt-no', [LoanPaymentController::class, 'nextReceiptNo'])->middleware('perm:Loan Payments,Create');
     Route::get('loans/{loan}/outstanding-by-bucket', [LoanPaymentController::class, 'outstandingByBucket'])->middleware('perm:Loan Payments,Create');
     Route::post('loans/{loan}/payments', [LoanPaymentController::class, 'store'])->middleware(['perm:Loan Payments,Create', 'idempotency:required']);

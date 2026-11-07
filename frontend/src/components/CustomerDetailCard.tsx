@@ -38,7 +38,7 @@ export function CustomerDetailCard({ c }: { c: Customer }) {
         <div className="row gap-2" style={{ alignItems: 'center' }}>
           <span style={{ fontWeight: 700, fontSize: 14 }}>{c.fullName}</span>
           <span className="t-2" style={{ fontSize: 12 }}>{c.code}</span>
-          {c.isGuarantor && <Badge tone="blue">Guarantor</Badge>}
+          {c.registeredAs && c.registeredAs !== 'Customer' ? <Badge tone="blue">{c.registeredAs}</Badge> : c.isGuarantor && <Badge tone="blue">Guarantor</Badge>}
         </div>
         <div className="row gap-2" style={{ alignItems: 'center' }}>
           <Btn size="sm" variant="solid" icon="chart" onClick={() => setCribModal(true)}>Credit Report</Btn>

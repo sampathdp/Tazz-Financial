@@ -65,6 +65,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'rep/coll-daily': 'Collection Reports',
   'rep/coll-summary': 'Collection Reports',
   'rep/coll-officers': 'Collection Reports',
+  'rep/coll-due': 'Collection Reports',
   'rep/coll-trend': 'Collection Reports',
   'rep/cust-summary': 'Customer Reports',
   'rep/cust-activity': 'Customer Reports',
@@ -85,6 +86,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   // 'loan/adjustments', 'ad/approvals', and 'ad/approval-types' are intentionally
   // NOT mapped here — canAccessRoute() below falls back to an admin-only check
   // for any route id absent from this map.
+  'sd/calculator': 'Speed Drafts',
   'sd/types': 'Speed Draft Types',
   'sd/drafts': 'Speed Drafts',
   'sd/payments': 'Speed Draft Payments',

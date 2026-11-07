@@ -206,6 +206,7 @@ export interface CustomerBusinessDetail {
   businessName?: string | null; businessRegNo?: string | null; businessType?: string | null; businessAddress?: string | null; businessPhone?: string | null;
 }
 
+export type CustomerRegisteredAs = 'Customer' | 'Guarantor' | 'Co-Borrower' | 'Joint Applicant' | 'Introducer'
 export interface Customer {
   id: number; branchId: number; branch?: { id: number; name: string; code: string };
   code: string;
@@ -239,6 +240,8 @@ export interface Customer {
   blacklistReason?: string | null; blacklistNote?: string | null; blacklistedAt?: string | null;
   /** Label, not a restriction — any customer can still be picked as a loan guarantor regardless. */
   isGuarantor?: boolean;
+  /** Capacity the customer was registered in — a label only; default 'Customer'. */
+  registeredAs?: CustomerRegisteredAs;
   notes?: string | null;
   /** True when a profile photo is on file — fetch the image itself via customersApi.photo(id). */
   hasPhoto?: boolean;
@@ -336,7 +339,7 @@ export interface LoanType {
   status?: 'Active' | 'Inactive';
 }
 
-export type LoanStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled' | 'Active' | 'Closed' | 'WrittenOff' | 'Restructured'
+export type LoanStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled' | 'Active' | 'Lapsed' | 'Closed' | 'WrittenOff' | 'Restructured'
 
 export interface LoanGuarantorInput {
   id?: number;
@@ -646,6 +649,11 @@ export type LoanPaymentType = 'Regular' | 'Settlement' | 'ManualAllocation'
 /** A cashier-chosen split of a payment across buckets — see
  *  LoanPaymentAllocator::applyManualAllocation(). Keys mirror the payload
  *  loanPaymentsApi.create() sends when allocationMode is 'manual'. */
+export interface PaymentBreakdown {
+  capital: number; interest: number; odCharge: number; otherCharges: number; appliedTotal: number; amount: number; unapplied: number;
+  installments: { installmentNo: number | null; dueDate: string | null; principal: number; interest: number; penalty: number }[];
+  charges: { name: string; amount: number }[];
+}
 export interface PaymentAllocationSplit {
   interest: number; odCharge: number; otherCharges: number; capital: number
 }
@@ -1435,6 +1443,8 @@ export const loanSchedulesApi = {
 }
 
 export const loanPaymentsApi = {
+  /** How one receipt was split: capital / interest / OD / other charges, per installment. */
+  breakdown: (paymentId: number) => http.get(`/loan-payments/${paymentId}/breakdown`).then((r) => camelize(r.data) as PaymentBreakdown),
   list: (loanId: number) => http.get(`/loans/${loanId}/payments`).then((r) => camelize(r.data) as LoanPayment[]),
   /** Preview-only: the receipt number the next payment on this loan would get — for
    *  display in the payment form before it's submitted. Not reserved until the payment
@@ -2311,6 +2321,21 @@ export const financeCalculatorApi = {
     http.post('/finance-calculator/calculate', snakeize(body)).then((r) => camelize(r.data) as FinanceCalcResult),
 }
 
+export interface SpeedDraftCalcInput {
+  principalAmount: number | string; termMonths: number; interestRatePercent: number | string;
+  ratePeriod?: 'monthly' | 'annual' | 'daily'; startDate?: string;
+}
+export interface SpeedDraftCalcResult {
+  principalAmount: number; termMonths: number; ratePeriod: 'monthly' | 'annual' | 'daily'; enteredRate: number; startDate: string;
+  firstInstallmentInterest: number; totalInterest: number; maturityPayable: number;
+  schedule: { installmentNo: number; dueDate: string; interestDue: number; principalDue: number; totalDue: number }[];
+}
+/** Interest-only Speed Draft quote via SpeedDraftScheduler — never persists. */
+export const speedDraftCalculatorApi = {
+  calculate: (body: SpeedDraftCalcInput) =>
+    http.post('/finance-calculator/speed-draft', snakeize(body)).then((r) => camelize(r.data) as SpeedDraftCalcResult),
+}
+
 /** One Pending monthly interest installment that needs releasing, as returned by fdInterestPaymentsApi.due(). */
 export interface FdInterestDueItem {
   id: number; installmentNo: number; dueDate: string; amount: number | string;
@@ -2384,7 +2409,7 @@ export const loanReportsApi = {
   pdf: (type: LoanReportType, params?: Record<string, any>) => reportPdf('loan', type, params),
 }
 
-export type CollectionReportType = 'daily-cash' | 'collection-summary' | 'officer-performance' | 'trend'
+export type CollectionReportType = 'daily-cash' | 'collection-summary' | 'officer-performance' | 'trend' | 'due-schedule'
 
 export const collectionReportsApi = {
   get: (type: CollectionReportType, params?: Record<string, any>) =>

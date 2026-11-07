@@ -231,7 +231,7 @@ export default function DashScreen({ go: _go, user: _user }: { go: Go; user?: Au
   const typeTop = typeRows.slice(0, 6)
   const typeRest = typeRows.slice(6).reduce((a, r) => a + r.outstanding, 0)
   const donutData = [...typeTop.map((r, i) => ({ label: r.name, value: r.outstanding, color: CAT[i] })), ...(typeRest > 0 ? [{ label: 'Other', value: typeRest, color: C.grey }] : [])].filter((x) => x.value > 0)
-  const statusColor: Record<string, string> = { Active: C.green, Pending: C.amber, Approved: C.blue, Closed: C.grey, Rejected: C.red, WrittenOff: C.red, Restructured: C.violet, Cancelled: C.grey }
+  const statusColor: Record<string, string> = { Active: C.green, Lapsed: C.amber, Pending: C.amber, Approved: C.blue, Closed: C.grey, Rejected: C.red, WrittenOff: C.red, Restructured: C.violet, Cancelled: C.grey }
   const statuses = d.loanStatusCounts ?? []
   const statusTotal = statuses.reduce((a, s) => a + s.count, 0)
   const agingColors = [C.amber, C.amber, C.red, C.red]

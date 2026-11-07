@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card, Btn, Badge, Field, Input, Select, BankSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../../components/ui'
 import { Icon } from '../../components/Icon'
+import { PaymentBreakdown } from '../../components/PaymentBreakdown'
 import { useFilePreview } from '../../components/FilePreview'
 import { PrintDocumentsPanel } from './PrintDocuments'
 import {
@@ -29,7 +30,7 @@ const dateOnly = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 10) : 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
 const statusTone: Record<LoanStatus, 'green' | 'red' | 'amber' | 'blue' | 'neutral'> = {
-  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
+  Pending: 'amber', Approved: 'blue', Rejected: 'red', Cancelled: 'red', Active: 'green', Lapsed: 'amber', Closed: 'neutral', WrittenOff: 'red', Restructured: 'amber',
 }
 const scheduleTone: Record<string, 'green' | 'red' | 'amber' | 'neutral'> = {
   Paid: 'green', Partial: 'amber', Overdue: 'red', Pending: 'neutral',
@@ -39,7 +40,7 @@ const chequeTone: Record<ChequeStatus, 'green' | 'red' | 'amber' | 'neutral' | '
 }
 
 
-const ACTIVE_STAGE_STATUSES: LoanStatus[] = ['Active', 'Closed', 'WrittenOff', 'Restructured']
+const ACTIVE_STAGE_STATUSES: LoanStatus[] = ['Active', 'Lapsed', 'Closed', 'WrittenOff', 'Restructured']
 
 const SECTIONS = [
   { id: 'summary', label: 'Summary', icon: 'chart' },
@@ -189,7 +190,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
   // here but not there, leaving a fully-settled loan stuck Active. This mirrors
   // that same aggregate check so the button only appears when it'll succeed.
   const dueBalance = (loan.summary?.dueBreakdown || []).reduce((a, r) => a + r.balance, 0)
-  const canCloseLoan = loan.status === 'Active' && Math.round(dueBalance * 100) / 100 <= 0.01
+  const canCloseLoan = (loan.status === 'Active' || loan.status === 'Lapsed') && Math.round(dueBalance * 100) / 100 <= 0.01
   const closeLoan = async () => {
     const ok = await notify.confirm({ title: `Close loan ${loan.code}?`, msg: 'This loan is fully settled but did not auto-close. Marks it Closed.', okText: 'Close Loan' })
     if (!ok) return
@@ -252,7 +253,7 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
               <Btn size="sm" variant="solid" icon="check" onClick={closeLoan}>Close Loan</Btn>
             </Can>
           )}
-          {loan.status === 'Active' && !pendingWriteOff && (() => {
+          {(loan.status === 'Active' || loan.status === 'Lapsed') && !pendingWriteOff && (() => {
             // Backend also gates this (LoanController::writeOffRequest — see LoanProvisioning)
             // and returns a 422 either way; disabling here is just a UX nicety so the user
             // sees why before clicking, not the source of truth.
@@ -639,6 +640,8 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
   const pendingCheque = all.filter((p) => p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending' && p.approvalStatus !== 'PendingApproval')
   const active = all.filter((p) => p.status !== 'Voided' && p.approvalStatus !== 'PendingApproval' && !(p.paymentMethod === 'Cheque' && p.clearanceStatus === 'Pending'))
   const voided = all.filter((p) => p.status === 'Voided')
+  const returnedCheques = (loan.postDatedCheques || []).filter((c) => c.status === 'Bounced' && !(c as any).facilityPaymentId)
+  const [viewReceipt, setViewReceipt] = useState<LoanPayment | null>(null)
 
   return (
     <>
@@ -688,7 +691,9 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
         {active.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No receipts recorded yet.</div> :
           <div className="col gap-2">
             {active.map((p) => (
-              <div key={p.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)' }}>
+              <div key={p.id} className="row between wrap" role="button" tabIndex={0} title="View receipt and how it was allocated"
+                onClick={() => setViewReceipt(p)} onKeyDown={(e) => { if (e.key === 'Enter') setViewReceipt(p) }}
+                style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', cursor: 'pointer' }}>
                 <div className="row gap-2" style={{ alignItems: 'center' }}>
                   <Icon n="receipt" s={15} />
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{p.code}</span>
@@ -705,10 +710,25 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
 
       <Card>
         <div className="eyebrow" style={{ marginBottom: 12 }}>Cancelled / Returned Receipts</div>
-        {voided.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No cancelled or returned receipts.</div> :
+        {voided.length === 0 && returnedCheques.length === 0 ? <div className="t-2" style={{ fontSize: 12.5 }}>No cancelled or returned receipts.</div> :
           <div className="col gap-2">
+            {returnedCheques.map((c) => (
+              <div key={`pdc-${c.id}`} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', opacity: 0.7 }}>
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <Icon n="x" s={15} c="var(--bad)" />
+                  <span style={{ fontSize: 12.5, fontWeight: 600, textDecoration: 'line-through' }}>Cheque #{c.chequeNo}</span>
+                  <span className="t-2" style={{ fontSize: 12 }}>{dateOnly(c.chequeDate)}{c.bank?.name ? ` · ${c.bank.name}` : ''} · returned before clearing, not applied</span>
+                </div>
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono', fontWeight: 600 }}>{money(c.amount)}</span>
+                  <Badge tone="red" dot>Cheque Returned</Badge>
+                </div>
+              </div>
+            ))}
             {voided.map((p) => (
-              <div key={p.id} className="row between wrap" style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', opacity: 0.7 }}>
+              <div key={p.id} className="row between wrap" role="button" tabIndex={0} title="View receipt and how it was allocated"
+                onClick={() => setViewReceipt(p)} onKeyDown={(e) => { if (e.key === 'Enter') setViewReceipt(p) }}
+                style={{ padding: '8px 12px', background: 'var(--bg-0)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', opacity: 0.7, cursor: 'pointer' }}>
                 <div className="row gap-2" style={{ alignItems: 'center' }}>
                   <Icon n="x" s={15} c="var(--bad)" />
                   <span style={{ fontSize: 12.5, fontWeight: 600, textDecoration: 'line-through' }}>{p.code}</span>
@@ -722,6 +742,38 @@ function ReceiptsPanel({ loan, me }: { loan: Loan; me?: AuthUser | null }) {
             ))}
           </div>}
       </Card>
+
+      <Modal open={!!viewReceipt} onClose={() => setViewReceipt(null)} title={viewReceipt ? `Receipt ${viewReceipt.code}` : ''} sub={`${loan.code} — ${loan.customer?.fullName || ''}`}
+        footer={<Btn variant="solid" onClick={() => setViewReceipt(null)}>Close</Btn>}>
+        {viewReceipt && (() => {
+          const p = viewReceipt
+          return (
+            <div className="col gap-2" style={{ fontSize: 13 }}>
+              <div className="row between"><span className="t-2">Date</span><b>{dateOnly(p.paidAt)}</b></div>
+              <div className="row between"><span className="t-2">Status</span>
+                {p.status === 'Voided' ? <Badge tone="red" dot>{p.clearanceStatus === 'Bounced' ? 'Cheque Returned' : 'Cancelled'}</Badge> : <Badge tone="green" dot>{p.paymentType === 'Settlement' ? 'Settlement' : 'Applied'}</Badge>}
+              </div>
+              <div className="row between" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+                <span className="t-2">Amount</span><span style={{ fontFamily: 'JetBrains Mono', fontWeight: 700 }}>{money(p.amount)}</span>
+              </div>
+              <div className="row between"><span className="t-2">Payment Method</span><b>{p.paymentMethod}{p.paymentType === 'Settlement' ? ' (Settlement)' : ''}</b></div>
+              {p.receiptNo && <div className="row between"><span className="t-2">Reference No.</span><b>{p.receiptNo}</b></div>}
+              {p.paymentMethod === 'Cheque' && p.bank?.name && <div className="row between"><span className="t-2">Bank</span><b>{p.bank.name}</b></div>}
+              {p.paymentMethod === 'Cheque' && p.chequeDate && <div className="row between"><span className="t-2">Cheque Date</span><b>{dateOnly(p.chequeDate)}</b></div>}
+              {p.clearanceStatus === 'Realized' && p.realizedAt && <div className="row between"><span className="t-2">Realized On</span><b>{dateOnly(p.realizedAt)}</b></div>}
+              {p.notes && <div className="row between"><span className="t-2">Notes</span><b>{p.notes}</b></div>}
+              <div className="row between" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}><span className="t-2">Received By</span><b>{p.receiver?.name || '—'}</b></div>
+              {p.status === 'Voided' && (
+                <div className="col gap-1" style={{ marginTop: 4, padding: '8px 12px', background: 'var(--bad-dim)', color: 'var(--bad)', border: '1px solid var(--bad)', borderRadius: 'var(--r-s)', fontSize: 12.5 }}>
+                  <div>Voided {dateOnly(p.voidedAt)} by {p.voider?.name || '—'}</div>
+                  {p.voidReason && <div>Reason: {p.voidReason}</div>}
+                </div>
+              )}
+              <div style={{ marginTop: 8, paddingTop: 10, borderTop: '1px solid var(--line)' }}><PaymentBreakdown paymentId={p.id} /></div>
+            </div>
+          )
+        })()}
+      </Modal>
     </>
   )
 }
@@ -853,7 +905,7 @@ function ChequesPanel({ loan, me, onChanged, notify }: { loan: Loan; me?: AuthUs
           <Td>{dateOnly(c.chequeDate)}</Td>
           <Td>{c.status === 'Realized' ? dateOnly(c.realizedAt) : '—'}</Td>
           <Td mono align="right">{money(c.amount)}</Td>
-          <Td align="center"><Badge tone={chequeTone[c.status]} dot>{c.status}</Badge></Td>
+          <Td align="center"><Badge tone={chequeTone[c.status]} dot>{c.status === 'Bounced' ? 'Returned' : c.status}</Badge></Td>
           <Td align="right">
             {c.status !== 'Realized' && (
               <Can user={me} module="Loan Payments" action="Delete">
@@ -907,6 +959,13 @@ function LedgerCard({ loan }: { loan: Loan }) {
       continue
     }
     rows.push({ date: p.paidAt, particulars: `Receipt ${p.code} (${p.paymentMethod})`, debit: 0, credit: num(p.amount), typeOrder: 4 })
+  }
+
+  // Post-dated cheques returned before they ever cleared have no payment behind them, so nothing
+  // was credited — listed for information only (0 debit / 0 credit).
+  for (const c of loan.postDatedCheques || []) {
+    if (c.status !== 'Bounced' || (c as any).facilityPaymentId) continue
+    rows.push({ date: ((c as any).updatedAt as string) || c.chequeDate, particulars: `Cheque RETURNED — #${c.chequeNo}${c.bank?.name ? ` (${c.bank.name})` : ''} — ${money(c.amount)} not applied`, debit: 0, credit: 0, typeOrder: 5, tone: 'bad' })
   }
 
   rows.sort((a, b) => {

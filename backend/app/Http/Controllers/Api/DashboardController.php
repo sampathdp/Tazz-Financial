@@ -31,7 +31,7 @@ class DashboardController extends Controller
             $today = now()->startOfDay();
             $monthStart = now()->startOfMonth();
 
-            $activeLoans = Loan::where('status', 'Active');
+            $activeLoans = Loan::whereIn('status', ['Active', 'Lapsed']);
             $totalLoanPortfolio = (clone $activeLoans)->sum('principal_amount');
             $outstandingLoanBalance = (clone $activeLoans)->sum('outstanding_balance_cache');
 

@@ -26,6 +26,46 @@ class LoanPaymentController extends Controller
         return $loan->payments()->with(['receiver:id,name', 'approver:id,name', 'voider:id,name', 'bank:id,name', 'pendingVoidRequest.requester:id,name', 'pendingAllocationRequest.requester:id,name', 'pendingAllocationRequest.firstApprover:id,name'])->get();
     }
 
+    /** Where one receipt's money went: capital / interest / default charge (OD) per installment,
+     *  plus any other charges it settled. Read from the allocation rows written when the
+     *  payment was applied, so it stays correct for voided receipts too. */
+    public function breakdown(FacilityPayment $payment)
+    {
+        $payment->load(['allocations.schedule:id,installment_no,due_date', 'chargeAllocations.charge.category:id,name']);
+
+        $installments = $payment->allocations
+            ->sortBy(fn ($a) => $a->schedule?->installment_no)
+            ->map(fn ($a) => [
+                'installment_no' => $a->schedule?->installment_no,
+                'due_date' => $a->schedule?->due_date?->toDateString(),
+                'principal' => (float) $a->principal_applied,
+                'interest' => (float) $a->interest_applied,
+                'penalty' => (float) $a->penalty_applied,
+            ])->values();
+
+        $charges = $payment->chargeAllocations
+            ->map(fn ($c) => ['name' => $c->charge?->category?->name ?? 'Charge', 'amount' => (float) $c->amount_applied])->values();
+
+        $capital = round($installments->sum('principal'), 2);
+        $interest = round($installments->sum('interest'), 2);
+        $od = round($installments->sum('penalty'), 2);
+        $other = round($charges->sum('amount'), 2);
+        $applied = round($capital + $interest + $od + $other, 2);
+
+        return [
+            'capital' => $capital,
+            'interest' => $interest,
+            'od_charge' => $od,
+            'other_charges' => $other,
+            'applied_total' => $applied,
+            'amount' => (float) $payment->amount,
+            // Non-zero only for a receipt not (yet) applied, e.g. a cheque pending clearance.
+            'unapplied' => round((float) $payment->amount - $applied, 2),
+            'installments' => $installments,
+            'charges' => $charges,
+        ];
+    }
+
     /** Preview-only: the receipt number the next payment on this loan would get,
      *  for display in the payment form before it's submitted — see NumberGenerator::peek(). */
     public function nextReceiptNo(Request $request, Loan $loan)
@@ -58,7 +98,7 @@ class LoanPaymentController extends Controller
         // Active covers normal loan servicing; Approved covers a pre-disbursement
         // charge (e.g. Document) being paid off before the loan generates a
         // schedule — see LoanController::disburse()'s gate on that charge.
-        if (!in_array($loan->status, ['Active', 'Approved'], true)) {
+        if (!in_array($loan->status, ['Active', 'Lapsed', 'Approved'], true)) {
             return response()->json(['message' => 'Payments can only be recorded against an active or approved loan.'], 422);
         }
         if ($loan->payments()->where('payment_type', 'Settlement')->where('approval_status', 'PendingApproval')->exists()) {
@@ -112,7 +152,7 @@ class LoanPaymentController extends Controller
 
         // Full settlement pays off and closes an active loan — meaningless before
         // the loan has even been disbursed.
-        if ($isSettlement && $loan->status !== 'Active') {
+        if ($isSettlement && !in_array($loan->status, ['Active', 'Lapsed'], true)) {
             return response()->json(['message' => 'A loan can only be settled once it is active.'], 422);
         }
 
