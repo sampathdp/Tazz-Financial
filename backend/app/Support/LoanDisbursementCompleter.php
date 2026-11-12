@@ -57,6 +57,9 @@ class LoanDisbursementCompleter
 
         $rows = LoanAmortizer::generate($loan->fresh(), $detail->fresh(), $params['first_installment_date'], (float) $financed);
         $loan->schedules()->insert($rows);
+        // The cache was seeded with bare capital above; once the schedule exists it must
+        // carry the full amount owed (principal + interest), same as after any payment.
+        $loan->update(['outstanding_balance_cache' => LoanPaymentAllocator::outstandingBalance($loan->fresh())]);
         self::applyEffectiveRate($detail->fresh(), $rows);
         self::generateSalesExecutiveCommission($loan->fresh(), $detail);
     }
