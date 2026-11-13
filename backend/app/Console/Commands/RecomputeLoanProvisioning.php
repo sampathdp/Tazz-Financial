@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Loan;
+use App\Support\LoanPaymentAllocator;
 use App\Support\LoanProvisioning;
 use Illuminate\Console\Command;
 
@@ -23,9 +24,11 @@ class RecomputeLoanProvisioning extends Command
     public function handle(): int
     {
         $count = 0;
-        Loan::whereIn('status', ['Active', 'Lapsed'])
+        Loan::with('loanDetail.loanType')->whereIn('status', ['Active', 'Lapsed'])
             ->chunkById(100, function ($loans) use (&$count) {
                 foreach ($loans as $loan) {
+                    // Penalty accrues daily with no payment event, so the balance cache drifts without this.
+                    $loan->update(['outstanding_balance_cache' => LoanPaymentAllocator::outstandingBalance($loan)]);
                     LoanProvisioning::refreshCache($loan);
                     $count++;
                 }

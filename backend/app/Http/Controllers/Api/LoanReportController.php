@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Loan;
+use App\Support\LoanPaymentAllocator;
 use App\Support\LoanSummary;
 use App\Support\ReportExport;
 use Carbon\Carbon;
@@ -545,7 +546,10 @@ class LoanReportController extends Controller
                 'chargesPaid' => round((float) $loan->charges->sum('paid_amount'), 2),
                 'totalScheduled' => round((float) ($loan->total_due_sum ?? 0), 2),
                 'totalPaid' => round((float) ($loan->paid_sum ?? 0), 2),
-                'outstandingBalance' => round((float) ($loan->outstanding_balance_cache ?? 0), 2),
+                // Live for open loans: the cache only refreshes on a payment/disbursement/nightly run, so penalty accrued since then would be missing.
+                'outstandingBalance' => in_array($loan->status, ['Active', 'Lapsed'], true)
+                    ? round(LoanPaymentAllocator::outstandingBalance($loan, $today), 2)
+                    : round((float) ($loan->outstanding_balance_cache ?? 0), 2),
                 'daysOverdue' => $daysOverdue,
                 'overdueAmount' => $overdueAmount,
                 'penaltyDue' => $penaltyDue,
