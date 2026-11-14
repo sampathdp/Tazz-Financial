@@ -240,9 +240,11 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
       <div>
         <PageHead crumbs="Speed Drafts" title={editing ? `Edit ${editing.code}` : 'New Speed Draft'} icon="coins"
           actions={<Btn variant="solid" onClick={backFromForm}>{editing ? `← Back to ${editing.code}` : '← Back to Speed Drafts'}</Btn>} />
-        <Card style={{ maxWidth: 720 }}>
-          <ErrorBanner error={err} />
-          <div className="col gap-4">
+        <ErrorBanner error={err} />
+        <div className="col gap-4" style={{ maxWidth: 1000 }}>
+          <Card>
+            <div className="eyebrow" style={{ marginBottom: 12 }}>Application</div>
+            <div className="col gap-4">
             <Field label="Customer">
               <SearchSelect
                 value={form.customerId ? `${customers.find((c) => c.id === form.customerId)?.fullName || ''}` : ''}
@@ -281,10 +283,12 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
               {' '}<b>Reducing balance</b>: interest is charged on the capital still outstanding, so it falls after a capital payment.
               {' '}<b>Flat</b>: interest is always charged on the original capital. Both give the same figures until capital is paid early.
             </div>
+            </div>
+          </Card>
 
             {needsInsurance && (
-              <div>
-                <div className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Insurance Policy</div>
+              <Card>
+                <div className="eyebrow" style={{ marginBottom: 10 }}>Insurance Policy</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <Field label="Insurance Company"><Input value={form.insurance?.insuranceCompany || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, insuranceCompany: e.target.value } }))} /></Field>
                   <Field label="Policy No"><Input value={form.insurance?.policyNo || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, policyNo: e.target.value } }))} /></Field>
@@ -293,13 +297,13 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
                   <Field label="Coverage"><Input value={form.insurance?.coverage || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, coverage: e.target.value } }))} placeholder="e.g. Comprehensive" /></Field>
                   <Field label="Remark" full><Input value={form.insurance?.remarks || ''} onChange={(e) => setForm((s) => ({ ...s, insurance: { ...s.insurance, remarks: e.target.value } }))} /></Field>
                 </div>
-              </div>
+              </Card>
             )}
 
             {selectedType?.requiresCollateral && (
-              <div>
-                <div className="row between" style={{ marginBottom: 8 }}>
-                  <span className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase' }}>Collateral</span>
+              <Card>
+                <div className="row between" style={{ marginBottom: 10 }}>
+                  <span className="eyebrow">Collateral / Security</span>
                   <Btn size="sm" variant="solid" icon="plus" onClick={addCollateral}>Add Item</Btn>
                 </div>
                 {form.collateral.map((c, i) => (
@@ -316,21 +320,21 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
                     <button className="mms-act" title="Remove" onClick={() => removeCollateral(i)}><Icon n="trash" s={14} /></button>
                   </div>
                 ))}
-              </div>
+              </Card>
             )}
 
-            <div>
-              <div className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Reference Person <span style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></div>
+            <Card>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Reference Person <span className="t-2" style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <Field label="Name"><Input value={form.referenceName || ''} onChange={(e) => setForm((s) => ({ ...s, referenceName: e.target.value }))} /></Field>
                 <Field label="NIC / Other ID No"><Input value={form.referenceIdNo || ''} onChange={(e) => setForm((s) => ({ ...s, referenceIdNo: e.target.value }))} /></Field>
                 <Field label="Address" full><textarea value={form.referenceAddress || ''} onChange={(e) => setForm((s) => ({ ...s, referenceAddress: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
               </div>
-            </div>
+            </Card>
 
-            <div>
-              <div className="row between" style={{ marginBottom: 8 }}>
-                <span className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase' }}>Co-Applicants <span style={{ fontWeight: 400, textTransform: 'none' }}>— joint borrowers, optional</span></span>
+            <Card>
+              <div className="row between" style={{ marginBottom: 10 }}>
+                <span className="eyebrow">Co-Applicants <span className="t-2" style={{ fontWeight: 400, textTransform: 'none' }}>— joint borrowers, optional</span></span>
                 <Btn size="sm" variant="solid" icon="plus" onClick={addCoApplicant}>Add Co-Applicant</Btn>
               </div>
               {form.coApplicants.length === 0 && <div className="t-2" style={{ fontSize: 12.5 }}>No co-applicants added.</div>}
@@ -350,11 +354,11 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
                   <button className="mms-act" title="Remove" onClick={() => removeCoApplicant(i)} style={{ marginTop: 6 }}><Icon n="trash" s={15} /></button>
                 </div>
               ))}
-            </div>
+            </Card>
 
-            <div>
-              <div className="row between" style={{ marginBottom: 8 }}>
-                <span className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase' }}>Guarantors <span style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></span>
+            <Card>
+              <div className="row between" style={{ marginBottom: 10 }}>
+                <span className="eyebrow">Guarantors <span className="t-2" style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></span>
                 <Btn size="sm" variant="solid" icon="plus" onClick={addGuarantor}>Add Guarantor</Btn>
               </div>
               {form.guarantors.length === 0 && <div className="t-2" style={{ fontSize: 12.5 }}>No guarantors added.</div>}
@@ -374,14 +378,13 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
                   <button className="mms-act" title="Remove" onClick={() => removeGuarantor(i)} style={{ marginTop: 6 }}><Icon n="trash" s={15} /></button>
                 </div>
               ))}
-            </div>
+            </Card>
 
             <div className="row gap-2">
               <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving…' : (editing ? 'Save Changes' : 'Submit Application')}</Btn>
               <Btn variant="solid" onClick={backFromForm}>Cancel</Btn>
             </div>
-          </div>
-        </Card>
+        </div>
       </div>
     )
   }
