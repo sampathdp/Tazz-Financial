@@ -192,7 +192,7 @@ class LoanController extends Controller
         $today = $request->filled('to') ? Carbon::parse($request->to)->startOfDay() : now()->startOfDay();
         $from = $request->filled('from') ? Carbon::parse($request->from)->startOfDay() : null;
 
-        return LoanSummary::overdueList($today, $from);
+        return LoanSummary::withReceivable(LoanSummary::overdueList($today, $from), $today);
     }
 
     public function show(Loan $loan)

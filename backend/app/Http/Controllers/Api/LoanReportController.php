@@ -99,7 +99,9 @@ class LoanReportController extends Controller
             ['metric' => 'Closed Loans', 'value' => $d['closedLoans']],
             ['metric' => 'Pending Loans', 'value' => $d['pendingLoans']],
             ['metric' => 'Written Off Loans', 'value' => $d['writtenOffLoans']],
-            ['metric' => 'Total Outstanding Balance', 'value' => $d['totalOutstandingBalance'], 'format' => 'money'],
+            ['metric' => 'Total Receivable (Outstanding)', 'value' => $d['totalOutstandingBalance'], 'format' => 'money'],
+            ['metric' => 'Total Interest (active loans)', 'value' => $d['totalInterest'], 'format' => 'money'],
+            ['metric' => 'Upcoming Interest (active loans)', 'value' => $d['upcomingInterest'], 'format' => 'money'],
             ['metric' => 'Average Loan Size', 'value' => $d['avgLoanSize'], 'format' => 'money'],
             ['metric' => 'Disbursed This Month (count)', 'value' => $d['disbursedThisMonthCount']],
             ['metric' => 'Disbursed This Month (amount)', 'value' => $d['disbursedThisMonthAmount'], 'format' => 'money'],
@@ -115,7 +117,9 @@ class LoanReportController extends Controller
     {
         $d = $this->parAging($request);
         $summaryRows = $this->formattedMetricRows([
-            ['metric' => 'Total Active Portfolio', 'value' => $d['totalPortfolio'], 'format' => 'money'],
+            ['metric' => 'Total Receivable (Active Portfolio)', 'value' => $d['totalPortfolio'], 'format' => 'money'],
+            ['metric' => 'Total Interest', 'value' => $d['totalInterest'], 'format' => 'money'],
+            ['metric' => 'Upcoming Interest', 'value' => $d['upcomingInterest'], 'format' => 'money'],
             ['metric' => 'PAR 30 %', 'value' => $d['par30Pct'], 'format' => 'percent'],
             ['metric' => 'PAR 60 %', 'value' => $d['par60Pct'], 'format' => 'percent'],
             ['metric' => 'NPL % (90+ days)', 'value' => $d['nplPct'], 'format' => 'percent'],
@@ -128,7 +132,8 @@ class LoanReportController extends Controller
                 'title' => 'Aging Buckets',
                 'columns' => [
                     ['key' => 'label', 'label' => 'Bucket'], ['key' => 'count', 'label' => 'Loans', 'align' => 'right', 'format' => 'number'],
-                    ['key' => 'amount', 'label' => 'Outstanding', 'align' => 'right', 'format' => 'money'], ['key' => 'pct', 'label' => '% of Portfolio', 'align' => 'right', 'format' => 'percent'],
+                    ['key' => 'amount', 'label' => 'Receivable (Outstanding)', 'align' => 'right', 'format' => 'money'], ['key' => 'pct', 'label' => '% of Portfolio', 'align' => 'right', 'format' => 'percent'],
+                    ['key' => 'totalInterest', 'label' => 'Total Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'upcomingInterest', 'label' => 'Upcoming Interest', 'align' => 'right', 'format' => 'money'],
                 ],
                 'rows' => $d['buckets'],
             ],
@@ -144,14 +149,16 @@ class LoanReportController extends Controller
             ['key' => 'code', 'label' => 'Loan Code'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'branch', 'label' => 'Branch'], ['key' => 'officer', 'label' => 'Officer'],
             ['key' => 'daysOverdue', 'label' => 'Days Overdue', 'align' => 'right', 'format' => 'number'], ['key' => 'installments', 'label' => 'Installments', 'align' => 'right', 'format' => 'number'],
             ['key' => 'overdueAmount', 'label' => 'Overdue Amount', 'align' => 'right', 'format' => 'money'], ['key' => 'penaltyDue', 'label' => 'Penalty Due', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'totalInterest', 'label' => 'Total Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'upcomingInterest', 'label' => 'Upcoming Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'totalReceivable', 'label' => 'Total Receivable', 'align' => 'right', 'format' => 'money'],
         ];
         $mapped = collect($rows)->map(fn ($r) => [
             'code' => $r['code'] ?? '', 'customer' => $r['customer']['full_name'] ?? '—', 'branch' => $r['branch']['name'] ?? '—',
             'officer' => $r['loan_detail']['recovery_officer']['name'] ?? $r['loan_detail']['loan_officer']['name'] ?? '—',
             'daysOverdue' => $r['daysOverdue'] ?? 0, 'installments' => $r['overdueInstallments'] ?? 0,
             'overdueAmount' => $r['overdueAmount'] ?? 0, 'penaltyDue' => $r['penaltyDue'] ?? 0,
+            'totalInterest' => $r['totalInterest'] ?? 0, 'upcomingInterest' => $r['upcomingInterest'] ?? 0, 'totalReceivable' => $r['totalReceivable'] ?? 0,
         ]);
-        $totalRow = ['customer' => 'Total', 'overdueAmount' => $mapped->sum('overdueAmount'), 'penaltyDue' => $mapped->sum('penaltyDue')];
+        $totalRow = ['customer' => 'Total', 'overdueAmount' => $mapped->sum('overdueAmount'), 'penaltyDue' => $mapped->sum('penaltyDue'), 'totalInterest' => $mapped->sum('totalInterest'), 'upcomingInterest' => $mapped->sum('upcomingInterest'), 'totalReceivable' => $mapped->sum('totalReceivable')];
         $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No overdue loans']];
 
         $to = $request->filled('to') ? Carbon::parse($request->to)->toDateString() : now()->toDateString();
@@ -169,6 +176,7 @@ class LoanReportController extends Controller
             ['key' => 'daysOverdue', 'label' => 'Days', 'align' => 'right', 'format' => 'number'], ['key' => 'installments', 'label' => 'Inst.', 'align' => 'right', 'format' => 'number'],
             ['key' => 'overdueAmount', 'label' => 'Overdue', 'align' => 'right', 'format' => 'money'], ['key' => 'penaltyDue', 'label' => 'Penalty', 'align' => 'right', 'format' => 'money'],
             ['key' => 'totalArrears', 'label' => 'Total Arrears', 'align' => 'right', 'format' => 'money'], ['key' => 'outstanding', 'label' => 'Outstanding', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'totalInterest', 'label' => 'Total Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'upcomingInterest', 'label' => 'Upcoming Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'totalReceivable', 'label' => 'Total Receivable', 'align' => 'right', 'format' => 'money'],
             ['key' => 'lastPaidDate', 'label' => 'Last Paid'], ['key' => 'lastPaidAmount', 'label' => 'Last Amount', 'align' => 'right', 'format' => 'money'],
             ['key' => 'officer', 'label' => 'Recovery Officer'],
         ];
@@ -179,10 +187,11 @@ class LoanReportController extends Controller
             'overdueAmount' => $r['overdueAmount'] ?? 0, 'penaltyDue' => $r['penaltyDue'] ?? 0,
             'totalArrears' => (float) ($r['overdueAmount'] ?? 0) + (float) ($r['penaltyDue'] ?? 0),
             'outstanding' => (float) ($r['total_due_sum'] ?? 0) - (float) ($r['paid_sum'] ?? 0),
+            'totalInterest' => $r['totalInterest'] ?? 0, 'upcomingInterest' => $r['upcomingInterest'] ?? 0, 'totalReceivable' => $r['totalReceivable'] ?? 0,
             'lastPaidDate' => $r['lastPaymentDate'] ?? '-', 'lastPaidAmount' => $r['lastPaymentAmount'] ?? null,
             'officer' => $r['loan_detail']['recovery_officer']['name'] ?? '-',
         ]);
-        $totalRow = ['customer' => 'Total', 'overdueAmount' => $mapped->sum('overdueAmount'), 'penaltyDue' => $mapped->sum('penaltyDue'), 'totalArrears' => $mapped->sum('totalArrears'), 'outstanding' => $mapped->sum('outstanding')];
+        $totalRow = ['customer' => 'Total', 'overdueAmount' => $mapped->sum('overdueAmount'), 'penaltyDue' => $mapped->sum('penaltyDue'), 'totalArrears' => $mapped->sum('totalArrears'), 'outstanding' => $mapped->sum('outstanding'), 'totalInterest' => $mapped->sum('totalInterest'), 'upcomingInterest' => $mapped->sum('upcomingInterest'), 'totalReceivable' => $mapped->sum('totalReceivable')];
         $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No overdue loans']];
 
         $to = $request->filled('to') ? Carbon::parse($request->to)->toDateString() : now()->toDateString();
@@ -197,6 +206,7 @@ class LoanReportController extends Controller
         $columns = [
             ['key' => 'code', 'label' => 'Loan Code'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'branch', 'label' => 'Branch'], ['key' => 'loanType', 'label' => 'Loan Type'],
             ['key' => 'officer', 'label' => 'Officer'], ['key' => 'principal', 'label' => 'Principal', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'totalInterest', 'label' => 'Total Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'upcomingInterest', 'label' => 'Upcoming Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'totalReceivable', 'label' => 'Total Receivable', 'align' => 'right', 'format' => 'money'],
             ['key' => 'disbursed', 'label' => 'Disbursed'], ['key' => 'status', 'label' => 'Status', 'align' => 'center'],
             ['key' => 'bank', 'label' => 'Bank'], ['key' => 'accountHolder', 'label' => 'Account Holder'], ['key' => 'accountNo', 'label' => 'Account No'],
         ];
@@ -207,8 +217,9 @@ class LoanReportController extends Controller
             'code' => $l->code, 'customer' => $l->customer?->full_name ?? '—', 'branch' => $l->branch?->name ?? '—',
             'loanType' => $l->loanDetail?->loanType?->name ?? '—', 'officer' => $l->loanDetail?->loanOfficer?->name ?? '—',
             'principal' => (float) $l->principal_amount, 'disbursed' => $l->disbursed_at?->format('Y-m-d') ?? '—', 'status' => $l->status,
+            'totalInterest' => (float) $l->total_interest, 'upcomingInterest' => (float) $l->upcoming_interest, 'totalReceivable' => (float) $l->total_receivable,
         ]);
-        $totalRow = ['customer' => 'Total', 'principal' => $mapped->sum('principal')];
+        $totalRow = ['customer' => 'Total', 'principal' => $mapped->sum('principal'), 'totalInterest' => $mapped->sum('totalInterest'), 'upcomingInterest' => $mapped->sum('upcomingInterest'), 'totalReceivable' => $mapped->sum('totalReceivable')];
         $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No disbursements in this range']];
 
         return ['Loan Disbursement', $sections, $this->periodMeta($request)];
@@ -219,13 +230,16 @@ class LoanReportController extends Controller
         $loans = $this->closedLoans($request);
         $columns = [
             ['key' => 'code', 'label' => 'Loan Code'], ['key' => 'customer', 'label' => 'Customer'], ['key' => 'branch', 'label' => 'Branch'],
-            ['key' => 'loanType', 'label' => 'Loan Type'], ['key' => 'principal', 'label' => 'Principal', 'align' => 'right', 'format' => 'money'], ['key' => 'closed', 'label' => 'Closed'],
+            ['key' => 'loanType', 'label' => 'Loan Type'], ['key' => 'principal', 'label' => 'Principal', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'totalInterest', 'label' => 'Total Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'upcomingInterest', 'label' => 'Upcoming Interest', 'align' => 'right', 'format' => 'money'], ['key' => 'totalReceivable', 'label' => 'Total Receivable', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'closed', 'label' => 'Closed'],
         ];
         $mapped = $loans->map(fn (Loan $l) => [
             'code' => $l->code, 'customer' => $l->customer?->full_name ?? '—', 'branch' => $l->branch?->name ?? '—',
             'loanType' => $l->loanDetail?->loanType?->name ?? '—', 'principal' => (float) $l->principal_amount, 'closed' => $l->closed_at?->format('Y-m-d') ?? '—',
+            'totalInterest' => (float) $l->total_interest, 'upcomingInterest' => (float) $l->upcoming_interest, 'totalReceivable' => (float) $l->total_receivable,
         ]);
-        $totalRow = ['customer' => 'Total', 'principal' => $mapped->sum('principal')];
+        $totalRow = ['customer' => 'Total', 'principal' => $mapped->sum('principal'), 'totalInterest' => $mapped->sum('totalInterest'), 'upcomingInterest' => $mapped->sum('upcomingInterest'), 'totalReceivable' => $mapped->sum('totalReceivable')];
         $sections = [['columns' => $columns, 'rows' => $mapped->all(), 'totalRow' => $totalRow, 'emptyText' => 'No closed loans in this range']];
 
         return ['Closed Loans', $sections, $this->periodMeta($request)];
@@ -264,6 +278,7 @@ class LoanReportController extends Controller
         // Live balances (same as the Loan Detail report), not the stale outstanding_balance_cache column.
         $open = LoanSummary::liveOutstanding(now()->startOfDay(), $byLoanType);
         $totalOutstanding = $open->sum('outstanding');
+        $interest = LoanSummary::interestFigures($open->pluck('id'));
         $activeCount = $open->count();
 
         $monthStart = now()->startOfMonth();
@@ -284,6 +299,10 @@ class LoanReportController extends Controller
             'pendingLoans' => (int) ($counts['Pending'] ?? 0),
             'writtenOffLoans' => (int) ($counts['WrittenOff'] ?? 0),
             'totalOutstandingBalance' => round((float) $totalOutstanding, 2),
+            // Total Receivable = the live outstanding above (capital + interest + default/other charges still owed).
+            'totalReceivable' => round((float) $totalOutstanding, 2),
+            'totalInterest' => round((float) $interest->sum('totalInterest'), 2),
+            'upcomingInterest' => round((float) $interest->sum('upcomingInterest'), 2),
             'avgLoanSize' => $activeCount > 0 ? round((float) $totalOutstanding / $activeCount, 2) : 0,
             'disbursedThisMonthCount' => (clone $thisMonth)->count(),
             'disbursedThisMonthAmount' => round((float) $disbursedThisMonth, 2),
@@ -301,7 +320,7 @@ class LoanReportController extends Controller
         $loanTypeId = $request->filled('loanTypeId') ? (int) $request->loanTypeId : null;
         $loanOfficerId = $request->filled('loanOfficerId') ? (int) $request->loanOfficerId : null;
 
-        return LoanSummary::overdueList($today, $from, $loanTypeId, $loanOfficerId);
+        return LoanSummary::withReceivable(LoanSummary::overdueList($today, $from, $loanTypeId, $loanOfficerId), $today);
     }
 
     /** PAR 30/60/90 aging buckets + NPL% (90+ days), by outstanding balance. */
@@ -338,6 +357,12 @@ class LoanReportController extends Controller
         // Live balances (same as the Loan Detail report), limited to the same loan type as
         // $oldestDueDate above — otherwise every other type's loans landed in "current".
         $open = LoanSummary::liveOutstanding($today, fn ($q) => $q->when($loanTypeId, fn ($q2) => $q2->whereHas('loanDetail', fn ($q3) => $q3->where('loan_type_id', $loanTypeId))));
+        $interest = LoanSummary::interestFigures($open->pluck('id'), $today);
+        foreach ($buckets as &$b) {
+            $b['totalInterest'] = 0.0;
+            $b['upcomingInterest'] = 0.0;
+        }
+        unset($b);
 
         $totalPortfolio = 0.0;
         foreach ($open as $loan) {
@@ -355,10 +380,14 @@ class LoanReportController extends Controller
             };
             $buckets[$key]['count']++;
             $buckets[$key]['amount'] += $balance;
+            $buckets[$key]['totalInterest'] += $interest[$loan['id']]['totalInterest'] ?? 0.0;
+            $buckets[$key]['upcomingInterest'] += $interest[$loan['id']]['upcomingInterest'] ?? 0.0;
         }
 
         foreach ($buckets as &$b) {
             $b['amount'] = round($b['amount'], 2);
+            $b['totalInterest'] = round($b['totalInterest'], 2);
+            $b['upcomingInterest'] = round($b['upcomingInterest'], 2);
             $b['pct'] = $totalPortfolio > 0 ? round(($b['amount'] / $totalPortfolio) * 100, 2) : 0.0;
         }
         unset($b);
@@ -370,6 +399,9 @@ class LoanReportController extends Controller
         return [
             'asOf' => $today->toDateString(),
             'totalPortfolio' => round($totalPortfolio, 2),
+            'totalReceivable' => round($totalPortfolio, 2),
+            'totalInterest' => round((float) $interest->sum('totalInterest'), 2),
+            'upcomingInterest' => round((float) $interest->sum('upcomingInterest'), 2),
             'buckets' => array_values($buckets),
             'par30Pct' => $totalPortfolio > 0 ? round(($atRisk30 / $totalPortfolio) * 100, 2) : 0.0,
             'par60Pct' => $totalPortfolio > 0 ? round(($atRisk60 / $totalPortfolio) * 100, 2) : 0.0,
@@ -394,7 +426,8 @@ class LoanReportController extends Controller
             ->when($request->filled('loanTypeId'), fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $request->loanTypeId)))
             ->orderByDesc('disbursed_at')
             ->get()
-            ->each(fn (Loan $l) => $l->bankDetail?->makeVisible('account_number'));
+            ->each(fn (Loan $l) => $l->bankDetail?->makeVisible('account_number'))
+            ->pipe(fn ($loans) => $this->withInterest($loans));
     }
 
     private function closedLoans(Request $request)
@@ -407,7 +440,21 @@ class LoanReportController extends Controller
             ->whereBetween('closed_at', [$from, $to])
             ->when($request->filled('loanTypeId'), fn ($q) => $q->whereHas('loanDetail', fn ($q2) => $q2->where('loan_type_id', $request->loanTypeId)))
             ->orderByDesc('closed_at')
-            ->get();
+            ->get()
+            ->pipe(fn ($loans) => $this->withInterest($loans));
+    }
+
+    /** Sets total_interest/upcoming_interest (LoanSummary::interestFigures) and total_receivable (LoanSummary::receivables) on each Loan model. */
+    private function withInterest($loans)
+    {
+        $interest = LoanSummary::interestFigures($loans->pluck('id'));
+        $receivable = LoanSummary::receivables($loans->pluck('id'));
+
+        return $loans->each(function (Loan $l) use ($interest, $receivable) {
+            $l->setAttribute('total_interest', $interest[$l->id]['totalInterest'] ?? 0.0);
+            $l->setAttribute('upcoming_interest', $interest[$l->id]['upcomingInterest'] ?? 0.0);
+            $l->setAttribute('total_receivable', $receivable[$l->id] ?? 0.0);
+        });
     }
 
     /**
@@ -484,7 +531,9 @@ class LoanReportController extends Controller
         }
 
         $today = Carbon::today();
-        $rows = $query->orderByDesc('id')->get()->map(function (Loan $loan) use ($today) {
+        $loans = $query->orderByDesc('id')->get();
+        $interest = LoanSummary::interestFigures($loans->pluck('id'), $today);
+        $rows = $loans->map(function (Loan $loan) use ($today, $interest) {
             $loanType = $loan->loanDetail?->loanType;
             $graceDays = (int) ($loanType?->grace_period_days ?? 5);
             $chargeRate = (float) ($loanType?->default_charge_rate_percent ?? 0);
@@ -548,6 +597,8 @@ class LoanReportController extends Controller
                 'chargesPaid' => round((float) $loan->charges->sum('paid_amount'), 2),
                 'totalScheduled' => round((float) ($loan->total_due_sum ?? 0), 2),
                 'totalPaid' => round((float) ($loan->paid_sum ?? 0), 2),
+                'totalInterest' => $interest[$loan->id]['totalInterest'] ?? 0.0,
+                'upcomingInterest' => $interest[$loan->id]['upcomingInterest'] ?? 0.0,
                 // Live for open loans: the cache only refreshes on a payment/disbursement/nightly run, so penalty accrued since then would be missing.
                 'outstandingBalance' => in_array($loan->status, ['Active', 'Lapsed'], true)
                     ? round(LoanPaymentAllocator::outstandingBalance($loan, $today), 2)

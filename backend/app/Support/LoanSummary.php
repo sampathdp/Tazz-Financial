@@ -247,6 +247,100 @@ class LoanSummary
     }
 
     /**
+     * Total Receivable per loan: what the customer still owes — unpaid capital +
+     * unpaid interest + default charges + other charges, net of waivers. Same
+     * LoanPaymentAllocator::outstandingBalance() figure as the Loan Detail
+     * report's Outstanding Balance and the Loan screen's "Amount To Be
+     * Collected". Only open (Active/Lapsed) loans owe anything; every other
+     * status is 0. Costs a few queries per open loan, so callers pass only the
+     * loans actually on the report.
+     *
+     * @param  iterable<int>  $loanIds
+     * @return \Illuminate\Support\Collection<int, float> keyed by loan id
+     */
+    public static function receivables(iterable $loanIds, ?Carbon $asOf = null): \Illuminate\Support\Collection
+    {
+        $ids = collect($loanIds)->map(fn ($id) => (int) $id)->unique()->values();
+        $out = $ids->mapWithKeys(fn ($id) => [$id => 0.0]);
+        if ($ids->isEmpty()) {
+            return $out;
+        }
+
+        foreach (self::liveOutstanding($asOf, fn ($q) => $q->whereIn('credit_facilities.id', $ids->all())) as $row) {
+            $out[$row['id']] = $row['outstanding'];
+        }
+
+        return $out;
+    }
+
+    /** Adds 'totalReceivable' (see receivables()) to each overdueList() row. */
+    public static function withReceivable(\Illuminate\Support\Collection $rows, ?Carbon $asOf = null): \Illuminate\Support\Collection
+    {
+        $receivable = self::receivables($rows->pluck('id'), $asOf);
+
+        return $rows->map(fn ($r) => $r + ['totalReceivable' => $receivable[$r['id']] ?? 0.0])->values();
+    }
+
+    /**
+     * Interest figures per loan, in two bulk queries (no per-loan round trips):
+     *
+     *  - totalInterest:    all interest on the loan's repayment schedule (sum of
+     *                      interest_due — already net of any early-settlement
+     *                      waiver, see LoanPaymentAllocator::applySettlementWaiver()).
+     *  - upcomingInterest: interest still to be collected on installments not yet
+     *                      fallen due (due_date on/after $asOf), net of interest
+     *                      already paid on them by live (not voided, not pending
+     *                      approval) payments. Only open (Active/Lapsed) loans have
+     *                      any — a closed, written-off or restructured loan will
+     *                      never collect its remaining schedule.
+     *
+     * @param  iterable<int>  $loanIds
+     * @return \Illuminate\Support\Collection<int, array{totalInterest: float, upcomingInterest: float}> keyed by loan id
+     */
+    public static function interestFigures(iterable $loanIds, ?Carbon $asOf = null): \Illuminate\Support\Collection
+    {
+        $asOf ??= Carbon::today();
+        $ids = collect($loanIds)->map(fn ($id) => (int) $id)->unique()->values();
+        $out = $ids->mapWithKeys(fn ($id) => [$id => ['totalInterest' => 0.0, 'upcomingInterest' => 0.0]]);
+
+        foreach ($ids->chunk(1000) as $chunk) {
+            $totals = \Illuminate\Support\Facades\DB::table('facility_schedules')
+                ->whereIn('credit_facility_id', $chunk->all())
+                ->groupBy('credit_facility_id')
+                ->selectRaw('credit_facility_id as id, COALESCE(SUM(interest_due), 0) as total')
+                ->pluck('total', 'id');
+
+            $interestPaid = \Illuminate\Support\Facades\DB::table('facility_payment_allocations as a')
+                ->join('facility_payments as p', 'p.id', '=', 'a.facility_payment_id')
+                ->where(fn ($q) => $q->whereNull('p.status')->orWhere('p.status', '!=', 'Voided'))
+                ->where(fn ($q) => $q->whereNull('p.approval_status')->orWhere('p.approval_status', '!=', 'PendingApproval'))
+                ->whereNotNull('a.facility_schedule_id')
+                ->groupBy('a.facility_schedule_id')
+                ->selectRaw('a.facility_schedule_id as schedule_id, SUM(a.interest_applied) as paid');
+
+            $upcoming = \Illuminate\Support\Facades\DB::table('facility_schedules as s')
+                ->join('credit_facilities as cf', 'cf.id', '=', 's.credit_facility_id')
+                ->leftJoinSub($interestPaid, 'ip', 'ip.schedule_id', '=', 's.id')
+                ->whereIn('s.credit_facility_id', $chunk->all())
+                ->whereIn('cf.status', ['Active', 'Lapsed'])
+                ->where('s.due_date', '>=', $asOf->toDateString())
+                ->where('s.status', '!=', 'Paid')
+                ->groupBy('s.credit_facility_id')
+                ->selectRaw('s.credit_facility_id as id, COALESCE(SUM(GREATEST(0, s.interest_due - COALESCE(ip.paid, 0))), 0) as upcoming')
+                ->pluck('upcoming', 'id');
+
+            foreach ($chunk as $id) {
+                $out[$id] = [
+                    'totalInterest' => round((float) ($totals[$id] ?? 0), 2),
+                    'upcomingInterest' => round((float) ($upcoming[$id] ?? 0), 2),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Active loans with at least one installment past its due date and not
      * fully paid, as of $asOf (days-overdue/penalty computed as of it). If
      * $from is given, only installments due on/after that date count.
@@ -290,7 +384,9 @@ class LoanSummary
             ->unique('credit_facility_id')
             ->keyBy('credit_facility_id');
 
-        return $loans->map(function ($loan) use ($asOf, $lastPayments) {
+        $interest = self::interestFigures($loans->pluck('id'), $asOf);
+
+        return $loans->map(function ($loan) use ($asOf, $lastPayments, $interest) {
             $lastPayment = $lastPayments->get($loan->id);
             $loanType = $loan->loanDetail?->loanType;
             $graceDays = (int) ($loanType?->grace_period_days ?? 5);
@@ -317,6 +413,8 @@ class LoanSummary
             $data['penaltyDue'] = round((float) $overdueSchedules->sum(
                 fn ($s) => self::penaltyDueForRow($s, $graceDays, $chargeRate, $asOf)
             ), 2);
+            $data['totalInterest'] = $interest[$loan->id]['totalInterest'] ?? 0.0;
+            $data['upcomingInterest'] = $interest[$loan->id]['upcomingInterest'] ?? 0.0;
 
             return $data;
         })->sortByDesc('daysOverdue')->values();

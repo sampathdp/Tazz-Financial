@@ -64,6 +64,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
     { label: 'Days Overdue', key: 'daysOverdue', align: 'right', format: 'number' }, { label: 'Installments', key: 'installments', align: 'right', format: 'number' },
     { label: 'Overdue Amount', key: 'overdueAmount', align: 'right', format: 'money' }, { label: 'OD / Penalty', key: 'penaltyDue', align: 'right', format: 'money' },
     { label: 'Total Arrears', key: 'totalArrears', align: 'right', format: 'money' }, { label: 'Outstanding', key: 'outstanding', align: 'right', format: 'money' },
+    { label: 'Total Interest', key: 'totalInterest', align: 'right', format: 'money' }, { label: 'Upcoming Interest', key: 'upcomingInterest', align: 'right', format: 'money' }, { label: 'Total Receivable', key: 'totalReceivable', align: 'right', format: 'money' },
     { label: 'Last Paid Date', key: 'lastPaidDate' }, { label: 'Last Paid Amount', key: 'lastPaidAmount', align: 'right', format: 'money' },
     { label: 'Recovery Officer', key: 'officer' },
   ]
@@ -72,13 +73,14 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
       code: l.code, customer: l.customer?.fullName || '—', product: l.loanDetail?.loanType?.name || '—',
       daysOverdue: l.daysOverdue, installments: num(l.overdueInstallments), overdueAmount: num(l.overdueAmount), penaltyDue: num(l.penaltyDue),
       totalArrears: num(l.overdueAmount) + num(l.penaltyDue), outstanding: num(l.totalDueSum) - num(l.paidSum),
+      totalInterest: num(l.totalInterest), upcomingInterest: num(l.upcomingInterest), totalReceivable: num(l.totalReceivable),
       lastPaidDate: l.lastPaymentDate || '—', lastPaidAmount: l.lastPaymentAmount != null ? num(l.lastPaymentAmount) : null,
       officer: l.loanDetail?.recoveryOfficer?.name || '—',
     }))
-    const sum = (k: 'overdueAmount' | 'penaltyDue' | 'totalArrears' | 'outstanding') => data.reduce((a, r) => a + r[k], 0)
+    const sum = (k: 'overdueAmount' | 'penaltyDue' | 'totalArrears' | 'outstanding' | 'totalInterest' | 'upcomingInterest' | 'totalReceivable') => data.reduce((a, r) => a + r[k], 0)
     void exportFlatTableToExcel({
       reportTitle: 'Overdue Loans', meta: `As of ${to || todayIso()}${from ? ` (from ${from})` : ''}`, columns, rows: data,
-      totalRow: { customer: 'Total', overdueAmount: sum('overdueAmount'), penaltyDue: sum('penaltyDue'), totalArrears: sum('totalArrears'), outstanding: sum('outstanding') },
+      totalRow: { customer: 'Total', overdueAmount: sum('overdueAmount'), penaltyDue: sum('penaltyDue'), totalArrears: sum('totalArrears'), outstanding: sum('outstanding'), totalInterest: sum('totalInterest'), upcomingInterest: sum('upcomingInterest'), totalReceivable: sum('totalReceivable') },
       emptyText: 'No overdue loans',
     }, `overdue-loans-${todayIso()}.xlsx`)
   }
@@ -121,7 +123,7 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
         <Table cols={[
           { label: 'Loan' }, { label: 'Customer' }, { label: 'Product' }, { label: 'Days Overdue', align: 'center' },
           { label: 'Installments', align: 'center' }, { label: 'Overdue Amount', align: 'right' }, { label: 'OD / Penalty', align: 'right' },
-          { label: 'Total Arrears', align: 'right' }, { label: 'Outstanding', align: 'right' }, { label: 'Last Paid Date', align: 'center' }, { label: 'Last Paid Amount', align: 'right' }, { label: 'Recovery Officer' },
+          { label: 'Total Arrears', align: 'right' }, { label: 'Outstanding', align: 'right' }, { label: 'Total Interest', align: 'right' }, { label: 'Upcoming Interest', align: 'right' }, { label: 'Total Receivable', align: 'right' }, { label: 'Last Paid Date', align: 'center' }, { label: 'Last Paid Amount', align: 'right' }, { label: 'Recovery Officer' },
         ]}
           rows={filtered} empty="No overdue loans — every active loan is up to date."
           onRow={openRow}
@@ -139,6 +141,9 @@ export function OverdueLoansScreen({ go, user: me }: { go: Go; user?: AuthUser |
             <Td mono align="right">{money(l.penaltyDue)}</Td>
             <Td mono align="right" style={{ fontWeight: 600 }}>{money(num(l.overdueAmount) + num(l.penaltyDue))}</Td>
             <Td mono align="right">{money(num(l.totalDueSum) - num(l.paidSum))}</Td>
+            <Td mono align="right">{money(l.totalInterest)}</Td>
+            <Td mono align="right">{money(l.upcomingInterest)}</Td>
+            <Td mono align="right" style={{ fontWeight: 600 }}>{money(l.totalReceivable)}</Td>
             <Td align="center">{l.lastPaymentDate || '—'}</Td>
             <Td mono align="right">{l.lastPaymentAmount != null ? money(l.lastPaymentAmount) : '—'}</Td>
             <Td>{l.loanDetail?.recoveryOfficer?.name || '—'}</Td>

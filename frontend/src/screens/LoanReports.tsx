@@ -79,7 +79,8 @@ export function LoanPortfolioSummaryScreen({ go: _go, user: me }: { go: Go; user
       rows: [
         { metric: 'Total Loans', value: data.totalLoans }, { metric: 'Active Loans', value: data.activeLoans },
         { metric: 'Closed Loans', value: data.closedLoans }, { metric: 'Pending Loans', value: data.pendingLoans },
-        { metric: 'Written Off Loans', value: data.writtenOffLoans }, { metric: 'Total Outstanding Balance', value: money(data.totalOutstandingBalance) },
+        { metric: 'Written Off Loans', value: data.writtenOffLoans }, { metric: 'Total Receivable (Outstanding)', value: money(data.totalOutstandingBalance) },
+        { metric: 'Total Interest (active loans)', value: money(data.totalInterest) }, { metric: 'Upcoming Interest (active loans)', value: money(data.upcomingInterest) },
         { metric: 'Average Loan Size', value: money(data.avgLoanSize) }, { metric: 'Disbursed This Month (count)', value: data.disbursedThisMonthCount },
         { metric: 'Disbursed This Month (amount)', value: money(data.disbursedThisMonthAmount) }, { metric: 'Disbursed Last Month (amount)', value: money(data.disbursedLastMonthAmount) },
         { metric: 'Loan Growth %', value: pct(data.loanGrowthPct) },
@@ -107,7 +108,9 @@ export function LoanPortfolioSummaryScreen({ go: _go, user: me }: { go: Go; user
         <>
           <TileGrid>
             <Tile icon="coins" label="Total Loans" value={String(data.totalLoans)} />
-            <Tile icon="wallet" label="Total Outstanding" value={money(data.totalOutstandingBalance)} />
+            <Tile icon="wallet" label="Total Receivable" value={money(data.totalOutstandingBalance)} />
+            <Tile icon="pie" label="Total Interest" value={money(data.totalInterest)} />
+            <Tile icon="chart" label="Upcoming Interest" value={money(data.upcomingInterest)} tone="green" />
             <Tile icon="target" label="Avg Loan Size" value={money(data.avgLoanSize)} />
             <Tile icon="arrowUp" label="Loan Growth %" value={pct(data.loanGrowthPct)} tone={data.loanGrowthPct != null ? (data.loanGrowthPct >= 0 ? 'green' : 'red') : 'blue'} />
           </TileGrid>
@@ -152,13 +155,16 @@ export function LoanParAgingScreen({ go: _go, user: me }: { go: Go; user?: AuthU
           title: 'Summary',
           columns: [{ label: 'Metric', key: 'metric' }, { label: 'Value', key: 'value', align: 'right' }],
           rows: [
-            { metric: 'Total Active Portfolio', value: money(data.totalPortfolio) }, { metric: 'PAR 30 %', value: pct(data.par30Pct) },
+            { metric: 'Total Receivable (Active Portfolio)', value: money(data.totalPortfolio) },
+            { metric: 'Total Interest', value: money(data.totalInterest) }, { metric: 'Upcoming Interest', value: money(data.upcomingInterest) },
+            { metric: 'PAR 30 %', value: pct(data.par30Pct) },
             { metric: 'PAR 60 %', value: pct(data.par60Pct) }, { metric: 'NPL % (90+)', value: pct(data.nplPct) },
           ],
         },
         {
           title: 'Aging Buckets',
-          columns: [{ label: 'Bucket', key: 'label' }, { label: 'Loans', key: 'count', align: 'right', format: 'number' }, { label: 'Outstanding', key: 'amount', align: 'right', format: 'money' }, { label: '% of Portfolio', key: 'pct', align: 'right', format: 'percent' }],
+          columns: [{ label: 'Bucket', key: 'label' }, { label: 'Loans', key: 'count', align: 'right', format: 'number' }, { label: 'Receivable (Outstanding)', key: 'amount', align: 'right', format: 'money' }, { label: '% of Portfolio', key: 'pct', align: 'right', format: 'percent' },
+            { label: 'Total Interest', key: 'totalInterest', align: 'right', format: 'money' }, { label: 'Upcoming Interest', key: 'upcomingInterest', align: 'right', format: 'money' }],
           rows: data.buckets || [],
         },
       ],
@@ -187,7 +193,9 @@ export function LoanParAgingScreen({ go: _go, user: me }: { go: Go; user?: AuthU
       {loading ? <Loading /> : err ? <ErrBox msg={err} /> : data && (
         <>
           <TileGrid>
-            <Tile icon="wallet" label="Total Active Portfolio" value={money(data.totalPortfolio)} />
+            <Tile icon="wallet" label="Total Receivable (Active Portfolio)" value={money(data.totalPortfolio)} />
+            <Tile icon="pie" label="Total Interest" value={money(data.totalInterest)} />
+            <Tile icon="chart" label="Upcoming Interest" value={money(data.upcomingInterest)} tone="green" />
             <Tile icon="alert" label="PAR 30 %" value={pct(data.par30Pct)} tone={data.par30Pct > 5 ? 'red' : 'green'} />
             <Tile icon="alert" label="PAR 60 %" value={pct(data.par60Pct)} tone={data.par60Pct > 5 ? 'red' : 'green'} />
             <Tile icon="shield" label="NPL % (90+)" value={pct(data.nplPct)} tone={data.nplPct > 5 ? 'red' : 'green'} />
@@ -197,12 +205,14 @@ export function LoanParAgingScreen({ go: _go, user: me }: { go: Go; user?: AuthU
               data={(data.buckets || []).map((b: any) => ({ label: b.label.replace(' days', 'd').replace(' (NPL)', ''), amount: b.amount }))} />
           </ChartCard>
           <Card pad={0}>
-            <Table cols={[{ label: 'Bucket' }, { label: 'Loans', align: 'right' }, { label: 'Outstanding', align: 'right' }, { label: '% of Portfolio', align: 'right' }]}
+            <Table cols={[{ label: 'Bucket' }, { label: 'Loans', align: 'right' }, { label: 'Receivable (Outstanding)', align: 'right' }, { label: '% of Portfolio', align: 'right' }, { label: 'Total Interest', align: 'right' }, { label: 'Upcoming Interest', align: 'right' }]}
               rows={data.buckets || []} empty="No data"
               render={(b: any) => <>
                 <Td>{b.label}</Td><Td align="right" mono>{b.count}</Td><Td align="right" mono>{money(b.amount)}</Td><Td align="right" mono>{pct(b.pct)}</Td>
+                <Td align="right" mono>{money(b.totalInterest)}</Td><Td align="right" mono>{money(b.upcomingInterest)}</Td>
               </>}
-              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td align="right" mono>{(data.buckets || []).reduce((a: number, b: any) => a + Number(b.count || 0), 0)}</Td><Td align="right" mono>{money((data.buckets || []).reduce((a: number, b: any) => a + Number(b.amount || 0), 0))}</Td><Td /></tr>} />
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td align="right" mono>{(data.buckets || []).reduce((a: number, b: any) => a + Number(b.count || 0), 0)}</Td><Td align="right" mono>{money((data.buckets || []).reduce((a: number, b: any) => a + Number(b.amount || 0), 0))}</Td><Td />
+                <Td align="right" mono>{money(data.totalInterest)}</Td><Td align="right" mono>{money(data.upcomingInterest)}</Td></tr>} />
           </Card>
         </>
       )}
@@ -236,6 +246,9 @@ export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
   const totalOverdue = rows.reduce((a, r) => a + Number(r.overdueAmount || 0), 0)
   const totalPenalty = rows.reduce((a, r) => a + Number(r.penaltyDue || 0), 0)
   const totalInstallments = rows.reduce((a, r) => a + Number(r.overdueInstallments || 0), 0)
+  const totalInterest = rows.reduce((a, r) => a + Number(r.totalInterest || 0), 0)
+  const upcomingInterest = rows.reduce((a, r) => a + Number(r.upcomingInterest || 0), 0)
+  const totalReceivable = rows.reduce((a, r) => a + Number(r.totalReceivable || 0), 0)
 
   const byOfficer = useMemo(() => {
     const m = new Map<string, number>()
@@ -251,6 +264,7 @@ export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
     { label: 'Loan Code', key: 'code' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' }, { label: 'Officer', key: 'officer' },
     { label: 'Days Overdue', key: 'daysOverdue', align: 'right', format: 'number' }, { label: 'Installments', key: 'installments', align: 'right', format: 'number' },
     { label: 'Overdue Amount', key: 'overdueAmount', align: 'right', format: 'money' }, { label: 'Penalty Due', key: 'penaltyDue', align: 'right', format: 'money' },
+    { label: 'Total Interest', key: 'totalInterest', align: 'right', format: 'money' }, { label: 'Upcoming Interest', key: 'upcomingInterest', align: 'right', format: 'money' }, { label: 'Total Receivable', key: 'totalReceivable', align: 'right', format: 'money' },
   ]
   const exportExcel = () => {
     void exportFlatTableToExcel({
@@ -260,8 +274,9 @@ export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
         code: l.code, customer: l.customer?.fullName || '—', branch: l.branch?.name || '—',
         officer: l.loanDetail?.recoveryOfficer?.name || l.loanDetail?.loanOfficer?.name || '—',
         daysOverdue: l.daysOverdue, installments: l.overdueInstallments, overdueAmount: Number(l.overdueAmount || 0), penaltyDue: Number(l.penaltyDue || 0),
+        totalInterest: Number(l.totalInterest || 0), upcomingInterest: Number(l.upcomingInterest || 0), totalReceivable: Number(l.totalReceivable || 0),
       })),
-      totalRow: { customer: 'Total', installments: totalInstallments, overdueAmount: totalOverdue, penaltyDue: totalPenalty },
+      totalRow: { customer: 'Total', installments: totalInstallments, overdueAmount: totalOverdue, penaltyDue: totalPenalty, totalInterest, upcomingInterest, totalReceivable },
       emptyText: 'No overdue loans',
     }, `loan-arrears-${today()}.xlsx`)
   }
@@ -298,6 +313,9 @@ export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
             <Tile icon="list" label="Outstanding Installments" value={totalInstallments.toFixed(2)} tone="amber" />
             <Tile icon="wallet" label="Overdue Amount" value={money(totalOverdue)} tone="red" />
             <Tile icon="coins" label="Penalty Due" value={money(totalPenalty)} tone="amber" />
+            <Tile icon="pie" label="Total Interest" value={money(totalInterest)} />
+            <Tile icon="chart" label="Upcoming Interest" value={money(upcomingInterest)} tone="green" />
+            <Tile icon="wallet" label="Total Receivable" value={money(totalReceivable)} tone="amber" />
           </TileGrid>
           {byOfficer.length > 0 && (
             <ChartCard title="Arrears by Recovery Officer (top 8)">
@@ -309,6 +327,7 @@ export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
               { label: 'Loan Code' }, { label: 'Customer' }, { label: 'Branch' }, { label: 'Officer' },
               { label: 'Days Overdue', align: 'right' as const }, { label: 'Installments', align: 'right' as const },
               { label: 'Overdue Amount', align: 'right' as const }, { label: 'Penalty Due', align: 'right' as const },
+              { label: 'Total Interest', align: 'right' as const }, { label: 'Upcoming Interest', align: 'right' as const }, { label: 'Total Receivable', align: 'right' as const },
             ]} rows={rows} empty="No overdue loans"
               render={(l: OverdueLoan) => <>
                 <Td mono>{l.code}</Td>
@@ -319,8 +338,11 @@ export function LoanArrearsScreen({ go: _go, user: me }: { go: Go; user?: AuthUs
                 <Td align="right" mono>{l.overdueInstallments}</Td>
                 <Td align="right" mono>{money(l.overdueAmount)}</Td>
                 <Td align="right" mono>{money(l.penaltyDue)}</Td>
+                <Td align="right" mono>{money(l.totalInterest)}</Td>
+                <Td align="right" mono>{money(l.upcomingInterest)}</Td>
+                <Td align="right" mono>{money(l.totalReceivable)}</Td>
               </>}
-              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td align="right" mono>{totalInstallments}</Td><Td align="right" mono>{money(totalOverdue)}</Td><Td align="right" mono>{money(totalPenalty)}</Td></tr>} />
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td align="right" mono>{totalInstallments}</Td><Td align="right" mono>{money(totalOverdue)}</Td><Td align="right" mono>{money(totalPenalty)}</Td><Td align="right" mono>{money(totalInterest)}</Td><Td align="right" mono>{money(upcomingInterest)}</Td><Td align="right" mono>{money(totalReceivable)}</Td></tr>} />
           </Card>
         </>
       )}
@@ -349,6 +371,9 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
   }, [fromDate, toDate, branchId, loanTypeId])
 
   const total = rows.reduce((a, r) => a + Number(r.principalAmount || 0), 0)
+  const totalInterest = rows.reduce((a, r) => a + Number(r.totalInterest || 0), 0)
+  const upcomingInterest = rows.reduce((a, r) => a + Number(r.upcomingInterest || 0), 0)
+  const totalReceivable = rows.reduce((a, r) => a + Number(r.totalReceivable || 0), 0)
 
   const trend = useMemo(() => {
     const m = new Map<string, number>()
@@ -365,16 +390,20 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
       reportTitle: 'Loan Disbursement', meta: `Period: ${fromDate || '—'} to ${toDate || today()}`,
       columns: [
         { label: 'Loan Code', key: 'code' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' }, { label: 'Loan Type', key: 'loanType' },
-        { label: 'Officer', key: 'officer' }, { label: 'Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Disbursed', key: 'disbursed' }, { label: 'Status', key: 'status', align: 'center' },
+        { label: 'Officer', key: 'officer' }, { label: 'Principal', key: 'principal', align: 'right', format: 'money' },
+        { label: 'Total Interest', key: 'totalInterest', align: 'right', format: 'money' }, { label: 'Upcoming Interest', key: 'upcomingInterest', align: 'right', format: 'money' }, { label: 'Total Receivable', key: 'totalReceivable', align: 'right', format: 'money' },
+        { label: 'Disbursed', key: 'disbursed' }, { label: 'Status', key: 'status', align: 'center' },
         { label: 'Bank', key: 'bank' }, { label: 'Account Holder', key: 'accountHolder' }, { label: 'Account No', key: 'accountNo' },
       ],
       rows: rows.map((l) => ({
         code: l.code, customer: l.customer?.fullName || '—', branch: l.branch?.name || '—', loanType: l.loanDetail?.loanType?.name || '—',
-        officer: l.loanDetail?.loanOfficer?.name || '—', principal: Number(l.principalAmount || 0), disbursed: dateOnly(l.disbursedAt), status: l.status,
+        officer: l.loanDetail?.loanOfficer?.name || '—', principal: Number(l.principalAmount || 0),
+        totalInterest: Number(l.totalInterest || 0), upcomingInterest: Number(l.upcomingInterest || 0), totalReceivable: Number(l.totalReceivable || 0),
+        disbursed: dateOnly(l.disbursedAt), status: l.status,
         bank: l.bankDetail ? `${l.bankDetail.bank?.name || ''}${l.bankDetail.bankBranch ? ` ${l.bankDetail.bankBranch}` : ''}`.trim() : '—',
         accountHolder: l.bankDetail?.accountHolder || '—', accountNo: l.bankDetail?.accountNumber || '—',
       })),
-      totalRow: { customer: 'Total', principal: total },
+      totalRow: { customer: 'Total', principal: total, totalInterest, upcomingInterest, totalReceivable },
       emptyText: 'No disbursements in this range',
     }, `loan-disbursement-${today()}.xlsx`)
   }
@@ -403,6 +432,9 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
           <TileGrid>
             <Tile icon="coins" label="Loans Disbursed" value={String(rows.length)} />
             <Tile icon="wallet" label="Total Disbursed" value={money(total)} tone="green" />
+            <Tile icon="pie" label="Total Interest" value={money(totalInterest)} />
+            <Tile icon="chart" label="Upcoming Interest" value={money(upcomingInterest)} tone="green" />
+            <Tile icon="wallet" label="Total Receivable" value={money(totalReceivable)} tone="amber" />
           </TileGrid>
           {trend.length > 1 && (
             <ChartCard title="Disbursed Amount by Day">
@@ -412,7 +444,9 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
           <Card pad={0}>
             <Table cols={[
               { label: 'Loan Code' }, { label: 'Customer' }, { label: 'Branch' }, { label: 'Loan Type' },
-              { label: 'Officer' }, { label: 'Principal', align: 'right' as const }, { label: 'Disbursed' }, { label: 'Status', align: 'center' as const },
+              { label: 'Officer' }, { label: 'Principal', align: 'right' as const },
+              { label: 'Total Interest', align: 'right' as const }, { label: 'Upcoming Interest', align: 'right' as const }, { label: 'Total Receivable', align: 'right' as const },
+              { label: 'Disbursed' }, { label: 'Status', align: 'center' as const },
               { label: 'Bank' }, { label: 'Account Holder' }, { label: 'Account No' },
             ]} rows={rows} empty="No disbursements in this range"
               render={(l: Loan) => <>
@@ -422,13 +456,16 @@ export function LoanDisbursementScreen({ go: _go, user: me }: { go: Go; user?: A
                 <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
                 <Td>{l.loanDetail?.loanOfficer?.name || '—'}</Td>
                 <Td align="right" mono>{money(l.principalAmount)}</Td>
+                <Td align="right" mono>{money(l.totalInterest)}</Td>
+                <Td align="right" mono>{money(l.upcomingInterest)}</Td>
+                <Td align="right" mono>{money(l.totalReceivable)}</Td>
                 <Td>{dateOnly(l.disbursedAt)}</Td>
                 <Td align="center"><Badge tone={l.status === 'Active' ? 'green' : 'neutral'} dot>{l.status}</Badge></Td>
                 <Td>{l.bankDetail ? `${l.bankDetail.bank?.name || ''}${l.bankDetail.bankBranch ? ` · ${l.bankDetail.bankBranch}` : ''}` : '—'}</Td>
                 <Td>{l.bankDetail?.accountHolder || '—'}</Td>
                 <Td mono>{l.bankDetail?.accountNumber || '—'}</Td>
               </>}
-              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td align="right" mono>{money(total)}</Td><Td /><Td /><Td /><Td /><Td /></tr>} />
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td align="right" mono>{money(total)}</Td><Td align="right" mono>{money(totalInterest)}</Td><Td align="right" mono>{money(upcomingInterest)}</Td><Td align="right" mono>{money(totalReceivable)}</Td><Td /><Td /><Td /><Td /><Td /></tr>} />
           </Card>
         </>
       )}
@@ -457,6 +494,9 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
   }, [fromDate, toDate, branchId, loanTypeId])
 
   const total = rows.reduce((a, r) => a + Number(r.principalAmount || 0), 0)
+  const totalInterest = rows.reduce((a, r) => a + Number(r.totalInterest || 0), 0)
+  const upcomingInterest = rows.reduce((a, r) => a + Number(r.upcomingInterest || 0), 0)
+  const totalReceivable = rows.reduce((a, r) => a + Number(r.totalReceivable || 0), 0)
 
   const byType = useMemo(() => {
     const m = new Map<string, number>()
@@ -469,13 +509,15 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
       reportTitle: 'Closed Loans', meta: `Period: ${fromDate || '—'} to ${toDate || today()}`,
       columns: [
         { label: 'Loan Code', key: 'code' }, { label: 'Customer', key: 'customer' }, { label: 'Branch', key: 'branch' },
-        { label: 'Loan Type', key: 'loanType' }, { label: 'Principal', key: 'principal', align: 'right', format: 'money' }, { label: 'Closed', key: 'closed' },
+        { label: 'Loan Type', key: 'loanType' }, { label: 'Principal', key: 'principal', align: 'right', format: 'money' },
+        { label: 'Total Interest', key: 'totalInterest', align: 'right', format: 'money' }, { label: 'Upcoming Interest', key: 'upcomingInterest', align: 'right', format: 'money' }, { label: 'Total Receivable', key: 'totalReceivable', align: 'right', format: 'money' },
+        { label: 'Closed', key: 'closed' },
       ],
       rows: rows.map((l) => ({
         code: l.code, customer: l.customer?.fullName || '—', branch: l.branch?.name || '—', loanType: l.loanDetail?.loanType?.name || '—',
-        principal: Number(l.principalAmount || 0), closed: dateOnly(l.closedAt),
+        principal: Number(l.principalAmount || 0), totalInterest: Number(l.totalInterest || 0), upcomingInterest: Number(l.upcomingInterest || 0), totalReceivable: Number(l.totalReceivable || 0), closed: dateOnly(l.closedAt),
       })),
-      totalRow: { customer: 'Total', principal: total },
+      totalRow: { customer: 'Total', principal: total, totalInterest, upcomingInterest, totalReceivable },
       emptyText: 'No closed loans in this range',
     }, `loan-closed-${today()}.xlsx`)
   }
@@ -504,6 +546,9 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
           <TileGrid>
             <Tile icon="check" label="Loans Closed" value={String(rows.length)} tone="green" />
             <Tile icon="coins" label="Total Principal" value={money(total)} />
+            <Tile icon="pie" label="Total Interest" value={money(totalInterest)} />
+            <Tile icon="chart" label="Upcoming Interest" value={money(upcomingInterest)} tone="green" />
+            <Tile icon="wallet" label="Total Receivable" value={money(totalReceivable)} tone="amber" />
           </TileGrid>
           {byType.length > 0 && (
             <ChartCard title="Closed by Loan Type">
@@ -513,7 +558,8 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
           <Card pad={0}>
             <Table cols={[
               { label: 'Loan Code' }, { label: 'Customer' }, { label: 'Branch' }, { label: 'Loan Type' },
-              { label: 'Principal', align: 'right' as const }, { label: 'Closed' },
+              { label: 'Principal', align: 'right' as const },
+              { label: 'Total Interest', align: 'right' as const }, { label: 'Upcoming Interest', align: 'right' as const }, { label: 'Total Receivable', align: 'right' as const }, { label: 'Closed' },
             ]} rows={rows} empty="No closed loans in this range"
               render={(l: Loan) => <>
                 <Td mono>{l.code}</Td>
@@ -521,9 +567,12 @@ export function LoanClosedLoansScreen({ go: _go, user: me }: { go: Go; user?: Au
                 <Td>{l.branch?.name || '—'}</Td>
                 <Td>{l.loanDetail?.loanType?.name || '—'}</Td>
                 <Td align="right" mono>{money(l.principalAmount)}</Td>
+                <Td align="right" mono>{money(l.totalInterest)}</Td>
+                <Td align="right" mono>{money(l.upcomingInterest)}</Td>
+                <Td align="right" mono>{money(l.totalReceivable)}</Td>
                 <Td>{dateOnly(l.closedAt)}</Td>
               </>}
-              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td align="right" mono>{money(total)}</Td><Td /></tr>} />
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td align="right" mono>{money(total)}</Td><Td align="right" mono>{money(totalInterest)}</Td><Td align="right" mono>{money(upcomingInterest)}</Td><Td align="right" mono>{money(totalReceivable)}</Td><Td /></tr>} />
           </Card>
         </>
       )}
@@ -587,7 +636,8 @@ const DETAIL_EXCEL_COLUMNS: ExcelColumn[] = [
   { label: 'Insurance Amount', key: 'insuranceAmount', align: 'right', format: 'money' },
   { label: 'Charges Due', key: 'chargesDue', align: 'right', format: 'money' }, { label: 'Charges Paid', key: 'chargesPaid', align: 'right', format: 'money' },
   { label: 'Total Scheduled', key: 'totalScheduled', align: 'right', format: 'money' }, { label: 'Total Paid', key: 'totalPaid', align: 'right', format: 'money' },
-  { label: 'Outstanding Balance', key: 'outstandingBalance', align: 'right', format: 'money' },
+  { label: 'Total Interest', key: 'totalInterest', align: 'right', format: 'money' }, { label: 'Upcoming Interest', key: 'upcomingInterest', align: 'right', format: 'money' },
+  { label: 'Total Receivable (Outstanding)', key: 'outstandingBalance', align: 'right', format: 'money' },
   { label: 'Days Overdue', key: 'daysOverdue', align: 'right', format: 'number' },
   { label: 'Overdue Amount', key: 'overdueAmount', align: 'right', format: 'money' }, { label: 'Penalty Due', key: 'penaltyDue', align: 'right', format: 'money' },
   { label: 'Rejected Reason', key: 'rejectedReason' }, { label: 'Cancelled Reason', key: 'cancelledReason' }, { label: 'Cancelled Date', key: 'cancelledAt' },
@@ -638,6 +688,8 @@ export function LoanDetailReportScreen({ go: _go, user: me }: { go: Go; user?: A
 
   const totalPrincipal = rows.reduce((a, r) => a + Number(r.principal || 0), 0)
   const totalOutstanding = rows.reduce((a, r) => a + Number(r.outstandingBalance || 0), 0)
+  const totalInterest = rows.reduce((a, r) => a + Number(r.totalInterest || 0), 0)
+  const upcomingInterest = rows.reduce((a, r) => a + Number(r.upcomingInterest || 0), 0)
   const overdueCount = rows.filter((r) => r.daysOverdue > 0).length
 
   const exportExcel = () => {
@@ -646,7 +698,7 @@ export function LoanDetailReportScreen({ go: _go, user: me }: { go: Go; user?: A
       meta: `${rows.length} loan(s)${applied.fromDate || applied.toDate ? ` — ${DATE_FIELDS.find((d) => d.value === applied.dateField)?.label}: ${applied.fromDate || '—'} to ${applied.toDate || today()}` : ''}`,
       columns: DETAIL_EXCEL_COLUMNS,
       rows: rows as unknown as Record<string, unknown>[],
-      totalRow: { customerName: 'Total', principal: totalPrincipal, outstandingBalance: totalOutstanding },
+      totalRow: { customerName: 'Total', principal: totalPrincipal, outstandingBalance: totalOutstanding, totalInterest, upcomingInterest },
       emptyText: 'No loans match the selected filters',
     }, `loan-detail-report-${today()}.xlsx`)
   }
@@ -717,13 +769,16 @@ export function LoanDetailReportScreen({ go: _go, user: me }: { go: Go; user?: A
           <TileGrid>
             <Tile icon="coins" label="Loans" value={String(rows.length)} />
             <Tile icon="wallet" label="Total Principal" value={money(totalPrincipal)} />
-            <Tile icon="wallet" label="Total Outstanding" value={money(totalOutstanding)} tone="amber" />
+            <Tile icon="wallet" label="Total Receivable" value={money(totalOutstanding)} tone="amber" />
+            <Tile icon="pie" label="Total Interest" value={money(totalInterest)} />
+            <Tile icon="chart" label="Upcoming Interest" value={money(upcomingInterest)} tone="green" />
             <Tile icon="alert" label="Overdue Loans" value={String(overdueCount)} tone={overdueCount > 0 ? 'red' : 'green'} />
           </TileGrid>
           <Card pad={0}>
             <Table cols={[
               { label: 'Loan Code' }, { label: 'Customer' }, { label: 'NIC' }, { label: 'Branch' }, { label: 'Loan Type' },
-              { label: 'Officer' }, { label: 'Principal', align: 'right' as const }, { label: 'Outstanding', align: 'right' as const },
+              { label: 'Officer' }, { label: 'Principal', align: 'right' as const }, { label: 'Total Receivable', align: 'right' as const },
+              { label: 'Total Interest', align: 'right' as const }, { label: 'Upcoming Interest', align: 'right' as const },
               { label: 'Status', align: 'center' as const }, { label: 'Days Overdue', align: 'right' as const }, { label: 'Disbursed' },
             ]} rows={rows} empty="No loans match the selected filters"
               render={(l: LoanDetailReportRow) => <>
@@ -735,11 +790,13 @@ export function LoanDetailReportScreen({ go: _go, user: me }: { go: Go; user?: A
                 <Td>{l.loanOfficer || '—'}</Td>
                 <Td align="right" mono>{money(l.principal)}</Td>
                 <Td align="right" mono>{money(l.outstandingBalance)}</Td>
+                <Td align="right" mono>{money(l.totalInterest)}</Td>
+                <Td align="right" mono>{money(l.upcomingInterest)}</Td>
                 <Td align="center"><Badge tone={l.status === 'Active' ? 'green' : l.status === 'Lapsed' ? 'amber' : l.status === 'Closed' ? 'neutral' : l.daysOverdue > 0 ? 'red' : 'neutral'} dot>{l.status}</Badge></Td>
                 <Td align="right" mono>{l.daysOverdue > 0 ? l.daysOverdue : '—'}</Td>
                 <Td>{dateOnly(l.disbursedAt)}</Td>
               </>}
-              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td /><Td align="right" mono>{money(totalPrincipal)}</Td><Td align="right" mono>{money(totalOutstanding)}</Td><Td /><Td /><Td /></tr>} />
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td /><Td /><Td align="right" mono>{money(totalPrincipal)}</Td><Td align="right" mono>{money(totalOutstanding)}</Td><Td align="right" mono>{money(totalInterest)}</Td><Td align="right" mono>{money(upcomingInterest)}</Td><Td /><Td /><Td /></tr>} />
           </Card>
         </>
       )}

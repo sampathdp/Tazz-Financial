@@ -534,6 +534,12 @@ export interface Loan {
   disbursedAmount?: number | string | null;
   disbursedAt?: string | null;
   outstandingBalanceCache?: number | string | null;
+  /** Report rows only (LoanSummary::interestFigures): all scheduled interest on the loan. */
+  totalInterest?: number;
+  /** Report rows only: unpaid interest on installments not yet due (0 unless Active/Lapsed). */
+  upcomingInterest?: number;
+  /** Report rows only (LoanSummary::receivables): still owed — capital + interest + default/other charges (0 unless Active/Lapsed). */
+  totalReceivable?: number;
   closedAt?: string | null;
 
   /** Loan-specific fields, nested — see LoanFacilityDetail. Always present on a real Loan. */
@@ -2425,6 +2431,8 @@ export interface LoanDetailReportRow {
   insuranceCompany?: string | null; insurancePolicyNo?: string | null; insuranceAmount: number;
   chargesDue: number; chargesPaid: number;
   totalScheduled: number; totalPaid: number; outstandingBalance: number;
+  /** All scheduled interest / unpaid interest on installments not yet due (see LoanSummary::interestFigures). */
+  totalInterest: number; upcomingInterest: number;
   daysOverdue: number; overdueAmount: number; penaltyDue: number;
   rejectedReason?: string | null; cancelledReason?: string | null; cancelledAt?: string | null; createdAt?: string | null;
 }
