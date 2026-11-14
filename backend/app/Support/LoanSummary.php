@@ -210,6 +210,43 @@ class LoanSummary
     }
 
     /**
+     * Live outstanding balance of every open (Active/Lapsed) loan in the
+     * caller's branch scope: the same LoanPaymentAllocator::outstandingBalance()
+     * figure the Loan Detail report and Loan screen show, NOT
+     * credit_facilities.outstanding_balance_cache. The cache only refreshes on
+     * a payment/disbursement event or the nightly loans:recompute-provisioning
+     * run, so default charges accrued since then (and any waiver or charge
+     * added without a payment) are missing from it; summing the cache is why
+     * the Dashboard total drifted from the Loan Detail report.
+     *
+     * @param  callable|null  $filter  extra constraints on the Loan query (e.g. loan type)
+     * @return \Illuminate\Support\Collection<int, array{id:int, branch_id:?int, loan_type_id:?int, principal:float, outstanding:float}>
+     */
+    public static function liveOutstanding(?Carbon $asOf = null, ?callable $filter = null): \Illuminate\Support\Collection
+    {
+        $asOf ??= Carbon::today();
+        $rows = collect();
+
+        Loan::with('loanDetail.loanType')
+            ->whereIn('status', ['Active', 'Lapsed'])
+            ->when($filter, fn ($q) => $filter($q))
+            ->chunkById(200, function ($loans) use ($rows, $asOf) {
+                foreach ($loans as $loan) {
+                    $typeId = $loan->loanDetail?->loan_type_id;
+                    $rows->push([
+                        'id' => (int) $loan->id,
+                        'branch_id' => $loan->branch_id !== null ? (int) $loan->branch_id : null,
+                        'loan_type_id' => $typeId !== null ? (int) $typeId : null,
+                        'principal' => (float) $loan->principal_amount,
+                        'outstanding' => round(LoanPaymentAllocator::outstandingBalance($loan, $asOf), 2),
+                    ]);
+                }
+            }, 'credit_facilities.id', 'id');
+
+        return $rows;
+    }
+
+    /**
      * Active loans with at least one installment past its due date and not
      * fully paid, as of $asOf (days-overdue/penalty computed as of it). If
      * $from is given, only installments due on/after that date count.
@@ -344,7 +381,7 @@ class LoanSummary
      */
     /**
      * A schedule's allocation rows minus those of voided / pending-approval
-     * payments (voids are soft — the rows stay). Use this, never raw
+     * payments (voids are soft â€” the rows stay). Use this, never raw
      * ->allocations, for any "how much has been collected" figure.
      * Expects `allocations.payment` eager-loaded.
      */

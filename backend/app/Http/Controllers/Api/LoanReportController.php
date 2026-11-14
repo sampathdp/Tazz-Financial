@@ -201,9 +201,9 @@ class LoanReportController extends Controller
             ['key' => 'bank', 'label' => 'Bank'], ['key' => 'accountHolder', 'label' => 'Account Holder'], ['key' => 'accountNo', 'label' => 'Account No'],
         ];
         $mapped = $loans->map(fn (Loan $l) => [
-            'bank' => $l->bankDetail ? trim($l->bankDetail->bank?->name . ' ' . $l->bankDetail->bank_branch) : '�',
-            'accountHolder' => $l->bankDetail?->account_holder ?? '�',
-            'accountNo' => $l->bankDetail?->account_number ?? '�',
+            'bank' => $l->bankDetail ? trim($l->bankDetail->bank?->name . ' ' . $l->bankDetail->bank_branch) : '—',
+            'accountHolder' => $l->bankDetail?->account_holder ?? '—',
+            'accountNo' => $l->bankDetail?->account_number ?? '—',
             'code' => $l->code, 'customer' => $l->customer?->full_name ?? '—', 'branch' => $l->branch?->name ?? '—',
             'loanType' => $l->loanDetail?->loanType?->name ?? '—', 'officer' => $l->loanDetail?->loanOfficer?->name ?? '—',
             'principal' => (float) $l->principal_amount, 'disbursed' => $l->disbursed_at?->format('Y-m-d') ?? '—', 'status' => $l->status,
@@ -261,9 +261,10 @@ class LoanReportController extends Controller
         $byLoanType = fn ($q) => $q->when($loanTypeId, fn ($q2) => $q2->whereHas('loanDetail', fn ($q3) => $q3->where('loan_type_id', $loanTypeId)));
 
         $counts = $byLoanType(Loan::query())->selectRaw('status, count(*) as c')->groupBy('status')->pluck('c', 'status');
-        $active = $byLoanType(Loan::whereIn('status', ['Active', 'Lapsed']));
-        $totalOutstanding = (clone $active)->sum('outstanding_balance_cache');
-        $activeCount = (clone $active)->count();
+        // Live balances (same as the Loan Detail report), not the stale outstanding_balance_cache column.
+        $open = LoanSummary::liveOutstanding(now()->startOfDay(), $byLoanType);
+        $totalOutstanding = $open->sum('outstanding');
+        $activeCount = $open->count();
 
         $monthStart = now()->startOfMonth();
         $lastMonthStart = now()->subMonthNoOverflow()->startOfMonth();
@@ -319,8 +320,8 @@ class LoanReportController extends Controller
             ->where('facility_schedules.due_date', '<', $today)
             ->where('facility_schedules.status', '!=', 'Paid')
             ->when($loanTypeId, function ($q) use ($loanTypeId) {
-                $q->join('loan_details', 'loan_details.credit_facility_id', '=', 'credit_facilities.id')
-                    ->where('loan_details.loan_type_id', $loanTypeId);
+                $q->join('loan_facility_details', 'loan_facility_details.credit_facility_id', '=', 'credit_facilities.id')
+                    ->where('loan_facility_details.loan_type_id', $loanTypeId);
             })
             ->groupBy('facility_schedules.credit_facility_id')
             ->selectRaw('facility_schedules.credit_facility_id as loan_id, MIN(facility_schedules.due_date) as oldest_due_date')
@@ -334,26 +335,27 @@ class LoanReportController extends Controller
             'par90_plus' => ['label' => '90+ days (NPL)', 'min' => 90, 'max' => null, 'count' => 0, 'amount' => 0.0],
         ];
 
-        $totalPortfolio = 0.0;
-        Loan::whereIn('status', ['Active', 'Lapsed'])->select('id', 'outstanding_balance_cache')
-            ->chunk(500, function ($loans) use (&$buckets, &$totalPortfolio, $oldestDueDate, $today) {
-                foreach ($loans as $loan) {
-                    $balance = (float) $loan->outstanding_balance_cache;
-                    $totalPortfolio += $balance;
-                    $oldest = $oldestDueDate->get($loan->id);
-                    $daysOverdue = $oldest ? (int) $today->diffInDays(Carbon::parse($oldest)) : 0;
+        // Live balances (same as the Loan Detail report), limited to the same loan type as
+        // $oldestDueDate above — otherwise every other type's loans landed in "current".
+        $open = LoanSummary::liveOutstanding($today, fn ($q) => $q->when($loanTypeId, fn ($q2) => $q2->whereHas('loanDetail', fn ($q3) => $q3->where('loan_type_id', $loanTypeId))));
 
-                    $key = match (true) {
-                        $daysOverdue <= 0 => 'current',
-                        $daysOverdue < 30 => 'par1_29',
-                        $daysOverdue < 60 => 'par30_59',
-                        $daysOverdue < 90 => 'par60_89',
-                        default => 'par90_plus',
-                    };
-                    $buckets[$key]['count']++;
-                    $buckets[$key]['amount'] += $balance;
-                }
-            });
+        $totalPortfolio = 0.0;
+        foreach ($open as $loan) {
+            $balance = $loan['outstanding'];
+            $totalPortfolio += $balance;
+            $oldest = $oldestDueDate->get($loan['id']);
+            $daysOverdue = $oldest ? (int) $today->diffInDays(Carbon::parse($oldest)) : 0;
+
+            $key = match (true) {
+                $daysOverdue <= 0 => 'current',
+                $daysOverdue < 30 => 'par1_29',
+                $daysOverdue < 60 => 'par30_59',
+                $daysOverdue < 90 => 'par60_89',
+                default => 'par90_plus',
+            };
+            $buckets[$key]['count']++;
+            $buckets[$key]['amount'] += $balance;
+        }
 
         foreach ($buckets as &$b) {
             $b['amount'] = round($b['amount'], 2);
