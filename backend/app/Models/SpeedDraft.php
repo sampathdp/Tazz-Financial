@@ -97,6 +97,16 @@ class SpeedDraft extends Model
         return $this->hasMany(FacilityCollateral::class, 'credit_facility_id');
     }
 
+    public function guarantors()
+    {
+        return $this->hasMany(FacilityGuarantor::class, 'credit_facility_id');
+    }
+
+    public function coApplicants()
+    {
+        return $this->hasMany(FacilityCoApplicant::class, 'credit_facility_id');
+    }
+
     public function schedules()
     {
         return $this->hasMany(FacilitySchedule::class, 'credit_facility_id')->orderBy('installment_no');

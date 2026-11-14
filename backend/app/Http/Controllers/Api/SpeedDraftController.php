@@ -38,6 +38,7 @@ class SpeedDraftController extends Controller
         'branch:id,name,code', 'customer:id,full_name,code,nic_no,phone',
         'speedDraftDetail.speedDraftType', 'insurance', 'applier:id,name', 'approver:id,name', 'creator:id,name',
         'collateral.jewelryDetail', 'collateral.vehicleDetail', 'collateral.documents',
+        'guarantors.guarantor:id,full_name,code,nic_no,phone', 'coApplicants.coApplicant:id,full_name,code,nic_no,phone',
         'schedules.allocations', 'schedules.activeAllocations', 'payments.receiver:id,name', 'payments.voider:id,name',
         'charges.category:id,name', 'charges.creator:id,name', 'waivers.approver:id,name', 'waivers.creator:id,name',
         'pendingApplicationRequest.requester:id,name',
@@ -128,10 +129,10 @@ class SpeedDraftController extends Controller
 
     public function store(Request $request)
     {
-        [$facilityData, $detailData, $collateral, $insurance] = $this->validated($request);
+        [$facilityData, $detailData, $collateral, $insurance, $guarantors, $coApplicants] = $this->validated($request);
         $branch = Branch::findOrFail($facilityData['branch_id']);
 
-        $speedDraft = DB::transaction(function () use ($facilityData, $detailData, $collateral, $insurance, $branch, $request) {
+        $speedDraft = DB::transaction(function () use ($facilityData, $detailData, $collateral, $insurance, $guarantors, $coApplicants, $branch, $request) {
             // No {CODE} placeholder in this module's default format — number_sequences'
             // loan_type_id/funding_product_id key columns are reserved for Loan/FD
             // (generated_numbers.loan_type_id is a hard FK to loan_types), and Speed
@@ -158,6 +159,12 @@ class SpeedDraftController extends Controller
             foreach ($collateral ?? [] as $item) {
                 $this->createCollateral($draft, $item);
             }
+            foreach ($guarantors as $g) {
+                $draft->guarantors()->create($g);
+            }
+            foreach ($coApplicants as $ca) {
+                $draft->coApplicants()->create($ca);
+            }
 
             $type = ApprovalType::where('code', 'speed_draft_application')->firstOrFail();
             ApprovalRequest::create([
@@ -179,10 +186,10 @@ class SpeedDraftController extends Controller
         if ($speedDraft->status !== 'Pending') {
             return response()->json(['message' => 'Only a Pending Speed Draft can be edited.'], 422);
         }
-        [$facilityData, $detailData, $collateral, $insurance] = $this->validated($request, $speedDraft);
+        [$facilityData, $detailData, $collateral, $insurance, $guarantors, $coApplicants] = $this->validated($request, $speedDraft);
 
         $userId = $request->user()->id;
-        DB::transaction(function () use ($speedDraft, $facilityData, $detailData, $collateral, $insurance, $userId) {
+        DB::transaction(function () use ($speedDraft, $facilityData, $detailData, $collateral, $insurance, $guarantors, $coApplicants, $userId) {
             $speedDraft->update(array_merge($facilityData, ['outstanding_balance_cache' => $facilityData['principal_amount']]));
             $speedDraft->speedDraftDetail()->update($detailData);
             $this->syncDocumentCharge($speedDraft, $detailData['document_charge_amount'] ?? null, $userId);
@@ -196,6 +203,14 @@ class SpeedDraftController extends Controller
                 foreach ($collateral as $item) {
                     $this->createCollateral($speedDraft, $item);
                 }
+            }
+            $speedDraft->guarantors()->delete();
+            foreach ($guarantors as $g) {
+                $speedDraft->guarantors()->create($g);
+            }
+            $speedDraft->coApplicants()->delete();
+            foreach ($coApplicants as $ca) {
+                $speedDraft->coApplicants()->create($ca);
             }
         });
 
@@ -613,7 +628,7 @@ class SpeedDraftController extends Controller
         }
     }
 
-    /** @return array{0: array, 1: array, 2: ?array, 3: ?array} [facility fields, speedDraftDetail fields, collateral or null if omitted, insurance] */
+    /** @return array{0: array, 1: array, 2: ?array, 3: ?array, 4: array, 5: array} [facility fields, speedDraftDetail fields, collateral or null if omitted, insurance, guarantors, coApplicants] */
     private function validated(Request $request, ?SpeedDraft $speedDraft = null): array
     {
         $typeId = $request->input('speed_draft_type_id', $speedDraft?->speedDraftDetail?->speed_draft_type_id);
@@ -640,6 +655,15 @@ class SpeedDraftController extends Controller
             'interest_method' => ['nullable', Rule::in(['reducing_balance', 'flat'])],
             'document_charge_amount' => ['nullable', 'numeric', 'min:0', new \App\Rules\Money],
             'vehicle_no' => 'nullable|string|max:20',
+            'reference_name' => 'nullable|string|max:150',
+            'reference_id_no' => 'nullable|string|max:64',
+            'reference_address' => 'nullable|string|max:255',
+            'guarantors' => 'array',
+            'guarantors.*.guarantor_customer_id' => 'required|exists:customers,id',
+            'guarantors.*.guaranteed_amount' => 'required|numeric|min:0',
+            'co_applicants' => 'array',
+            'co_applicants.*.co_applicant_customer_id' => 'required|exists:customers,id',
+            'co_applicants.*.share_percent' => 'nullable|numeric|min:0|max:100',
             'insurance' => 'nullable|array',
             'insurance.insurance_company' => 'nullable|string|max:150',
             'insurance.policy_no' => 'nullable|string|max:64',
@@ -671,6 +695,20 @@ class SpeedDraftController extends Controller
             }
         }
 
+        foreach ($validated['guarantors'] ?? [] as $g) {
+            if ((int) $g['guarantor_customer_id'] === (int) $validated['customer_id']) {
+                throw ValidationException::withMessages(['guarantors' => 'A customer cannot guarantee their own Speed Draft.']);
+            }
+        }
+        $coApplicantsInput = $validated['co_applicants'] ?? [];
+        $coApplicantIds = array_map('intval', array_column($coApplicantsInput, 'co_applicant_customer_id'));
+        if (in_array((int) $validated['customer_id'], $coApplicantIds, true)) {
+            throw ValidationException::withMessages(['co_applicants' => 'The primary applicant cannot also be listed as a co-applicant.']);
+        }
+        if (count($coApplicantIds) !== count(array_unique($coApplicantIds))) {
+            throw ValidationException::withMessages(['co_applicants' => 'The same co-applicant is listed more than once.']);
+        }
+
         $facilityData = [
             'branch_id' => $validated['branch_id'],
             'customer_id' => $validated['customer_id'],
@@ -687,6 +725,9 @@ class SpeedDraftController extends Controller
             'interest_method' => $validated['interest_method'] ?? 'reducing_balance',
             'document_charge_amount' => isset($validated['document_charge_amount']) && $validated['document_charge_amount'] !== ''
                 ? $validated['document_charge_amount'] : null,
+            'reference_name' => $validated['reference_name'] ?? null,
+            'reference_id_no' => $validated['reference_id_no'] ?? null,
+            'reference_address' => $validated['reference_address'] ?? null,
         ];
 
         // Only meaningful for Lease/Mortgage — see the facility_insurance_details
@@ -715,7 +756,16 @@ class SpeedDraftController extends Controller
             ], $validated['collateral'] ?? [])
             : null;
 
-        return [$facilityData, $detailData, $collateral, $insurance];
+        $guarantors = array_map(fn ($g) => [
+            'guarantor_customer_id' => $g['guarantor_customer_id'],
+            'guaranteed_amount' => $g['guaranteed_amount'],
+        ], $validated['guarantors'] ?? []);
+        $coApplicants = array_map(fn ($ca) => [
+            'co_applicant_customer_id' => $ca['co_applicant_customer_id'],
+            'share_percent' => $ca['share_percent'] ?? null,
+        ], $coApplicantsInput);
+
+        return [$facilityData, $detailData, $collateral, $insurance, $guarantors, $coApplicants];
     }
 
     /** Creates/updates/clears the draft's insurance row to match $insurance — null

@@ -4,11 +4,11 @@
    Applications/Active screens since the volume here doesn't need them split out yet. */
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, Table, Td, Pager, ErrorBanner, LoadingBlock } from '../components/ui'
+import { Card, PageHead, Btn, Badge, Field, Input, Select, SearchSelect, inputStyle, Table, Td, Pager, ErrorBanner, LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
   speedDraftsApi, speedDraftTypesApi, customersApi,
-  type SpeedDraft, type SpeedDraftStatus, type SpeedDraftType, type SpeedDraftCollateralInput, type FacilityInsuranceDetail, type Customer, type AuthUser,
+  type SpeedDraft, type SpeedDraftStatus, type SpeedDraftType, type SpeedDraftCollateralInput, type LoanGuarantorInput, type LoanCoApplicantInput,type FacilityInsuranceDetail, type Customer, type AuthUser,
 } from '../api'
 import { SpeedDraftDetail } from './speedDraft/SpeedDraftDetail'
 import { Can } from '../lib/permissions'
@@ -37,8 +37,13 @@ interface FormState {
   vehicleNo?: string
   insurance?: Partial<FacilityInsuranceDetail>
   collateral: SpeedDraftCollateralInput[]
+  referenceName?: string
+  referenceIdNo?: string
+  referenceAddress?: string
+  guarantors: LoanGuarantorInput[]
+  coApplicants: LoanCoApplicantInput[]
 }
-const blankForm = (): FormState => ({ ratePeriod: 'monthly', interestMethod: 'reducing_balance', collateral: [] })
+const blankForm = (): FormState => ({ ratePeriod: 'monthly', interestMethod: 'reducing_balance', collateral: [], guarantors: [], coApplicants: [] })
 const blankInsurance = (): Partial<FacilityInsuranceDetail> => ({})
 const ROUTE_BASE = '/sd/drafts'
 
@@ -130,6 +135,9 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
           documentChargeAmount: full.speedDraftDetail?.documentChargeAmount ?? '',
           vehicleNo: full.speedDraftDetail?.vehicleNo || '', insurance: full.insurance || blankInsurance(),
           collateral: full.collateral || [],
+          referenceName: full.speedDraftDetail?.referenceName || '', referenceIdNo: full.speedDraftDetail?.referenceIdNo || '',
+          referenceAddress: full.speedDraftDetail?.referenceAddress || '',
+          guarantors: full.guarantors || [], coApplicants: full.coApplicants || [],
         })
         setErr(''); setMode('form')
       } else {
@@ -164,6 +172,15 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
     setForm((s) => ({ ...s, collateral: s.collateral.map((c, ci) => (ci === i ? { ...c, ...patch } : c)) }))
   const removeCollateral = (i: number) => setForm((s) => ({ ...s, collateral: s.collateral.filter((_, ci) => ci !== i) }))
 
+  const addGuarantor = () => setForm((s) => ({ ...s, guarantors: [...s.guarantors, { guarantorCustomerId: 0, guaranteedAmount: '' }] }))
+  const setGuarantor = (i: number, patch: Partial<LoanGuarantorInput>) =>
+    setForm((s) => ({ ...s, guarantors: s.guarantors.map((g, gi) => (gi === i ? { ...g, ...patch } : g)) }))
+  const removeGuarantor = (i: number) => setForm((s) => ({ ...s, guarantors: s.guarantors.filter((_, gi) => gi !== i) }))
+  const addCoApplicant = () => setForm((s) => ({ ...s, coApplicants: [...s.coApplicants, { coApplicantCustomerId: 0, sharePercent: '' }] }))
+  const setCoApplicant = (i: number, patch: Partial<LoanCoApplicantInput>) =>
+    setForm((s) => ({ ...s, coApplicants: s.coApplicants.map((ca, cai) => (cai === i ? { ...ca, ...patch } : ca)) }))
+  const removeCoApplicant = (i: number) => setForm((s) => ({ ...s, coApplicants: s.coApplicants.filter((_, cai) => cai !== i) }))
+
   const save = async () => {
     if (!form.customerId) { setErr('Select a customer.'); return }
     if (!form.speedDraftTypeId) { setErr('Select a Speed Draft Type.'); return }
@@ -173,6 +190,8 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
     if (needsInsurance && (!form.insurance?.insuranceCompany || !form.insurance?.policyNo || !form.insurance?.amount || !form.insurance?.contactPerson || !form.insurance?.coverage)) {
       setErr('Insurance details are required for a Lease or Mortgage draft.'); return
     }
+    if (form.guarantors.some((g) => !g.guarantorCustomerId)) { setErr('Pick a customer for every guarantor row (or remove it).'); return }
+    if (form.coApplicants.some((ca) => !ca.coApplicantCustomerId)) { setErr('Pick a customer for every co-applicant row (or remove it).'); return }
     const customer = customers.find((c) => c.id === form.customerId)
     const body = {
       customerId: form.customerId,
@@ -187,6 +206,11 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
       vehicleNo: selectedType?.category === 'Lease' ? (form.vehicleNo || null) : null,
       insurance: needsInsurance ? form.insurance : undefined,
       collateral: form.collateral.filter((c) => c.description),
+      referenceName: form.referenceName || null,
+      referenceIdNo: form.referenceIdNo || null,
+      referenceAddress: form.referenceAddress || null,
+      guarantors: form.guarantors.map((g) => ({ guarantorCustomerId: g.guarantorCustomerId, guaranteedAmount: g.guaranteedAmount })),
+      coApplicants: form.coApplicants.map((ca) => ({ coApplicantCustomerId: ca.coApplicantCustomerId, sharePercent: ca.sharePercent || null })),
     }
     setBusy(true); setErr('')
     try {
@@ -294,6 +318,63 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
                 ))}
               </div>
             )}
+
+            <div>
+              <div className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Reference Person <span style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Field label="Name"><Input value={form.referenceName || ''} onChange={(e) => setForm((s) => ({ ...s, referenceName: e.target.value }))} /></Field>
+                <Field label="NIC / Other ID No"><Input value={form.referenceIdNo || ''} onChange={(e) => setForm((s) => ({ ...s, referenceIdNo: e.target.value }))} /></Field>
+                <Field label="Address" full><textarea value={form.referenceAddress || ''} onChange={(e) => setForm((s) => ({ ...s, referenceAddress: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
+              </div>
+            </div>
+
+            <div>
+              <div className="row between" style={{ marginBottom: 8 }}>
+                <span className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase' }}>Co-Applicants <span style={{ fontWeight: 400, textTransform: 'none' }}>— joint borrowers, optional</span></span>
+                <Btn size="sm" variant="solid" icon="plus" onClick={addCoApplicant}>Add Co-Applicant</Btn>
+              </div>
+              {form.coApplicants.length === 0 && <div className="t-2" style={{ fontSize: 12.5 }}>No co-applicants added.</div>}
+              {form.coApplicants.map((ca, i) => (
+                <div key={i} className="row gap-2" style={{ marginBottom: 10, alignItems: 'flex-start' }}>
+                  <div style={{ flex: 2 }}>
+                    <SearchSelect
+                      value={ca.coApplicantCustomerId ? `${customers.find((c) => c.id === ca.coApplicantCustomerId)?.fullName || ''}` : ''}
+                      onChange={(_n, opt) => setCoApplicant(i, { coApplicantCustomerId: opt?.id })}
+                      options={customers.filter((c) => c.id !== form.customerId && !form.coApplicants.some((o, oi) => oi !== i && o.coApplicantCustomerId === c.id))}
+                      getLabel={(c) => `${c.fullName} (${c.code})`}
+                      getSub={(c) => c.nicNo || c.phone || ''}
+                      placeholder="Search customer…"
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}><Input type="number" placeholder="Share % (optional)" value={ca.sharePercent ?? ''} onChange={(e) => setCoApplicant(i, { sharePercent: e.target.value as any })} /></div>
+                  <button className="mms-act" title="Remove" onClick={() => removeCoApplicant(i)} style={{ marginTop: 6 }}><Icon n="trash" s={15} /></button>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <div className="row between" style={{ marginBottom: 8 }}>
+                <span className="t-2" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase' }}>Guarantors <span style={{ fontWeight: 400, textTransform: 'none' }}>— optional</span></span>
+                <Btn size="sm" variant="solid" icon="plus" onClick={addGuarantor}>Add Guarantor</Btn>
+              </div>
+              {form.guarantors.length === 0 && <div className="t-2" style={{ fontSize: 12.5 }}>No guarantors added.</div>}
+              {form.guarantors.map((g, i) => (
+                <div key={i} className="row gap-2" style={{ marginBottom: 10, alignItems: 'flex-start' }}>
+                  <div style={{ flex: 2 }}>
+                    <SearchSelect
+                      value={g.guarantorCustomerId ? `${customers.find((c) => c.id === g.guarantorCustomerId)?.fullName || ''}` : ''}
+                      onChange={(_n, opt) => setGuarantor(i, { guarantorCustomerId: opt?.id })}
+                      options={customers.filter((c) => c.id !== form.customerId)}
+                      getLabel={(c) => `${c.fullName} (${c.code})`}
+                      getSub={(c) => c.nicNo || c.phone || ''}
+                      placeholder="Search customer…"
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}><Input type="number" placeholder="Guaranteed amount" value={g.guaranteedAmount ?? ''} onChange={(e) => setGuarantor(i, { guaranteedAmount: e.target.value as any })} /></div>
+                  <button className="mms-act" title="Remove" onClick={() => removeGuarantor(i)} style={{ marginTop: 6 }}><Icon n="trash" s={15} /></button>
+                </div>
+              ))}
+            </div>
 
             <div className="row gap-2">
               <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving…' : (editing ? 'Save Changes' : 'Submit Application')}</Btn>

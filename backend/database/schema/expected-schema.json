@@ -19257,6 +19257,33 @@
                     "generated": false,
                     "collation": null
                 },
+                "reference_name": {
+                    "type": "varchar(150)",
+                    "nullable": true,
+                    "default": null,
+                    "default_is_expr": false,
+                    "auto": false,
+                    "generated": false,
+                    "collation": "utf8mb4_unicode_ci"
+                },
+                "reference_id_no": {
+                    "type": "varchar(64)",
+                    "nullable": true,
+                    "default": null,
+                    "default_is_expr": false,
+                    "auto": false,
+                    "generated": false,
+                    "collation": "utf8mb4_unicode_ci"
+                },
+                "reference_address": {
+                    "type": "varchar(255)",
+                    "nullable": true,
+                    "default": null,
+                    "default_is_expr": false,
+                    "auto": false,
+                    "generated": false,
+                    "collation": "utf8mb4_unicode_ci"
+                },
                 "disbursement_method": {
                     "type": "enum('Cash','Bank','Cheque')",
                     "nullable": true,

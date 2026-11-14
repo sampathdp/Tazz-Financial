@@ -1766,6 +1766,9 @@ export interface SpeedDraftFacilityDetail {
   interestMethod?: SpeedDraftInterestMethod;
   /** Document charge keyed on the application (becomes a Document charge that must be paid before disbursement). */
   documentChargeAmount?: number | string | null;
+  referenceName?: string | null;
+  referenceIdNo?: string | null;
+  referenceAddress?: string | null;
   /** Set once disbursed — see speedDraftsApi.disburse(). */
   disbursementMethod?: 'Cash' | 'Bank' | 'Cheque' | null;
 }
@@ -1810,6 +1813,9 @@ export interface SpeedDraft {
   paymentFrequency?: string;
   interestMethod?: SpeedDraftInterestMethod;
   documentChargeAmount?: number | string | null;
+  referenceName?: string | null;
+  referenceIdNo?: string | null;
+  referenceAddress?: string | null;
   /** Required when the selected speed draft type's category is 'Lease'. Write-flat/read-nested, same rule as the fields above. */
   vehicleNo?: string | null;
 
@@ -1818,6 +1824,8 @@ export interface SpeedDraft {
   insurance?: FacilityInsuranceDetail | null;
 
   collateral?: SpeedDraftCollateralInput[];
+  guarantors?: LoanGuarantorInput[];
+  coApplicants?: LoanCoApplicantInput[];
   schedules?: SpeedDraftSchedule[];
   payments?: SpeedDraftPayment[];
   /** Other charges (Document / Visit / Legal ...) and waivers - same shapes as on a loan. */
