@@ -59,6 +59,7 @@ use App\Http\Controllers\Api\LoanChargeController;
 use App\Http\Controllers\Api\LoanCollateralDocumentController;
 use App\Http\Controllers\Api\LoanController;
 use App\Http\Controllers\Api\LoanDiaryNoteController;
+use App\Http\Controllers\Api\LoanInquiryController;
 use App\Http\Controllers\Api\LoanDocumentController;
 use App\Http\Controllers\Api\LoanPaymentController;
 use App\Http\Controllers\Api\LoanPostDatedChequeController;
@@ -202,6 +203,9 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     // --- Sanction / Blacklist (admin only; bars the customer from every new facility in every branch) ---
     Route::post('customers/{customer}/blacklist', [BlacklistController::class, 'store'])->middleware('admin');
     Route::delete('customers/{customer}/blacklist', [BlacklistController::class, 'destroy'])->middleware('admin');
+
+    // --- Loan Inquiry: all of a customer's loans / speed drafts / pawnings in one search ---
+    Route::get('loan-inquiry', [LoanInquiryController::class, 'index'])->middleware('perm:Customer Management,View');
 
     // --- Customer Credit Report (internal CRIB-style report, per customer) ---
     Route::get('customers/{customer}/crib-report', [CustomerCribReportController::class, 'show'])->middleware('perm:Customer Management,View');

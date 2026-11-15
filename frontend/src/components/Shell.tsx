@@ -25,6 +25,7 @@ export const NAV: NavNode[] = [
 
   { section: 'Customer Management', icon: 'users', items: [
     { id: 'customers', label: 'Customer Management', icon: 'users' },
+    { id: 'loan/inquiry', label: 'Loan Inquiry', icon: 'search' },
     { id: 'finance/calculator', label: 'Leasing / Loan Calculator', icon: 'calc' },
     { id: 'blacklist', label: 'Sanction / Blacklist', icon: 'shield' },
   ] },

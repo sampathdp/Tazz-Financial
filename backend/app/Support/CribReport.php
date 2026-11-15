@@ -44,6 +44,8 @@ class CribReport
         $facilities = DB::table('credit_facilities')
             ->where('customer_id', $this->customer->id)
             ->whereNull('deleted_at')
+            // Speed Drafts are interest-only short-term drafts, not credit-report material.
+            ->where('facility_type', '!=', 'SpeedDraft')
             ->where(fn ($q) => $q->whereNotNull('disbursed_at')->orWhereIn('status', ['Active', 'Lapsed']))
             ->orderByDesc('id')
             ->get();
@@ -318,6 +320,7 @@ class CribReport
             ->leftJoin('customers', 'customers.id', '=', 'credit_facilities.customer_id')
             ->where('facility_guarantors.guarantor_customer_id', $this->customer->id)
             ->whereNull('credit_facilities.deleted_at')
+            ->where('credit_facilities.facility_type', '!=', 'SpeedDraft')
             ->orderByDesc('credit_facilities.id')
             ->get([
                 'credit_facilities.code',
@@ -343,6 +346,7 @@ class CribReport
         return DB::table('credit_facilities')
             ->where('customer_id', $this->customer->id)
             ->whereNull('deleted_at')
+            ->where('facility_type', '!=', 'SpeedDraft')
             ->where('created_at', '>=', $since)
             ->count();
     }

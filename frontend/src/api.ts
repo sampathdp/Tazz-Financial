@@ -2759,6 +2759,19 @@ export interface CribReport {
   inquiries: { last6Months: number; last12Months: number }
 }
 
+export interface LoanInquiryFacility {
+  id: number; code: string; type: 'Loan' | 'SpeedDraft' | 'Pawning'; status: string
+  principalAmount: number; outstandingBalance: number; disbursedAt?: string | null; maturityDate?: string | null
+}
+export interface LoanInquiryCustomer {
+  id: number; code: string; fullName: string; nicNo?: string | null; phone?: string | null
+  facilities: LoanInquiryFacility[]
+}
+/** One search → every Loan, Speed Draft and Pawning the matching customers hold. */
+export const loanInquiryApi = {
+  search: (search: string) => http.get('/loan-inquiry', { params: { search } }).then((r) => camelize(r.data.data) as LoanInquiryCustomer[]),
+}
+
 export const customerCribApi = {
   get: (customerId: number) => http.get(`/customers/${customerId}/crib-report`).then((r) => camelize(r.data) as CribReport),
   pdf: (customerId: number) =>

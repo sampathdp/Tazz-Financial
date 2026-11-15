@@ -40,6 +40,7 @@ export function Can({ user, module, action = 'View', children }: {
 export const ROUTE_MODULE: Record<string, string> = {
   dash: 'Dashboard',
   customers: 'Customer Management',
+  'loan/inquiry': 'Customer Management',
   'loan/types': 'Loan Types',
   'finance/calculator': 'Loan Calculator',
   'finance/dashboard': 'Finance Dashboard',

@@ -16,6 +16,7 @@ import { WhatsNewModal } from './components/WhatsNewModal'
 
 const DashScreen = lazy(() => import('./screens/Dashboard'))
 const CustomersScreen = lazy(() => import('./screens/Customers').then((m) => ({ default: m.CustomersScreen })))
+const LoanInquiryScreen = lazy(() => import('./screens/LoanInquiry').then((m) => ({ default: m.LoanInquiryScreen })))
 const LoanTypesScreen = lazy(() => import('./screens/LoanTypes').then((m) => ({ default: m.LoanTypesScreen })))
 const LoanCalculatorScreen = lazy(() => import('./screens/LoanCalculator').then((m) => ({ default: m.LoanCalculatorScreen })))
 const SpeedDraftCalculatorScreen = lazy(() => import('./screens/SpeedDraftCalculator').then((m) => ({ default: m.SpeedDraftCalculatorScreen })))
@@ -205,6 +206,7 @@ function ComingSoon({ route }: { route: string }) {
 const SCREENS: Record<string, ScreenComp> = {
   dash: DashScreen,
   customers: CustomersScreen,
+  'loan/inquiry': LoanInquiryScreen,
   'loan/types': LoanTypesScreen,
   'finance/calculator': LoanCalculatorScreen,
   'finance/dashboard': FinanceDashboardScreen,
