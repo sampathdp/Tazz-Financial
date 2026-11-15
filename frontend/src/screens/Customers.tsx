@@ -5,7 +5,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, Table, Td, Pager, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { useFilePreview } from '../components/FilePreview'
-import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, customerCribApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type FdDeposit, type FixedDeposit, type CribReport, type AuthUser } from '../api'
+import { customersApi, branchesApi, customerDocumentsApi, customerLoansApi, customerFundingApi, customerCribApi, loansApi, type Customer, type Branch, type OccupationType, type CustomerDocType, type CustomerDocument, type CustomerTitle, type Loan, type LoanStatus, type SpeedDraft, type FdDeposit, type FixedDeposit, type CribReport, type AuthUser } from '../api'
 import { Can } from '../lib/permissions'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
@@ -250,6 +250,31 @@ function LoanHistoryTable({ loans, loading, showBorrower, onOpen, empty }: {
         <Td align="right" mono>{l.status === 'Approved' ? '—' : money(num(l.totalDueSum) - num(l.paidSum))}</Td>
         <Td align="center"><Badge tone={loanStatusTone[l.status]} dot>{l.status}</Badge></Td>
         <Td align="right"><Btn size="sm" variant="solid" icon="eye" onClick={() => onOpen(l.id)}>View</Btn></Td>
+      </>} />
+  )
+}
+
+/** Speed-draft history for the customer profile (borrower + guarantor). */
+function SpeedDraftHistoryTable({ drafts, loading, showBorrower, empty }: {
+  drafts: SpeedDraft[]; loading: boolean; showBorrower?: boolean; empty: string
+}) {
+  if (loading) return <div style={{ padding: '0 16px 16px', fontSize: 12.5, color: 'var(--tx-2)' }}>Loading…</div>
+  const tone = (s: string) => (s === 'Active' ? 'green' : s === 'Rejected' ? 'red' : s === 'Closed' ? 'neutral' : 'amber') as 'green' | 'red' | 'amber' | 'neutral'
+  return (
+    <Table cols={[
+      { label: 'Code' }, { label: 'Type' },
+      ...(showBorrower ? [{ label: 'Borrower' }] : []),
+      { label: 'Principal', align: 'right' as const }, { label: 'Outstanding', align: 'right' as const },
+      { label: 'Status', align: 'center' as const },
+    ]}
+      rows={drafts} empty={empty}
+      render={(d) => <>
+        <Td c="var(--tx-0)" style={{ fontWeight: 600 }}>{d.code}</Td>
+        <Td>{d.speedDraftDetail?.speedDraftType?.name || '—'}</Td>
+        {showBorrower && <Td>{d.customer?.fullName || '—'}</Td>}
+        <Td align="right" mono>{money(d.principalAmount)}</Td>
+        <Td align="right" mono>{d.status === 'Active' ? money(d.outstandingBalanceCache) : '—'}</Td>
+        <Td align="center"><Badge tone={tone(d.status)} dot>{d.status}</Badge></Td>
       </>} />
   )
 }
@@ -530,13 +555,15 @@ export function CreditReportPanel({ customerId, me }: { customerId: number; me?:
 function CustomerView({ customer, me, onEdit, onOpenLoan, onOpenCredit }: { customer: Customer; me?: AuthUser | null; onEdit: () => void; onOpenLoan: (loanId: number) => void; onOpenCredit: () => void }) {
   const [borrowerLoans, setBorrowerLoans] = useState<Loan[]>([])
   const [guarantorLoans, setGuarantorLoans] = useState<Loan[]>([])
+  const [sdBorrower, setSdBorrower] = useState<SpeedDraft[]>([])
+  const [sdGuarantor, setSdGuarantor] = useState<SpeedDraft[]>([])
   const [loansLoading, setLoansLoading] = useState(true)
 
   useEffect(() => {
     setLoansLoading(true)
     customerLoansApi.list(customer.id)
-      .then((d) => { setBorrowerLoans(d.borrower); setGuarantorLoans(d.guarantor) })
-      .catch(() => { setBorrowerLoans([]); setGuarantorLoans([]) })
+      .then((d) => { setBorrowerLoans(d.borrower); setGuarantorLoans(d.guarantor); setSdBorrower(d.speedDraftBorrower ?? []); setSdGuarantor(d.speedDraftGuarantor ?? []) })
+      .catch(() => { setBorrowerLoans([]); setGuarantorLoans([]); setSdBorrower([]); setSdGuarantor([]) })
       .finally(() => setLoansLoading(false))
   }, [customer.id])
 
@@ -617,6 +644,16 @@ function CustomerView({ customer, me, onEdit, onOpenLoan, onOpenCredit }: { cust
       <Card style={{ marginBottom: 16 }} pad={0}>
         <div className="eyebrow" style={{ padding: '14px 16px 10px' }}>Loan History — as Guarantor</div>
         <LoanHistoryTable loans={guarantorLoans} loading={loansLoading} showBorrower onOpen={onOpenLoan} empty="Not a guarantor on any loan" />
+      </Card>
+
+      <Card style={{ marginBottom: 16 }} pad={0}>
+        <div className="eyebrow" style={{ padding: '14px 16px 10px' }}>Speed Draft History — as Borrower</div>
+        <SpeedDraftHistoryTable drafts={sdBorrower} loading={loansLoading} empty="No speed drafts for this customer" />
+      </Card>
+
+      <Card style={{ marginBottom: 16 }} pad={0}>
+        <div className="eyebrow" style={{ padding: '14px 16px 10px' }}>Speed Draft History — as Guarantor</div>
+        <SpeedDraftHistoryTable drafts={sdGuarantor} loading={loansLoading} showBorrower empty="Not a guarantor on any speed draft" />
       </Card>
 
       <Card style={{ marginBottom: 16 }} pad={0}>

@@ -8,6 +8,7 @@ use App\Models\FdDeposit;
 use App\Models\FixedDeposit;
 use App\Models\Loan;
 use App\Models\SavingsAccount;
+use App\Models\SpeedDraft;
 use App\Services\NumberGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -109,7 +110,18 @@ class CustomerController extends Controller
                 ->with('customer:id,full_name,code')
         )->get();
 
-        return ['borrower' => $borrower, 'guarantor' => $guarantor];
+        $sdWith = fn ($q) => $q->with(['branch:id,name,code', 'speedDraftDetail.speedDraftType:id,name,code'])->orderByDesc('id');
+
+        $sdBorrower = $sdWith(SpeedDraft::where('customer_id', $customer->id))->get();
+        $sdGuarantor = $sdWith(
+            SpeedDraft::whereHas('guarantors', fn ($q) => $q->where('guarantor_customer_id', $customer->id))
+                ->with('customer:id,full_name,code')
+        )->get();
+
+        return [
+            'borrower' => $borrower, 'guarantor' => $guarantor,
+            'speed_draft_borrower' => $sdBorrower, 'speed_draft_guarantor' => $sdGuarantor,
+        ];
     }
 
     /** Full funding history for a customer's profile view: every deposit, Fixed Deposit and savings account they hold. */

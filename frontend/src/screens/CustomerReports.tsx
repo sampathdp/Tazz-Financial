@@ -126,12 +126,12 @@ export function CustomerActivityScreen({ go: _go, user: me }: { go: Go; user?: A
       reportTitle: 'Customer Activity',
       columns: [
         { label: 'Code', key: 'code' }, { label: 'Name', key: 'name' }, { label: 'Branch', key: 'branch' }, { label: 'Status', key: 'status', align: 'center' },
-        { label: 'Loans', key: 'loans', align: 'right', format: 'number' }, { label: 'Borrowed', key: 'borrowed', align: 'right', format: 'money' },
+        { label: 'Loans', key: 'loans', align: 'right', format: 'number' }, { label: 'Speed Drafts', key: 'speedDrafts', align: 'right', format: 'number' }, { label: 'Borrowed', key: 'borrowed', align: 'right', format: 'money' },
         { label: 'Outstanding', key: 'outstanding', align: 'right', format: 'money' }, { label: 'FDs', key: 'fds', align: 'right', format: 'number' },
         { label: 'Deposited', key: 'deposited', align: 'right', format: 'money' }, { label: 'Joined', key: 'joined' },
       ],
       rows: rows.map((c) => ({
-        code: c.code, name: c.fullName, branch: c.branch?.name || '—', status: c.status, loans: c.loanCount, borrowed: Number(c.totalBorrowed || 0),
+        code: c.code, name: c.fullName, branch: c.branch?.name || '—', status: c.status, loans: c.loanCount, speedDrafts: c.speedDraftCount ?? 0, borrowed: Number(c.totalBorrowed || 0),
         outstanding: Number(c.totalOutstanding || 0), fds: c.fdCount, deposited: Number(c.totalDeposited || 0), joined: dateOnly(c.joinedAt),
       })),
       totalRow: { name: 'Total', borrowed: rows.reduce((a, c) => a + Number(c.totalBorrowed || 0), 0), outstanding: rows.reduce((a, c) => a + Number(c.totalOutstanding || 0), 0), deposited: rows.reduce((a, c) => a + Number(c.totalDeposited || 0), 0) },
@@ -155,7 +155,7 @@ export function CustomerActivityScreen({ go: _go, user: me }: { go: Go; user?: A
           <Card pad={0}>
             <Table cols={[
               { label: 'Code' }, { label: 'Name' }, { label: 'Branch' }, { label: 'Status', align: 'center' as const },
-              { label: 'Loans', align: 'right' as const }, { label: 'Borrowed', align: 'right' as const }, { label: 'Outstanding', align: 'right' as const },
+              { label: 'Loans', align: 'right' as const }, { label: 'Speed Drafts', align: 'right' as const }, { label: 'Borrowed', align: 'right' as const }, { label: 'Outstanding', align: 'right' as const },
               { label: 'FDs', align: 'right' as const }, { label: 'Deposited', align: 'right' as const }, { label: 'Joined' },
             ]} rows={rows} empty="No customers"
               render={(c: any) => <>
@@ -164,13 +164,14 @@ export function CustomerActivityScreen({ go: _go, user: me }: { go: Go; user?: A
                 <Td>{c.branch?.name || '—'}</Td>
                 <Td align="center"><Badge tone={c.status === 'Active' ? 'green' : c.status === 'Blacklisted' ? 'red' : 'neutral'} dot>{c.status}</Badge></Td>
                 <Td align="right" mono>{c.loanCount}</Td>
+                <Td align="right" mono>{c.speedDraftCount ?? 0}</Td>
                 <Td align="right" mono>{money(c.totalBorrowed)}</Td>
                 <Td align="right" mono>{money(c.totalOutstanding)}</Td>
                 <Td align="right" mono>{c.fdCount}</Td>
                 <Td align="right" mono>{money(c.totalDeposited)}</Td>
                 <Td>{dateOnly(c.joinedAt)}</Td>
               </>}
-              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td align="right" mono>{rows.reduce((a: number, c: any) => a + Number(c.loanCount || 0), 0)}</Td><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalBorrowed || 0), 0))}</Td><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalOutstanding || 0), 0))}</Td><Td /><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalDeposited || 0), 0))}</Td><Td /></tr>} />
+              footer={<tr style={{ fontWeight: 700, background: 'var(--bg-1)' }}><Td>Total</Td><Td /><Td /><Td /><Td align="right" mono>{rows.reduce((a: number, c: any) => a + Number(c.loanCount || 0), 0)}</Td><Td align="right" mono>{rows.reduce((a: number, c: any) => a + Number(c.speedDraftCount || 0), 0)}</Td><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalBorrowed || 0), 0))}</Td><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalOutstanding || 0), 0))}</Td><Td /><Td align="right" mono>{money(rows.reduce((a: number, c: any) => a + Number(c.totalDeposited || 0), 0))}</Td><Td /></tr>} />
           </Card>
         </>
       )}

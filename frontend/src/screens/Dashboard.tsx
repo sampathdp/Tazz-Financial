@@ -221,6 +221,12 @@ export default function DashScreen({ go: _go, user: _user }: { go: Go; user?: Au
   const effTone = eff === null ? C.grey : eff >= 90 ? C.green : eff >= 75 ? C.amber : C.red
   const liquid = d.bankBalances + d.cashInHand
   const equity = d.totalEquity
+  const sdOutstanding = d.speedDraft?.outstandingCapital ?? 0
+  const pawnOutstanding = d.pending?.pawningValue ?? 0
+  const totalOutstanding = d.outstandingLoanBalance + sdOutstanding + pawnOutstanding
+  const loanCollected = t[t.length - 1]?.collected ?? 0
+  const sdCollected = d.speedDraft?.collectedThisMonth ?? 0
+  const totalCollected = loanCollected + sdCollected
   const lastM = t[t.length - 1], prevM = t[t.length - 2]
   const delta = (cur?: number, prev?: number) => {
     if (cur === undefined || !prev) return null
@@ -239,6 +245,16 @@ export default function DashScreen({ go: _go, user: _user }: { go: Go; user?: Au
   return (
     <div>
       <PageHead crumbs="Overview" title="Dashboard" sub={today} />
+
+      {/* company-wide totals (Loans + Speed Drafts + Pawnings), breakdown in each note */}
+      <Grid cols="repeat(auto-fit, minmax(280px, 1fr))">
+        <Kpi icon="coins" label="Total Outstanding Balance" value={moneyK(totalOutstanding)} tone="blue"
+          note={`Loans ${moneyK(d.outstandingLoanBalance)} · Speed Drafts ${moneyK(sdOutstanding)} · Pawnings ${moneyK(pawnOutstanding)}`} />
+        <Kpi icon="wallet" label="Total Liquidity (Bank + Cash)" value={moneyK(liquid)} tone="blue"
+          note={`Bank ${moneyK(d.bankBalances)} · Cash ${moneyK(d.cashInHand)}`} />
+        <Kpi icon="chart" label="Total Collected This Month" value={moneyK(totalCollected)} tone="green"
+          note={`Loans ${moneyK(loanCollected)} · Speed Drafts ${moneyK(sdCollected)}`} />
+      </Grid>
 
       {/* headline KPIs */}
       <Grid cols="repeat(auto-fit, minmax(210px, 1fr))">

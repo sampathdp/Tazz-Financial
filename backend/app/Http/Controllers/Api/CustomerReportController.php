@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\FixedDeposit;
 use App\Models\Loan;
+use App\Models\SpeedDraft;
 use App\Models\User;
 use App\Support\CurrentBranch;
 use App\Support\ReportExport;
@@ -73,13 +74,16 @@ class CustomerReportController extends Controller
         $owed = Loan::whereIn('customer_id', $customers->pluck('id'))->where('status', 'Active')
             ->select('customer_id')->selectRaw('sum(outstanding_balance_cache) as total_outstanding')
             ->groupBy('customer_id')->pluck('total_outstanding', 'customer_id');
+        $sdOwed = SpeedDraft::whereIn('customer_id', $customers->pluck('id'))->where('status', 'Active')
+            ->select('customer_id')->selectRaw('sum(outstanding_balance_cache) as total_outstanding')
+            ->groupBy('customer_id')->pluck('total_outstanding', 'customer_id');
         $users = User::whereIn('id', $customers->pluck('blacklisted_by')->filter())->pluck('name', 'id');
 
         return $customers->map(fn (Customer $c) => [
             'id' => $c->id, 'code' => $c->code, 'fullName' => $c->full_name, 'nicNo' => $c->nic_no, 'phone' => $c->phone,
             'branch' => $c->branch ? ['id' => $c->branch->id, 'name' => $c->branch->name, 'code' => $c->branch->code] : null,
             'reason' => $c->blacklist_reason, 'note' => $c->blacklist_note, 'blacklistedAt' => $c->blacklisted_at, 'blacklistedBy' => $users[$c->blacklisted_by] ?? null,
-            'totalOutstanding' => round((float) ($owed[$c->id] ?? 0), 2),
+            'totalOutstanding' => round((float) ($owed[$c->id] ?? 0) + (float) ($sdOwed[$c->id] ?? 0), 2),
         ])->values();
     }
 
@@ -108,13 +112,13 @@ class CustomerReportController extends Controller
         $rows = $this->activity($request);
         $columns = [
             ['key' => 'code', 'label' => 'Code'], ['key' => 'fullName', 'label' => 'Name'], ['key' => 'branch', 'label' => 'Branch'], ['key' => 'status', 'label' => 'Status'],
-            ['key' => 'loanCount', 'label' => 'Loans', 'align' => 'right', 'format' => 'number'], ['key' => 'totalBorrowed', 'label' => 'Total Borrowed', 'align' => 'right', 'format' => 'money'],
+            ['key' => 'loanCount', 'label' => 'Loans', 'align' => 'right', 'format' => 'number'], ['key' => 'speedDraftCount', 'label' => 'Speed Drafts', 'align' => 'right', 'format' => 'number'], ['key' => 'totalBorrowed', 'label' => 'Total Borrowed', 'align' => 'right', 'format' => 'money'],
             ['key' => 'totalOutstanding', 'label' => 'Outstanding', 'align' => 'right', 'format' => 'money'], ['key' => 'fdCount', 'label' => 'FDs', 'align' => 'right', 'format' => 'number'],
             ['key' => 'totalDeposited', 'label' => 'Total Deposited', 'align' => 'right', 'format' => 'money'],
         ];
         $mapped = $rows->map(fn ($r) => [
             'code' => $r['code'], 'fullName' => $r['fullName'], 'branch' => $r['branch']['name'] ?? '—', 'status' => $r['status'],
-            'loanCount' => $r['loanCount'], 'totalBorrowed' => $r['totalBorrowed'], 'totalOutstanding' => $r['totalOutstanding'],
+            'loanCount' => $r['loanCount'], 'speedDraftCount' => $r['speedDraftCount'], 'totalBorrowed' => $r['totalBorrowed'], 'totalOutstanding' => $r['totalOutstanding'],
             'fdCount' => $r['fdCount'], 'totalDeposited' => $r['totalDeposited'],
         ]);
         $totalRow = ['fullName' => 'Total', 'totalBorrowed' => $mapped->sum('totalBorrowed'), 'totalOutstanding' => $mapped->sum('totalOutstanding'), 'totalDeposited' => $mapped->sum('totalDeposited')];
@@ -135,8 +139,14 @@ class CustomerReportController extends Controller
         $newThisMonth = Customer::where('created_at', '>=', $monthStart)->count();
         $newLastMonth = Customer::whereBetween('created_at', [$lastMonthStart, $lastMonthEnd])->count();
 
+        // Speed drafts are credit facilities too — a customer's borrowing history spans both.
         $customersWithLoanCounts = Loan::select('customer_id', DB::raw('count(*) as loan_count'))
             ->groupBy('customer_id')->pluck('loan_count', 'customer_id');
+        $sdCounts = SpeedDraft::select('customer_id', DB::raw('count(*) as loan_count'))
+            ->groupBy('customer_id')->pluck('loan_count', 'customer_id');
+        foreach ($sdCounts as $cid => $n) {
+            $customersWithLoanCounts[$cid] = ($customersWithLoanCounts[$cid] ?? 0) + $n;
+        }
         $borrowerCount = $customersWithLoanCounts->count();
         $repeatCount = $customersWithLoanCounts->filter(fn ($c) => $c >= 2)->count();
 
@@ -165,6 +175,13 @@ class CustomerReportController extends Controller
             ->selectRaw("sum(case when status = 'Active' then outstanding_balance_cache else 0 end) as total_outstanding")
             ->groupBy('customer_id')->get()->keyBy('customer_id');
 
+        $sdAgg = SpeedDraft::select('customer_id')
+            ->selectRaw('count(*) as sd_count')
+            ->selectRaw("sum(case when status = 'Active' then 1 else 0 end) as active_sd_count")
+            ->selectRaw('sum(principal_amount) as total_borrowed')
+            ->selectRaw("sum(case when status = 'Active' then outstanding_balance_cache else 0 end) as total_outstanding")
+            ->groupBy('customer_id')->get()->keyBy('customer_id');
+
         $fdQuery = FixedDeposit::select('customer_id')
             ->selectRaw('count(*) as fd_count')
             ->selectRaw("sum(case when status = 'Active' then principal_amount else 0 end) as total_deposited")
@@ -179,8 +196,9 @@ class CustomerReportController extends Controller
             ->with('branch:id,name,code')
             ->orderBy('full_name')
             ->get(['id', 'code', 'full_name', 'branch_id', 'status', 'created_at'])
-            ->map(function (Customer $c) use ($loanAgg, $fdAgg) {
+            ->map(function (Customer $c) use ($loanAgg, $sdAgg, $fdAgg) {
                 $loans = $loanAgg->get($c->id);
+                $sd = $sdAgg->get($c->id);
                 $fds = $fdAgg->get($c->id);
 
                 return [
@@ -189,8 +207,10 @@ class CustomerReportController extends Controller
                     'status' => $c->status, 'joinedAt' => $c->created_at,
                     'loanCount' => (int) ($loans->loan_count ?? 0),
                     'activeLoanCount' => (int) ($loans->active_loan_count ?? 0),
-                    'totalBorrowed' => round((float) ($loans->total_borrowed ?? 0), 2),
-                    'totalOutstanding' => round((float) ($loans->total_outstanding ?? 0), 2),
+                    'speedDraftCount' => (int) ($sd->sd_count ?? 0),
+                    'activeSpeedDraftCount' => (int) ($sd->active_sd_count ?? 0),
+                    'totalBorrowed' => round((float) ($loans->total_borrowed ?? 0) + (float) ($sd->total_borrowed ?? 0), 2),
+                    'totalOutstanding' => round((float) ($loans->total_outstanding ?? 0) + (float) ($sd->total_outstanding ?? 0), 2),
                     'fdCount' => (int) ($fds->fd_count ?? 0),
                     'totalDeposited' => round((float) ($fds->total_deposited ?? 0), 2),
                 ];

@@ -69,6 +69,28 @@ class AccrualInterestCalculator
         return $totals;
     }
 
+    /** Accrued Speed Draft interest grouped by speed draft type name — the Speed Draft twin of incomeForPeriodByLoanType(). */
+    public static function incomeForPeriodBySpeedDraftType(?string $from, ?string $to): array
+    {
+        $perFacility = self::perFacilityIncome('SpeedDraft', $from, $to);
+        if (empty($perFacility)) {
+            return [];
+        }
+
+        $typeByFacility = DB::table('speed_draft_facility_details')
+            ->leftJoin('speed_draft_types', 'speed_draft_types.id', '=', 'speed_draft_facility_details.speed_draft_type_id')
+            ->whereIn('speed_draft_facility_details.credit_facility_id', array_keys($perFacility))
+            ->pluck('speed_draft_types.name', 'speed_draft_facility_details.credit_facility_id');
+
+        $totals = [];
+        foreach ($perFacility as $facilityId => $amount) {
+            $name = $typeByFacility[$facilityId] ?? 'Unclassified';
+            $totals[$name] = bcadd($totals[$name] ?? '0.00', $amount, 2);
+        }
+
+        return $totals;
+    }
+
     /** @return array<int, string> credit_facility_id => amount earned in the period, for both incomeForPeriod() (summed) and incomeForPeriodByLoanType() (grouped) to share. */
     private static function perFacilityIncome(string $facilityType, ?string $from, ?string $to): array
     {

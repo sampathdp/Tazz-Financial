@@ -430,11 +430,11 @@ class AccountingReportController extends Controller
      * journal_lines the same way plFigures() reads 4010/4020/4030 overall,
      * just joined through to loan_types via facility_payments →
      * loan_facility_details rather than left ungrouped; only source_type
-     * 'LoanPayment' entries are included, so Speed Draft income (source_type
-     * 'SpeedDraftPayment', no loan_type_id to join through anyway) never
-     * leaks into this table — it stays on its own 4015 line in the flat
-     * income table above. Accrual basis comes from
-     * AccrualInterestCalculator::incomeForPeriodByLoanType().
+     * 'LoanPayment' entries feed the loan rows; 'SpeedDraftPayment' entries are
+     * joined through speed_draft_facility_details → speed_draft_types and
+     * appended as "Speed Draft – <type>" rows (4015 interest). Accrual basis
+     * comes from AccrualInterestCalculator::incomeForPeriodByLoanType() /
+     * incomeForPeriodBySpeedDraftType().
      */
     private function incomeByLoanProduct(?string $from, ?string $to): array
     {
@@ -465,6 +465,33 @@ class AccountingReportController extends Controller
             $byType[$row->loan_type_name][$key] = bcadd($byType[$row->loan_type_name][$key], $amount, 2);
         }
         foreach ($accrualByType as $name => $amount) {
+            $byType[$name] ??= ['interest_cash' => '0.00', 'charges' => '0.00', 'penalty' => '0.00'];
+            $byType[$name]['interest_accrual'] = $amount;
+        }
+
+        // Speed Drafts: same breakdown, keyed "Speed Draft – <type>" so they sit beside loan products.
+        $sdCashRows = DB::table('journal_lines')
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->join('facility_payments', 'facility_payments.id', '=', 'journal_entries.source_id')
+            ->join('speed_draft_facility_details', 'speed_draft_facility_details.credit_facility_id', '=', 'facility_payments.credit_facility_id')
+            ->leftJoin('speed_draft_types', 'speed_draft_types.id', '=', 'speed_draft_facility_details.speed_draft_type_id')
+            ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'journal_lines.account_id')
+            ->where('journal_entries.source_type', 'SpeedDraftPayment')
+            ->when($this->branchIds() !== null, fn ($q) => $q->whereIn('journal_entries.branch_id', $this->branchIds()))
+            ->whereIn('chart_of_accounts.code', ['4015', '4020', '4030'])
+            ->when($from, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '>=', $d))
+            ->when($to, fn ($q, $d) => $q->whereDate('journal_entries.entry_date', '<=', $d))
+            ->selectRaw("COALESCE(speed_draft_types.name, 'Unclassified') as type_name, chart_of_accounts.code as code, SUM(journal_lines.credit) - SUM(journal_lines.debit) as amount")
+            ->groupBy('type_name', 'code')
+            ->get();
+        foreach ($sdCashRows as $row) {
+            $name = 'Speed Draft – ' . $row->type_name;
+            $byType[$name] ??= ['interest_cash' => '0.00', 'charges' => '0.00', 'penalty' => '0.00'];
+            $key = ['4015' => 'interest_cash', '4020' => 'charges', '4030' => 'penalty'][$row->code];
+            $byType[$name][$key] = bcadd($byType[$name][$key], (string) round((float) $row->amount, 2), 2);
+        }
+        foreach (AccrualInterestCalculator::incomeForPeriodBySpeedDraftType($from, $to) as $typeName => $amount) {
+            $name = 'Speed Draft – ' . $typeName;
             $byType[$name] ??= ['interest_cash' => '0.00', 'charges' => '0.00', 'penalty' => '0.00'];
             $byType[$name]['interest_accrual'] = $amount;
         }

@@ -1632,7 +1632,7 @@ export const customerDocumentsApi = {
 export const customerLoansApi = {
   /** Every loan this customer has ever borrowed (any status), plus every loan they guarantee. */
   list: (customerId: number) =>
-    http.get(`/customers/${customerId}/loans`).then((r) => camelize(r.data) as { borrower: Loan[]; guarantor: Loan[] }),
+    http.get(`/customers/${customerId}/loans`).then((r) => camelize(r.data) as { borrower: Loan[]; guarantor: Loan[]; speedDraftBorrower: SpeedDraft[]; speedDraftGuarantor: SpeedDraft[] }),
 }
 
 /* ======================= Speed Drafts (Loans / Mortgages / Gold Pawning / Leases — interest-only) =======================
