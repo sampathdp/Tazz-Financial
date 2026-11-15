@@ -1771,6 +1771,8 @@ export interface SpeedDraftFacilityDetail {
   referenceAddress?: string | null;
   /** Set once disbursed — see speedDraftsApi.disburse(). */
   disbursementMethod?: 'Cash' | 'Bank' | 'Cheque' | null;
+  loanOfficerId?: number | null; loanOfficer?: { id: number; name: string } | null;
+  recoveryOfficerId?: number | null; recoveryOfficer?: { id: number; name: string } | null;
 }
 
 export interface SpeedDraft {
@@ -1831,6 +1833,9 @@ export interface SpeedDraft {
   /** Other charges (Document / Visit / Legal ...) and waivers - same shapes as on a loan. */
   charges?: LoanCharge[];
   waivers?: LoanWaiver[];
+  postDatedCheques?: LoanPostDatedCheque[];
+  diaryNotes?: LoanDiaryNote[];
+  documents?: LoanDocument[];
   summary?: SpeedDraftSummary;
   createdAt?: string;
 }
@@ -1843,7 +1848,37 @@ export interface OverdueSpeedDraft extends SpeedDraft {
   overdueInterest: number;
 }
 
+export const speedDraftPostDatedChequesApi = {
+  create: (id: number, body: { chequeNo: string; bankId: number; chequeDate: string; amount: number | string; notes?: string }) =>
+    http.post(`/speed-drafts/${id}/post-dated-cheques`, snakeize(body)).then((r) => camelize(r.data) as LoanPostDatedCheque),
+  /** Realizing needs realizedAt (clearing date) and paymentType (what the cheque settles). */
+  updateStatus: (chequeId: number, status: ChequeStatus, opts?: { notes?: string; realizedAt?: string; paymentType?: 'Interest' | 'CapitalReduction' | 'Charges' }) =>
+    http.patch(`/speed-draft-post-dated-cheques/${chequeId}`, snakeize({ status, ...opts })).then((r) => camelize(r.data) as LoanPostDatedCheque),
+  remove: (chequeId: number) => http.delete(`/speed-draft-post-dated-cheques/${chequeId}`).then((r) => r.data),
+}
+
+export const speedDraftDiaryNotesApi = {
+  create: (id: number, body: { note: string; followUpDate?: string }) =>
+    http.post(`/speed-drafts/${id}/diary-notes`, snakeize(body)).then((r) => camelize(r.data) as LoanDiaryNote),
+  remove: (noteId: number) => http.delete(`/speed-draft-diary-notes/${noteId}`).then((r) => r.data),
+}
+
+export const speedDraftDocumentsApi = {
+  list: (id: number) => http.get(`/speed-drafts/${id}/documents`).then((r) => camelize(r.data) as LoanDocument[]),
+  upload: async (id: number, file: File, documentCategoryId: number) => {
+    const form = new FormData()
+    form.append('file', await compressImageToWebp(file))
+    form.append('document_category_id', String(documentCategoryId))
+    return http.post(`/speed-drafts/${id}/documents`, form).then((r) => camelize(r.data) as LoanDocument)
+  },
+  remove: (id: number, documentId: number) => http.delete(`/speed-drafts/${id}/documents/${documentId}`).then((r) => r.data),
+  download: (id: number, documentId: number) =>
+    http.get(`/speed-drafts/${id}/documents/${documentId}/file`, { responseType: 'blob' }).then((r) => r.data as Blob),
+}
+
 export const speedDraftsApi = {
+  updateOfficers: (id: number, body: { loanOfficerId?: number | null; recoveryOfficerId?: number | null }) =>
+    http.patch(`/speed-drafts/${id}/officers`, snakeize(body)).then((r) => camelize(r.data) as SpeedDraft),
   list: (params?: { status?: SpeedDraftStatus }) =>
     http.get('/speed-drafts', { params: { status: params?.status || undefined } }).then((r) => camelize(r.data) as SpeedDraft[]),
   /** Server-paginated + searched — powers the Speed Drafts browse screen. list() above is untouched and still used by the PaymentReceipt picker. */
@@ -2450,6 +2485,26 @@ export const loanReportsApi = {
   get: (type: LoanReportType, params?: Record<string, any>, signal?: AbortSignal) =>
     http.get(`/loan-reports/${type}`, { params: snakeize(params || {}), signal }).then((r) => camelize(r.data)),
   pdf: (type: LoanReportType, params?: Record<string, any>) => reportPdf('loan', type, params),
+}
+
+export type SpeedDraftReportType = 'portfolio-summary' | 'par-aging' | 'arrears' | 'disbursement' | 'closed' | 'collections' | 'maturity' | 'draft-detail'
+
+/** Generic payload every speed-draft report returns — see SpeedDraftReportController. */
+export interface SpeedDraftReport {
+  title: string; meta: string;
+  tiles: { label: string; value: number | string | null; format?: 'money' | 'number' | 'percent' | null; tone?: 'blue' | 'green' | 'amber' | 'red' | null; icon?: string | null }[];
+  chart?: { title: string; kind: 'bar'; color?: 'bad'; data: { label: string; value: number }[] } | null;
+  sections: {
+    title?: string;
+    columns: { key: string; label: string; align?: 'left' | 'right' | 'center'; format?: 'money' | 'number' | 'percent' }[];
+    rows: Record<string, any>[]; totalRow?: Record<string, any>; emptyText?: string;
+  }[];
+}
+
+export const speedDraftReportsApi = {
+  get: (type: SpeedDraftReportType, params?: Record<string, any>) =>
+    http.get(`/speed-draft-reports/${type}`, { params: snakeize(params || {}) }).then((r) => camelize(r.data) as SpeedDraftReport),
+  pdf: (type: SpeedDraftReportType, params?: Record<string, any>) => reportPdf('speed-draft', type, params),
 }
 
 export type CollectionReportType = 'daily-cash' | 'collection-summary' | 'officer-performance' | 'trend' | 'due-schedule'
@@ -3327,6 +3382,19 @@ export interface DashboardSummary {
   collectionEfficiency: number | null;
   dueThisMonth: number;
   pending: { loanApplications: number; pawningActive: number; pawningValue: number; fdMaturing30: number };
+  speedDraft?: DashboardSpeedDraft;
+}
+
+export interface DashboardSpeedDraft {
+  activeCount: number; pendingCount: number;
+  outstandingCapital: number; outstandingInterest: number; penaltyDue: number; receivable: number;
+  overdueCount: number; arrearsAmount: number; nplPct: number;
+  disbursedThisMonth: number; collectedToday: number; collectedThisMonth: number;
+  maturing30Count: number; maturing30Capital: number;
+  trend: { month: string; label: string; disbursed: number; collected: number }[];
+  byType: { name: string; count: number; outstanding: number }[];
+  arrearsAging: { bucket: string; count: number; amount: number }[];
+  topOverdue: { code: string; customer: string; branch: string | null; daysOverdue: number; amount: number }[];
 }
 
 export const api = {

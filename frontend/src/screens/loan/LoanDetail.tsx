@@ -365,12 +365,12 @@ export function LoanDetail({ loan, me, onChanged, go, context }: {
 }
 
 /* ---------- Colored KPI tiles (same chip-icon pattern as the Dashboard's KPI cards) ---------- */
-type Tone = 'blue' | 'green' | 'amber' | 'red' | 'neutral'
-const toneColor: Record<Tone, string> = { blue: 'var(--ac-bright)', green: 'var(--ok)', amber: 'var(--warn)', red: 'var(--bad)', neutral: 'var(--tx-1)' }
-const toneDim: Record<Tone, string> = { blue: 'var(--ac-dim)', green: 'var(--ok-dim)', amber: 'var(--warn-dim)', red: 'var(--bad-dim)', neutral: 'var(--bg-3)' }
+export type Tone = 'blue' | 'green' | 'amber' | 'red' | 'neutral'
+export const toneColor: Record<Tone, string> = { blue: 'var(--ac-bright)', green: 'var(--ok)', amber: 'var(--warn)', red: 'var(--bad)', neutral: 'var(--tx-1)' }
+export const toneDim: Record<Tone, string> = { blue: 'var(--ac-dim)', green: 'var(--ok-dim)', amber: 'var(--warn-dim)', red: 'var(--bad-dim)', neutral: 'var(--bg-3)' }
 
-interface KpiItem { label: string; value: React.ReactNode; icon: string; tone?: Tone }
-function Kpi({ label, value, icon, tone = 'neutral' }: KpiItem) {
+export interface KpiItem { label: string; value: React.ReactNode; icon: string; tone?: Tone }
+export function Kpi({ label, value, icon, tone = 'neutral' }: KpiItem) {
   return (
     <Card pad={16}>
       <div className="row gap-3" style={{ alignItems: 'center' }}>
@@ -385,7 +385,7 @@ function Kpi({ label, value, icon, tone = 'neutral' }: KpiItem) {
     </Card>
   )
 }
-function KpiGrid({ items }: { items: KpiItem[] }) {
+export function KpiGrid({ items }: { items: KpiItem[] }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14 }}>
       {items.map((it) => <Kpi key={it.label} {...it} />)}
@@ -394,7 +394,7 @@ function KpiGrid({ items }: { items: KpiItem[] }) {
 }
 
 /** Full customer profile, active loans and credit report for the applicant — so an approver can review them without leaving the loan. */
-function CustomerTab({ loan }: { loan: Loan }) {
+export function CustomerTab({ loan }: { loan: Loan }) {
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [loading, setLoading] = useState(true)
   useEffect(() => {

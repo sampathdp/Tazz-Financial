@@ -122,6 +122,14 @@ const LoanArrearsScreen = named(() => import('./screens/LoanReports'), 'LoanArre
 const LoanDisbursementScreen = named(() => import('./screens/LoanReports'), 'LoanDisbursementScreen')
 const LoanClosedLoansScreen = named(() => import('./screens/LoanReports'), 'LoanClosedLoansScreen')
 const LoanDetailReportScreen = named(() => import('./screens/LoanReports'), 'LoanDetailReportScreen')
+const SpeedDraftPortfolioSummaryScreen = named(() => import('./screens/SpeedDraftReports'), 'SpeedDraftPortfolioSummaryScreen')
+const SpeedDraftParAgingScreen = named(() => import('./screens/SpeedDraftReports'), 'SpeedDraftParAgingScreen')
+const SpeedDraftArrearsScreen = named(() => import('./screens/SpeedDraftReports'), 'SpeedDraftArrearsScreen')
+const SpeedDraftDisbursementReportScreen = named(() => import('./screens/SpeedDraftReports'), 'SpeedDraftDisbursementReportScreen')
+const SpeedDraftClosedScreen = named(() => import('./screens/SpeedDraftReports'), 'SpeedDraftClosedScreen')
+const SpeedDraftCollectionsScreen = named(() => import('./screens/SpeedDraftReports'), 'SpeedDraftCollectionsScreen')
+const SpeedDraftMaturityScreen = named(() => import('./screens/SpeedDraftReports'), 'SpeedDraftMaturityScreen')
+const SpeedDraftDetailReportScreen = named(() => import('./screens/SpeedDraftReports'), 'SpeedDraftDetailReportScreen')
 
 const CollectionDailyCashScreen = named(() => import('./screens/CollectionReports'), 'CollectionDailyCashScreen')
 const CollectionSummaryScreen = named(() => import('./screens/CollectionReports'), 'CollectionSummaryScreen')
@@ -292,6 +300,14 @@ const SCREENS: Record<string, ScreenComp> = {
   'rep/loans-disbursement': LoanDisbursementScreen,
   'rep/loans-closed': LoanClosedLoansScreen,
   'rep/loans-detail': LoanDetailReportScreen,
+  'rep/sd-summary': SpeedDraftPortfolioSummaryScreen,
+  'rep/sd-par': SpeedDraftParAgingScreen,
+  'rep/sd-arrears': SpeedDraftArrearsScreen,
+  'rep/sd-disbursement': SpeedDraftDisbursementReportScreen,
+  'rep/sd-closed': SpeedDraftClosedScreen,
+  'rep/sd-collections': SpeedDraftCollectionsScreen,
+  'rep/sd-maturity': SpeedDraftMaturityScreen,
+  'rep/sd-detail': SpeedDraftDetailReportScreen,
   'rep/coll-daily': CollectionDailyCashScreen,
   'rep/coll-summary': CollectionSummaryScreen,
   'rep/coll-officers': CollectionOfficerPerformanceScreen,

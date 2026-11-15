@@ -39,6 +39,7 @@ class Permissions
         'Speed Draft Types',
         'Speed Drafts',
         'Speed Draft Payments',
+        'Speed Draft Reports',
         'Pawning Types',
         'Pawnings',
         'Pawning Payments',

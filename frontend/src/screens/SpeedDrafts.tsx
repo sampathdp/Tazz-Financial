@@ -241,7 +241,7 @@ export function SpeedDraftsScreen({ go, user: me }: { go: Go; user?: AuthUser | 
         <PageHead crumbs="Speed Drafts" title={editing ? `Edit ${editing.code}` : 'New Speed Draft'} icon="coins"
           actions={<Btn variant="solid" onClick={backFromForm}>{editing ? `← Back to ${editing.code}` : '← Back to Speed Drafts'}</Btn>} />
         <ErrorBanner error={err} />
-        <div className="col gap-4" style={{ maxWidth: 1000 }}>
+        <div className="col gap-4" style={{ width: "100%" }}>
           <Card>
             <div className="eyebrow" style={{ marginBottom: 12 }}>Application</div>
             <div className="col gap-4">

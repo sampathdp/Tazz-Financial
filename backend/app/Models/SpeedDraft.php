@@ -123,6 +123,21 @@ class SpeedDraft extends Model
         return $this->hasMany(FacilityCharge::class, 'credit_facility_id');
     }
 
+    public function postDatedCheques()
+    {
+        return $this->hasMany(FacilityPostDatedCheque::class, 'credit_facility_id')->orderBy('cheque_date');
+    }
+
+    public function documents()
+    {
+        return $this->hasMany(FacilityDocument::class, 'credit_facility_id');
+    }
+
+    public function diaryNotes()
+    {
+        return $this->hasMany(FacilityDiaryNote::class, 'credit_facility_id')->orderByDesc('created_at');
+    }
+
     public function waivers()
     {
         return $this->hasMany(FacilityWaiver::class, 'credit_facility_id')->orderByDesc('waived_at');

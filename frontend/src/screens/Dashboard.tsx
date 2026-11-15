@@ -336,6 +336,66 @@ export default function DashScreen({ go: _go, user: _user }: { go: Go; user?: Au
         </Panel>
       </Grid>
 
+      {/* speed drafts */}
+      {d.speedDraft && (() => {
+        const sd = d.speedDraft
+        const st = sd.trend ?? []
+        const sdPar = pct(sd.arrearsAmount, sd.outstandingCapital)
+        const sdTypes = sd.byType ?? []
+        return (
+          <>
+            <div className="eyebrow" style={{ margin: '8px 0 12px' }}>Speed Drafts</div>
+            <Grid cols="repeat(auto-fit, minmax(210px, 1fr))">
+              <Kpi icon="coins" label="Outstanding Capital" value={moneyK(sd.outstandingCapital)} tone="blue" series={st.map((m) => m.disbursed)} note={`${sd.activeCount} active · ${sd.pendingCount} pending`} />
+              <Kpi icon="pie" label="Interest Outstanding" value={moneyK(sd.outstandingInterest)} tone="amber" note={`Penalty ${moneyK(sd.penaltyDue)}`} />
+              <Kpi icon="chart" label="Collected This Month" value={moneyK(sd.collectedThisMonth)} tone="green" series={st.map((m) => m.collected)} note={`Today ${moneyK(sd.collectedToday)}`} />
+              <Kpi icon="upload" label="Disbursed This Month" value={moneyK(sd.disbursedThisMonth)} tone="blue" note={`Receivable ${moneyK(sd.receivable)}`} />
+              <Kpi icon="alert" label="Speed Draft Arrears" value={moneyK(sd.arrearsAmount)} tone={sd.arrearsAmount > 0 ? 'red' : 'green'} note={`${sd.overdueCount} drafts · NPL ${sd.nplPct.toFixed(1)}%`} />
+              <Kpi icon="clock" label="Maturing in 30 Days" value={String(sd.maturing30Count)} tone={sd.maturing30Count > 0 ? 'amber' : 'green'} note={`${moneyK(sd.maturing30Capital)} capital`} />
+            </Grid>
+            <Grid cols="repeat(auto-fit, minmax(300px, 1fr))">
+              <Panel title="Speed Draft Disbursed vs Collected" sub="Last 12 months" right={<Legend items={[{ label: 'Disbursed', color: C.blue }, { label: 'Collected', color: C.green }]} />}>
+                <TimeChart kind="bar" labels={st.map((m) => m.label)} series={[{ name: 'Disbursed', data: st.map((m) => m.disbursed), color: C.blue }, { name: 'Collected', data: st.map((m) => m.collected), color: C.green }]} />
+              </Panel>
+              <Panel title="Speed Drafts by Type" sub="Outstanding capital, active drafts">
+                <HBars sub rows={sdTypes.map((r) => ({ name: r.name, value: r.outstanding, sub: `${r.count} drafts` }))} color={C.blue} />
+              </Panel>
+              <Panel title="Speed Draft Arrears Aging" sub={sdPar > 0 ? `${sdPar.toFixed(1)}% of capital in arrears` : 'Overdue amount by days past due'}>
+                {(sd.arrearsAging ?? []).every((b) => b.count === 0) ? <Empty text="No overdue Speed Drafts" /> : (
+                  <HBars sub rows={sd.arrearsAging.map((b, i) => ({ name: b.bucket + ' days', value: b.amount, color: agingColors[i], sub: `${b.count} drafts` }))} />
+                )}
+              </Panel>
+            </Grid>
+            {(sd.topOverdue ?? []).length > 0 && (
+              <Panel title="Watchlist — Most Overdue Speed Drafts" sub="Longest days past due first" style={{ marginBottom: 16 }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                    <thead>
+                      <tr className="t-2" style={{ textAlign: 'left' }}>
+                        {['Draft', 'Customer', 'Branch', 'Days overdue', 'Amount due'].map((h, i) => (
+                          <th key={h} style={{ padding: '6px 8px', fontWeight: 500, borderBottom: '1px solid var(--line)', textAlign: i > 2 ? 'right' : 'left' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sd.topOverdue.map((r, i) => (
+                        <tr key={i}>
+                          <td className="mono" style={{ padding: '8px', borderBottom: '1px solid var(--line-soft)' }}>{r.code}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid var(--line-soft)' }}>{r.customer}</td>
+                          <td className="t-2" style={{ padding: '8px', borderBottom: '1px solid var(--line-soft)' }}>{r.branch ?? '—'}</td>
+                          <td className="mono" style={{ padding: '8px', borderBottom: '1px solid var(--line-soft)', textAlign: 'right', color: r.daysOverdue >= 90 ? C.red : r.daysOverdue >= 30 ? C.amber : undefined }}>{r.daysOverdue}</td>
+                          <td className="mono" style={{ padding: '8px', borderBottom: '1px solid var(--line-soft)', textAlign: 'right' }}>{moneyK(r.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Panel>
+            )}
+          </>
+        )
+      })()}
+
       {/* watchlist */}
       <Panel title="Watchlist — Most Overdue Loans" sub="Longest days past due first" style={{ marginBottom: 16 }}>
         {(d.topOverdue ?? []).length ? (

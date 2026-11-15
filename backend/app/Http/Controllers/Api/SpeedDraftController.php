@@ -36,7 +36,8 @@ class SpeedDraftController extends Controller
     ];
     private const DETAIL_RELATIONS = [
         'branch:id,name,code', 'customer:id,full_name,code,nic_no,phone',
-        'speedDraftDetail.speedDraftType', 'insurance', 'applier:id,name', 'approver:id,name', 'creator:id,name',
+        'speedDraftDetail.speedDraftType', 'speedDraftDetail.loanOfficer:id,name', 'speedDraftDetail.recoveryOfficer:id,name', 'insurance',
+        'postDatedCheques.creator:id,name', 'postDatedCheques.bank:id,name', 'diaryNotes.creator:id,name', 'documents.category:id,name', 'applier:id,name', 'approver:id,name', 'creator:id,name',
         'collateral.jewelryDetail', 'collateral.vehicleDetail', 'collateral.documents',
         'guarantors.guarantor:id,full_name,code,nic_no,phone', 'coApplicants.coApplicant:id,full_name,code,nic_no,phone',
         'schedules.allocations', 'schedules.activeAllocations', 'payments.receiver:id,name', 'payments.voider:id,name',
@@ -125,6 +126,18 @@ class SpeedDraftController extends Controller
         $speedDraft->setAttribute('summary', SpeedDraftSummary::build($speedDraft));
 
         return $speedDraft;
+    }
+
+    public function updateOfficers(Request $request, SpeedDraft $speedDraft)
+    {
+        $data = $request->validate([
+            'loan_officer_id' => 'nullable|exists:users,id',
+            'recovery_officer_id' => 'nullable|exists:users,id',
+        ]);
+
+        $speedDraft->speedDraftDetail()->update($data);
+
+        return $this->show($speedDraft);
     }
 
     public function store(Request $request)

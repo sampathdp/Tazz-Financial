@@ -19,7 +19,7 @@ use Illuminate\Validation\Rule;
 class SpeedDraftPaymentController extends Controller
 {
     /** Short code used in the receipt number's {TYPE} segment — see NumberGenerator's 'speed_draft_payment' format. */
-    private const TYPE_CODES = ['Interest' => 'INT', 'CapitalReduction' => 'CAP', 'Settlement' => 'SET', 'Charges' => 'CHG'];
+    public const TYPE_CODES = ['Interest' => 'INT', 'CapitalReduction' => 'CAP', 'Settlement' => 'SET', 'Charges' => 'CHG'];
 
     public function index(SpeedDraft $speedDraft)
     {
@@ -124,7 +124,7 @@ class SpeedDraftPaymentController extends Controller
     }
 
     /** The amount rules per payment type, shared by the pre-check and the locked re-check. @return array{amount?: float, error?: string} */
-    private function amountCheck(SpeedDraft $speedDraft, string $type, float $amount, Carbon $asOf): array
+    public function amountCheck(SpeedDraft $speedDraft, string $type, float $amount, Carbon $asOf): array
     {
         if ($type === 'Interest') {
             $outstanding = round(SpeedDraftPaymentAllocator::outstandingInterest($speedDraft) + SpeedDraftPaymentAllocator::outstandingPenalty($speedDraft, $asOf), 2);

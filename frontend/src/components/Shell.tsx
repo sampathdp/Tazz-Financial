@@ -138,6 +138,16 @@ export const NAV: NavNode[] = [
       { id: 'rep/loans-detail', label: 'Loan Detail Report', icon: 'list' },
       { id: 'rep/loans-commissions', label: 'Sales Executive Commissions', icon: 'target' },
     ] },
+    { group: 'Speed Draft Reports', icon: 'coins', items: [
+      { id: 'rep/sd-summary', label: 'Portfolio Summary', icon: 'coins' },
+      { id: 'rep/sd-par', label: 'PAR / NPL Aging', icon: 'target' },
+      { id: 'rep/sd-arrears', label: 'Arrears', icon: 'alert' },
+      { id: 'rep/sd-disbursement', label: 'Disbursement', icon: 'upload' },
+      { id: 'rep/sd-collections', label: 'Collections', icon: 'wallet' },
+      { id: 'rep/sd-maturity', label: 'Maturity Schedule', icon: 'clock' },
+      { id: 'rep/sd-closed', label: 'Closed Drafts', icon: 'check' },
+      { id: 'rep/sd-detail', label: 'Draft Detail Report', icon: 'list' },
+    ] },
     { group: 'Collection Reports', icon: 'receipt', items: [
       { id: 'rep/coll-daily', label: 'Daily Cash Collection', icon: 'wallet' },
       { id: 'rep/coll-summary', label: 'Collection Summary', icon: 'chart' },

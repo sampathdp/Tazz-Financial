@@ -17,6 +17,10 @@ import { Can, canApprove, isAdmin } from '../../lib/permissions'
 import { useNotify } from '../../components/Notify'
 import { getErrorText } from '../../lib/apiError'
 import type { Go } from '../types'
+import {
+  SpeedDraftCustomerTab, ContractStatusPanel, RecoveryPanel, SpeedDraftLedgerCard, SpeedDraftChequesPanel,
+  SpeedDraftDiaryPanel, SpeedDraftImagesPanel, SpeedDraftPrintPanel,
+} from './SpeedDraftTabs'
 
 const num = (v: unknown) => Number(v ?? 0)
 const round2 = (v: number) => Math.round(v * 100) / 100
@@ -34,6 +38,14 @@ const SECTIONS = [
   { id: 'charges', label: 'Charges', icon: 'tag' },
   { id: 'waivers', label: 'Waivers', icon: 'refund' },
   { id: 'collateral', label: 'Collateral', icon: 'tag' },
+  { id: 'customer', label: 'Customer Details', icon: 'users' },
+  { id: 'contract-status', label: 'Contract Status', icon: 'target' },
+  { id: 'recovery', label: 'Recovery', icon: 'users' },
+  { id: 'cheques', label: 'Post Dated Cheques', icon: 'cheque' },
+  { id: 'ledger', label: 'Ledger Card', icon: 'ledger' },
+  { id: 'diary', label: 'Diarizing', icon: 'clock' },
+  { id: 'images', label: 'Contract Images', icon: 'doc' },
+  { id: 'print', label: 'Print Documents', icon: 'print' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
 
@@ -54,7 +66,7 @@ export function SpeedDraftDetail({ speedDraft, me, onChanged, go, onWithdrawn }:
   return (
     <div>
       <div className="row between wrap gap-2" style={{ marginBottom: 16 }}>
-        <div className="row gap-2" style={{ borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
+        <div className="row gap-2 wrap" style={{ borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
           {SECTIONS.filter((s) => s.id !== 'collateral' || showCollateral).map((s) => (
             <Btn key={s.id} size="sm" variant="ghost" icon={s.icon} active={section === s.id} onClick={() => setSection(s.id)}>{s.label}</Btn>
           ))}
@@ -97,6 +109,14 @@ export function SpeedDraftDetail({ speedDraft, me, onChanged, go, onWithdrawn }:
       )}
       {section === 'charges' && <ChargesPanel speedDraft={speedDraft} />}
       {section === 'waivers' && <WaiversPanel speedDraft={speedDraft} />}
+      {section === 'customer' && <SpeedDraftCustomerTab speedDraft={speedDraft} />}
+      {section === 'contract-status' && <ContractStatusPanel speedDraft={speedDraft} />}
+      {section === 'recovery' && <RecoveryPanel speedDraft={speedDraft} me={me} onChanged={onChanged} />}
+      {section === 'cheques' && <SpeedDraftChequesPanel speedDraft={speedDraft} me={me} onChanged={onChanged} />}
+      {section === 'ledger' && <SpeedDraftLedgerCard speedDraft={speedDraft} />}
+      {section === 'diary' && <SpeedDraftDiaryPanel speedDraft={speedDraft} me={me} onChanged={onChanged} />}
+      {section === 'images' && <SpeedDraftImagesPanel speedDraft={speedDraft} me={me} />}
+      {section === 'print' && <SpeedDraftPrintPanel speedDraft={speedDraft} me={me} />}
       {showCollateral && section === 'collateral' && <CollateralPanel speedDraft={speedDraft} me={me} onChanged={onChanged} />}
     </div>
   )

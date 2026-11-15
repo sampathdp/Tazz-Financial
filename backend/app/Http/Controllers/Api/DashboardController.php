@@ -14,6 +14,8 @@ use App\Models\FixedDeposit;
 use App\Models\Loan;
 use App\Models\LoanType;
 use App\Models\Pawning;
+use App\Models\SpeedDraft;
+use App\Support\SpeedDraftReports;
 use App\Support\CurrentBranch;
 use App\Support\LoanSummary;
 use Illuminate\Http\Request;
@@ -45,7 +47,7 @@ class DashboardController extends Controller
     {
         $branchIds = CurrentBranch::reportBranchIds();
 
-        return Cache::remember('dashboard:summary:v2:' . md5(json_encode($branchIds)) . ':' . now()->format('Y-m-d-H-i'), 60, function () use ($branchIds) {
+        return Cache::remember('dashboard:summary:v3:' . md5(json_encode($branchIds)) . ':' . now()->format('Y-m-d-H-i'), 60, function () use ($branchIds) {
             $today = now()->startOfDay();
             $monthStart = now()->startOfMonth();
 
@@ -83,7 +85,7 @@ class DashboardController extends Controller
             $activeLoanOfficers = CurrentBranch::applyScope($officers, 'credit_facilities.branch_id')
                 ->distinct()->count('loan_facility_details.loan_officer_id');
 
-            return array_merge($this->insights($today, $overdue, $open, $branchIds), [
+            return array_merge(['speedDraft' => $this->speedDraft($today, $monthStart)], $this->insights($today, $overdue, $open, $branchIds), [
                 'total_assets' => round((float) $totalAssets, 2),
                 'total_liabilities' => round((float) $totalLiabilities, 2),
                 'total_equity' => round((float) $totalEquity, 2),
@@ -238,6 +240,82 @@ class DashboardController extends Controller
             'collectionEfficiency' => $dueThisMonth > 0 ? round(min(100, $paidThisMonth / $dueThisMonth * 100), 1) : null,
             'dueThisMonth' => round($dueThisMonth, 2),
             'pending' => $pending,
+        ];
+    }
+
+    /**
+     * Speed Draft block: live capital/interest/arrears from SpeedDraftReports (same source as the
+     * Speed Draft reports), plus disbursed/collected for the month and a 12-month trend.
+     */
+    private function speedDraft(\Carbon\Carbon $today, \Carbon\Carbon $monthStart): array
+    {
+        $active = SpeedDraftReports::activeRows();
+        $overdue = $active->where('daysOverdue', '>', 0);
+        $capital = (float) $active->sum('outstandingCapital');
+
+        $buckets = [['1-30', 1, 30], ['31-60', 31, 60], ['61-90', 61, 90], ['90+', 91, PHP_INT_MAX]];
+        $aging = array_map(function ($b) use ($overdue) {
+            $rows = $overdue->filter(fn ($r) => $r['daysOverdue'] >= $b[1] && $r['daysOverdue'] <= $b[2]);
+
+            return ['bucket' => $b[0], 'count' => $rows->count(), 'amount' => round((float) $rows->sum('overdueInterest') + (float) $rows->sum('penaltyDue'), 2)];
+        }, $buckets);
+
+        $start = now()->startOfMonth()->subMonths(11);
+        $months = [];
+        for ($i = 0; $i < 12; $i++) {
+            $m = $start->copy()->addMonths($i);
+            $months[$m->format('Y-m')] = ['month' => $m->format('Y-m'), 'label' => $m->format('M'), 'disbursed' => 0.0, 'collected' => 0.0];
+        }
+        $disb = SpeedDraft::whereNotNull('disbursed_at')->where('disbursed_at', '>=', $start)
+            ->selectRaw("DATE_FORMAT(disbursed_at, '%Y-%m') as ym, SUM(COALESCE(disbursed_amount, principal_amount)) as amt")
+            ->groupBy('ym')->toBase()->get();
+        foreach ($disb as $r) {
+            if (isset($months[$r->ym])) {
+                $months[$r->ym]['disbursed'] = round((float) $r->amt, 2);
+            }
+        }
+        $collQuery = DB::table('facility_payments')
+            ->join('credit_facilities', 'credit_facilities.id', '=', 'facility_payments.credit_facility_id')
+            ->where('credit_facilities.facility_type', 'SpeedDraft')->whereNull('credit_facilities.deleted_at')
+            ->where('facility_payments.status', 'Active')->where('facility_payments.approval_status', 'Approved')
+            ->where(fn ($q) => $q->whereNull('facility_payments.clearance_status')->orWhere('facility_payments.clearance_status', 'Realized'))
+            ->where('facility_payments.paid_at', '>=', $start);
+        $coll = CurrentBranch::applyScope($collQuery, 'credit_facilities.branch_id')
+            ->selectRaw("DATE_FORMAT(facility_payments.paid_at, '%Y-%m') as ym, SUM(facility_payments.amount) as amt, SUM(CASE WHEN DATE(facility_payments.paid_at) = ? THEN facility_payments.amount ELSE 0 END) as today_amt", [$today->toDateString()])
+            ->groupBy('ym')->get();
+        $collectedToday = 0.0;
+        foreach ($coll as $r) {
+            $collectedToday += (float) $r->today_amt;
+            if (isset($months[$r->ym])) {
+                $months[$r->ym]['collected'] = round((float) $r->amt, 2);
+            }
+        }
+
+        $byType = $active->groupBy('type')->map(fn ($g, $n) => ['name' => $n, 'count' => $g->count(), 'outstanding' => round((float) $g->sum('outstandingCapital'), 2)])->sortByDesc('outstanding')->values();
+        $maturing = $active->filter(fn ($r) => $r['maturityDate'] && $r['maturityDate'] >= $today->toDateString() && $r['maturityDate'] <= $today->copy()->addDays(30)->toDateString());
+
+        return [
+            'activeCount' => $active->count(),
+            'pendingCount' => SpeedDraft::where('status', 'Pending')->count(),
+            'outstandingCapital' => round($capital, 2),
+            'outstandingInterest' => round((float) $active->sum('outstandingInterest'), 2),
+            'penaltyDue' => round((float) $active->sum('penaltyDue'), 2),
+            'receivable' => round((float) $active->sum('receivable'), 2),
+            'overdueCount' => $overdue->count(),
+            'arrearsAmount' => round((float) $overdue->sum('overdueInterest') + (float) $overdue->sum('penaltyDue'), 2),
+            'nplPct' => $capital > 0 ? round((float) $overdue->where('daysOverdue', '>=', 90)->sum('outstandingCapital') / $capital * 100, 2) : 0.0,
+            'disbursedThisMonth' => round((float) SpeedDraft::whereNotNull('disbursed_at')->where('disbursed_at', '>=', $monthStart)->sum(DB::raw('COALESCE(disbursed_amount, principal_amount)')), 2),
+            'collectedToday' => round($collectedToday, 2),
+            'collectedThisMonth' => round((float) ($months[now()->format('Y-m')]['collected'] ?? 0), 2),
+            'maturing30Count' => $maturing->count(),
+            'maturing30Capital' => round((float) $maturing->sum('outstandingCapital'), 2),
+            'trend' => array_values($months),
+            'byType' => $byType,
+            'arrearsAging' => $aging,
+            'topOverdue' => $overdue->sortByDesc('daysOverdue')->take(5)->map(fn ($r) => [
+                'code' => $r['code'], 'customer' => $r['customer'], 'branch' => $r['branch'], 'daysOverdue' => $r['daysOverdue'],
+                'amount' => round($r['overdueInterest'] + $r['penaltyDue'], 2),
+            ])->values(),
         ];
     }
 
