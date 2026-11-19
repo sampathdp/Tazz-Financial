@@ -1532,6 +1532,9 @@ export interface ApprovalsInbox {
       branch?: { id: number; name: string } | null; category?: { id: number; name: string } | null; vendor?: { id: number; name: string } | null
     } | null
   })[]
+  achievementRequests: (LoanCancelRequest & {
+    achievement?: { id: number; title: string; achievedOn?: string | null; branch?: string | null } | null
+  })[]
 }
 
 export const approvalsApi = {
@@ -2967,10 +2970,15 @@ export const staffApi = {
 /* My profile: the signed-in user's own achievements. */
 export interface UserAchievement {
   id: number; title: string; description?: string | null; achievedOn?: string | null;
+  status?: 'Pending' | 'Approved' | 'Rejected'; reviewNote?: string | null; reviewedAt?: string | null;
+  reviewer?: { id: number; name: string } | null;
 }
 export const profileApi = {
   /** The signed-in user's staff record, or null when none is linked. */
   staff: () => http.get('/profile/staff').then((r) => (r.data ? (camelize(r.data) as Staff) : null)),
+  /** Self-edit of own name / NIC / phone. */
+  updateStaff: (body: { name: string; nicNo?: string | null; phone?: string | null }) =>
+    http.put('/profile/staff', snakeize(body)).then((r) => camelize(r.data) as Staff),
   /** Auth-protected, so fetched as a blob rather than a plain <img src>. */
   photo: () => http.get('/profile/photo', { responseType: 'blob' }).then((r) => r.data as Blob),
   uploadPhoto: async (file: File) => {
@@ -2985,6 +2993,9 @@ export const achievementsApi = {
   create: (body: Partial<UserAchievement>) => http.post('/profile/achievements', snakeize(body)).then((r) => camelize(r.data) as UserAchievement),
   update: (id: number, body: Partial<UserAchievement>) => http.put(`/profile/achievements/${id}`, snakeize(body)).then((r) => camelize(r.data) as UserAchievement),
   remove: (id: number) => http.delete(`/profile/achievements/${id}`).then((r) => r.data),
+  /** Admin-only review (Approvals inbox). */
+  approve: (id: number) => http.post(`/achievements/${id}/approve`).then((r) => r.data),
+  reject: (id: number, reason?: string) => http.post(`/achievements/${id}/reject`, { reason }).then((r) => r.data),
 }
 
 export type ExpenseStatus = 'Pending' | 'Approved' | 'Rejected' | 'Paid'

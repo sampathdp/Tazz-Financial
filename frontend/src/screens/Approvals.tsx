@@ -18,7 +18,7 @@
    under "All pending", with an Open link. */
 import { useEffect, useMemo, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Table, Td } from '../components/ui'
-import { approvalsApi, loansApi, loanPaymentsApi, expensesApi, type ApprovalsInbox, type AuthUser } from '../api'
+import { approvalsApi, loansApi, loanPaymentsApi, expensesApi, achievementsApi, type ApprovalsInbox, type AuthUser } from '../api'
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
@@ -34,11 +34,11 @@ function progressLabel(requiredApprovals: number, firstApprover?: { name: string
     : `Needs ${remaining} approval${remaining === 1 ? '' : 's'}`
 }
 
-const EMPTY_INBOX: ApprovalsInbox = { loanApplicationRequests: [], speedDraftApplicationRequests: [], loanCancelRequests: [], loanWriteOffRequests: [], paymentVoidRequests: [], allocationRequests: [], settlementRequests: [], expenseRequests: [] }
+const EMPTY_INBOX: ApprovalsInbox = { loanApplicationRequests: [], speedDraftApplicationRequests: [], loanCancelRequests: [], loanWriteOffRequests: [], paymentVoidRequests: [], allocationRequests: [], settlementRequests: [], expenseRequests: [], achievementRequests: [] }
 
 type Kind =
   | 'loan_application' | 'speed_draft' | 'loan_cancel' | 'loan_write_off'
-  | 'payment_void' | 'payment_manual_allocation' | 'payment_settlement' | 'expense_approval'
+  | 'payment_void' | 'payment_manual_allocation' | 'payment_settlement' | 'expense_approval' | 'achievement'
 
 type Tone = 'neutral' | 'blue' | 'green' | 'amber' | 'red'
 
@@ -97,6 +97,7 @@ export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     payment_manual_allocation: { approve: loanPaymentsApi.approveAllocationRequest, reject: loanPaymentsApi.rejectAllocationRequest },
     payment_settlement: { approve: loanPaymentsApi.approveSettlement, reject: loanPaymentsApi.rejectSettlement },
     expense_approval: { approve: expensesApi.approve, reject: expensesApi.reject },
+    achievement: { approve: achievementsApi.approve, reject: achievementsApi.reject },
   }
 
   const canAct = (it: { requester?: { id: number } | null; firstApprover?: { id: number } | null }) =>
@@ -136,6 +137,8 @@ export function ApprovalsScreen({ go, user: me }: { go: Go; user?: AuthUser | nu
     ...data.expenseRequests.map((r) => mk('expense_approval', 'amber', 'Expense', r,
       r.expense?.code || '—', r.expense?.branch?.name || '—', r.expense ? num(r.expense.amount) : null,
       { actionId: r.expense?.id })),
+    ...(data.achievementRequests || []).map((r) => mk('achievement', 'green', 'Achievement', r,
+      r.achievement?.title || '—', r.achievement?.branch || '—', null)),
   ].sort((a, b) => (a.requestedAt || '').localeCompare(b.requestedAt || '')), [data, go])
 
   const shown = filter === 'all'

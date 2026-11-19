@@ -6,8 +6,11 @@ import { achievementsApi, profileApi, type UserAchievement, type Staff, type Aut
 import { useNotify } from '../components/Notify'
 import { getErrorText } from '../lib/apiError'
 import type { Go } from './types'
+import { nicToDob, validateNic } from '../lib/nic'
 
 const blankForm = (): Partial<UserAchievement> => ({ title: '', description: '', achievedOn: '' })
+const STATUS_LABEL = { Pending: 'Awaiting approval', Approved: 'Approved', Rejected: 'Not approved' } as const
+const STATUS_TONE = { Pending: 'amber', Approved: 'green', Rejected: 'red' } as const
 const fmtDate = (iso?: string | null) => {
   const m = (iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
   return m ? `${m[3]}-${m[2]}-${m[1]}` : 'No date'
@@ -42,7 +45,7 @@ export function ProfileScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
       const body = { title: form.title.trim(), description: form.description?.trim() || null, achievedOn: form.achievedOn || null }
       if (editing) await achievementsApi.update(editing.id, body); else await achievementsApi.create(body)
       close(); refresh()
-      notify.success(editing ? 'Achievement updated' : 'Achievement added', body.title)
+      notify.success(editing ? 'Achievement updated' : 'Achievement added', 'Sent to an admin for approval')
     } catch (ex: any) {
       setErr(getErrorText(ex, 'Save failed'))
     } finally { setBusy(false) }
@@ -79,7 +82,29 @@ export function ProfileScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
     catch (ex: any) { notify.error('Remove failed', getErrorText(ex)) }
   }
 
+  const [detailsModal, setDetailsModal] = useState(false)
+  const [dForm, setDForm] = useState({ name: '', nicNo: '', phone: '' })
+  const [dErr, setDErr] = useState('')
+  const [dBusy, setDBusy] = useState(false)
+  const openDetails = () => {
+    setDForm({ name: staff?.name || '', nicNo: staff?.nicNo || '', phone: staff?.phone || '' })
+    setDErr(''); setDetailsModal(true)
+  }
+  const saveDetails = async () => {
+    if (!dForm.name.trim()) { setDErr('Name is required.'); return }
+    const nicErr = validateNic(dForm.nicNo)
+    if (nicErr) { setDErr(nicErr); return }
+    setDBusy(true); setDErr('')
+    try {
+      const updated = await profileApi.updateStaff({ name: dForm.name.trim(), nicNo: dForm.nicNo.trim() || null, phone: dForm.phone.trim() || null })
+      setStaff(updated); setDetailsModal(false)
+      notify.success('Details updated')
+    } catch (ex: any) { setDErr(getErrorText(ex, 'Save failed')) }
+    finally { setDBusy(false) }
+  }
+
   const name = staff?.name || me?.name || 'User'
+  const dob = staff?.nicNo ? nicToDob(staff.nicNo) : undefined
   const status = staff?.status || me?.status || 'Active'
   const detail = (label: string, value?: string | null, mono?: boolean) => (
     <div style={{ minWidth: 0 }}>
@@ -115,10 +140,14 @@ export function ProfileScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
       </Card>
 
       <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontWeight: 700, marginBottom: 12 }}>Details</div>
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 700 }}>Details</div>
+          {staff && <Btn variant="solid" size="sm" icon="edit" onClick={openDetails}>Edit</Btn>}
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 18 }}>
           {detail('Staff ID', staff?.staffCode, true)}
           {detail('NIC', staff?.nicNo)}
+          {detail('Birthday', dob ? fmtDate(dob) : null)}
           {detail('Phone', staff?.phone)}
           {detail('Email', staff?.email || me?.email)}
           {detail('Designation', staff?.designation)}
@@ -138,9 +167,17 @@ export function ProfileScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
             {rows.map((r) => (
               <div key={r.id} className="row between" style={{ gap: 12, padding: 12, border: '1px solid var(--line)', borderRadius: 'var(--r-s)', background: 'var(--bg-2)', alignItems: 'flex-start' }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, color: 'var(--tx-0)' }}>{r.title}</div>
+                  <div className="row gap-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--tx-0)' }}>{r.title}</span>
+                    <Badge tone={STATUS_TONE[r.status || 'Pending']} dot>{STATUS_LABEL[r.status || 'Pending']}</Badge>
+                  </div>
                   <div style={{ fontSize: 12, color: 'var(--tx-2)', marginBottom: r.description ? 6 : 0 }}>{fmtDate(r.achievedOn)}</div>
                   {r.description ? <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{r.description}</div> : null}
+                  {r.status === 'Rejected' && (
+                    <div style={{ fontSize: 12, color: 'var(--bad)', marginTop: 6 }}>
+                      Not approved{r.reviewer ? ` by ${r.reviewer.name}` : ''}{r.reviewNote ? `: ${r.reviewNote}` : ''}. Edit to resubmit.
+                    </div>
+                  )}
                 </div>
                 <div className="row gap-1" style={{ flexShrink: 0 }}>
                   <Btn variant="ghost" size="sm" onClick={() => openEdit(r)}>Edit</Btn>
@@ -151,6 +188,21 @@ export function ProfileScreen({ user: me }: { go: Go; user?: AuthUser | null }) 
           </div>
         )}
       </Card>
+
+      <Modal open={detailsModal} onClose={() => setDetailsModal(false)} width={520} title="Edit Details"
+        footer={<>
+          <Btn variant="plain" onClick={() => setDetailsModal(false)}>Cancel</Btn>
+          <Btn variant="primary" icon="check" onClick={saveDetails} disabled={dBusy}>{dBusy ? 'Saving...' : 'Save Changes'}</Btn>
+        </>}>
+        <ErrorBanner error={dErr} />
+        <div style={{ display: 'grid', gap: 16 }}>
+          <Field label="Name"><Input value={dForm.name} maxLength={150} onChange={(e) => setDForm((s) => ({ ...s, name: e.target.value }))} /></Field>
+          <Field label="NIC"><Input value={dForm.nicNo} maxLength={12} placeholder="e.g. 199012345678" onChange={(e) => setDForm((s) => ({ ...s, nicNo: e.target.value }))} /></Field>
+          {nicToDob(dForm.nicNo) && <div className="t-2" style={{ fontSize: 12, marginTop: -8 }}>Birthday: {fmtDate(nicToDob(dForm.nicNo))}</div>}
+          <Field label="Phone"><Input value={dForm.phone} maxLength={20} placeholder="e.g. 0771234567" onChange={(e) => setDForm((s) => ({ ...s, phone: e.target.value }))} /></Field>
+        </div>
+        <div className="t-2" style={{ fontSize: 11.5, marginTop: 10 }}>Staff ID, email, designation and branch are managed by an admin.</div>
+      </Modal>
 
       <Modal open={modal} onClose={close} width={520} title={editing ? 'Edit Achievement' : 'Add Achievement'}
         footer={<>

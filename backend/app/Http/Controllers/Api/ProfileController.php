@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Staff;
 use App\Support\DocStore;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class ProfileController extends Controller
 {
@@ -45,14 +46,41 @@ class ProfileController extends Controller
     /** The signed-in user's staff record (linked by user_id, falling back to email), or null. */
     public function staff(Request $request)
     {
-        $user = $request->user();
-        $staff = Staff::with('branch:id,name,code')->where('user_id', $user->id)->first()
-            ?? Staff::with('branch:id,name,code')->whereNull('user_id')->where('email', $user->email)->first();
+        $staff = $this->ownStaff($request);
 
-        if (!$staff) {
-            return response()->json(null);
+        return $staff ? $this->present($staff) : response()->json(null);
+    }
+
+    /** Self-service edit of the caller's own personal details. Code, branch, designation and
+     *  status stay admin-managed through the Staff screen. */
+    public function updateStaff(Request $request)
+    {
+        $staff = $this->ownStaff($request);
+        abort_unless($staff, 404, 'No staff record is linked to your account.');
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:150'],
+            'nic_no' => ['nullable', 'string', 'max:20', 'regex:/^(\d{9}[VvXx]|\d{12})$/', Rule::unique('staff', 'nic_no')->ignore($staff->id)],
+            'phone' => ['nullable', 'string', 'max:20'],
+        ]);
+        if (!empty($data['nic_no'])) {
+            $data['nic_no'] = strtoupper(trim($data['nic_no']));
         }
+        $staff->update($data);
 
+        return $this->present($staff->fresh('branch:id,name,code'));
+    }
+
+    private function ownStaff(Request $request): ?Staff
+    {
+        $user = $request->user();
+
+        return Staff::with('branch:id,name,code')->where('user_id', $user->id)->first()
+            ?? Staff::with('branch:id,name,code')->whereNull('user_id')->where('email', $user->email)->first();
+    }
+
+    private function present(Staff $staff): array
+    {
         return $staff->only(['id', 'staff_code', 'name', 'nic_no', 'phone', 'email', 'designation', 'branch_id', 'status', 'created_at'])
             + ['branch' => $staff->branch];
     }

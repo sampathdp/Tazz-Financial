@@ -129,6 +129,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- My profile: own achievements (open to every signed-in user, scoped to the caller) ---
     Route::get('profile/staff', [ProfileController::class, 'staff']);
+    Route::put('profile/staff', [ProfileController::class, 'updateStaff']);
     Route::get('profile/photo', [ProfileController::class, 'photo']);
     Route::post('profile/photo', [ProfileController::class, 'storePhoto']);
     Route::delete('profile/photo', [ProfileController::class, 'destroyPhoto']);
@@ -141,6 +142,8 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
 
     // --- Approvals inbox (admin-only, see ApprovalController) ---
     Route::get('approvals', [ApprovalController::class, 'index'])->middleware('admin');
+    Route::post('achievements/{achievement}/approve', [UserAchievementController::class, 'approve'])->middleware('admin');
+    Route::post('achievements/{achievement}/reject', [UserAchievementController::class, 'reject'])->middleware('admin');
 
     // --- Approval Types registry (admin-only, see ApprovalTypeController) ---
     Route::get('approval-types', [ApprovalTypeController::class, 'index'])->middleware('admin');

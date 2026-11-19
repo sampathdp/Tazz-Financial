@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ApprovalRequest;
+use App\Models\UserAchievement;
 
 /**
  * Admin-only consolidated inbox of everything awaiting approval — every
@@ -99,6 +100,25 @@ class ApprovalController extends Controller
         ])->whereHas('approvalType', fn ($q) => $q->where('code', 'expense_approval'))
             ->where('status', 'PendingApproval')->orderBy('requested_at')->get();
 
+        // Staff achievements live in their own table (not approval_requests); shaped like the
+        // other buckets so the inbox renders them with the same row.
+        $achievementRequests = UserAchievement::with('user:id,name,branch_id', 'user.branch:id,name')
+            ->where('status', UserAchievement::PENDING)->orderBy('updated_at')->get()
+            ->map(fn (UserAchievement $a) => [
+                'id' => $a->id,
+                'requested_at' => $a->updated_at,
+                'reason' => $a->description,
+                'required_approvals' => 1,
+                'requester' => $a->user ? ['id' => $a->user->id, 'name' => $a->user->name] : null,
+                'first_approver' => null,
+                'achievement' => [
+                    'id' => $a->id,
+                    'title' => $a->title,
+                    'achieved_on' => $a->achieved_on?->format('Y-m-d'),
+                    'branch' => $a->user?->branch?->name,
+                ],
+            ]);
+
         return [
             'loanApplicationRequests' => $loanApplicationRequests,
             'speedDraftApplicationRequests' => $speedDraftApplicationRequests,
@@ -108,6 +128,7 @@ class ApprovalController extends Controller
             'allocationRequests' => $allocationRequests,
             'settlementRequests' => $settlementRequests,
             'expenseRequests' => $expenseRequests,
+            'achievementRequests' => $achievementRequests,
         ];
     }
 }

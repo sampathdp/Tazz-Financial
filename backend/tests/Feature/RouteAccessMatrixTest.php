@@ -44,6 +44,7 @@ class RouteAccessMatrixTest extends TestCase
         'GET api/users/active',
         'GET api/users/marketing-executives',
         'PUT api/customers/{customer}/bank-details/{bankDetail}',
+        'PUT api/profile/staff',
         'PUT api/loans/{loan}/payout-account',
         'POST api/customers/{customer}/bank-details',
         'POST api/finance-requests/{financeRequest}/approve',
