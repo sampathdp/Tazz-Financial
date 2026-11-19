@@ -2,15 +2,29 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, PageHead, Badge, Input, Table, Td, statusTone, LoadingBlock } from '../components/ui'
-import { loanInquiryApi, type LoanInquiryCustomer, type LoanInquiryFacility } from '../api'
+import { loanInquiryApi, type LoanInquiryCustomer, type LoanInquiryFacility, type AuthUser } from '../api'
+import { canAccessRoute } from '../lib/permissions'
+import { useNotify } from '../components/Notify'
 import type { Go } from './types'
 
 const money = (v: unknown) => Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const TYPE_LABEL: Record<LoanInquiryFacility['type'], string> = { Loan: 'Loan', SpeedDraft: 'Speed Draft', Pawning: 'Pawning' }
-const TYPE_ROUTE: Record<LoanInquiryFacility['type'], string> = { Loan: '/loan/active', SpeedDraft: '/sd/drafts', Pawning: '/pawn/tickets' }
+const TYPE_ROUTE: Record<LoanInquiryFacility['type'], string> = { Loan: 'loan/active', SpeedDraft: 'sd/drafts', Pawning: 'pawn/tickets' }
 
-export function LoanInquiryScreen(_: { go: Go }) {
+export function LoanInquiryScreen({ user }: { go: Go; user?: AuthUser | null }) {
   const navigate = useNavigate()
+  const notify = useNotify()
+
+  // Each facility's own screen is gated by its module permission; navigating
+  // there without it hits the router's permission fallback and lands on /dash.
+  // Loans can always open inside the customer view (same permission as this
+  // screen), so prefer the module screen only when the user may see it.
+  const openFacility = (c: LoanInquiryCustomer, f: LoanInquiryFacility) => {
+    const route = TYPE_ROUTE[f.type]
+    if (canAccessRoute(user, route)) return navigate(`/${route}/${f.id}`)
+    if (f.type === 'Loan') return navigate(`/customers/${c.id}/loan/${f.id}`)
+    notify.error(`You don't have permission to view ${TYPE_LABEL[f.type]} records`)
+  }
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<LoanInquiryCustomer[]>([])
   const [loading, setLoading] = useState(false)
@@ -47,7 +61,7 @@ export function LoanInquiryScreen(_: { go: Go }) {
             cols={[{ label: 'Type' }, { label: 'Number' }, { label: 'Status' }, { label: 'Amount', align: 'right' }, { label: 'Outstanding', align: 'right' }, { label: 'Disbursed' }, { label: 'Maturity' }] as any}
             rows={c.facilities}
             empty="No loans, speed drafts or pawnings for this customer"
-            onRow={(f: LoanInquiryFacility) => navigate(`${TYPE_ROUTE[f.type]}/${f.id}`)}
+            onRow={(f: LoanInquiryFacility) => openFacility(c, f)}
             render={(f: LoanInquiryFacility) => (
               <>
                 <Td><Badge tone="blue">{TYPE_LABEL[f.type]}</Badge></Td>
