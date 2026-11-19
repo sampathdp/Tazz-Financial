@@ -337,7 +337,10 @@ const SCREENS: Record<string, ScreenComp> = {
 // Every nav entry (built screens + "soon" placeholders) gets a real route, so
 // every screen in the system has its own URL and its own browser-history
 // entry — that's what makes Back/Forward and refresh behave correctly.
-const ROUTE_IDS = [...Object.keys(flatNav), 'profile']
+// Screens reachable by link but kept out of the sidebar (e.g. Active Loans,
+// opened from Loan Inquiry / Loan Detail) still need their routes.
+const HIDDEN_ROUTE_IDS = ['profile', 'loan/active']
+const ROUTE_IDS = [...new Set([...Object.keys(flatNav), ...HIDDEN_ROUTE_IDS])]
 
 // Screens with a list + create/edit/detail flow also get /new and /:id
 // sibling routes, so which record/form is open lives in the URL — that's
