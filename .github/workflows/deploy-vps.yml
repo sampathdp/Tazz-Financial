@@ -1,0 +1,88 @@
+name: Deploy to VPS
+
+# Manual only until the VPS cutover. At cutover:
+#   1. add `push: branches: [master]` below,
+#   2. delete .github/workflows/main.yml (FTP deploy) and backend/public/opcache-reset.php,
+#   3. delete the FTP_* and OPS_TOKEN repository secrets.
+# Server side (deploy user, /home/deploy/bin/activate-release.sh, backups) is set up per the
+# "Tazz VPS Runbook", phases 07, 13 and 14.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # frontend/.env.production sets VITE_API_URL=/api (frontend and API share one domain)
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high || true
+          npm run build
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: mbstring, bcmath, pdo_mysql, xml, curl, zip, gd, intl
+          tools: composer:v2
+
+      - name: Install PHP dependencies (from composer.lock)
+        working-directory: backend
+        run: |
+          composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction
+          composer audit --locked || true
+
+      # The VPS deploys over SSH, so the token-guarded web ops endpoint is never shipped there.
+      - name: Package release
+        run: |
+          mkdir -p release/backend release/frontend
+          rsync -a \
+            --exclude node_modules --exclude /tests --exclude /storage \
+            --exclude '.env' --exclude '.env.*' --exclude '*.sql' \
+            --exclude vendor.zip --exclude composer.phar --exclude 'scratch_*.php' \
+            --exclude /public/opcache-reset.php \
+            backend/ release/backend/
+          rm -f release/backend/bootstrap/cache/*.php
+          cp -r frontend/dist/. release/frontend/
+          tar -czf release.tgz -C release .
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Upload and activate
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ID="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          scp -P "$PORT" release.tgz "deploy@$HOST:/var/www/tazz/releases/$ID.tgz"
+          ssh -p "$PORT" "deploy@$HOST" "set -e
+            mkdir /var/www/tazz/releases/$ID
+            tar -xzf /var/www/tazz/releases/$ID.tgz -C /var/www/tazz/releases/$ID
+            rm /var/www/tazz/releases/$ID.tgz
+            /home/deploy/bin/activate-release.sh $ID"
+
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

@@ -74,7 +74,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '7.4'
+          php-version: '8.1'
           extensions: mbstring, bcmath, pdo, pdo_mysql, tokenizer, xml, ctype, json, fileinfo, openssl, zip
           tools: composer:2.6.6
 

@@ -8,3 +8,8 @@ backend/storage/backups/
 *.dump
 backend/vendor.zip
 backend/composer.phar
+
+# Client business documents and reference screenshots: keep them out of git
+*.xlsx
+*.xls
+/WhatsApp Image *.jpeg
