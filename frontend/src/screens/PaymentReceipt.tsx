@@ -14,7 +14,8 @@ import { PaymentBreakdown } from '../components/PaymentBreakdown'
 import { Card, PageHead, Btn, Badge, Field, Input, Select, BankSelect, SearchSelect, Table, Td, Modal, inputStyle, ErrorBanner } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
-  loansApi, loanPaymentsApi, loanPostDatedChequesApi, speedDraftsApi, speedDraftPaymentsApi, company,
+  loansApi, loanPaymentsApi, loanPostDatedChequesApi, speedDraftsApi, speedDraftPaymentsApi, bankAccountsApi, company,
+  type BankAccount,
   type Loan, type LoanPayment, type LoanSchedule, type PaymentMethod, type AuthUser, type PaymentAllocationSplit,
   type SpeedDraft, type SpeedDraftPayment, type SpeedDraftSchedule, type SpeedDraftPaymentType,
 } from '../api'
@@ -63,7 +64,17 @@ interface ReceiptData { payment: LoanPayment; loan: Loan; balanceBefore: number 
    is just the date printed on the cheque, captured for the audit trail. This is
    distinct from "Record Cheque" (Post Dated Cheques), which logs a future cheque
    the same way — also untouched until realized. */
-function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBackDated, refNo, setRefNo, nextReceipt, bankId, setBankId, chequeDate, setChequeDate, notes, setNotes }: {
+/** Bank transfer receipts: which of our bank accounts the money landed in, so it posts straight into that balance. */
+function DepositedIntoField({ accounts, value, onChange }: { accounts: BankAccount[]; value: number | undefined; onChange: (v: number | undefined) => void }) {
+  return (
+    <Field label="Deposited Into" full><Select value={value ?? ''} onChange={(e) => onChange(Number(e.target.value) || undefined)}>
+      <option value="">Select our bank account...</option>
+      {accounts.map((a) => <option key={a.id} value={a.id}>{[a.name, a.bank?.name, a.accountNumber].filter(Boolean).join(' — ')}</option>)}
+    </Select></Field>
+  )
+}
+
+function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBackDated, refNo, setRefNo, nextReceipt, bankId, setBankId, chequeDate, setChequeDate, notes, setNotes, bankAccounts, bankAccountId, setBankAccountId }: {
   method: PaymentMethod; setMethod: (v: PaymentMethod) => void
   paidAt: string; setPaidAt: (v: string) => void
   backDated: boolean; setBackDated: (v: boolean) => void
@@ -72,6 +83,8 @@ function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBac
   bankId: number | undefined; setBankId: (v: number | undefined) => void
   chequeDate: string; setChequeDate: (v: string) => void
   notes: string; setNotes: (v: string) => void
+  /** Bank transfer: the company account the money landed in. Omitted (speed drafts) = no picker. */
+  bankAccounts?: BankAccount[]; bankAccountId?: number; setBankAccountId?: (v: number | undefined) => void
 }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
@@ -92,6 +105,7 @@ function PaymentFields({ method, setMethod, paidAt, setPaidAt, backDated, setBac
       {method === 'Cash'
         ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
         : <Field label={REF_LABEL[method]}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
+      {method === 'Bank' && setBankAccountId && <DepositedIntoField accounts={bankAccounts || []} value={bankAccountId} onChange={setBankAccountId} />}
       {method === 'Cheque' && <>
         <Field label="Bank"><BankSelect value={bankId} onChange={setBankId} /></Field>
         <Field label="Cheque Date"><Input type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} /></Field>
@@ -335,6 +349,9 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [payBackDated, setPayBackDated] = useState(false)
   const [refNo, setRefNo] = useState('')
   const [payBankId, setPayBankId] = useState<number | undefined>(undefined)
+  const [payBankAccountId, setPayBankAccountId] = useState<number | undefined>(undefined)
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  useEffect(() => { bankAccountsApi.list().then((d) => setBankAccounts(d.filter((a) => a.status !== 'Inactive'))).catch(() => setBankAccounts([])) }, [])
   const [payChequeDate, setPayChequeDate] = useState(todayIso())
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
@@ -364,6 +381,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const [settleBackDated, setSettleBackDated] = useState(false)
   const [settleRefNo, setSettleRefNo] = useState('')
   const [settleBankId, setSettleBankId] = useState<number | undefined>(undefined)
+  const [settleBankAccountId, setSettleBankAccountId] = useState<number | undefined>(undefined)
   const [settleChequeDate, setSettleChequeDate] = useState(todayIso())
   const [settleNotes, setSettleNotes] = useState('')
   const [settleBusy, setSettleBusy] = useState(false)
@@ -450,10 +468,10 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const locked = !!pendingSettlement
 
   const resetPayForm = () => {
-    setPayOpen(false); setCollectedBranchId(undefined); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
+    setPayOpen(false); setCollectedBranchId(undefined); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayBankAccountId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
     setAllocationMode('auto'); setAllocByPercent(false); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges('')
   }
-  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleRefNo(''); setSettleBankId(undefined); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
+  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleRefNo(''); setSettleBankId(undefined); setSettleBankAccountId(undefined); setSettleChequeDate(todayIso()); setSettleNotes(''); setSettleErr('') }
   const resetChequeForm = () => { setChequeOpen(false); setChequeNo(''); setRcBankId(undefined); setRcChequeDate(todayIso()); setChequeAmount(''); setChequeErr('') }
 
   const pickLoan = async (_n: string, opt?: Loan) => {
@@ -471,7 +489,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   }
 
   const openPay = () => {
-    setPayOpen(true); setCollectedBranchId(undefined); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
+    setPayOpen(true); setCollectedBranchId(undefined); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setRefNo(''); setPayBankId(undefined); setPayBankAccountId(undefined); setPayChequeDate(todayIso()); setNotes(''); setErr('')
     setAllocationMode('auto'); setAllocByPercent(false); setAllocInterest(''); setAllocCapital(''); setAllocOdCharge(''); setAllocOtherCharges(''); setAllocDue(null)
   }
 
@@ -493,6 +511,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
     if (!selected || recordingRef.current) return
     if (!amount || Number(amount) <= 0) { setErr('Enter a payment amount.'); return }
     if (method === 'Cheque' && (!payBankId || !payChequeDate)) { setErr('Bank and Cheque Date are required for a cheque payment.'); return }
+    if (method === 'Bank' && !payBankAccountId) { setErr('Pick which of our bank accounts the transfer was deposited into.'); return }
     if (allocationMode === 'manual' && Math.abs(allocTotal - Number(amount)) > 0.01) { setErr('The allocation split must add up to the payment amount.'); return }
     // Synchronous guard: `busy` state only updates after a re-render, so a fast double-click slips past it.
     recordingRef.current = true
@@ -502,6 +521,7 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
       const payment = await loanPaymentsApi.create(selected.id, {
         amount, paymentMethod: method, paidAt, receiptNo: refNo || undefined,
         bankId: method === 'Cheque' ? payBankId : undefined,
+        bankAccountId: method === 'Bank' ? payBankAccountId : undefined,
         chequeDate: method === 'Cheque' ? payChequeDate : undefined,
         notes: notes || undefined,
         collectedBranchId: method === 'Cash' ? collectedBranchId : undefined,
@@ -526,12 +546,14 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
   const submitSettlement = async () => {
     if (!selected) return
     if (settleMethod === 'Cheque' && (!settleBankId || !settleChequeDate)) { setSettleErr('Bank and Cheque Date are required for a cheque settlement.'); return }
+    if (settleMethod === 'Bank' && !settleBankAccountId) { setSettleErr('Pick which of our bank accounts the transfer was deposited into.'); return }
     setSettleBusy(true); setSettleErr('')
     try {
       await loanPaymentsApi.create(selected.id, {
         amount: outstanding, paymentMethod: settleMethod, paidAt: settlePaidAt,
         receiptNo: settleRefNo || undefined,
         bankId: settleMethod === 'Cheque' ? settleBankId : undefined,
+        bankAccountId: settleMethod === 'Bank' ? settleBankAccountId : undefined,
         chequeDate: settleMethod === 'Cheque' ? settleChequeDate : undefined,
         notes: settleNotes || undefined, isSettlement: true,
       })
@@ -1031,7 +1053,8 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
             </>)
           })()}
           <PaymentFields method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} backDated={payBackDated} setBackDated={setPayBackDated} refNo={refNo} setRefNo={setRefNo} nextReceipt={nextReceipt}
-            bankId={payBankId} setBankId={setPayBankId} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes} />
+            bankId={payBankId} setBankId={setPayBankId} chequeDate={payChequeDate} setChequeDate={setPayChequeDate} notes={notes} setNotes={setNotes}
+            bankAccounts={bankAccounts} bankAccountId={payBankAccountId} setBankAccountId={setPayBankAccountId} />
           {canCollectElsewhere && method === 'Cash' && (
             <Field label="Collected at branch">
               <Select id="collected-branch" value={collectedBranchId ?? ''} onChange={(e) => setCollectedBranchId(e.target.value ? Number(e.target.value) : undefined)}>
@@ -1053,7 +1076,8 @@ export function PaymentReceiptScreen({ user: me }: { go: Go; user?: AuthUser | n
           <ErrorBanner error={settleErr} style={{ marginBottom: 0 }} />
           <div className="t-2" style={{ fontSize: 12.5 }}>This pays off the full outstanding balance of <b style={{ fontFamily: 'JetBrains Mono' }}>{money(outstanding)}</b> and must be approved by a Branch Manager before the loan closes and the receipt can be printed.</div>
           <PaymentFields method={settleMethod} setMethod={setSettleMethod} paidAt={settlePaidAt} setPaidAt={setSettlePaidAt} backDated={settleBackDated} setBackDated={setSettleBackDated} refNo={settleRefNo} setRefNo={setSettleRefNo} nextReceipt={nextReceipt}
-            bankId={settleBankId} setBankId={setSettleBankId} chequeDate={settleChequeDate} setChequeDate={setSettleChequeDate} notes={settleNotes} setNotes={setSettleNotes} />
+            bankId={settleBankId} setBankId={setSettleBankId} chequeDate={settleChequeDate} setChequeDate={setSettleChequeDate} notes={settleNotes} setNotes={setSettleNotes}
+            bankAccounts={bankAccounts} bankAccountId={settleBankAccountId} setBankAccountId={setSettleBankAccountId} />
         </div>
       </Modal>
 
@@ -1314,6 +1338,10 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
 
   const [settleOpen, setSettleOpen] = useState(false)
   const [settleMethod, setSettleMethod] = useState<PaymentMethod>('Cash')
+  const [payBankAccountId, setPayBankAccountId] = useState<number | undefined>(undefined)
+  const [settleBankAccountId, setSettleBankAccountId] = useState<number | undefined>(undefined)
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  useEffect(() => { bankAccountsApi.list().then((d) => setBankAccounts(d.filter((a) => a.status !== 'Inactive'))).catch(() => setBankAccounts([])) }, [])
   const [settlePaidAt, setSettlePaidAt] = useState(todayIso())
   const [settleBackDated, setSettleBackDated] = useState(false)
   const [settleReceiptNo, setSettleReceiptNo] = useState('')
@@ -1352,8 +1380,8 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
     : scheduleTab === 'unpaid' ? schedules.filter((s) => s.status !== 'Paid')
     : schedules
 
-  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setReceiptNo(''); setNotes(''); setErr('') }
-  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleReceiptNo(''); setSettleNotes(''); setSettleErr('') }
+  const resetPayForm = () => { setPayOpen(false); setAmount(''); setMethod('Cash'); setPayBankAccountId(undefined); setPaidAt(todayIso()); setPayBackDated(false); setReceiptNo(''); setNotes(''); setErr('') }
+  const resetSettleForm = () => { setSettleOpen(false); setSettleMethod('Cash'); setSettleBankAccountId(undefined); setSettlePaidAt(todayIso()); setSettleBackDated(false); setSettleReceiptNo(''); setSettleNotes(''); setSettleErr('') }
 
   const pickDraft = async (_n: string, opt?: SpeedDraft) => {
     resetPayForm(); resetSettleForm(); setScheduleTab('unpaid'); setPanelTab('history')
@@ -1364,15 +1392,16 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
     finally { setLoadingDraft(false) }
   }
 
-  const openPay = (type: SpeedDraftPaymentType) => { setPayType(type); setPayOpen(true); setAmount(''); setMethod('Cash'); setPaidAt(todayIso()); setPayBackDated(false); setReceiptNo(''); setNotes(''); setErr('') }
+  const openPay = (type: SpeedDraftPaymentType) => { setPayType(type); setPayOpen(true); setAmount(''); setMethod('Cash'); setPayBankAccountId(undefined); setPaidAt(todayIso()); setPayBackDated(false); setReceiptNo(''); setNotes(''); setErr('') }
 
   const record = async () => {
     if (!selected) return
     if (!amount || Number(amount) <= 0) { setErr('Enter a payment amount.'); return }
+    if (method === 'Bank' && !payBankAccountId) { setErr('Pick which of our bank accounts the transfer was deposited into.'); return }
     setBusy(true); setErr('')
     try {
       const payment = await speedDraftPaymentsApi.create(selected.id, {
-        amount, paymentType: payType, paymentMethod: method, paidAt, receiptNo: receiptNo || undefined, notes: notes || undefined,
+        amount, paymentType: payType, paymentMethod: method, bankAccountId: method === 'Bank' ? payBankAccountId : undefined, paidAt, receiptNo: receiptNo || undefined, notes: notes || undefined,
       })
       const fresh = await speedDraftsApi.get(selected.id)
       setReceipt({ payment, draft: fresh })
@@ -1384,10 +1413,12 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
 
   const submitSettlement = async () => {
     if (!selected) return
+    if (settleMethod === 'Bank' && !settleBankAccountId) { setSettleErr('Pick which of our bank accounts the transfer was deposited into.'); return }
     setSettleBusy(true); setSettleErr('')
     try {
       const payment = await speedDraftPaymentsApi.create(selected.id, {
         amount: summary?.amountToSettleToday || 0, paymentType: 'Settlement', paymentMethod: settleMethod,
+        bankAccountId: settleMethod === 'Bank' ? settleBankAccountId : undefined,
         paidAt: settlePaidAt, receiptNo: settleReceiptNo || undefined, notes: settleNotes || undefined,
       })
       const fresh = await speedDraftsApi.get(selected.id)
@@ -1593,6 +1624,7 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
             {method === 'Cash'
               ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
               : <Field label="Reference No."><Input value={receiptNo} onChange={(e) => setReceiptNo(e.target.value)} /></Field>}
+            {method === 'Bank' && <DepositedIntoField accounts={bankAccounts} value={payBankAccountId} onChange={setPayBankAccountId} />}
           </div>
           <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ width: '100%', background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', padding: '9px 12px', color: 'var(--tx-0)', fontSize: 13.5, fontFamily: 'Outfit', resize: 'vertical' }} /></Field>
         </div>
@@ -1624,6 +1656,7 @@ export function SpeedDraftPaymentReceiptScreen({ user: me }: { go: Go; user?: Au
             {settleMethod === 'Cash'
               ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
               : <Field label="Reference No."><Input value={settleReceiptNo} onChange={(e) => setSettleReceiptNo(e.target.value)} /></Field>}
+            {settleMethod === 'Bank' && <DepositedIntoField accounts={bankAccounts} value={settleBankAccountId} onChange={setSettleBankAccountId} />}
           </div>
           <Field label="Notes"><textarea value={settleNotes} onChange={(e) => setSettleNotes(e.target.value)} rows={2} style={{ width: '100%', background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 'var(--r-s)', padding: '9px 12px', color: 'var(--tx-0)', fontSize: 13.5, fontFamily: 'Outfit', resize: 'vertical' }} /></Field>
         </div>

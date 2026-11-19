@@ -320,6 +320,29 @@ class LoanLedgerPoster
         $isPending = in_array($payment->payment_type, ['Settlement', 'ManualAllocation'], true);
         $label = $payment->payment_type === 'Settlement' ? 'settlement' : 'manual allocation';
 
+        // Bank transfer with the receiving company account named: book it straight into that account,
+        // the same way a cash receipt moves a till (balance + GL + finance transaction).
+        if ($payment->payment_method === 'Bank' && $payment->bank_account_id) {
+            $bank = \App\Models\BankAccount::find($payment->bank_account_id);
+            if (!$bank) {
+                throw new \App\Exceptions\FinancePostingException('The bank account chosen for this transfer no longer exists.');
+            }
+            $leg = ['type' => 'bank', 'id' => (int) $bank->id, 'leaf' => ChartOfAccount::forBankAccount($bank)];
+            if ($isPending) {
+                self::postCollection($payment, $leg, [
+                    ['account_id' => ChartOfAccount::system('2100')->id, 'credit' => (string) $payment->amount],
+                ], "Bank receipt pending {$label} approval - {$payment->code}");
+
+                return;
+            }
+            $credits = self::splitLines($payment);
+            if ($credits) {
+                self::postCollection($payment, $leg, $credits, "Loan payment (Bank: {$bank->name}) {$payment->code}");
+            }
+
+            return;
+        }
+
         if ($payment->payment_method === 'Bank') {
             $credits = $isPending
                 ? [['account_id' => ChartOfAccount::system('2100')->id, 'credit' => (string) $payment->amount]]
@@ -350,8 +373,9 @@ class LoanLedgerPoster
             throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
 
+        $leg = ['type' => 'cash', 'id' => (int) $till->id, 'leaf' => ChartOfAccount::forCashTill($till)];
         if ($isPending) {
-            self::postCollection($payment, $till, [
+            self::postCollection($payment, $leg, [
                 ['account_id' => ChartOfAccount::system('2100')->id, 'credit' => (string) $payment->amount],
             ], "Cash receipt pending {$label} approval - {$payment->code}");
 
@@ -360,7 +384,7 @@ class LoanLedgerPoster
 
         $credits = self::splitLines($payment);
         if ($credits) {
-            self::postCollection($payment, $till, $credits, "Loan payment {$payment->code}");
+            self::postCollection($payment, $leg, $credits, "Loan payment {$payment->code}");
         }
     }
 
@@ -370,11 +394,10 @@ class LoanLedgerPoster
         return $loan && $loan->status === 'Approved' ? CashAccount::PURPOSE_DOCUMENT_CHARGES : CashAccount::PURPOSE_COLLECTIONS;
     }
 
-    /** Books a cash collection through the one money writer. $credits is the Cr side (each ['account_id'=>, 'credit'=>]); the till Dr and the +movement are added here. */
-    private static function postCollection(FacilityPayment $payment, CashAccount $till, array $credits, string $description): void
+    /** Books a collection through the one money writer into a till or bank account ($leg: type/id/leaf). $credits is the Cr side (each ['account_id'=>, 'credit'=>]); the leg's Dr and +movement are added here. Always txn_type COLLECTION so reverseAllFor() finds it. */
+    private static function postCollection(FacilityPayment $payment, array $leg, array $credits, string $description): void
     {
         $amount = (string) $payment->amount;
-        $tillLeaf = ChartOfAccount::forCashTill($till);
         $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
 
         FinancePostingService::execute([
@@ -382,9 +405,9 @@ class LoanLedgerPoster
             'amount' => $amount,
             'entry_date' => $entryDate,
             'branch_id' => $payment->branch_id,
-            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $amount]],
+            'movements' => [['account_type' => $leg['type'], 'account_id' => $leg['id'], 'delta' => $amount]],
             'gl_lines' => array_merge(
-                [['account_id' => $tillLeaf->id, 'debit' => $amount, 'credit' => 0]],
+                [['account_id' => $leg['leaf']->id, 'debit' => $amount, 'credit' => 0]],
                 array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
             ),
             'gl_source_type' => 'LoanPayment',

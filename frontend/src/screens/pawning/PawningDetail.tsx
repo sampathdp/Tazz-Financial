@@ -8,7 +8,7 @@
    previews client-side and the server always recomputes authoritatively. */
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Card, Btn, Badge, Field, Input, Table, Td, Modal, ErrorBanner } from '../../components/ui'
+import { Card, Btn, Badge, Field, Input, Table, Td, Modal, ErrorBanner, BankAccountSelect } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import { DetailSummary } from '../../components/DetailSummary'
 import { pawningsApi, type Pawning, type PawningCollateralItem, type PawningPayment, type PaymentMethod, type AuthUser } from '../../api'
@@ -236,6 +236,7 @@ function TicketActions({ pawning: d, me, onChanged }: { pawning: Pawning; me?: A
 function RenewModal({ pawning: d, open, onClose, onChanged, notify }: { pawning: Pawning; open: boolean; onClose: () => void; onChanged: () => void; notify: ReturnType<typeof useNotify> }) {
   const [capitalPayment, setCapitalPayment] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash')
+  const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const s = d.summary
@@ -244,9 +245,10 @@ function RenewModal({ pawning: d, open, onClose, onChanged, notify }: { pawning:
 
   const submit = async () => {
     if (num(capitalPayment) >= num(d.outstandingBalanceCache)) { setErr('A capital payment that clears the full balance is a redemption, not a renewal — use Redeem instead.'); return }
+    if (paymentMethod === 'Bank' && !bankAccountId) { setErr('Pick which of our bank accounts the transfer was deposited into.'); return }
     setBusy(true); setErr('')
     try {
-      await pawningsApi.renew(d.id, { capitalPayment: capitalPayment || 0, paymentMethod })
+      await pawningsApi.renew(d.id, { capitalPayment: capitalPayment || 0, paymentMethod, bankAccountId: paymentMethod === 'Bank' ? bankAccountId : undefined })
       onClose(); setCapitalPayment(''); onChanged()
       notify.success('Ticket renewed', d.code)
     } catch (ex: any) { setErr(getErrorText(ex, 'Renewal failed')) }
@@ -269,6 +271,7 @@ function RenewModal({ pawning: d, open, onClose, onChanged, notify }: { pawning:
           <Field label="Payment Method"><select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)} style={{ padding: '9px 12px', borderRadius: 'var(--r-s)', border: '1px solid var(--line)', background: 'var(--bg-3)', color: 'var(--tx-0)' }}>
             <option value="Cash">Cash</option><option value="Bank">Bank</option><option value="Cheque">Cheque</option>
           </select></Field>
+          {paymentMethod === 'Bank' && <Field label="Deposited Into"><BankAccountSelect value={bankAccountId} onChange={setBankAccountId} placeholder="Select our bank account..." /></Field>}
         </div>
         <div style={{ fontSize: 13, fontWeight: 600 }}>Total to collect: {money(total)}</div>
       </div>
@@ -280,6 +283,7 @@ function RedeemModal({ pawning: d, open, onClose, onChanged, notify }: { pawning
   const [full, setFull] = useState(true)
   const [selected, setSelected] = useState<number[]>([])
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash')
+  const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const pledged = (d.collateral || []).filter((c) => c.pawnDetail?.itemStatus === 'Pledged')
@@ -301,9 +305,10 @@ function RedeemModal({ pawning: d, open, onClose, onChanged, notify }: { pawning
 
   const submit = async () => {
     if (!full && selected.length === 0) { setErr('Select at least one article to redeem.'); return }
+    if (paymentMethod === 'Bank' && !bankAccountId) { setErr('Pick which of our bank accounts the transfer was deposited into.'); return }
     setBusy(true); setErr('')
     try {
-      await pawningsApi.redeem(d.id, { redemptionType: full ? 'Full' : 'Partial', facilityCollateralIds: full ? undefined : selected, paymentMethod })
+      await pawningsApi.redeem(d.id, { redemptionType: full ? 'Full' : 'Partial', facilityCollateralIds: full ? undefined : selected, paymentMethod, bankAccountId: paymentMethod === 'Bank' ? bankAccountId : undefined })
       onClose(); setSelected([]); setFull(true); onChanged()
       notify.success(full ? 'Ticket fully redeemed' : 'Articles redeemed', d.code)
     } catch (ex: any) { setErr(getErrorText(ex, 'Redemption failed')) }
@@ -336,6 +341,7 @@ function RedeemModal({ pawning: d, open, onClose, onChanged, notify }: { pawning
         <Field label="Payment Method"><select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)} style={{ padding: '9px 12px', borderRadius: 'var(--r-s)', border: '1px solid var(--line)', background: 'var(--bg-3)', color: 'var(--tx-0)', maxWidth: 200 }}>
           <option value="Cash">Cash</option><option value="Bank">Bank</option><option value="Cheque">Cheque</option>
         </select></Field>
+        {paymentMethod === 'Bank' && <Field label="Deposited Into"><BankAccountSelect value={bankAccountId} onChange={setBankAccountId} placeholder="Select our bank account..." /></Field>}
         <div className="t-2" style={{ fontSize: 12.5 }}>
           Estimated capital {money(preview.capital)} + interest {money(preview.interest)} = <b style={{ color: 'var(--tx-0)' }}>{money(preview.total)}</b>. The server confirms the exact figure.
         </div>

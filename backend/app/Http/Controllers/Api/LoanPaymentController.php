@@ -114,6 +114,8 @@ class LoanPaymentController extends Controller
             'receipt_no' => 'nullable|string|max:32',
             'bank_id' => 'required_if:payment_method,Cheque|nullable|exists:banks,id',
             'cheque_date' => 'required_if:payment_method,Cheque|nullable|date',
+            // Bank transfer: the company account it landed in. Left out, the receipt waits in 1030 Undeposited Funds.
+            'bank_account_id' => ['nullable', Rule::exists('bank_accounts', 'id')->where('status', 'Active')],
             'notes' => 'nullable|string|max:255',
             'collected_branch_id' => 'nullable|exists:branches,id',
             'is_settlement' => 'boolean',
@@ -239,6 +241,7 @@ class LoanPaymentController extends Controller
                 'paid_at' => $data['paid_at'] ?? now(),
                 'receipt_no' => $data['receipt_no'] ?? null,
                 'bank_id' => $data['bank_id'] ?? null,
+                'bank_account_id' => $method === 'Bank' ? ($data['bank_account_id'] ?? null) : null,
                 'cheque_date' => $data['cheque_date'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'approval_status' => ($isSettlement || $isManual) ? 'PendingApproval' : 'Approved',

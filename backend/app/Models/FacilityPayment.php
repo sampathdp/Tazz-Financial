@@ -11,7 +11,7 @@ class FacilityPayment extends Model
 
     protected $fillable = [
         'code', 'credit_facility_id', 'branch_id', 'collected_branch_id', 'amount', 'payment_type', 'payment_method',
-        'status', 'approval_status', 'clearance_status', 'receipt_no', 'bank_id',
+        'status', 'approval_status', 'clearance_status', 'receipt_no', 'bank_id', 'bank_account_id',
         'cheque_date', 'realized_at', 'received_by', 'approved_by', 'approved_at', 'paid_at',
         'notes', 'void_reason', 'voided_by', 'voided_at', 'manual_allocation',
     ];
@@ -39,6 +39,12 @@ class FacilityPayment extends Model
     public function bank()
     {
         return $this->belongsTo(Bank::class);
+    }
+
+    /** The company bank account a Bank-method receipt was paid into (null = parked in 1030 Undeposited Funds). */
+    public function bankAccount()
+    {
+        return $this->belongsTo(BankAccount::class);
     }
 
     public function receiver()

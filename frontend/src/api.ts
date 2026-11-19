@@ -685,7 +685,7 @@ export interface LoanPayment {
   receiver?: { id: number; name: string } | null;
   paidAt: string; receiptNo?: string | null; notes?: string | null;
   /** Only set when paymentMethod is Cheque. */
-  bankId?: number | null; bank?: { id: number; name: string } | null; chequeDate?: string | null;
+  bankId?: number | null; bank?: { id: number; name: string } | null; bankAccountId?: number | null; chequeDate?: string | null;
   /** Cheque payments only — null for Cash/Bank/settlement. Starts 'Pending' and holds the
    *  amount out of the loan's balance until manually cleared via loanPaymentsApi.clearCheque(). */
   clearanceStatus?: PaymentClearanceStatus | null;
@@ -1474,7 +1474,7 @@ export const loanPaymentsApi = {
    *  the Make Payment modal. See LoanPaymentAllocator::outstandingByBucket(). */
   outstandingByBucket: (loanId: number, asOf?: string) =>
     http.get(`/loans/${loanId}/outstanding-by-bucket`, { params: snakeize({ asOf }) }).then((r) => camelize(r.data) as PaymentAllocationSplit),
-  create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankId?: number; chequeDate?: string; notes?: string; collectedBranchId?: number; isSettlement?: boolean; allocationMode?: 'auto' | 'manual'; allocations?: PaymentAllocationSplit }) =>
+  create: (loanId: number, body: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; bankId?: number; bankAccountId?: number; chequeDate?: string; notes?: string; collectedBranchId?: number; isSettlement?: boolean; allocationMode?: 'auto' | 'manual'; allocations?: PaymentAllocationSplit }) =>
     http.post(`/loans/${loanId}/payments`, snakeize(body)).then((r) => camelize(r.data) as LoanPayment),
   /** Submits a void request — doesn't void the payment itself, see LoanPaymentVoidRequest. */
   requestVoid: (paymentId: number, voidReason?: string) => http.post(`/loan-payments/${paymentId}/void-request`, { void_reason: voidReason }).then((r) => camelize(r.data) as LoanPaymentVoidRequest),
@@ -1915,7 +1915,7 @@ export const speedDraftsApi = {
    *  Any interest/penalty not covered by `payment` is capitalized into the new principal (see backend SpeedDraftController::renew()). */
   renew: (id: number, body: {
     termMonths: number; notes?: string;
-    payment?: { amount: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; notes?: string };
+    payment?: { amount: number | string; paymentMethod?: PaymentMethod; bankAccountId?: number; paidAt?: string; receiptNo?: string; notes?: string };
   }) =>
     http.post(`/speed-drafts/${id}/renew`, snakeize(body)).then((r) => camelize(r.data) as { speedDraft: SpeedDraft; oldSpeedDraft: SpeedDraft; renewal: SpeedDraftRenewal }),
 }
@@ -1961,7 +1961,7 @@ export const speedDraftPaymentsApi = {
   /** Preview-only: the receipt number the next payment on this draft would get — see NumberGenerator::peek(). */
   nextReceiptNo: (speedDraftId: number, paymentType: SpeedDraftPaymentType) =>
     http.get(`/speed-drafts/${speedDraftId}/next-receipt-no`, { params: { payment_type: paymentType } }).then((r) => r.data.code as string),
-  create: (speedDraftId: number, body: { amount: number | string; paymentType: SpeedDraftPaymentType; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; notes?: string }) =>
+  create: (speedDraftId: number, body: { amount: number | string; paymentType: SpeedDraftPaymentType; paymentMethod?: PaymentMethod; bankAccountId?: number; paidAt?: string; receiptNo?: string; notes?: string }) =>
     http.post(`/speed-drafts/${speedDraftId}/payments`, snakeize(body)).then((r) => camelize(r.data) as SpeedDraftPayment),
   remove: (paymentId: number, voidReason?: string) => http.delete(`/speed-draft-payments/${paymentId}`, { data: { void_reason: voidReason } }).then((r) => r.data),
 }
@@ -3334,9 +3334,9 @@ export const pawningsApi = {
   overdue: () => http.get('/pawnings-overdue').then((r) => camelize(r.data) as OverduePawning[]),
   create: (body: { branchId: number; customerId: number; pawningTypeId: number; principalAmount: number | string; startDate?: string; purpose?: string; previousFacilityId?: number; articles: PawningArticleInput[] }) =>
     http.post('/pawnings', snakeize(body)).then((r) => camelize(r.data) as Pawning),
-  renew: (id: number, body?: { capitalPayment?: number | string; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; notes?: string }) =>
+  renew: (id: number, body?: { capitalPayment?: number | string; paymentMethod?: PaymentMethod; bankAccountId?: number; paidAt?: string; receiptNo?: string; notes?: string }) =>
     http.post(`/pawnings/${id}/renew`, snakeize(body || {})).then((r) => camelize(r.data) as Pawning),
-  redeem: (id: number, body: { redemptionType: PawningRedemptionType; facilityCollateralIds?: number[]; paymentMethod?: PaymentMethod; paidAt?: string; receiptNo?: string; notes?: string }) =>
+  redeem: (id: number, body: { redemptionType: PawningRedemptionType; facilityCollateralIds?: number[]; paymentMethod?: PaymentMethod; bankAccountId?: number; paidAt?: string; receiptNo?: string; notes?: string }) =>
     http.post(`/pawnings/${id}/redeem`, snakeize(body)).then((r) => camelize(r.data) as Pawning),
   /** Voids a renewal/redemption payment and unwinds its effect — only the most recent Active payment on the ticket may be voided (see backend PawningController::voidPayment). */
   voidPayment: (paymentId: number, voidReason?: string) =>

@@ -5,7 +5,7 @@
    Loan (ActiveLoans/LoanDetail show history, PaymentReceipt records payments). */
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, ErrorBanner, statusTone } from '../../components/ui'
+import { Card, Btn, Badge, Field, Input, Select, Table, Td, Modal, ErrorBanner, statusTone, BankAccountSelect } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import { DetailSummary } from '../../components/DetailSummary'
 import { useFilePreview } from '../../components/FilePreview'
@@ -288,6 +288,7 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
   const [renewPayNow, setRenewPayNow] = useState(false)
   const [renewAmount, setRenewAmount] = useState('')
   const [renewMethod, setRenewMethod] = useState<PaymentMethod>('Cash')
+  const [renewBankAccountId, setRenewBankAccountId] = useState<number | undefined>(undefined)
   const [renewPaidAt, setRenewPaidAt] = useState(todayIso())
   const [renewReceiptNo, setRenewReceiptNo] = useState('')
   const [renewNotes, setRenewNotes] = useState('')
@@ -342,19 +343,20 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
 
   const openRenew = () => {
     setRenewTermMonths(d.termMonths); setRenewPayNow(false); setRenewAmount('')
-    setRenewMethod('Cash'); setRenewPaidAt(todayIso()); setRenewReceiptNo(''); setRenewNotes(''); setRenewErr('')
+    setRenewMethod('Cash'); setRenewBankAccountId(undefined); setRenewPaidAt(todayIso()); setRenewReceiptNo(''); setRenewNotes(''); setRenewErr('')
     setRenewOpen(true)
   }
   const renew = async () => {
     if (!renewTermMonths || renewTermMonths <= 0) { setRenewErr('Enter the new term in months.'); return }
     if (renewPayNow && (!renewAmount || Number(renewAmount) <= 0)) { setRenewErr('Enter the payment amount, or turn off "Record a payment now".'); return }
+    if (renewPayNow && renewMethod === 'Bank' && !renewBankAccountId) { setRenewErr('Pick which of our bank accounts the transfer was deposited into.'); return }
     setBusy(true); setRenewErr('')
     try {
       const res = await speedDraftsApi.renew(d.id, {
         termMonths: renewTermMonths,
         notes: renewNotes || undefined,
         payment: renewPayNow ? {
-          amount: renewAmount, paymentMethod: renewMethod, paidAt: renewPaidAt,
+          amount: renewAmount, paymentMethod: renewMethod, bankAccountId: renewMethod === 'Bank' ? renewBankAccountId : undefined, paidAt: renewPaidAt,
           receiptNo: renewReceiptNo || undefined, notes: undefined,
         } : undefined,
       })
@@ -463,6 +465,7 @@ function StatusActions({ speedDraft: d, me, onChanged, go, onWithdrawn }: {
                 </Select></Field>
                 <Field label="Date"><Input type="date" value={renewPaidAt} max={todayIso()} onChange={(e) => setRenewPaidAt(e.target.value)} /></Field>
                 {renewMethod !== 'Cash' && <Field label="Reference No."><Input value={renewReceiptNo} onChange={(e) => setRenewReceiptNo(e.target.value)} /></Field>}
+                {renewMethod === 'Bank' && <Field label="Deposited Into"><BankAccountSelect value={renewBankAccountId} onChange={setRenewBankAccountId} placeholder="Select our bank account..." /></Field>}
               </div>
             )}
             <Field label="Notes"><Input value={renewNotes} onChange={(e) => setRenewNotes(e.target.value)} placeholder="Optional" /></Field>

@@ -171,4 +171,27 @@ class CashLedgerAuditProbeTest extends TestCase
         $this->assertSame('0.00', (string) $bank->fresh()->current_balance);
         $this->assertSame('2000.00', number_format((float) $this->glBalance($c1030) - (float) $before, 2, '.', ''));
     }
+
+    public function test_bank_method_receipt_with_an_account_lands_in_that_bank_account_and_reverses_out_of_it(): void
+    {
+        $this->till('Main');
+        $bankRow = DB::table('banks')->insertGetId(['name' => 'AU Bank', 'created_at' => now(), 'updated_at' => now()]);
+        $bank = BankAccount::create([
+            'branch_id' => $this->branchId, 'bank_id' => $bankRow, 'name' => 'AU Acc', 'account_number' => 'AU' . Str::random(8),
+            'account_type' => 'Current', 'currency' => 'LKR', 'opening_balance' => 0, 'current_balance' => '0.00', 'status' => 'Active',
+        ]);
+        $loan = $this->approvedLoan();
+        $this->docCharge($loan);
+        $c1030 = ChartOfAccount::system('1030')->id;
+        $before = $this->glBalance($c1030);
+
+        $res = $this->postJson("/api/loans/{$loan->id}/payments", ['amount' => 2000, 'payment_method' => 'Bank', 'bank_account_id' => $bank->id])->assertStatus(201);
+
+        $this->assertSame('2000.00', (string) $bank->fresh()->current_balance, 'the transfer lands in the chosen bank account');
+        $this->assertSame('0.00', number_format((float) $this->glBalance($c1030) - (float) $before, 2, '.', ''), '1030 is not touched');
+        $this->assertSame('2000.00', number_format((float) $this->glBalance(ChartOfAccount::forBankAccount($bank->fresh())->id), 2, '.', ''), 'the bank GL leaf matches');
+
+        \App\Support\LoanLedgerPoster::reverseAllFor(\App\Models\FacilityPayment::findOrFail($res->json('id')));
+        $this->assertSame('0.00', (string) $bank->fresh()->current_balance, 'voiding takes the money back out of the bank account');
+    }
 }

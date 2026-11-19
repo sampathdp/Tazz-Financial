@@ -247,6 +247,8 @@ class PawningController extends Controller
         $data = $request->validate([
             'capital_payment' => 'nullable|numeric|min:0',
             'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
+            // Bank transfer: the company account it landed in. Left out, the receipt waits in 1030 Undeposited Funds.
+            'bank_account_id' => ['nullable', Rule::exists('bank_accounts', 'id')->where('status', 'Active')],
             'paid_at' => 'nullable|date',
             'receipt_no' => 'nullable|string|max:32',
             'notes' => 'nullable|string|max:255',
@@ -283,6 +285,7 @@ class PawningController extends Controller
                 'amount' => $amount,
                 'payment_type' => $capitalPaid > 0 ? 'Regular' : 'Interest',
                 'payment_method' => $method,
+                'bank_account_id' => $method === 'Bank' ? ($data['bank_account_id'] ?? null) : null,
                 'received_by' => $request->user()->id,
                 'paid_at' => $data['paid_at'] ?? now(),
                 'receipt_no' => $data['receipt_no'] ?? null,
@@ -352,6 +355,8 @@ class PawningController extends Controller
             'facility_collateral_ids' => 'required_if:redemption_type,Partial|array|min:1',
             'facility_collateral_ids.*' => 'integer|exists:facility_collateral,id',
             'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
+            // Bank transfer: the company account it landed in. Left out, the receipt waits in 1030 Undeposited Funds.
+            'bank_account_id' => ['nullable', Rule::exists('bank_accounts', 'id')->where('status', 'Active')],
             'paid_at' => 'nullable|date',
             'receipt_no' => 'nullable|string|max:32',
             'notes' => 'nullable|string|max:255',
@@ -405,6 +410,7 @@ class PawningController extends Controller
                 'amount' => $totalSettled,
                 'payment_type' => 'Settlement',
                 'payment_method' => $method,
+                'bank_account_id' => $method === 'Bank' ? ($data['bank_account_id'] ?? null) : null,
                 'received_by' => $request->user()->id,
                 'paid_at' => $data['paid_at'] ?? now(),
                 'receipt_no' => $data['receipt_no'] ?? null,

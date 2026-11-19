@@ -187,6 +187,8 @@ export const NAV: NavNode[] = [
       { id: 'rep/cb-position', label: 'Cash & Bank Position', icon: 'building' },
       { id: 'rep/cb-cashbook', label: 'Cashbook Activity', icon: 'receipt' },
       { id: 'rep/cb-bank', label: 'Bank Activity', icon: 'swap' },
+      // Admin-only (unmapped in ROUTE_MODULE) — reads the same admin-only cheque list as Cheque Clearance.
+      { id: 'rep/cheques', label: 'Cheque Report', icon: 'cheque' },
     ] },
     { group: 'Expense Reports', icon: 'wallet', items: [
       { id: 'rep/exp-summary', label: 'Expense Summary', icon: 'chart' },

@@ -420,6 +420,34 @@ class PawningLedgerTest extends TestCase
         $this->assertBc($tillCashBefore, (string) $this->till->fresh()->current_balance, 'till not touched');
     }
 
+    // PWN-08b: a bank transfer that names the receiving account lands in that account, not 1030.
+    public function test_pwn08b_bank_redemption_with_account_lands_in_that_bank_account(): void
+    {
+        $c1030 = $this->acct('1030');
+        $bankRow = DB::table('banks')->insertGetId(['name' => 'PWN Bank ' . Str::random(4), 'created_at' => now(), 'updated_at' => now()]);
+        $bank = \App\Models\BankAccount::create([
+            'branch_id' => $this->branchId, 'bank_id' => $bankRow, 'name' => 'PWN Acc', 'account_number' => 'PW' . Str::random(8),
+            'account_type' => 'Current', 'currency' => 'LKR', 'opening_balance' => 0, 'current_balance' => '0.00', 'status' => 'Active',
+        ]);
+        $type = $this->pawningType();
+        $ticket = $this->createTicket($type, 200000.00, [
+            ['net_weight_grams' => '20.000', 'gross_weight_grams' => '21.000', 'rate_per_gram' => '15000.00'],
+        ], startDate: now()->subDays(15)->toDateString());
+        $before1030 = $this->glBalance($c1030);
+
+        $this->postJson("/api/pawnings/{$ticket->id}/redeem", [
+            'redemption_type' => 'Full', 'payment_method' => 'Bank', 'bank_account_id' => $bank->id,
+        ])->assertStatus(200);
+
+        $payment = \App\Models\FacilityPayment::where('credit_facility_id', $ticket->id)->latest('id')->firstOrFail();
+        $this->assertSame((int) $bank->id, (int) $payment->bank_account_id);
+        $this->assertBc((string) $payment->amount, (string) $bank->fresh()->current_balance, 'bank account receives the transfer');
+        $this->assertBc('0.00', bcsub($this->glBalance($c1030), $before1030, 2), '1030 not touched');
+
+        \App\Support\PawningLedgerPoster::reverseAllFor($payment);
+        $this->assertBc('0.00', (string) $bank->fresh()->current_balance, 'void takes it back out of the bank');
+    }
+
     // =============================================================
     // PWN-09 — badly overdue ticket collects the SAME single-cycle interest
     // =============================================================

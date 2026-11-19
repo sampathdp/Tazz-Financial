@@ -75,7 +75,8 @@ class SpeedDraftLedgerPoster
      * capital (1110) split.
      *   - Cash: one COLLECTION transaction through FinancePostingService (till
      *     balance + finance_transactions row + cashbook mirror, atomic with GL).
-     *   - Bank / Cheque: a GL-only entry against 1030 Cheques / Undeposited
+     *   - Bank with bank_account_id: a COLLECTION into that bank account.
+     *   - Bank without one / Cheque: a GL-only entry against 1030 Cheques / Undeposited
      *     Funds — a plain receipt captures no company bank account, so it sits
      *     in 1030 until a Bank Deposit (contra = Ledger 1030) moves it.
      */
@@ -106,6 +107,17 @@ class SpeedDraftLedgerPoster
         }
         $amount = bcadd(bcadd(bcadd($interest, $penalty, 2), $capital, 2), $charges, 2);
 
+        // Bank transfer with the receiving company account named: straight into that account.
+        if ($payment->payment_method === 'Bank' && $payment->bank_account_id) {
+            $bank = \App\Models\BankAccount::find($payment->bank_account_id);
+            if (!$bank) {
+                throw new \App\Exceptions\FinancePostingException('The bank account chosen for this transfer no longer exists.');
+            }
+            self::postCollection($payment, ['type' => 'bank', 'id' => (int) $bank->id, 'leaf' => ChartOfAccount::forBankAccount($bank)], $amount, $credits, "Speed Draft payment (Bank: {$bank->name}) {$payment->code}");
+
+            return;
+        }
+
         if ($payment->payment_method !== 'Cash') {
             $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
             $lines = array_merge(
@@ -121,13 +133,12 @@ class SpeedDraftLedgerPoster
         if (!$till) {
             throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
         }
-        self::postCollection($payment, $till, $amount, $credits, "Speed Draft payment {$payment->code}");
+        self::postCollection($payment, ['type' => 'cash', 'id' => (int) $till->id, 'leaf' => ChartOfAccount::forCashTill($till)], $amount, $credits, "Speed Draft payment {$payment->code}");
     }
 
-    /** Books a Speed Draft cash collection through the one money writer. */
-    private static function postCollection(FacilityPayment $payment, CashAccount $till, string $amount, array $credits, string $description): void
+    /** Books a Speed Draft collection into a till or bank account ($leg: type/id/leaf) through the one money writer. */
+    private static function postCollection(FacilityPayment $payment, array $leg, string $amount, array $credits, string $description): void
     {
-        $tillLeaf = ChartOfAccount::forCashTill($till);
         $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
 
         FinancePostingService::execute([
@@ -135,9 +146,9 @@ class SpeedDraftLedgerPoster
             'amount' => $amount,
             'entry_date' => $entryDate,
             'branch_id' => $payment->branch_id,
-            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $amount]],
+            'movements' => [['account_type' => $leg['type'], 'account_id' => $leg['id'], 'delta' => $amount]],
             'gl_lines' => array_merge(
-                [['account_id' => $tillLeaf->id, 'debit' => $amount, 'credit' => 0]],
+                [['account_id' => $leg['leaf']->id, 'debit' => $amount, 'credit' => 0]],
                 array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
             ),
             'gl_source_type' => 'SpeedDraftPayment',

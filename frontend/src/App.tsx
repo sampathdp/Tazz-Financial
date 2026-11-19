@@ -150,6 +150,7 @@ const InvestorDirectoryScreen = named(() => import('./screens/InvestorReports'),
 const CashBankPositionScreen = named(() => import('./screens/CashBankReports'), 'CashBankPositionScreen')
 const CashbookActivityScreen = named(() => import('./screens/CashBankReports'), 'CashbookActivityScreen')
 const BankActivityScreen = named(() => import('./screens/CashBankReports'), 'BankActivityScreen')
+const ChequeReportScreen = named(() => import('./screens/ChequeReport'), 'ChequeReportScreen')
 
 const ExpenseSummaryScreen = named(() => import('./screens/ExpenseReports'), 'ExpenseSummaryScreen')
 const ExpenseListScreen = named(() => import('./screens/ExpenseReports'), 'ExpenseListScreen')
@@ -326,6 +327,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'rep/cb-position': CashBankPositionScreen,
   'rep/cb-cashbook': CashbookActivityScreen,
   'rep/cb-bank': BankActivityScreen,
+  'rep/cheques': ChequeReportScreen,
   'rep/exp-summary': ExpenseSummaryScreen,
   'rep/exp-list': ExpenseListScreen,
   'rep/exp-vendor': ExpenseByVendorScreen,

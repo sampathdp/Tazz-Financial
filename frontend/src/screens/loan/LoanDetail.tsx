@@ -1429,6 +1429,9 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
   const [paidAt, setPaidAt] = useState(todayIso())
   const [refNo, setRefNo] = useState('')
   const [bankId, setBankId] = useState<number | undefined>(undefined)
+  const [bankAccountId, setBankAccountId] = useState<number | undefined>(undefined)
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  useEffect(() => { bankAccountsApi.list().then((d) => setBankAccounts(d.filter((a) => a.status !== 'Inactive'))).catch(() => setBankAccounts([])) }, [])
   const [chequeDate, setChequeDate] = useState(todayIso())
   const [nextReceipt, setNextReceipt] = useState('')
   const [payBusy, setPayBusy] = useState(false)
@@ -1476,11 +1479,13 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
 
   const payCharge = async () => {
     if (method === 'Cheque' && (!bankId || !chequeDate)) { setPayErr('Bank and Cheque Date are required for a cheque payment.'); return }
+    if (method === 'Bank' && !bankAccountId) { setPayErr('Pick which of our bank accounts the transfer was deposited into.'); return }
     setPayBusy(true); setPayErr('')
     try {
       await loanPaymentsApi.create(loan.id, {
         amount: docBalance, paymentMethod: method, paidAt, receiptNo: refNo || undefined,
         bankId: method === 'Cheque' ? bankId : undefined,
+        bankAccountId: method === 'Bank' ? bankAccountId : undefined,
         chequeDate: method === 'Cheque' ? chequeDate : undefined,
         notes: `Document charge${notes ? ` — ${notes}` : ''}`,
       })
@@ -1542,6 +1547,12 @@ function DocumentChargeSection({ loan, me, docCharge, docBalance, computedAmount
         {method === 'Cash'
           ? <Field label="Receipt No."><Input value={nextReceipt || '…'} readOnly disabled style={{ color: 'var(--tx-2)' }} /></Field>
           : <Field label={method === 'Cheque' ? 'Cheque No.' : 'Transfer Reference'}><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
+        {method === 'Bank' && (
+          <Field label="Deposited Into"><Select value={bankAccountId ?? ''} onChange={(e) => setBankAccountId(Number(e.target.value) || undefined)}>
+            <option value="">Select our bank account...</option>
+            {bankAccounts.map((a) => <option key={a.id} value={a.id}>{[a.name, a.bank?.name, a.accountNumber].filter(Boolean).join(' — ')}</option>)}
+          </Select></Field>
+        )}
         {method === 'Cheque' && <>
           <Field label="Bank"><BankSelect value={bankId} onChange={setBankId} /></Field>
           <Field label="Cheque Date"><Input type="date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} /></Field>

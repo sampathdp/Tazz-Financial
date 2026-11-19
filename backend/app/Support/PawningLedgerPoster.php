@@ -97,7 +97,18 @@ class PawningLedgerPoster
         $entryDate = optional($payment->paid_at)->toDateString() ?? now()->toDateString();
         $description = "Pawning payment ({$payment->payment_method}) {$payment->code}";
 
-        if ($payment->payment_method !== 'Cash') {
+        // Bank transfer with the receiving company account named: straight into that account.
+        $leg = null;
+        if ($payment->payment_method === 'Bank' && $payment->bank_account_id) {
+            $bank = \App\Models\BankAccount::find($payment->bank_account_id);
+            if (!$bank) {
+                throw new \App\Exceptions\FinancePostingException('The bank account chosen for this transfer no longer exists.');
+            }
+            $leg = ['type' => 'bank', 'id' => (int) $bank->id, 'leaf' => ChartOfAccount::forBankAccount($bank)];
+            $description = "Pawning payment (Bank: {$bank->name}) {$payment->code}";
+        }
+
+        if (!$leg && $payment->payment_method !== 'Cash') {
             $lines = array_merge(
                 [['account_id' => ChartOfAccount::system('1030')->id, 'debit' => $amount, 'credit' => 0]],
                 array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
@@ -107,20 +118,22 @@ class PawningLedgerPoster
             return;
         }
 
-        $till = CashAccount::branchPrimary((int) $payment->branch_id, CashAccount::PURPOSE_PAWNING);
-        if (!$till) {
-            throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
+        if (!$leg) {
+            $till = CashAccount::branchPrimary((int) $payment->branch_id, CashAccount::PURPOSE_PAWNING);
+            if (!$till) {
+                throw new \App\Exceptions\FinancePostingException('This branch has no active cash account, so the cash movement cannot be recorded. Add a till under Cashbook > Accounts first.');
+            }
+            $leg = ['type' => 'cash', 'id' => (int) $till->id, 'leaf' => ChartOfAccount::forCashTill($till)];
         }
-        $tillLeaf = ChartOfAccount::forCashTill($till);
 
         FinancePostingService::execute([
             'txn_type' => 'COLLECTION',
             'amount' => $amount,
             'entry_date' => $entryDate,
             'branch_id' => $payment->branch_id,
-            'movements' => [['account_type' => 'cash', 'account_id' => (int) $till->id, 'delta' => $amount]],
+            'movements' => [['account_type' => $leg['type'], 'account_id' => $leg['id'], 'delta' => $amount]],
             'gl_lines' => array_merge(
-                [['account_id' => $tillLeaf->id, 'debit' => $amount, 'credit' => 0]],
+                [['account_id' => $leg['leaf']->id, 'debit' => $amount, 'credit' => 0]],
                 array_map(fn ($l) => ['account_id' => $l['account_id'], 'debit' => 0, 'credit' => $l['credit']], $credits),
             ),
             'gl_source_type' => 'PawningPayment',

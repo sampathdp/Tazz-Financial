@@ -51,6 +51,8 @@ class SpeedDraftPaymentController extends Controller
             'amount' => ['required', 'numeric', 'min:0.01', new \App\Rules\Money],
             'payment_type' => ['required', Rule::in(['Interest', 'CapitalReduction', 'Settlement', 'Charges'])],
             'payment_method' => ['nullable', Rule::in(['Cash', 'Bank', 'Cheque'])],
+            // Bank transfer: the company account it landed in. Left out, the receipt waits in 1030 Undeposited Funds.
+            'bank_account_id' => ['nullable', Rule::exists('bank_accounts', 'id')->where('status', 'Active')],
             'paid_at' => 'nullable|date',
             'receipt_no' => 'nullable|string|max:32',
             'notes' => 'nullable|string|max:255',
@@ -98,6 +100,7 @@ class SpeedDraftPaymentController extends Controller
                 'amount' => $data['amount'],
                 'payment_type' => $type,
                 'payment_method' => $method,
+                'bank_account_id' => $method === 'Bank' ? ($data['bank_account_id'] ?? null) : null,
                 'received_by' => $request->user()->id,
                 'paid_at' => $data['paid_at'] ?? now(),
                 'receipt_no' => $data['receipt_no'] ?? null,
