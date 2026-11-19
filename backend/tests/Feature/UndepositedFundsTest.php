@@ -52,6 +52,16 @@ class UndepositedFundsTest extends TestCase
         $this->assertEquals($before + 400.0, (float) $this->getJson('/api/undeposited-funds')->json('balance'), '1030 is reduced by the deposit');
     }
 
+    public function test_entries_list_the_receipts_and_deposits_on_1030(): void
+    {
+        $this->park('250.00');
+        $this->postJson('/api/undeposited-funds/deposit', ['bank_account_id' => $this->bank->id, 'amount' => 100, 'txn_date' => now()->toDateString()])->assertStatus(201);
+
+        $rows = collect($this->getJson('/api/undeposited-funds/entries')->assertOk()->json());
+        $this->assertTrue($rows->contains(fn ($r) => (float) $r['debit'] === 250.0 && $r['description'] === 'parked'), 'the parked receipt is listed');
+        $this->assertTrue($rows->contains(fn ($r) => (float) $r['credit'] === 100.0), 'the deposit out of 1030 is listed');
+    }
+
     public function test_depositing_more_than_the_undeposited_balance_is_refused(): void
     {
         $current = (float) $this->getJson('/api/undeposited-funds')->json('balance');

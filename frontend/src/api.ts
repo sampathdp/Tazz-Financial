@@ -960,6 +960,19 @@ export const bankTransactionsApi = {
   remove: (id: number) => http.delete(`/bank-transactions/${id}`).then((r) => r.data),
 }
 
+export interface UndepositedFundsEntry {
+  id: number; entryDate: string; code: string; sourceType: string | null; description: string | null;
+  debit: number | string; credit: number | string; branchName: string | null;
+}
+
+/** 1030 Cheques / Undeposited Funds: bank-method and cheque receipts waiting to be banked. */
+export const undepositedFundsApi = {
+  show: () => http.get('/undeposited-funds').then((r) => camelize(r.data) as { accountId: number; code: string; name: string; balance: number | string }),
+  entries: () => http.get('/undeposited-funds/entries').then((r) => camelize(r.data) as UndepositedFundsEntry[]),
+  deposit: (body: { bankAccountId: number; amount: number | string; txnDate: string; referenceNo?: string; description?: string }) =>
+    http.post('/undeposited-funds/deposit', snakeize(body)).then((r) => camelize(r.data) as BankTransaction),
+}
+
 export const bankReconciliationsApi = {
   list: (bankAccountId?: number) =>
     http.get('/bank-reconciliations', { params: bankAccountId ? { bank_account_id: bankAccountId } : {} }).then((r) => camelize(r.data) as BankReconciliation[]),

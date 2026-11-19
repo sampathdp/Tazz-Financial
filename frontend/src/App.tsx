@@ -92,6 +92,7 @@ const CashReconciliationScreen = named(() => import('./screens/Cashbook'), 'Cash
 const BankAccountsScreen = named(() => import('./screens/Bank'), 'BankAccountsScreen')
 const BankTransactionsScreen = named(() => import('./screens/Bank'), 'BankTransactionsScreen')
 const BankReconciliationScreen = named(() => import('./screens/Bank'), 'BankReconciliationScreen')
+const UndepositedFundsScreen = named(() => import('./screens/Bank'), 'UndepositedFundsScreen')
 
 const ExpenseCategoriesScreen = named(() => import('./screens/Masters'), 'ExpenseCategoriesScreen')
 const BanksScreen = named(() => import('./screens/Masters'), 'BanksScreen')
@@ -250,6 +251,7 @@ const SCREENS: Record<string, ScreenComp> = {
   'bank/accounts': BankAccountsScreen,
   'bank/txns': BankTransactionsScreen,
   'bank/recon': BankReconciliationScreen,
+  'bank/undeposited': UndepositedFundsScreen,
   'masters/expense-categories': ExpenseCategoriesScreen,
   'masters/banks': BanksScreen,
   'masters/document-categories': DocumentCategoriesScreen,

@@ -23,6 +23,20 @@ class UndepositedFundsController extends Controller
         return ['account_id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'balance' => ChartOfAccount::balancesAsOf()->get($account->id)->balance ?? '0.00'];
     }
 
+    /** The movements on 1030 (receipts in, deposits out), newest first, so the user can match them to the bank statement. */
+    public function entries()
+    {
+        $account = ChartOfAccount::system('1030');
+
+        return \Illuminate\Support\Facades\DB::table('journal_lines as jl')
+            ->join('journal_entries as je', 'je.id', '=', 'jl.journal_entry_id')
+            ->leftJoin('branches as b', 'b.id', '=', 'je.branch_id')
+            ->where('jl.account_id', $account->id)
+            ->orderByDesc('jl.entry_date')->orderByDesc('jl.id')
+            ->limit(500)
+            ->get(['jl.id', 'jl.entry_date', 'je.code', 'je.source_type', 'je.description', 'jl.debit', 'jl.credit', 'b.name as branch_name']);
+    }
+
     public function deposit(Request $request)
     {
         $data = $request->validate([

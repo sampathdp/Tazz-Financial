@@ -477,6 +477,7 @@ Route::middleware(['auth:sanctum', 'throttle:' . config('ratelimit.api') . ',1']
     Route::get('bank-transactions', [BankTransactionController::class, 'index'])->middleware('perm:Bank Transactions,View');
     Route::post('bank-transactions', [BankTransactionController::class, 'store'])->middleware(['perm:Bank Transactions,Create', 'idempotency:required']);
     Route::get('undeposited-funds', [UndepositedFundsController::class, 'show'])->middleware('perm:Bank Transactions,View');
+    Route::get('undeposited-funds/entries', [UndepositedFundsController::class, 'entries'])->middleware('perm:Bank Transactions,View');
     Route::post('undeposited-funds/deposit', [UndepositedFundsController::class, 'deposit'])->middleware(['perm:Bank Transactions,Create', 'idempotency:required']);
     Route::post('bank-transactions/{bankTransaction}/clear', [BankTransactionController::class, 'clear'])->middleware(['perm:Bank Transactions,Edit', 'idempotency:required']);
     Route::delete('bank-transactions/{bankTransaction}', [BankTransactionController::class, 'destroy'])->middleware('perm:Bank Transactions,Delete')->middleware('idempotency:required');

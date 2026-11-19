@@ -98,6 +98,7 @@ export const NAV: NavNode[] = [
   { section: 'Bank Management', icon: 'building', items: [
     { id: 'bank/accounts', label: 'Bank Accounts', icon: 'building' },
     { id: 'bank/txns', label: 'Bank Transactions', icon: 'receipt' },
+    { id: 'bank/undeposited', label: 'Undeposited Funds', icon: 'cheque' },
     { id: 'bank/recon', label: 'Bank Reconciliation', icon: 'adjust' },
   ] },
 

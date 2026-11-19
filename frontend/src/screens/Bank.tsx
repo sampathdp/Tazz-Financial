@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 import { Card, PageHead, Btn, Badge, Field, Input, DateInput, Select, BankSelect, Modal, Table, Td, inputStyle, ErrorBanner , LoadingBlock } from '../components/ui'
 import { Icon } from '../components/Icon'
 import {
-  branchesApi, bankAccountsApi, bankTransactionsApi, bankReconciliationsApi, cashAccountsApi, chartOfAccountsApi,
+  branchesApi, bankAccountsApi, bankTransactionsApi, bankReconciliationsApi, cashAccountsApi, chartOfAccountsApi, undepositedFundsApi,
+  type UndepositedFundsEntry,
   type Branch, type AuthUser, type BankAccount, type BankAccountType, type CashAccount, type ChartOfAccount,
   type BankTransaction, type BankTxnType, type BankTxnContraKind, type BankReconciliation,
 } from '../api'
@@ -250,6 +251,97 @@ export function BankTransactionsScreen({ go: _go, user: me }: { go: Go; user?: A
             </Select></Field>
           )}
           <Field label="Description" full><Input value={form.description || ''} onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} /></Field>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+/* ========================== Undeposited Funds =========================== */
+
+/** Bank-method and cheque receipts land in GL 1030 until they are banked. This screen moves them into a real bank account. */
+export function UndepositedFundsScreen({ go: _go, user: me }: { go: Go; user?: AuthUser | null }) {
+  const notify = useNotify()
+  const [balance, setBalance] = useState<number>(0)
+  const [entries, setEntries] = useState<UndepositedFundsEntry[]>([])
+  const [accounts, setAccounts] = useState<BankAccount[]>([])
+  const [loading, setLoading] = useState(true)
+  const [modal, setModal] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [form, setForm] = useState<{ bankAccountId?: number; amount?: string; txnDate: string; referenceNo?: string; description?: string }>({ txnDate: new Date().toISOString().slice(0, 10) })
+
+  const refresh = () => {
+    setLoading(true)
+    Promise.all([undepositedFundsApi.show(), undepositedFundsApi.entries()])
+      .then(([s, e]) => { setBalance(Number(s.balance || 0)); setEntries(e) })
+      .catch(() => { setBalance(0); setEntries([]) })
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { refresh() }, [])
+  useEffect(() => { bankAccountsApi.list().then((d) => setAccounts(d.filter((a) => a.status !== 'Inactive'))).catch(() => setAccounts([])) }, [])
+
+  const openDeposit = () => {
+    setForm({ txnDate: new Date().toISOString().slice(0, 10), amount: balance > 0 ? balance.toFixed(2) : '' })
+    setErr(''); setModal(true)
+  }
+  const close = () => { setModal(false); setErr('') }
+
+  const save = async () => {
+    const amt = Number(form.amount)
+    if (!form.bankAccountId) { setErr('Pick the bank account the money was deposited into.'); return }
+    if (!amt || amt <= 0) { setErr('Amount must be greater than zero.'); return }
+    if (amt > balance + 0.005) { setErr(`Only ${money(balance)} is waiting in Undeposited Funds.`); return }
+    setBusy(true); setErr('')
+    try {
+      await undepositedFundsApi.deposit({ bankAccountId: form.bankAccountId, amount: form.amount!, txnDate: form.txnDate, referenceNo: form.referenceNo || undefined, description: form.description || undefined })
+      close(); refresh()
+      notify.success('Deposited to bank')
+    } catch (ex: any) {
+      setErr(getErrorText(ex, 'Deposit failed'))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div>
+      <PageHead crumbs="Bank Management" title="Undeposited Funds" icon="cheque"
+        sub="Bank-transfer and cheque collections wait here (GL 1030) until you deposit them into a bank account."
+        actions={<Can user={me} module="Bank Transactions" action="Create"><Btn variant="primary" icon="plus" onClick={openDeposit} disabled={balance <= 0 || !accounts.length}>Deposit to Bank</Btn></Can>} />
+
+      <Card style={{ marginBottom: 16 }}>
+        <div className="t-2" style={{ fontSize: 12 }}>Waiting to be banked</div>
+        <div className="mono" style={{ fontSize: 26, fontWeight: 600 }}>LKR {money(balance)}</div>
+      </Card>
+
+      <Card pad={0}>
+        {loading ? <LoadingBlock /> :
+        <Table cols={[{ label: 'Date' }, { label: 'Entry' }, { label: 'Branch' }, { label: 'Description' }, { label: 'In', align: 'right' }, { label: 'Out (banked)', align: 'right' }]}
+          rows={entries}
+          render={(e) => <>
+            <Td>{e.entryDate}</Td>
+            <Td mono style={{ fontSize: 12 }}>{e.code}</Td>
+            <Td>{e.branchName || '—'}</Td>
+            <Td c="var(--tx-2)" style={{ fontSize: 12.5, whiteSpace: 'normal' }}>{e.description || '—'}</Td>
+            <Td align="right" mono c="var(--ok)">{Number(e.debit) > 0 ? money(e.debit) : ''}</Td>
+            <Td align="right" mono c="var(--bad)">{Number(e.credit) > 0 ? money(e.credit) : ''}</Td>
+          </>} />}
+      </Card>
+
+      <Modal open={modal} onClose={close} width={520} title="Deposit to Bank"
+        footer={<>
+          <Btn variant="plain" onClick={close}>Cancel</Btn>
+          <Btn variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving...' : 'Record Deposit'}</Btn>
+        </>}>
+        <ErrorBanner error={err} style={{ marginBottom: 14 }} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Field label="Deposited Into" full><Select value={form.bankAccountId ?? ''} onChange={(e) => setForm((s) => ({ ...s, bankAccountId: Number(e.target.value) || undefined }))}>
+            <option value="">Select bank account...</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{accountLabel(a)}</option>)}
+          </Select></Field>
+          <Field label="Date"><DateInput value={form.txnDate} onChange={(iso) => setForm((s) => ({ ...s, txnDate: iso }))} /></Field>
+          <Field label={`Amount (max ${money(balance)})`}><Input type="number" step="0.01" value={form.amount ?? ''} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} /></Field>
+          <Field label="Reference No (bank slip / statement)" full><Input value={form.referenceNo || ''} onChange={(e) => setForm((s) => ({ ...s, referenceNo: e.target.value }))} /></Field>
+          <Field label="Description" full><Input value={form.description || ''} placeholder="Banked from Undeposited Funds" onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))} /></Field>
         </div>
       </Modal>
     </div>

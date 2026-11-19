@@ -111,6 +111,7 @@ export const ROUTE_MODULE: Record<string, string> = {
   'cash/recon': 'Cash Reconciliation',
   'bank/accounts': 'Bank Accounts',
   'bank/txns': 'Bank Transactions',
+  'bank/undeposited': 'Bank Transactions',
   'bank/recon': 'Bank Reconciliation',
   'masters/expense-categories': 'Masters',
   'masters/banks': 'Masters',
